@@ -1,0 +1,47 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_protobuf {
+    name: "libsdvtelemetry_proto_rust",
+    crate_name: "sdvtelemetry_proto_rust",
+    protos: [":sdvtelemetryservice-proto-srcs"],
+    proto_flags: ["-I external/protobuf/src"],
+    source_stem: "sdvtelemetry_proto_rust_source",
+    use_protobuf3: true,
+}
+
+cc_library {
+    name: "libsdvtelemetry_proto_cpp",
+    srcs: [":sdvtelemetryservice-proto-srcs"],
+    proto: {
+        export_proto_headers: true,
+        include_dirs: ["external/protobuf/src"],
+        type: "full",
+    },
+    shared_libs: ["libprotobuf-cpp-full"],
+}
+
+rust_binary {
+    name: "sdv_telemetry_service",
+    srcs: [
+        "src/main.rs",
+    ],
+    rustlibs: [
+        "liblog_rust",
+        "liblogger",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "libtokio",
+        "android.sdv.telemetry-rust",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+        "libsdv_log_rust",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
+    ],
+}

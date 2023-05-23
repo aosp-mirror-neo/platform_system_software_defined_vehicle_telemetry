@@ -1,0 +1,27 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+}
+
+// See https://source.android.com/devices/architecture/aidl/stable-aidl#module-naming-rules
+// to learn how to use it.
+aidl_interface {
+    name: "android.sdv.telemetry",
+    srcs: [
+        "android/sdv/telemetry/*.aidl",
+    ],
+    vendor_available: false,
+    unstable: true,
+    backend: {
+        java: {
+            enabled: false,
+        },
+        rust: {
+            enabled: true,
+        },
+        cpp: {
+            enabled: true,
+        },
+    },
+}

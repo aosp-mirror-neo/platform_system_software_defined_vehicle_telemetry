@@ -1,0 +1,6 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+filegroup {
+    name: "sdvtelemetryservice-proto-srcs",
+    srcs: ["*.proto"],
+}
