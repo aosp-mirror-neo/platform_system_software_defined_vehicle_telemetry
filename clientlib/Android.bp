@@ -1,0 +1,45 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+}
+
+cc_defaults {
+    name: "telemetry_defaults",
+    cflags: [
+        "-Werror",
+        "-Wall",
+        "-Wno-unused-parameter",
+        "-Wno-unused-private-field",
+    ],
+    shared_libs: [
+        "libprotobuf-cpp-full",
+        "libbinder",
+        "liblog",
+        "libutils",
+        "libbase",
+    ],
+    static_libs: ["libgtest"],
+}
+
+cc_library {
+    name: "libtelemetry_c",
+    srcs: [
+        "src/report_ready_listener_impl.cpp",
+        "src/telemetry_service.cpp",
+        "src/lib.cpp",
+    ],
+    defaults: [
+        "telemetry_defaults",
+    ],
+    local_include_dirs: [
+        "include",
+    ],
+    export_include_dirs: [
+        "export",
+    ],
+    shared_libs: [
+        "android.sdv.telemetry-cpp",
+        "libsdvtelemetry_proto_cpp",
+    ],
+}

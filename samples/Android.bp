@@ -1,0 +1,33 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_binary {
+    name: "telemetry_rust_client",
+    srcs: [
+        "rust/telemetry_rust_client.rs",
+    ],
+    rustlibs: [
+        "liblog_rust",
+        "liblogger",
+        "libbinder_rs",
+        "android.sdv.telemetry-rust",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+    ],
+}
+
+cc_binary {
+    name: "telemetry_cpp_client",
+    srcs: ["cpp/telemetry_cpp_client.cpp"],
+    defaults: [
+        "telemetry_defaults",
+    ],
+    shared_libs: [
+        "libsdvtelemetry_proto_cpp",
+        "libtelemetry_c",
+        "liblog",
+    ],
+}

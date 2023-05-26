@@ -1,0 +1,302 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+syntax = "proto3";
+
+package android.sdv.telemetry;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/descriptor.proto";
+
+option java_multiple_files = true;
+
+message MetricsConfig {
+  // Required.
+  // The name of the configuration. Must be unique within a device.
+  optional string name = 1;
+
+  // Required.
+  // Version number of the configuration. Must be more than 0.
+  optional uint32 version = 2;
+
+  // Optional.
+  // Protobuf messages that are available in this Metrics Configuration.
+  repeated google.protobuf.FileDescriptorProto descriptor_protos = 3;
+
+  // Optional.
+  // A script that is executed at the device side. Must contain all the handler
+  // functions defined in subscribers below.
+  // The script functions must be `pure` functions.
+  optional string script = 4;
+
+  // Optional.
+  // Triggers that are available in the Metrics Configuration.
+  repeated Trigger triggers = 5;
+
+  // Optional.
+  // Publishers that are available in the Metrics Configuration.
+  repeated Publisher publishers = 6;
+
+  // Optional.
+  // Configurations of metrics reports that are to be generated.
+  repeated MetricsReportConfig metrics_report_configs = 7;
+
+  // Optional.
+  // The name of the trigger that starts data collection. The state is not
+  // persisted.
+  optional string start_trigger_name = 8;
+
+  // Optional.
+  // The name of the trigger that ends data collection.
+  optional string end_trigger_name = 9;
+
+  // Optional.
+  // The name of the trigger that finishes metrics configuration.
+  // A finished metrics configuration is removed from the system.
+  optional string finish_trigger_name = 10;
+}
+
+// Emits trigger events.
+message Trigger {
+  // Required.
+  // The name of the trigger.
+  // Must be unique across Metrics Configuration.
+  optional string name = 1;
+
+  oneof option {
+    DataTrigger data_trigger = 2;
+    PeriodicTrigger periodic_trigger = 3;
+    ConditionalTrigger conditional_trigger = 4;
+  }
+}
+
+// Listens to the publisher and triggers when it publishes a new message.
+// The published message is stored in the activation context under publisher
+// name and is available down the activation chain.
+message DataTrigger {
+  // Required.
+  // The name of the publisher to listen to.
+  optional string publisher_name = 1;
+}
+
+// Triggers periodically.
+message PeriodicTrigger {
+  // Required.
+  // An interval between polls.
+  optional google.protobuf.Duration interval = 1;
+}
+
+// Listens to other triggers, when they fire evaluates selector expression
+// against the activation context and triggers if the returned value changes.
+message ConditionalTrigger {
+  // Required.
+  // Underlying trigger names.
+  repeated string trigger_names = 1;
+
+  // Optional.
+  // Names of the publishers that are referenced in the selector expression.
+  // If a message from a publisher is missing from the activation context, the
+  // context will be populated with the latest published message.
+  repeated string publisher_names = 2;
+
+  // Required.
+  // An expression that uses data from the activation context and returns
+  // a value. If `change_type` is not ALL, the value must be of numeric or
+  // boolean type. `publisher_names` must declare all publishers referenced
+  // by the function.
+  optional string selector_expression = 3;
+
+  // Type of value change.
+  enum ChangeType {
+    CHANGE_TYPE_UNSPECIFIED = 0;
+    RISING_EDGE = 1;
+    FALLING_EDGE = 2;
+    ALL = 3;
+  }
+
+  // Required.
+  // The type of the value change that causes the trigger to fire.
+  optional ChangeType change_type = 4;
+}
+
+// Publishes messages and stores the latest published message.
+message Publisher {
+  // Required.
+  // The name of the publisher.
+  // Must be unique across Metrics Configuration.
+  optional string name = 1;
+
+  oneof option {
+    ServicePublisher service_publisher = 2;
+    AggregationPublisher aggregation_publisher = 3;
+  }
+}
+
+// Publishes messages from an external service.
+message ServicePublisher {
+  // Optional.
+  // Identification of the service in the service discovery.
+  optional string service_name = 1;
+
+  // Optional.
+  // When set to `true`, the publisher will keep previously published field
+  // value if the new value is empty.
+  optional bool keep_field_values = 2;
+
+  // Optional.
+  // Service-specific configuration.
+  oneof option {
+    NetworkPublisherConfig network_publisher_config = 10000;
+    SamplePublisherConfig sample_publisher_config = 10001;
+  }
+}
+
+// When triggered performs aggregation based on declarations or runs the script
+// to perform aggregation, combines the results into a message and publishes it.
+message AggregationPublisher {
+  // Required.
+  // The names of the triggers that specify when aggregation is performed.
+  repeated string trigger_name = 1;
+
+  // Optional.
+  // Names of the publishers that are used in the underlying aggregations.
+  // If a message from a publisher is missing from the activation context, the
+  // context will be populated with the latest published message.
+  repeated string publisher_names = 2;
+
+  // Required.
+  // Message type declared in the Metrics Configuration that is used to publish
+  // the message with the aggregated data. The message must have a field for
+  // each aggregated field and the field must fit the aggregation result.
+  optional string message_type_name = 3;
+
+  // Optional.
+  // Associated declarative aggregations.
+  // Must be empty if at least one script aggregation is specified.
+  repeated DeclarativeAggregation declarative_aggregations = 4;
+
+  // Optional.
+  // Associated script aggregations.
+  // Must be empty if at least one declarative aggregation is specified.
+  repeated ScriptAggregation script_aggregations = 5;
+}
+
+// Declaratively specifies how to aggregate data from the activation context.
+message DeclarativeAggregation {
+  // Required.
+  // The name of the field that stores aggregation result.
+  // Must be unique within AggregationPublisher.
+  optional string field_name = 1;
+
+  // Required.
+  // An expression that extracts data from the activation context.
+  // If the extracted data is not a numeric value or a boolean,
+  // aggregation_type must be VECTOR, LATEST or CUSTOM. The `publisher_names`
+  // field in the parent AggregationPublisher must declare all referenced
+  // publishers.
+  optional string selector_expression = 2;
+
+  enum AggregationType {
+    AGGREGATION_TYPE_UNSPECIFIED = 0;
+
+    // Concatenation of all values into a vector.
+    VECTOR = 1;
+
+    // Maximum numeric value.
+    MAX = 2;
+
+    // Minimum numeric value.
+    MIN = 3;
+
+    // Numeric average of all values.
+    AVG = 4;
+
+    // Count of values.
+    COUNT = 5;
+
+    // Numeric difference of current value from the initial value.
+    DELTA = 6;
+
+    // Numeric difference of initial value from the current value.
+    REVERSE_DELTA = 7;
+
+    // The latest published value.
+    LATEST = 8;
+
+    // Custom aggregation specified by seed_expression and
+    // aggregation_expression.
+    CUSTOM = 1000;
+  }
+
+  // Required.
+  // Type of aggregation performed with the data from the publisher.
+  optional AggregationType aggregation_type = 3;
+
+  // Optional.
+  // The expression used to generate the initial value of the aggregate.
+  // Required if aggregation_type is CUSTOM.
+  optional string seed_expression = 4;
+
+  // Optional.
+  // The expression used to aggregate the values.
+  // Required if aggregation_type is CUSTOM.
+  optional string aggregation_expression = 5;
+}
+
+// Specifies a script that aggregates data from the activation context.
+message ScriptAggregation {
+  // Required.
+  // The name of the fields that need to be extracted from the script data table
+  // and put into the aggregation result. Must be unique within
+  // AggregationPublisher.
+  repeated string field_names = 1;
+
+  // Required.
+  // Name of the function that aggregates data from the activation context.
+  // Must be defined in the script.
+  optional string handler_function_name = 2;
+}
+
+// Specifies when and how data is combined into a Metrics Report to be reported
+// to the OEM application.
+message MetricsReportConfig {
+  // Required.
+  // The names of the triggers that specify when the metrics report is
+  // generated.
+  repeated string report_trigger_names = 1;
+
+  // Optional.
+  // Names of the publishers that are referenced in the selector expression.
+  // If a message from a publisher is missing from the activation context, the
+  // context will be populated with the latest published message.
+  repeated string publisher_names = 2;
+
+  // Optional.
+  // Specifies whether to send the report using the latest published messages
+  // on Telemetry Service shutdown or when the data collection is ended or
+  // finished.
+  optional bool report_incomplete = 3;
+
+  // Required.
+  // The expression that uses data from the activation context to create a
+  // message with metrics to report to the OEM application. `publisher_names`
+  // must declare all referenced publishers.
+  optional string selector_expression = 4;
+}
+
+message SamplePublisherConfig {}
+
+enum TrafficDirection {
+  ALL = 0;
+  DOWNLOAD = 1;
+  UPLOAD = 2;
+}
+
+message NetworkPublisherConfig {
+  // Required.
+  // The name of the application being monitored.
+  optional string application_name = 1;
+
+  // Required.
+  // The direction of traffic to monitor.
+  optional TrafficDirection traffic_direction = 2;
+}
