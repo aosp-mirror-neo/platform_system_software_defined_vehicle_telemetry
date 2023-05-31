@@ -1,8 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 //! Binary for registering Telemetry service.
-mod telemetry_service;
-
 use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
@@ -10,7 +8,7 @@ use binder_tokio::TokioRuntime;
 use log::info;
 use tokio::runtime::Builder;
 
-use crate::telemetry_service::SdvTelemetryService;
+use sdv_telemetry::SdvTelemetryService;
 
 static LOG_TAG: &str = "SdvTelemetryService";
 
