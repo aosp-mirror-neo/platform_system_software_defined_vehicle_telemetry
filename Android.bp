@@ -82,6 +82,9 @@ rust_test {
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
-    test_suites: ["general-tests"],
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
     auto_gen_config: true,
 }
