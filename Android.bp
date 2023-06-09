@@ -6,6 +6,7 @@ package {
 
 cc_library {
     name: "libsdvtelemetry_proto_cpp",
+    host_supported: true,
     srcs: [":sdvtelemetryservice-proto-srcs"],
     proto: {
         export_proto_headers: true,
@@ -31,6 +32,7 @@ rust_defaults {
 
 rust_protobuf {
     name: "libsdvtelemetry_proto_rust",
+    host_supported: true,
     crate_name: "sdvtelemetry_proto_rust",
     protos: [":sdvtelemetryservice-proto-srcs"],
     proto_flags: ["-I external/protobuf/src"],
@@ -41,6 +43,7 @@ rust_protobuf {
 rust_library {
     name: "libsdv_telemetry",
     crate_name: "sdv_telemetry",
+    host_supported: true,
     srcs: [
         "src/telemetry_service.rs",
     ],
@@ -71,7 +74,7 @@ rust_binary {
     ],
 }
 
-rust_test {
+rust_test_host {
     name: "sdv_telemetry_unit_tests",
     defaults: ["telemetry@rust_defaults"],
     srcs: [
@@ -86,5 +89,8 @@ rust_test {
         "general-tests",
         "automotive-sdv-tests",
     ],
+    test_options: {
+        unit_test: true,
+    },
     auto_gen_config: true,
 }
