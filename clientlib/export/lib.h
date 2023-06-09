@@ -3,6 +3,7 @@
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_LIB_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_LIB_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 // extern C functions should not be combined with namespaces, because extern "C" functions in
