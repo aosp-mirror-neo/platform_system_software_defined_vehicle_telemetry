@@ -61,7 +61,7 @@ mod tests {
         // block on async block
         rt.block_on(async {
             let mut config = MetricsConfig::new();
-            config.name = Some("Test Metric".to_string());
+            config.uuid = Some("01bf0754-df95-46bb-bb35-522b6af66600".to_string());
             config.version = Some(2);
             config.script = Some("Sample Script".to_string());
 

@@ -32,7 +32,7 @@ fn main() -> Result<(), binder::Status> {
     let service = get_binder_service().expect("Unable to connect to telemetry service");
 
     let mut config = MetricsConfig::new();
-    config.name = Some("Test Metric".to_string());
+    config.uuid = Some("01bf0754-df95-46bb-bb35-522b6af66600".to_string());
     config.version = Some(2);
     config.script = Some("Sample Script".to_string());
 
