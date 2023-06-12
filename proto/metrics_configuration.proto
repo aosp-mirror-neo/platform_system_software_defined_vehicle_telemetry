@@ -4,15 +4,14 @@ syntax = "proto3";
 
 package android.sdv.telemetry;
 
-import "google/protobuf/duration.proto";
 import "google/protobuf/descriptor.proto";
 
 option java_multiple_files = true;
 
 message MetricsConfig {
   // Required.
-  // The name of the configuration. Must be unique within a device.
-  optional string name = 1;
+  // Universally unique configuration identifier.
+  optional string uuid = 1;
 
   // Required.
   // Version number of the configuration. Must be more than 0.
@@ -58,8 +57,8 @@ message MetricsConfig {
 // Emits trigger events.
 message Trigger {
   // Required.
-  // The name of the trigger.
-  // Must be unique across Metrics Configuration.
+  // The name of the trigger. Must be unique across all publishers and triggers
+  // in the Metrics Configuration.
   optional string name = 1;
 
   oneof option {
@@ -81,8 +80,8 @@ message DataTrigger {
 // Triggers periodically.
 message PeriodicTrigger {
   // Required.
-  // An interval between polls.
-  optional google.protobuf.Duration interval = 1;
+  // An interval between polls, in milliseconds.
+  optional uint64 interval_ms = 1;
 }
 
 // Listens to other triggers, when they fire evaluates selector expression
@@ -94,7 +93,7 @@ message ConditionalTrigger {
 
   // Optional.
   // Names of the publishers that are referenced in the selector expression.
-  // If a message from a publisher is missing from the activation context, the
+  // If a message from a publisher is not present in the activation context, the
   // context will be populated with the latest published message.
   repeated string publisher_names = 2;
 
@@ -119,10 +118,12 @@ message ConditionalTrigger {
 }
 
 // Publishes messages and stores the latest published message.
+// A DataTrigger under publisher name that listens to it is implicitly created
+// for each Publisher in the Metrics Configuration.
 message Publisher {
   // Required.
-  // The name of the publisher.
-  // Must be unique across Metrics Configuration.
+  // The name of the publisher. Must be unique across all publishers and
+  // triggers in the Metrics Configuration.
   optional string name = 1;
 
   oneof option {
@@ -136,11 +137,6 @@ message ServicePublisher {
   // Optional.
   // Identification of the service in the service discovery.
   optional string service_name = 1;
-
-  // Optional.
-  // When set to `true`, the publisher will keep previously published field
-  // value if the new value is empty.
-  optional bool keep_field_values = 2;
 
   // Optional.
   // Service-specific configuration.
@@ -159,7 +155,7 @@ message AggregationPublisher {
 
   // Optional.
   // Names of the publishers that are used in the underlying aggregations.
-  // If a message from a publisher is missing from the activation context, the
+  // If a message from a publisher is not present in the activation context, the
   // context will be populated with the latest published message.
   repeated string publisher_names = 2;
 
@@ -170,14 +166,19 @@ message AggregationPublisher {
   optional string message_type_name = 3;
 
   // Optional.
+  // Specifies whether the aggregated value is reset when the publisher data is
+  // read into activation context.
+  optional bool reset_on_get = 4;
+
+  // Optional.
   // Associated declarative aggregations.
   // Must be empty if at least one script aggregation is specified.
-  repeated DeclarativeAggregation declarative_aggregations = 4;
+  repeated DeclarativeAggregation declarative_aggregations = 5;
 
   // Optional.
   // Associated script aggregations.
   // Must be empty if at least one declarative aggregation is specified.
-  repeated ScriptAggregation script_aggregations = 5;
+  repeated ScriptAggregation script_aggregations = 6;
 }
 
 // Declaratively specifies how to aggregate data from the activation context.
@@ -190,15 +191,15 @@ message DeclarativeAggregation {
   // Required.
   // An expression that extracts data from the activation context.
   // If the extracted data is not a numeric value or a boolean,
-  // aggregation_type must be VECTOR, LATEST or CUSTOM. The `publisher_names`
-  // field in the parent AggregationPublisher must declare all referenced
-  // publishers.
+  // aggregation_type must be VECTOR, LATEST or CUSTOM.
+  // The `publisher_names` field in the parent AggregationPublisher must declare
+  // all referenced publishers.
   optional string selector_expression = 2;
 
   enum AggregationType {
     AGGREGATION_TYPE_UNSPECIFIED = 0;
 
-    // Concatenation of all values into a vector.
+    // Concatenation of values into a vector.
     VECTOR = 1;
 
     // Maximum numeric value.
@@ -213,14 +214,8 @@ message DeclarativeAggregation {
     // Count of values.
     COUNT = 5;
 
-    // Numeric difference of current value from the initial value.
-    DELTA = 6;
-
-    // Numeric difference of initial value from the current value.
-    REVERSE_DELTA = 7;
-
     // The latest published value.
-    LATEST = 8;
+    LATEST = 6;
 
     // Custom aggregation specified by seed_expression and
     // aggregation_expression.
@@ -259,14 +254,14 @@ message ScriptAggregation {
 // Specifies when and how data is combined into a Metrics Report to be reported
 // to the OEM application.
 message MetricsReportConfig {
-  // Required.
+  // Optional.
   // The names of the triggers that specify when the metrics report is
   // generated.
   repeated string report_trigger_names = 1;
 
   // Optional.
   // Names of the publishers that are referenced in the selector expression.
-  // If a message from a publisher is missing from the activation context, the
+  // If a message from a publisher is not present in the activation context, the
   // context will be populated with the latest published message.
   repeated string publisher_names = 2;
 

@@ -36,7 +36,7 @@ int main() {
         start_telemetry_service();
 
   android::sdv::telemetry::MetricsConfig config;
-  config.set_name("Test Metric");
+  config.set_uuid("01bf0754-df95-46bb-bb35-522b6af66600");
   config.set_version(2);
   config.set_script("Sample Script");
 
