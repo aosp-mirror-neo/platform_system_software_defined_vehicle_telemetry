@@ -61,9 +61,9 @@ mod tests {
         // block on async block
         rt.block_on(async {
             let mut config = MetricsConfig::new();
-            config.uuid = Some("01bf0754-df95-46bb-bb35-522b6af66600".to_string());
-            config.version = Some(2);
-            config.script = Some("Sample Script".to_string());
+            config.uuid = "01bf0754-df95-46bb-bb35-522b6af66600".to_string();
+            config.version = 2;
+            config.script = "Sample Script".to_string();
 
             info!("Serializing metric config");
             let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
