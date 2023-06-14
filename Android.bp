@@ -35,7 +35,10 @@ rust_protobuf {
     host_supported: true,
     crate_name: "sdvtelemetry_proto_rust",
     protos: [":sdvtelemetryservice-proto-srcs"],
-    proto_flags: ["-I external/protobuf/src"],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
     source_stem: "sdvtelemetry_proto_rust_source",
     use_protobuf3: true,
 }

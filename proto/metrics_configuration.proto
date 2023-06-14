@@ -5,17 +5,18 @@ syntax = "proto3";
 package android.sdv.telemetry;
 
 import "google/protobuf/descriptor.proto";
+import "system/software_defined_vehicle/telemetry/proto/expression.proto";
 
 option java_multiple_files = true;
 
 message MetricsConfig {
   // Required.
   // Universally unique configuration identifier.
-  optional string uuid = 1;
+  string uuid = 1;
 
   // Required.
   // Version number of the configuration. Must be more than 0.
-  optional uint32 version = 2;
+  uint32 version = 2;
 
   // Optional.
   // Protobuf messages that are available in this Metrics Configuration.
@@ -25,7 +26,7 @@ message MetricsConfig {
   // A script that is executed at the device side. Must contain all the handler
   // functions defined in subscribers below.
   // The script functions must be `pure` functions.
-  optional string script = 4;
+  string script = 4;
 
   // Optional.
   // Triggers that are available in the Metrics Configuration.
@@ -36,22 +37,26 @@ message MetricsConfig {
   repeated Publisher publishers = 6;
 
   // Optional.
+  // Expression nodes that are available in the Metrics Configuration.
+  repeated expr.Node expression_nodes = 7;
+
+  // Optional.
   // Configurations of metrics reports that are to be generated.
-  repeated MetricsReportConfig metrics_report_configs = 7;
+  repeated MetricsReportConfig metrics_report_configs = 8;
 
   // Optional.
   // The name of the trigger that starts data collection. The state is not
   // persisted.
-  optional string start_trigger_name = 8;
+  string start_trigger_name = 9;
 
   // Optional.
   // The name of the trigger that ends data collection.
-  optional string end_trigger_name = 9;
+  string end_trigger_name = 10;
 
   // Optional.
   // The name of the trigger that finishes metrics configuration.
   // A finished metrics configuration is removed from the system.
-  optional string finish_trigger_name = 10;
+  string finish_trigger_name = 11;
 }
 
 // Emits trigger events.
@@ -59,7 +64,7 @@ message Trigger {
   // Required.
   // The name of the trigger. Must be unique across all publishers and triggers
   // in the Metrics Configuration.
-  optional string name = 1;
+  string name = 1;
 
   oneof option {
     DataTrigger data_trigger = 2;
@@ -74,14 +79,14 @@ message Trigger {
 message DataTrigger {
   // Required.
   // The name of the publisher to listen to.
-  optional string publisher_name = 1;
+  string publisher_name = 1;
 }
 
 // Triggers periodically.
 message PeriodicTrigger {
   // Required.
   // An interval between polls, in milliseconds.
-  optional uint64 interval_ms = 1;
+  uint64 interval_ms = 1;
 }
 
 // Listens to other triggers, when they fire evaluates selector expression
@@ -91,18 +96,13 @@ message ConditionalTrigger {
   // Underlying trigger names.
   repeated string trigger_names = 1;
 
-  // Optional.
-  // Names of the publishers that are referenced in the selector expression.
-  // If a message from a publisher is not present in the activation context, the
-  // context will be populated with the latest published message.
-  repeated string publisher_names = 2;
-
   // Required.
-  // An expression that uses data from the activation context and returns
-  // a value. If `change_type` is not ALL, the value must be of numeric or
-  // boolean type. `publisher_names` must declare all publishers referenced
-  // by the function.
-  optional string selector_expression = 3;
+  // The index of the root node of the expression that uses data from publishers
+  // and returns a value. If `change_type` is not ALL, the value must be of
+  // numeric type or a boolean. If a message from a publisher is not present in
+  // the activation context, the context will be populated with the latest
+  // published message.
+  uint32 selector_node_index = 2;
 
   // Type of value change.
   enum ChangeType {
@@ -114,7 +114,7 @@ message ConditionalTrigger {
 
   // Required.
   // The type of the value change that causes the trigger to fire.
-  optional ChangeType change_type = 4;
+  ChangeType change_type = 3;
 }
 
 // Publishes messages and stores the latest published message.
@@ -124,21 +124,29 @@ message Publisher {
   // Required.
   // The name of the publisher. Must be unique across all publishers and
   // triggers in the Metrics Configuration.
-  optional string name = 1;
+  string name = 1;
 
   oneof option {
-    ServicePublisher service_publisher = 2;
-    AggregationPublisher aggregation_publisher = 3;
+    TaxoPublisher taxo_publisher = 2;
+    ServicePublisher service_publisher = 3;
+    AggregationPublisher aggregation_publisher = 4;
   }
 }
 
-// Publishes messages from an external service.
+// Publishes well-known data taxonomy signals exposed by the middleware layer.
+message TaxoPublisher {
+  // Required.
+  // Data taxonomy signal name.
+  string taxo_name = 1;
+}
+
+// Publishes messages from a customizable external service.
 message ServicePublisher {
   // Optional.
   // Identification of the service in the service discovery.
-  optional string service_name = 1;
+  string service_name = 1;
 
-  // Optional.
+  // Required.
   // Service-specific configuration.
   oneof option {
     NetworkPublisherConfig network_publisher_config = 10000;
@@ -153,32 +161,26 @@ message AggregationPublisher {
   // The names of the triggers that specify when aggregation is performed.
   repeated string trigger_name = 1;
 
-  // Optional.
-  // Names of the publishers that are used in the underlying aggregations.
-  // If a message from a publisher is not present in the activation context, the
-  // context will be populated with the latest published message.
-  repeated string publisher_names = 2;
-
   // Required.
   // Message type declared in the Metrics Configuration that is used to publish
   // the message with the aggregated data. The message must have a field for
   // each aggregated field and the field must fit the aggregation result.
-  optional string message_type_name = 3;
+  string message_type_name = 2;
 
   // Optional.
   // Specifies whether the aggregated value is reset when the publisher data is
   // read into activation context.
-  optional bool reset_on_get = 4;
+  bool reset_on_get = 3;
 
   // Optional.
   // Associated declarative aggregations.
   // Must be empty if at least one script aggregation is specified.
-  repeated DeclarativeAggregation declarative_aggregations = 5;
+  repeated DeclarativeAggregation declarative_aggregations = 4;
 
   // Optional.
   // Associated script aggregations.
   // Must be empty if at least one declarative aggregation is specified.
-  repeated ScriptAggregation script_aggregations = 6;
+  repeated ScriptAggregation script_aggregations = 5;
 }
 
 // Declaratively specifies how to aggregate data from the activation context.
@@ -186,15 +188,15 @@ message DeclarativeAggregation {
   // Required.
   // The name of the field that stores aggregation result.
   // Must be unique within AggregationPublisher.
-  optional string field_name = 1;
+  string field_name = 1;
 
   // Required.
-  // An expression that extracts data from the activation context.
-  // If the extracted data is not a numeric value or a boolean,
-  // aggregation_type must be VECTOR, LATEST or CUSTOM.
-  // The `publisher_names` field in the parent AggregationPublisher must declare
-  // all referenced publishers.
-  optional string selector_expression = 2;
+  // The index of the root node of the expression that converts data from
+  // publishers to a value. If the value is not numeric or a boolean,
+  // aggregation_type must be VECTOR, LATEST or CUSTOM. If a message from
+  // a publisher is not present in the activation context, the context will be
+  // populated with the latest published message.
+  uint32 selector_node_index = 2;
 
   enum AggregationType {
     AGGREGATION_TYPE_UNSPECIFIED = 0;
@@ -224,17 +226,17 @@ message DeclarativeAggregation {
 
   // Required.
   // Type of aggregation performed with the data from the publisher.
-  optional AggregationType aggregation_type = 3;
+  AggregationType aggregation_type = 3;
 
   // Optional.
   // The expression used to generate the initial value of the aggregate.
   // Required if aggregation_type is CUSTOM.
-  optional string seed_expression = 4;
+  expr.NewProtoNode seed_expression = 4;
 
   // Optional.
   // The expression used to aggregate the values.
   // Required if aggregation_type is CUSTOM.
-  optional string aggregation_expression = 5;
+  expr.NewProtoNode aggregation_expression = 5;
 }
 
 // Specifies a script that aggregates data from the activation context.
@@ -248,7 +250,7 @@ message ScriptAggregation {
   // Required.
   // Name of the function that aggregates data from the activation context.
   // Must be defined in the script.
-  optional string handler_function_name = 2;
+  string handler_function_name = 2;
 }
 
 // Specifies when and how data is combined into a Metrics Report to be reported
@@ -260,22 +262,17 @@ message MetricsReportConfig {
   repeated string report_trigger_names = 1;
 
   // Optional.
-  // Names of the publishers that are referenced in the selector expression.
-  // If a message from a publisher is not present in the activation context, the
-  // context will be populated with the latest published message.
-  repeated string publisher_names = 2;
-
-  // Optional.
   // Specifies whether to send the report using the latest published messages
   // on Telemetry Service shutdown or when the data collection is ended or
   // finished.
-  optional bool report_incomplete = 3;
+  bool report_incomplete = 2;
 
   // Required.
-  // The expression that uses data from the activation context to create a
-  // message with metrics to report to the OEM application. `publisher_names`
-  // must declare all referenced publishers.
-  optional string selector_expression = 4;
+  // The expression that creates a message with metrics to report to the
+  // OEM application. If a message from a publisher is not present in
+  // the activation context, the context will be populated with the latest
+  // published message.
+  expr.NewProtoNode selector_expression = 3;
 }
 
 message SamplePublisherConfig {}
@@ -289,9 +286,9 @@ enum TrafficDirection {
 message NetworkPublisherConfig {
   // Required.
   // The name of the application being monitored.
-  optional string application_name = 1;
+  string application_name = 1;
 
   // Required.
   // The direction of traffic to monitor.
-  optional TrafficDirection traffic_direction = 2;
+  TrafficDirection traffic_direction = 2;
 }
