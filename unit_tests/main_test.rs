@@ -13,7 +13,6 @@ mod tests {
     };
     use log::info;
     use protobuf::Message;
-    use sdv_telemetry::SdvTelemetryService;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
     use tokio::runtime::Runtime;
 
@@ -56,7 +55,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         // block on async block
         rt.block_on(async {
@@ -68,7 +67,7 @@ mod tests {
             info!("Serializing metric config");
             let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
 
-            let result = service.addMetricsConfig("TestConfig", serialized_config).await;
+            let result = service.addMetricsConfig(serialized_config).await;
 
             assert!(result.is_ok());
         });
@@ -81,7 +80,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         // block on async block
         rt.block_on(async {
@@ -97,7 +96,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         // block on async block
         rt.block_on(async {
@@ -113,7 +112,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         // block on async block
         rt.block_on(async {
@@ -129,7 +128,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         let listener: Strong<dyn ITelemetryReportReadyListener> =
             Strong::new(Box::new(TelemetryReportReadyListener));
@@ -148,7 +147,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));
@@ -167,7 +166,7 @@ mod tests {
 
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService) as Box<dyn ITelemetryServiceAsyncServer>;
+            Box::new(sdv_telemetry::create_telemetry_service());
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));

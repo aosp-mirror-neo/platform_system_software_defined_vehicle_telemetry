@@ -16,8 +16,8 @@ class IReportReadyListener {
 class ReportReadyImpl final:
       public IReportReadyListener, public android::RefBase {
 public:
-    void onReady(const std::string& metricConfigName) override {
-        ALOGI("Report Ready for config: %s", metricConfigName.c_str());
+    void onReady(const std::string& metricConfigUuid) override {
+        ALOGI("Report Ready for config: %s", metricConfigUuid.c_str());
     }
 };
 

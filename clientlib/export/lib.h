@@ -16,8 +16,7 @@ extern "C" {
     typedef struct ServiceHolder ServiceHolder;
     ServiceHolder* start_telemetry_service();
     void stop_telemetry_service(ServiceHolder* holder);
-    void addMetricsConfig(
-        ServiceHolder* holder, char* config_name, uint8_t* metrics_config, size_t size);
+    void addMetricsConfig(ServiceHolder* holder, uint8_t* metrics_config, size_t size);
     void removeAllMetricsConfigs(ServiceHolder* holder);
     void setReportReadyListener(
         ServiceHolder* holder, void* listener, void (*cbFunc)(void*, const char*, size_t));

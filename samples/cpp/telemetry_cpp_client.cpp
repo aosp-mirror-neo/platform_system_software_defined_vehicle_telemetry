@@ -50,8 +50,7 @@ int main() {
   }
 
   std::vector<uint8_t> vec(serialData.begin(), serialData.end());
-  char config_name[] = "TestConfig";
-  addMetricsConfig(holder, &config_name[0], &vec[0], vec.size());
+  addMetricsConfig(holder, &vec[0], vec.size());
 
   android::sp<ReportReadyImpl> listener(new ReportReadyImpl());
   ALOGI("Setting report ready listener");

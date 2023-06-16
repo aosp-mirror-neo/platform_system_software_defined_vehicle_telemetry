@@ -39,7 +39,7 @@ fn main() -> Result<(), binder::Status> {
     info!("Serializing metric config");
     let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
 
-    let _ = service.addMetricsConfig("TestConfig", serialized_config);
+    let _ = service.addMetricsConfig(serialized_config);
     let _ = service.removeAllMetricsConfigs();
     Ok(())
 }

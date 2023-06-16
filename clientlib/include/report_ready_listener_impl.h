@@ -12,7 +12,7 @@ public:
 
     ReportReadyListenerImpl(void *cb, void (*cbFunc)(void*, const char*, size_t));
     ~ReportReadyListenerImpl();
-    android::binder::Status onReady(const ::android::String16& metricConfigName) override;
+    android::binder::Status onReady(const ::android::String16& metricConfigUuid) override;
 
 private:
     // Void pointer storing the CB object passed by the OEM client app.

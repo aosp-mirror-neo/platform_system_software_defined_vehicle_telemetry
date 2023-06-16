@@ -29,8 +29,7 @@ public:
     virtual ~TelemetryService();
 
     void removeAllMetricsConfigs();
-    void addMetricsConfig(const ::android::String16& metricsConfigName,
-                          const std::vector<uint8_t>& metricConfig);
+    void addMetricsConfig(const std::vector<uint8_t>& metricConfig);
     void setReportReadyListener(void* listener, void (*cbFunc)(void*, const char*, size_t));
 
 private:

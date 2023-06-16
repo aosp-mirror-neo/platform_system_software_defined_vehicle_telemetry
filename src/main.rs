@@ -8,8 +8,6 @@ use binder_tokio::TokioRuntime;
 use log::info;
 use tokio::runtime::Builder;
 
-use sdv_telemetry::SdvTelemetryService;
-
 static LOG_TAG: &str = "SdvTelemetryService";
 
 fn main() {
@@ -25,7 +23,7 @@ fn main() {
 
     info!("Creating telemetry service");
 
-    let service = SdvTelemetryService;
+    let service = sdv_telemetry::create_telemetry_service();
     let descriptor = <BpTelemetryService as ITelemetryService>::get_descriptor();
 
     println!("Adding {descriptor} service to binder");
