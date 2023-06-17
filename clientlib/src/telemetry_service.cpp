@@ -32,10 +32,9 @@ namespace android::sdv::telemetry {
         binder_service_->removeAllMetricsConfigs();
     }
 
-    void TelemetryService::addMetricsConfig(const ::android::String16& metricsConfigName,
-                                    const std::vector<uint8_t>& metricConfig){
+    void TelemetryService::addMetricsConfig(const std::vector<uint8_t>& metricConfig) {
         ALOGI("addMetricsConfig in CPP");
-        binder_service_->addMetricsConfig(metricsConfigName, metricConfig);
+        binder_service_->addMetricsConfig(metricConfig);
     }
 
     void TelemetryService::setReportReadyListener(void* listener,

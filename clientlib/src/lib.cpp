@@ -17,13 +17,11 @@ void stop_telemetry_service(ServiceHolder* holder){
     // Note: Kept for future use. In case variables need to be freed explicitly.
 }
 
-void addMetricsConfig(
-    ServiceHolder* holder, char* config_name, uint8_t* metrics_config, size_t size)
-{
+void addMetricsConfig(ServiceHolder* holder, uint8_t* metrics_config, size_t size) {
     android::sdv::telemetry::TelemetryService* service =
                 reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
     std::vector<uint8_t> vec(metrics_config, metrics_config+size);
-    service->addMetricsConfig(android::String16(config_name), vec);
+    service->addMetricsConfig(vec);
 }
 
 void removeAllMetricsConfigs(ServiceHolder* holder){

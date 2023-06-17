@@ -19,12 +19,10 @@ namespace android::sdv::telemetry {
     }
 
     android::binder::Status ReportReadyListenerImpl::onReady(
-        const ::android::String16& metricConfigName)
-    {
-        const char* configName = android::String8(metricConfigName).c_str();
-        ALOGI("onReady %s", configName);
-        cbFuncPtr(clientCB_, configName,strlen(configName));
+            const ::android::String16& metricConfigUuid) {
+        const char* configUuid = android::String8(metricConfigUuid).c_str();
+        ALOGI("onReady %s", configUuid);
+        cbFuncPtr(clientCB_, configUuid, strlen(configUuid));
         return android::binder::Status::ok();
     }
-
 }

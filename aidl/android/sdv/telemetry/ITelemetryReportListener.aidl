@@ -9,6 +9,6 @@ package android.sdv.telemetry;
  * @hide
  */
 oneway interface ITelemetryReportListener {
-    void onResult(in String metricsConfigName, in ParcelFileDescriptor reportFileDescriptor,
+    void onResult(in String metricsConfigUuid, in ParcelFileDescriptor reportFileDescriptor,
             in byte[] telemetryError, in int status);
 }

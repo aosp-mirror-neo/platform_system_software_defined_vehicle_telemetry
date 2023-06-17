@@ -14,13 +14,13 @@ interface ITelemetryService {
     /**
      * Adds telemetry MetricsConfigs to TelemetryService.
      */
-    void addMetricsConfig(in String metricsConfigName, in byte[] metricsConfig);
+    void addMetricsConfig(in byte[] metricsConfig);
 
     /**
-     * Removes a MetricsConfig based on the name. This will also remove outputs produced by the
+     * Removes a MetricsConfig based on uuid. This will also remove outputs produced by the
      * MetricsConfig.
      */
-    void removeMetricsConfig(in String metricsConfigName);
+    void removeMetricsConfig(in String metricsConfigUuid);
 
     /**
      * Removes all MetricsConfigs. This will also remove all MetricsConfig outputs.
@@ -28,10 +28,10 @@ interface ITelemetryService {
     void removeAllMetricsConfigs();
 
     /**
-     * Sends finished telemetry reports or errors associated with the given name using the
+     * Sends finished telemetry reports or errors associated with the given uuid using the
      * {@code ITelemetryServiceListener}.
      */
-    void getFinishedReport(in String metricsConfigName, in ITelemetryReportListener listener);
+    void getFinishedReport(in String metricsConfigUuid, in ITelemetryReportListener listener);
 
     /**
      * Sends all finished telemetry reports or errors using the {@code ITelemetryReportListener}.

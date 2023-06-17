@@ -12,5 +12,5 @@ oneway interface ITelemetryReportReadyListener {
      * Called by telemetry service to provide notifications on finished reports or script
      * runtime error.
      */
-    void onReady(in String metricsConfigName);
+    void onReady(in String metricsConfigUuid);
 }
