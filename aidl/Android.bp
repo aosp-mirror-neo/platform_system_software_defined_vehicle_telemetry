@@ -11,7 +11,7 @@ aidl_interface {
     srcs: [
         "android/sdv/telemetry/*.aidl",
     ],
-    vendor_available: true,
+    vendor_available: false,
     unstable: true,
     host_supported: true,
     backend: {

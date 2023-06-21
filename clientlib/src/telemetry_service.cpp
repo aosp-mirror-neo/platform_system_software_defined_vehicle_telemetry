@@ -32,6 +32,11 @@ namespace android::sdv::telemetry {
         binder_service_->removeAllMetricsConfigs();
     }
 
+    void TelemetryService::removeMetricsConfig(const std::string& metricsConfigUuid) {
+        ALOGI("remove metrics config inside CPP");
+        binder_service_->removeMetricsConfig(metricsConfigUuid);
+    }
+
     void TelemetryService::addMetricsConfig(const std::vector<uint8_t>& metricConfig) {
         ALOGI("addMetricsConfig in CPP");
         binder_service_->addMetricsConfig(metricConfig);

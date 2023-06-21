@@ -8,7 +8,10 @@ use binder_tokio::TokioRuntime;
 use log::info;
 use tokio::runtime::Builder;
 
+use sdv_telemetry::SdvTelemetryService;
+
 static LOG_TAG: &str = "SdvTelemetryService";
+static ROOT_DIR: &str = "/data/local/tmp";
 
 fn main() {
     sdv_log::init_logger(LOG_TAG).unwrap_or_else(|error| match &error {
@@ -20,10 +23,9 @@ fn main() {
     });
 
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    info!("Creating telemetry service with hashmap");
 
-    info!("Creating telemetry service");
-
-    let service = sdv_telemetry::create_telemetry_service();
+    let service = runtime.block_on(SdvTelemetryService::new(ROOT_DIR));
     let descriptor = <BpTelemetryService as ITelemetryService>::get_descriptor();
 
     println!("Adding {descriptor} service to binder");

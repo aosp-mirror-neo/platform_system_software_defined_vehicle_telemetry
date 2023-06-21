@@ -19,7 +19,6 @@ cc_library {
 rust_defaults {
     name: "telemetry@rust_defaults",
     defaults: ["sdv@rust_defaults"],
-    crate_name: "sdv_telemetry_defaults",
     rustlibs: [
         "liblog_rust",
         "liblogger",
@@ -48,16 +47,12 @@ rust_protobuf {
 rust_library {
     name: "libsdv_telemetry",
     crate_name: "sdv_telemetry",
+    defaults: ["telemetry@rust_defaults"],
     host_supported: true,
     srcs: [
         "src/telemetry_service.rs",
     ],
     rustlibs: [
-        "liblog_rust",
-        "liblogger",
-        "libbinder_rs",
-        "libthiserror",
-        "android.sdv.telemetry-rust",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
@@ -83,9 +78,10 @@ rust_binary {
 rust_test_host {
     name: "libsdv_telemetry_unit_tests",
     defaults: ["telemetry@rust_defaults"],
-    srcs: ["src/telemetry_service.rs"],
+    srcs: [
+        "src/telemetry_service.rs",
+    ],
     rustlibs: [
-        "libsdv_telemetry",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],

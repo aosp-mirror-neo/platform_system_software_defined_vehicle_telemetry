@@ -56,6 +56,8 @@ int main() {
   setReportReadyListener(
                 holder, static_cast<void*>(listener.get()), &trigger_report_ready_listener);
 
+  sleep(3);
+  removeMetricsConfig(holder, config.uuid().c_str());
   removeAllMetricsConfigs(holder);
 
   // adding sleep for 3 seconds to let async callback finish.

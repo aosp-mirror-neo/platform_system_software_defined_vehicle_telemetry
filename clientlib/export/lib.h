@@ -17,6 +17,7 @@ extern "C" {
     ServiceHolder* start_telemetry_service();
     void stop_telemetry_service(ServiceHolder* holder);
     void addMetricsConfig(ServiceHolder* holder, uint8_t* metrics_config, size_t size);
+    void removeMetricsConfig(ServiceHolder* holder, const char* uuid);
     void removeAllMetricsConfigs(ServiceHolder* holder);
     void setReportReadyListener(
         ServiceHolder* holder, void* listener, void (*cbFunc)(void*, const char*, size_t));
