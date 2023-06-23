@@ -3,6 +3,7 @@
 //! This module implements the ITelemetryService AIDL interface
 #![allow(non_snake_case)]
 
+mod expression_evaluation;
 mod metrics_config_orchestrator;
 
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
@@ -34,7 +35,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn addMetricsConfig(&self, metrics_config: &[u8]) -> BinderResult<()> {
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config).unwrap();
         info!("addMetricsConfig: {:?}\n", config);
-        self.metrics_config_orchestrator.initialize_config(config);
+        self.metrics_config_orchestrator.initialize_config(&config);
         Ok(())
     }
 
@@ -86,6 +87,6 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 /// Returns an instance of SdvTelemetryService with default dependencies.
 pub fn create_telemetry_service() -> SdvTelemetryService {
     SdvTelemetryService {
-        metrics_config_orchestrator: Box::new(MetricsConfigOrchestratorImpl::create()),
+        metrics_config_orchestrator: Box::new(MetricsConfigOrchestratorImpl::new()),
     }
 }
