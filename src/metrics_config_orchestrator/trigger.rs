@@ -10,10 +10,9 @@ pub trait TriggerFactory {
     fn create(&self, trigger_proto: &TriggerProto, context: &MetricsConfig) -> Trigger;
 }
 
-#[allow(dead_code)]
 pub struct Trigger {
-    name: String,
-    trigger_type: TriggerType,
+    pub name: String,
+    pub trigger_type: TriggerType,
 }
 
 #[allow(dead_code)]
