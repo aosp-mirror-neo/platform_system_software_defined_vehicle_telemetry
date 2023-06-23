@@ -3,6 +3,7 @@
 //! This module implements the ITelemetryService AIDL interface
 #![allow(non_snake_case)]
 
+mod collection_extension;
 mod expression_evaluation;
 mod metrics_config_orchestrator;
 
@@ -35,7 +36,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn addMetricsConfig(&self, metrics_config: &[u8]) -> BinderResult<()> {
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config).unwrap();
         info!("addMetricsConfig: {:?}\n", config);
-        self.metrics_config_orchestrator.initialize_config(&config);
+        let _ = self.metrics_config_orchestrator.initialize_config(&config);
         Ok(())
     }
 
