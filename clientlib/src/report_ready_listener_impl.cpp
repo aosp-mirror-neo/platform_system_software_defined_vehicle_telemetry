@@ -18,9 +18,8 @@ namespace android::sdv::telemetry {
         ALOGI("Destroyed");
     }
 
-    android::binder::Status ReportReadyListenerImpl::onReady(
-            const ::android::String16& metricConfigUuid) {
-        const char* configUuid = android::String8(metricConfigUuid).c_str();
+    android::binder::Status ReportReadyListenerImpl::onReady(const std::string& metricConfigUuid) {
+        const char* configUuid = metricConfigUuid.c_str();
         ALOGI("onReady %s", configUuid);
         cbFuncPtr(clientCB_, configUuid, strlen(configUuid));
         return android::binder::Status::ok();

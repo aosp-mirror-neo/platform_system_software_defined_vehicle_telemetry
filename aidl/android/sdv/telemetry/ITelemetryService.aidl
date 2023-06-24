@@ -20,7 +20,7 @@ interface ITelemetryService {
      * Removes a MetricsConfig based on uuid. This will also remove outputs produced by the
      * MetricsConfig.
      */
-    void removeMetricsConfig(in String metricsConfigUuid);
+    void removeMetricsConfig(in @utf8InCpp String metricsConfigUuid);
 
     /**
      * Removes all MetricsConfigs. This will also remove all MetricsConfig outputs.
@@ -31,7 +31,8 @@ interface ITelemetryService {
      * Sends finished telemetry reports or errors associated with the given uuid using the
      * {@code ITelemetryServiceListener}.
      */
-    void getFinishedReport(in String metricsConfigUuid, in ITelemetryReportListener listener);
+    void getFinishedReport(
+            in @utf8InCpp String metricsConfigUuid, in ITelemetryReportListener listener);
 
     /**
      * Sends all finished telemetry reports or errors using the {@code ITelemetryReportListener}.

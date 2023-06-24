@@ -3,20 +3,21 @@
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_TELEMETRY_SERVICE_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_TELEMETRY_SERVICE_H
 
+#include <android-base/stringprintf.h>
 #include <android/sdv/telemetry/BnTelemetryService.h>
 #include <binder/IServiceManager.h>
+#include <utils/Log.h>
+
 #include <getopt.h>
 #include <stdlib.h>
 #include <sysexits.h>
 #include <unistd.h>
+
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
 #include <memory>
 #include <vector>
-#include <utils/Log.h>
-#include <utils/String16.h>
-#include <android-base/stringprintf.h>
 
 using ::android::sdv::telemetry::ITelemetryService;
 
