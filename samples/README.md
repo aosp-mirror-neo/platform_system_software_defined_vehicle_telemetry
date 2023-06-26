@@ -71,3 +71,12 @@ using the sdv_telemetry_service executable.
         # In the previous terminal with logcat expect logs with logtag
         # "telemetry_rust_client" and "SdvTelemetryService"
         ```
+    3. Start a new terminal and run rust c client application
+
+        ```bash
+        adb shell
+        # Expect the root terminal "#"
+        telemetry_rust_c_client
+        # In the previous terminal with logcat expect logs with logtag
+        # "telemetry_rust_c_client" and "SdvTelemetryService"
+        ```
