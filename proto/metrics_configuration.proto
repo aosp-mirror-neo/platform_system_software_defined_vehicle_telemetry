@@ -159,7 +159,7 @@ message ServicePublisher {
 message AggregationPublisher {
   // Required.
   // The names of the triggers that specify when aggregation is performed.
-  repeated string trigger_name = 1;
+  repeated string trigger_names = 1;
 
   // Required.
   // Message type declared in the Metrics Configuration that is used to publish
