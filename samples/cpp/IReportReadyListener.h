@@ -1,9 +1,12 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-#include <stdlib.h>
-#include <stdio.h>
 #include <utils/Log.h>
 #include <utils/RefBase.h>
+
+#include <stdio.h>
+#include <stdlib.h>
+
+#include <string>
 
 class IReportReadyListener {
   public:

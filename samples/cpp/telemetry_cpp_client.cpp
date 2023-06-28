@@ -2,21 +2,20 @@
 
 #define LOG_TAG "CPPClient"
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <vector>
-#include <unistd.h>
-
-#include <utils/String16.h>
-#include <utils/Log.h>
+#include "IReportReadyListener.h"
+#include "lib.h"
+#include "system/software_defined_vehicle/telemetry/proto/metrics_configuration.pb.h"
 
 #include <binder/IPCThreadState.h>
 #include <binder/IServiceManager.h>
 #include <binder/ProcessState.h>
+#include <utils/Log.h>
 
-#include "lib.h"
-#include "IReportReadyListener.h"
-#include "system/software_defined_vehicle/telemetry/proto/metrics_configuration.pb.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+#include <vector>
 
 // Callback function triggered by the telemetry service. Pointer to this function
 // is passed to the telemetry service.

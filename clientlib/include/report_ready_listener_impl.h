@@ -1,8 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-#include <utils/Log.h>
-#include <utils/String16.h>
 #include <android/sdv/telemetry/BnTelemetryReportReadyListener.h>
+#include <utils/Log.h>
 
 namespace android::sdv::telemetry {
 
@@ -12,7 +11,7 @@ public:
 
     ReportReadyListenerImpl(void *cb, void (*cbFunc)(void*, const char*, size_t));
     ~ReportReadyListenerImpl();
-    android::binder::Status onReady(const ::android::String16& metricConfigUuid) override;
+    android::binder::Status onReady(const std::string& metricConfigUuid) override;
 
 private:
     // Void pointer storing the CB object passed by the OEM client app.
