@@ -18,6 +18,7 @@ cc_library {
 
 rust_defaults {
     name: "telemetry@rust_defaults",
+    defaults: ["sdv@rust_defaults"],
     crate_name: "sdv_telemetry_defaults",
     rustlibs: [
         "liblog_rust",
@@ -25,6 +26,7 @@ rust_defaults {
         "libbinder_rs",
         "libbinder_tokio_rs",
         "libtokio",
+        "libthiserror",
         "android.sdv.telemetry-rust",
         "libsdv_log_rust",
     ],
@@ -54,6 +56,7 @@ rust_library {
         "liblog_rust",
         "liblogger",
         "libbinder_rs",
+        "libthiserror",
         "android.sdv.telemetry-rust",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
