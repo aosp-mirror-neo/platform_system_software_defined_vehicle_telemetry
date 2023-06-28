@@ -8,10 +8,11 @@ use sdvtelemetry_proto_rust::expression::{
     combination_node::LogicalOperator, node::Node_type, CombinationNode as CombinationNodeProto,
     Node as NodeProto,
 };
+use std::fmt;
 use std::{cell::RefCell, rc::Rc};
 
 /// A wrapper around a protobuf Node.
-#[derive(Debug, Default, Clone, PartialEq)]
+#[derive(Default, Clone, PartialEq)]
 pub struct Node<'a> {
     proto_node: &'a NodeProto,
     // Option<T> means the variable can either hold nothing or T. Rust
@@ -22,6 +23,27 @@ pub struct Node<'a> {
     // RefCell<T> means you can modify the object T.
     left: Option<Rc<RefCell<Node<'a>>>>,
     right: Option<Rc<RefCell<Node<'a>>>>,
+}
+
+/// Pretty print Node's debug string, reducing clutter caused by Option<Rc<RefCell<T>>>.
+impl<'a> fmt::Debug for Node<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let left_string = if let Some(left_child_ref) = &self.left {
+            format!("{:#?}", *left_child_ref.borrow())
+        } else {
+            "Empty".to_string()
+        };
+        let right_string = if let Some(right_child_ref) = &self.right {
+            format!("{:#?}", *right_child_ref.borrow())
+        } else {
+            "Empty".to_string()
+        };
+        write!(
+            f,
+            "Node {{ proto node: {},  left: {},  right: {} }}",
+            self.proto_node, left_string, right_string
+        )
+    }
 }
 
 impl<'a> Node<'a> {
@@ -168,7 +190,8 @@ mod tests {
     use super::Node;
     use sdv_node_value::NodeValue;
     use sdvtelemetry_proto_rust::expression::{
-        combination_node::LogicalOperator, CombinationNode, ConstantLeafNode, Node as NodeProto,
+        combination_node::{ArithmeticOperator, LogicalOperator},
+        CombinationNode, ConstantLeafNode, Node as NodeProto,
     };
 
     /// Helper function that returns this tree:
@@ -282,7 +305,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_and_or_ok() {
+    fn test_evaluate_and_or_ok() -> Result<(), String> {
         // setup this tree:
         //            index 3 (AND)
         //          /              \
@@ -306,7 +329,7 @@ mod tests {
         root_node.set_combination_node(combination_node.clone());
         all_proto_nodes.push(root_node.clone());
 
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes).unwrap();
+        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
 
         // we will evaluate every node in `converted_nodes`, and we expect these results:
         let expected_results = vec![
@@ -317,8 +340,73 @@ mod tests {
             NodeValue::Bool(false), // index 4 = F && (T || F)  = F
         ];
 
-        for (i, rust_node_ref) in converted_nodes.iter().enumerate() {
-            assert_eq!(rust_node_ref.borrow().evaluate().unwrap(), expected_results[i]);
+        // assert that evaluated_result[i] == expected_result[i] for all index i
+        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
+        {
+            assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_evaluate_arithmetic_ok() -> Result<(), String> {
+        // setup this tree: 5 / 2 * 5^2
+        //            index 4 (MULTIPLY)
+        //          /              \
+        //      index 2              index 3
+        //       DIVIDE               POWER
+        //    /         \          /        \
+        // index 0   index 1   index 0     index 1
+        //   5          2       5             2
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut node_2 = NodeProto::new();
+        let mut node_3 = NodeProto::new();
+        let mut node_4 = NodeProto::new();
+
+        let mut constant_leaf_five = ConstantLeafNode::new();
+        constant_leaf_five.set_int32_value(5);
+        node_0.set_constant_leaf_node(constant_leaf_five);
+
+        let mut constant_leaf_two = ConstantLeafNode::new();
+        constant_leaf_two.set_int32_value(2);
+        node_1.set_constant_leaf_node(constant_leaf_two);
+
+        let mut combination_divide = CombinationNode::new();
+        combination_divide.set_arithmetic_operator(ArithmeticOperator::DIVIDE);
+        combination_divide.left_index = Some(0);
+        combination_divide.right_index = Some(1);
+        node_2.set_combination_node(combination_divide);
+
+        let mut combination_pow = CombinationNode::new();
+        combination_pow.set_arithmetic_operator(ArithmeticOperator::POWER);
+        combination_pow.left_index = Some(0);
+        combination_pow.right_index = Some(1);
+        node_3.set_combination_node(combination_pow);
+
+        let mut combination_multiply = CombinationNode::new();
+        combination_multiply.set_arithmetic_operator(ArithmeticOperator::MULTIPLY);
+        combination_multiply.left_index = Some(2);
+        combination_multiply.right_index = Some(3);
+        node_4.set_combination_node(combination_multiply);
+
+        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
+        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+
+        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        let expected_results = vec![
+            NodeValue::Int32(5),     // index 0 = constant value of 5
+            NodeValue::Int32(2),     // index 1 = constant value of 2
+            NodeValue::Double(2.5),  // index 2 = 5 / 2 = 2.5
+            NodeValue::Int64(25),    // index 3 = 5^2 = 25
+            NodeValue::Double(62.5), // index 4 = 2.5 * 25 = 62.5
+        ];
+
+        // assert that evaluated_result[i] == expected_result[i]  for all index i
+        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
+        {
+            assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
+        }
+        Ok(())
     }
 }

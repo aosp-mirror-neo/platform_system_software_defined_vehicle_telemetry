@@ -30,23 +30,23 @@ fn main() {
     constant_leaf.set_int32_value(10);
     left_node.set_constant_leaf_node(constant_leaf); // left = 10
     let mut constant_leaf = ConstantLeafNode::new();
-    constant_leaf.set_int32_value(99);
-    right_node.set_constant_leaf_node(constant_leaf); // right = 99
+    constant_leaf.set_int64_value(3);
+    right_node.set_constant_leaf_node(constant_leaf); // right = 3
 
     let mut combination_node = CombinationNode::new();
     combination_node.left_index = Some(0);
     combination_node.right_index = Some(1);
-    combination_node.set_arithmetic_operator(ArithmeticOperator::ADD);
-    root_node.set_combination_node(combination_node); // root = 10 + 99 = 109
+    combination_node.set_arithmetic_operator(ArithmeticOperator::DIVIDE);
+    root_node.set_combination_node(combination_node); // root = 10 / 3 = 3.3333
 
     let all_nodes = vec![left_node, right_node, root_node];
 
     match Node::convert_nodes(&all_nodes) {
         Ok(rust_nodes) => {
-            info!("{:?}", rust_nodes);
-            info!("constant 10 {:?}", rust_nodes[0].borrow().evaluate());
-            info!("constant 99 is {:?}", rust_nodes[1].borrow().evaluate());
-            info!("10 + 99 is {:?}", rust_nodes[2].borrow().evaluate());
+            info!("All converted nodes = {:#?}", rust_nodes);
+            for (i, node_ref) in rust_nodes.iter().enumerate() {
+                info!("index {} result = {:?}", i, node_ref.borrow().evaluate());
+            }
         }
         Err(e) => {
             info!("{}", e);
