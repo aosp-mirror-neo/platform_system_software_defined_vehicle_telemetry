@@ -13,10 +13,9 @@ pub trait PublisherFactory {
     fn create(&self, publisher_proto: &PublisherProto, context: &MetricsConfig) -> Publisher;
 }
 
-#[allow(dead_code)]
 pub struct Publisher {
-    name: String,
-    publisher_type: PublisherType,
+    pub name: String,
+    pub publisher_type: PublisherType,
 }
 
 #[allow(dead_code)]
