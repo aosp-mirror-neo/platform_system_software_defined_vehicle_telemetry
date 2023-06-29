@@ -85,6 +85,7 @@ rust_test_host {
     defaults: ["telemetry@rust_defaults"],
     srcs: ["src/telemetry_service.rs"],
     rustlibs: [
+        "libsdv_telemetry",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
@@ -96,29 +97,5 @@ rust_test_host {
         "general-tests",
         "automotive-sdv-tests",
     ],
-    test_options: {
-        unit_test: true,
-    },
-    auto_gen_config: true,
-}
-
-rust_test_host {
-    name: "sdv_telemetry_unit_tests",
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "unit_tests/main_test.rs",
-    ],
-    rustlibs: [
-        "libsdv_telemetry",
-        "libsdvtelemetry_proto_rust",
-        "libprotobuf",
-    ],
-    test_suites: [
-        "general-tests",
-        "automotive-sdv-tests",
-    ],
-    test_options: {
-        unit_test: true,
-    },
     auto_gen_config: true,
 }
