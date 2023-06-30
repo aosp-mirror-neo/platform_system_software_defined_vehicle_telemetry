@@ -7,12 +7,13 @@ use lazy_static::lazy_static;
 use log::info;
 use protobuf::MessageDyn;
 use sdv_ast::{MessageProvider, MessageProviderError, NodeFactory, NodeFactoryImpl};
-use sdv_telem_expr_test_proto::test_message::TestMessage;
+use sdv_telem_expr_parser::Parser;
+use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdvtelemetry_proto_rust::expression::{
     combination_node::ArithmeticOperator, CombinationNode, ConstantLeafNode, FieldLeafNode,
     Node as NodeProto,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 static LOG_TAG: &str = "Ast";
 
@@ -20,8 +21,13 @@ lazy_static! {
     static ref TEST_MESSAGE: TestMessage = {
         let mut test_message = TestMessage::new();
         test_message.int_field = 10;
+        test_message.enum_field = TestEnum::SOME.into();
         test_message.repeated_doubles =
             vec![std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
+
+        let mut test_nested_message = TestNestedMessage::new();
+        test_nested_message.bool_field = true;
+        test_message.message_field = protobuf::MessageField::some(test_nested_message);
         test_message
     };
 }
@@ -40,7 +46,7 @@ impl MessageProvider for MessageProviderImpl {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
 
-    info!("Telemetry AST");
+    info!("====== Manual construction of the tree ======");
 
     let mut left_node = NodeProto::new();
     let mut right_node = NodeProto::new();
@@ -79,6 +85,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             info!("All converted nodes = {:#?}", rust_nodes);
             for (i, node_ref) in rust_nodes.iter().enumerate() {
                 info!("index {} result = {:?}", i, node_ref.evaluate());
+            }
+        }
+        Err(e) => {
+            info!("{}", e);
+        }
+    }
+
+    info!("====== Building protobuf nodes using utility function ======");
+
+    let mut parser = Parser::new();
+    let mut idx_to_expr = HashMap::new();
+
+    let mut parse_and_store = |expr| match parser.parse(expr) {
+        Ok(root_idx) => {
+            idx_to_expr.insert(root_idx, expr);
+            info!("Expression: {}. Root node index: {:?}", expr, root_idx);
+        }
+        Err(e) => {
+            info!("Failed to parse textual expression \"{}\", error: {}", expr, e);
+        }
+    };
+
+    let expr =
+        "-2 - 6 >= -8 && publisher.enum_field == 1 && !publisher.message_field.bool_field != true";
+
+    parse_and_store("true ^ false");
+    parse_and_store(expr);
+    parse_and_store("30**2 < 100");
+    parse_and_store("5 / 2 - 5 % 2");
+
+    match node_factory.create_nodes(parser.get_nodes(), &message_provider) {
+        Ok(rust_nodes) => {
+            for (idx, expr) in idx_to_expr.iter() {
+                let root_node = &rust_nodes[*idx as usize];
+                info!(
+                    "Expression: \"{}\". Result: {:?}. Node: {:?}",
+                    expr,
+                    root_node.evaluate(),
+                    root_node
+                );
             }
         }
         Err(e) => {

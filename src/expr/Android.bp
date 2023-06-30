@@ -41,6 +41,7 @@ rust_binary {
     rustlibs: [
         "liblazy_static",
         "libsdv_ast_traversal",
+        "libsdv_telem_expr_parser",
         "libsdv_telem_expr_test_proto",
     ],
 }
