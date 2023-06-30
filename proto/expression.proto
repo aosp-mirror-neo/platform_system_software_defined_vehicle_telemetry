@@ -13,9 +13,9 @@ message Node {
     // non-leaf node holding some value computed from its children.
     CombinationNode combination_node = 1;
     // leaf node of constant value.
-    ConstantLeafNode leaf_constant_node = 2;
+    ConstantLeafNode constant_leaf_node = 2;
     // leaf node of field value from a protobuf message.
-    FieldLeafNode leaf_field_node = 3;
+    FieldLeafNode field_leaf_node = 3;
   }
 }
 
@@ -25,11 +25,9 @@ message ConstantLeafNode {
     bool bool_value = 1;
     int32 int32_value = 2;
     int64 int64_value = 3;
-    uint32 uint32_value = 4;
-    uint64 uint64_value = 5;
-    float float_value = 6;
-    double double_value = 7;
-    string string_value = 8;
+    float float_value = 4;
+    double double_value = 5;
+    string string_value = 6;
   }
 }
 
@@ -98,12 +96,22 @@ message CombinationNode {
     ArithmeticOperator arithmetic_operator = 3;
   }
 
+  // Required.
+  // Left index should always be specified and be set to a valid value.
+  // Index of the left child Node in the repeated list of `expression_nodes`
+  // in MetricsConfig.
   // Most operators are binary and form this relationship:
   //   [left child] <operator> [right child]
+  // The optional annotation is ton verify that the left_index is set, not some
+  // default value of 0. The left_index should always be specified.
+  optional uint32 left_index = 4;
+
+  // Optional.
+  // Index of the right child Node in the repeated list of `expression_nodes`
+  // in MetricsConfig.
   // For unary operators, only the left child should be set. If the right child
   // is set, an error will be raised.
-  Node left = 4;
-  Node right = 5;
+  optional uint32 right_index = 5;
 }
 
 message NewProtoNode {
