@@ -12,6 +12,4 @@ Check logs with `adb logcat`
 
 ## Test Instructions
 
-`UNSAFE_DISABLE_HIDDENAPI_FLAGS=true atest sdv_node_value_unit_tests`
-
 `UNSAFE_DISABLE_HIDDENAPI_FLAGS=true atest sdv_ast_unit_tests`

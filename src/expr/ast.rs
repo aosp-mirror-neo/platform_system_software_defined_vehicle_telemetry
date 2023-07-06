@@ -2,6 +2,8 @@
 
 //! Library for building and traversing the abstract syntax tree.
 
+mod node_value;
+
 use log::info;
 use sdv_node_value::NodeValue;
 use sdvtelemetry_proto_rust::expression::{
@@ -190,7 +192,7 @@ mod tests {
     use super::Node;
     use sdv_node_value::NodeValue;
     use sdvtelemetry_proto_rust::expression::{
-        combination_node::{ArithmeticOperator, LogicalOperator},
+        combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
         CombinationNode, ConstantLeafNode, Node as NodeProto,
     };
 
@@ -407,6 +409,95 @@ mod tests {
         {
             assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn test_evaluate_mixed_operators() -> Result<(), String> {
+        // setup tree containing all 3 types of operators
+        //                       index 4 (&&)
+        //                    /               \
+        //                index 2             index 3
+        //               LT_OR_EQ              TRUE
+        //              /        \
+        //     index 0 (5)      index 1 (+)
+        //                       /         \
+        //               index 0 (5)       index 0 (5)
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut node_2 = NodeProto::new();
+        let mut node_3 = NodeProto::new();
+        let mut node_4 = NodeProto::new();
+
+        let mut constant_leaf_five = ConstantLeafNode::new();
+        constant_leaf_five.set_int32_value(5);
+        node_0.set_constant_leaf_node(constant_leaf_five);
+
+        let mut add_node = CombinationNode::new();
+        add_node.left_index = Some(0); // 5
+        add_node.right_index = Some(0); // 5
+        add_node.set_arithmetic_operator(ArithmeticOperator::ADD);
+        node_1.set_combination_node(add_node);
+
+        let mut gt_eq_node = CombinationNode::new();
+        gt_eq_node.left_index = Some(0); // 5
+        gt_eq_node.right_index = Some(1); // 5+5 = 10
+        gt_eq_node.set_relational_operator(RelationalOperator::LT_OR_EQ);
+        node_2.set_combination_node(gt_eq_node);
+
+        let mut constant_leaf_true = ConstantLeafNode::new();
+        constant_leaf_true.set_bool_value(true);
+        node_3.set_constant_leaf_node(constant_leaf_true);
+
+        let mut and_node = CombinationNode::new();
+        and_node.left_index = Some(2); // 5 <= 10
+        and_node.right_index = Some(3); // TRUE
+        and_node.set_logical_operator(LogicalOperator::AND);
+        node_4.set_combination_node(and_node);
+
+        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
+        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+
+        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        let expected_results = vec![
+            NodeValue::Int32(5),   // index 0 = 5
+            NodeValue::Int64(10),  // index 1 = 5+5 = 10
+            NodeValue::Bool(true), // index 2 = 5 <= 10
+            NodeValue::Bool(true), // index 3 = constant value of True
+            NodeValue::Bool(true), // index 4 = True && True = True
+        ];
+
+        // assert that evaluated_result[i] == expected_result[i] for all index i
+        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
+        {
+            assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_evaluate_incompatible_types_should_fail() -> Result<(), String> {
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+
+        let mut constant_leaf_true = ConstantLeafNode::new();
+        constant_leaf_true.set_bool_value(true);
+        node_0.set_constant_leaf_node(constant_leaf_true);
+
+        let mut lt_node = CombinationNode::new();
+        lt_node.left_index = Some(0); // True
+        lt_node.right_index = Some(0); // True
+        lt_node.set_relational_operator(RelationalOperator::LT);
+        node_1.set_combination_node(lt_node);
+
+        let all_proto_nodes = vec![node_0, node_1];
+        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+
+        // Index 1 expr is "True < True"
+        let result = converted_nodes[1].borrow().evaluate();
+
+        // True cannot be less than True
+        assert!(result.is_err());
         Ok(())
     }
 }
