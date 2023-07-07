@@ -40,6 +40,6 @@ fn main() -> Result<(), binder::Status> {
     let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
 
     let _ = service.addMetricsConfig(serialized_config);
-    let _ = service.removeAllMetricsConfigs();
+    // let _ = service.removeAllMetricsConfigs();
     Ok(())
 }

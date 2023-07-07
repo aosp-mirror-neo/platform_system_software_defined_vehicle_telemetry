@@ -30,6 +30,7 @@ public:
     virtual ~TelemetryService();
 
     void removeAllMetricsConfigs();
+    void removeMetricsConfig(const std::string& metricsConfigUuid);
     void addMetricsConfig(const std::vector<uint8_t>& metricConfig);
     void setReportReadyListener(void* listener, void (*cbFunc)(void*, const char*, size_t));
 
