@@ -14,10 +14,13 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use publisher::{Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryImpl};
-use trigger::{Trigger, TriggerFactory, TriggerFactoryImpl};
-
-use self::publisher::PublisherFactoryError;
+use publisher::{
+    Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryError,
+    PublisherFactoryImpl,
+};
+use trigger::{
+    Trigger, TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
+};
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 pub trait MetricsConfigOrchestrator {
@@ -45,6 +48,8 @@ pub enum MetricsConfigOrchestratorError {
     DuplicateMetricsConfigUuid { uuid: String },
     #[error("Invalid definition for publisher {publisher_name}")]
     InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
+    #[error("Invalid definition for trigger {trigger_name}")]
+    InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
     #[error("Invalid descriptor protos")]
     InvalidDescriptorProtos {
         #[from]
@@ -72,7 +77,7 @@ impl MetricsConfigOrchestratorImpl {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
             publisher_factory: PublisherFactoryImpl::new(),
-            trigger_factory: TriggerFactoryImpl {},
+            trigger_factory: TriggerFactoryImpl::new(),
         }
     }
 }
@@ -157,13 +162,13 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
             sorted_vector.iter().try_fold(
                 MetricsConfig { publishers: HashMap::new(), triggers: HashMap::new() },
                 |mut acc, container_name| {
-                    let context = PublisherFactoryContext {
-                        config: &acc,
-                        expression_nodes: &config_proto.expression_nodes,
-                        file_descriptors: &file_descriptors,
-                    };
                     match dependency_map.get(*container_name) {
                         Some(DependencyContainer::Publisher { publisher_proto, .. }) => {
+                            let context = PublisherFactoryContext {
+                                config: &acc,
+                                expression_nodes: &config_proto.expression_nodes,
+                                file_descriptors: &file_descriptors,
+                            };
                             match self.publisher_factory.create(publisher_proto, &context) {
                                 Ok(publisher) => acc
                                     .publishers
@@ -177,8 +182,23 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
                             };
                         }
                         Some(DependencyContainer::Trigger { trigger_proto, .. }) => {
-                            let container = self.trigger_factory.create(trigger_proto, &acc);
-                            acc.triggers.insert(container_name.to_string(), container.into());
+                            let context = TriggerFactoryContext {
+                                config: &acc,
+                                expression_nodes: &config_proto.expression_nodes,
+                            };
+                            match self.trigger_factory.create(trigger_proto, &context) {
+                                Ok(trigger) => {
+                                    acc.triggers.insert(container_name.to_string(), trigger.into())
+                                }
+                                Err(factory_error) => {
+                                    return Err(
+                                        MetricsConfigOrchestratorError::InvalidTriggerDefinition {
+                                            trigger_name: trigger_proto.name.clone(),
+                                            factory_error,
+                                        },
+                                    )
+                                }
+                            };
                         }
                         None => {
                             return Err(MetricsConfigOrchestratorError::InvalidDependency {
@@ -259,12 +279,16 @@ mod tests {
     }
 
     impl TriggerFactory for MockTriggerFactory {
-        fn create(&self, trigger_proto: &TriggerProto, _context: &MetricsConfig) -> Trigger {
+        fn create(
+            &self,
+            trigger_proto: &TriggerProto,
+            _context: &TriggerFactoryContext,
+        ) -> Result<Trigger, TriggerFactoryError> {
             self.trigger_protos.lock().unwrap().push(trigger_proto.clone());
-            Trigger {
+            Ok(Trigger {
                 name: trigger_proto.name.clone(),
-                trigger_type: TriggerType::Periodic { interval_ms: u32::MAX },
-            }
+                trigger_type: TriggerType::Periodic { interval_ms: u64::MAX },
+            })
         }
     }
 
