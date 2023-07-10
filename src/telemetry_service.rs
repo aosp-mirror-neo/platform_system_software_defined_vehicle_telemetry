@@ -94,7 +94,7 @@ impl SdvTelemetryService {
 
         info!("Telemetry service initialized with {:} configs loaded from memory", configs_loaded);
         SdvTelemetryService {
-            data_dir: data_dir.to_string(),
+            data_dir,
             metrics_config_orchestrator: Box::new(MetricsConfigOrchestratorImpl::new()),
             metrics_configs_store: configs_store,
         }
@@ -162,8 +162,9 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let mut db = self.metrics_configs_store.lock().unwrap();
 
         // Spawning a new task since file I/O ops are slow and waiting on them to finish will block the calling client thread.
+        let data_dir = self.data_dir.clone();
         let _handle = tokio::spawn(async move {
-            for entry in fs::read_dir(DATA_DIR).unwrap() {
+            for entry in fs::read_dir(data_dir).unwrap() {
                 file_io_utils::remove_file(&entry.unwrap().path()).await.unwrap();
             }
         });
