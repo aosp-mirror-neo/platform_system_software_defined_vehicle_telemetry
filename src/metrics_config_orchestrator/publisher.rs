@@ -62,7 +62,6 @@ pub struct Publisher {
     pub publisher_type: PublisherType,
 }
 
-#[allow(dead_code)]
 pub enum PublisherType {
     Signal {
         signal_name: String,
@@ -602,7 +601,7 @@ mod tests {
         const FIELD_NAME1: &str = "field1";
         const FIELD_NAME2: &str = "field2";
         const TRIGGER_NAME: &str = "trigger";
-        const INTERVAL_MS: u32 = 42;
+        const INTERVAL_MS: u64 = 42;
         let factory = create_factory();
 
         let file_descriptor = create_file_descriptor(&[FIELD_NAME1, FIELD_NAME2]);
