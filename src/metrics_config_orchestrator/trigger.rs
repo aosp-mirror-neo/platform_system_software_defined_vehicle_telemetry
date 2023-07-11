@@ -1,7 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use sdvtelemetry_proto_rust::{
-    expression::Node as NodeProto, metrics_configuration::Trigger as TriggerProto,
+    expression::Node as NodeProto,
+    metrics_configuration::{trigger::Trigger_type as TriggerTypeProto, Trigger as TriggerProto},
 };
 use std::{
     fmt::Debug,
@@ -25,6 +26,12 @@ pub struct Trigger {
     pub trigger_type: TriggerType,
 }
 
+pub enum TriggerType {
+    Data { publisher: Weak<Publisher> },
+    Periodic { interval_ms: u64 },
+    Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: ExpressionImpl },
+}
+
 pub struct TriggerFactoryContext<'a> {
     pub config: &'a MetricsConfig,
     pub expression_nodes: &'a [NodeProto],
@@ -40,12 +47,6 @@ pub enum TriggerFactoryError {
     IncorrectNodeIndex { node_index: u32 },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
-}
-
-pub enum TriggerType {
-    Data { publisher: Weak<Publisher> },
-    Periodic { interval_ms: u64 },
-    Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: ExpressionImpl },
 }
 
 pub struct TriggerFactoryImpl<ExprFactory: ExpressionFactory = ExpressionFactoryImpl> {
@@ -66,38 +67,40 @@ impl<ExprFactory: ExpressionFactory> TriggerFactory for TriggerFactoryImpl<ExprF
     ) -> Result<Trigger, TriggerFactoryError> {
         Ok(Trigger {
             name: trigger_proto.name.clone(),
-            trigger_type: if trigger_proto.has_data_trigger() {
-                TriggerType::Data {
+            trigger_type: match &trigger_proto.trigger_type {
+                Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
                     publisher: Arc::downgrade(
-                        &context.config.publishers[&trigger_proto.data_trigger().publisher_name],
+                        &context.config.publishers[&data_trigger.publisher_name],
                     ),
+                },
+                Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => {
+                    TriggerType::Periodic { interval_ms: periodic_trigger.interval_ms }
                 }
-            } else if trigger_proto.has_periodic_trigger() {
-                TriggerType::Periodic { interval_ms: trigger_proto.periodic_trigger().interval_ms }
-            } else if trigger_proto.has_conditional_trigger() {
-                let conditional_proto = trigger_proto.conditional_trigger();
-                if conditional_proto.trigger_names.is_empty() {
-                    return Err(TriggerFactoryError::NoParentTriggers);
+                Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
+                    if conditional_trigger.trigger_names.is_empty() {
+                        return Err(TriggerFactoryError::NoParentTriggers);
+                    }
+                    let selector_node_index = conditional_trigger
+                        .selector_node_index
+                        .ok_or(TriggerFactoryError::MissingNodeIndex)?;
+                    let selector_expression = context
+                        .expression_nodes
+                        .get(selector_node_index as usize)
+                        .ok_or(TriggerFactoryError::IncorrectNodeIndex {
+                            node_index: selector_node_index,
+                        })?;
+                    TriggerType::Conditional {
+                        triggers: conditional_trigger
+                            .trigger_names
+                            .iter()
+                            .map(|name| Arc::downgrade(&context.config.triggers[name]))
+                            .collect(),
+                        selector_expression: self
+                            .expression_factory
+                            .create_from_node(selector_expression, context.expression_nodes),
+                    }
                 }
-                let selector_node_index = conditional_proto
-                    .selector_node_index
-                    .ok_or(TriggerFactoryError::MissingNodeIndex)?;
-                let selector_expression =
-                    context.expression_nodes.get(selector_node_index as usize).ok_or(
-                        TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
-                    )?;
-                TriggerType::Conditional {
-                    triggers: conditional_proto
-                        .trigger_names
-                        .iter()
-                        .map(|name| Arc::downgrade(&context.config.triggers[name]))
-                        .collect(),
-                    selector_expression: self
-                        .expression_factory
-                        .create_from_node(selector_expression, context.expression_nodes),
-                }
-            } else {
-                return Err(TriggerFactoryError::UnknownTriggerType);
+                _ => return Err(TriggerFactoryError::UnknownTriggerType),
             },
         })
     }
