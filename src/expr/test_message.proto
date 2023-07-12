@@ -1,0 +1,23 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+syntax = "proto3";
+
+package android.sdv.telemetry.test;
+
+enum TestEnum {
+  NONE = 0;
+  SOME = 1;
+}
+
+message TestMessage {
+  int32 int_field = 1;
+  float float_field = 2;
+  string string_field = 3;
+  TestEnum enum_field = 4;
+  TestNestedMessage message_field = 5;
+}
+
+message TestNestedMessage {
+  bool bool_field = 1;
+  repeated int32 repeated_int_fields = 2;
+}
