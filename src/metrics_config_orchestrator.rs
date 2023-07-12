@@ -30,7 +30,7 @@ pub trait MetricsConfigOrchestrator {
         config: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError>;
     /// Finish lifecycle of Metrics Configuration with the specified uuid.
-    fn finish_config(&self, config_uuid: &str);
+    fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError>;
 }
 
 #[derive(Error, Debug)]
@@ -55,6 +55,8 @@ pub enum MetricsConfigOrchestratorError {
         #[from]
         error: protobuf::Error,
     },
+    #[error("Metric Config with UUID {uuid} doesn't exist")]
+    InvalidConfigUuid { uuid: String },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -221,8 +223,15 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
         Ok(())
     }
 
-    #[allow(unused_variables)]
-    fn finish_config(&self, config_uuid: &str) {}
+    fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError> {
+        let mut configs = self.configs.lock().unwrap();
+        match configs.remove(config_uuid) {
+            Some(_) => Ok(()),
+            _ => Err(MetricsConfigOrchestratorError::InvalidConfigUuid {
+                uuid: config_uuid.to_owned(),
+            }),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -498,5 +507,28 @@ mod tests {
         let context = &contexts[&config.uuid];
         assert_eq!(context.publishers.len(), 2);
         assert_eq!(context.triggers.len(), 2);
+    }
+
+    #[test]
+    fn finish_config_invalid_config_uuid_fails() {
+        const UUID: &str = "uuid";
+        let orchestrator = create_orchestrator();
+
+        let err = orchestrator.finish_config(UUID).err().unwrap();
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } if uuid == UUID)
+        )
+    }
+
+    #[test]
+    fn finish_config_success() {
+        const UUID: &str = "uuid";
+        let orchestrator = create_orchestrator();
+
+        let mut metrics_config = MetricsConfigProto::new();
+        metrics_config.uuid = UUID.to_owned();
+        orchestrator.initialize_config(&metrics_config).unwrap();
+
+        assert!(orchestrator.finish_config(UUID).is_ok());
     }
 }
