@@ -4,7 +4,6 @@
 #![allow(non_snake_case)]
 
 mod collection_extension;
-mod expression_evaluation;
 mod file_io_utils;
 mod metrics_config_orchestrator;
 

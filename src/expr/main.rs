@@ -5,7 +5,7 @@
 
 use lazy_static::lazy_static;
 use log::info;
-use sdv_ast::Node;
+use sdv_ast::{NodeFactory, NodeFactoryImpl};
 use sdv_telem_expr_test_proto::test_message::TestMessage;
 use sdvtelemetry_proto_rust::expression::{
     combination_node::ArithmeticOperator, CombinationNode, ConstantLeafNode, FieldLeafNode,
@@ -20,6 +20,11 @@ lazy_static! {
         test_message.int_field = 10;
         test_message
     };
+}
+
+/// This function is an argument to `Node#evaluate()`.
+fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
+    &*TEST_MESSAGE
 }
 
 fn main() {
@@ -53,11 +58,12 @@ fn main() {
 
     let all_nodes = vec![left_node, right_node, root_node];
 
-    match Node::convert_nodes(&all_nodes) {
+    let node_factory = NodeFactoryImpl::new();
+    match node_factory.create_nodes(&all_nodes) {
         Ok(rust_nodes) => {
             info!("All converted nodes = {:#?}", rust_nodes);
             for (i, node_ref) in rust_nodes.iter().enumerate() {
-                info!("index {} result = {:?}", i, node_ref.borrow().evaluate(&|_| &*TEST_MESSAGE));
+                info!("index {} result = {:?}", i, node_ref.evaluate(&provide_test_message));
             }
         }
         Err(e) => {

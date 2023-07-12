@@ -1,8 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use sdvtelemetry_proto_rust::{
-    expression::Node as NodeProto,
-    metrics_configuration::{trigger::Trigger_type as TriggerTypeProto, Trigger as TriggerProto},
+use sdv_ast::Node;
+use sdvtelemetry_proto_rust::metrics_configuration::{
+    trigger::Trigger_type as TriggerTypeProto, Trigger as TriggerProto,
 };
 use std::{
     fmt::Debug,
@@ -10,7 +10,6 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::expression_evaluation::{ExpressionFactory, ExpressionFactoryImpl, ExpressionImpl};
 use crate::metrics_config_orchestrator::{MetricsConfig, Publisher};
 
 pub trait TriggerFactory {
@@ -29,12 +28,12 @@ pub struct Trigger {
 pub enum TriggerType {
     Data { publisher: Weak<Publisher> },
     Periodic { interval_ms: u64 },
-    Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: ExpressionImpl },
+    Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: Arc<Node> },
 }
 
 pub struct TriggerFactoryContext<'a> {
     pub config: &'a MetricsConfig,
-    pub expression_nodes: &'a [NodeProto],
+    pub expression_nodes: &'a Vec<Arc<Node>>,
 }
 
 #[derive(Error, Debug)]
@@ -49,17 +48,15 @@ pub enum TriggerFactoryError {
     UnknownTriggerType,
 }
 
-pub struct TriggerFactoryImpl<ExprFactory: ExpressionFactory = ExpressionFactoryImpl> {
-    expression_factory: ExprFactory,
-}
+pub struct TriggerFactoryImpl {}
 
 impl TriggerFactoryImpl {
     pub fn new() -> Self {
-        TriggerFactoryImpl { expression_factory: ExpressionFactoryImpl {} }
+        TriggerFactoryImpl {}
     }
 }
 
-impl<ExprFactory: ExpressionFactory> TriggerFactory for TriggerFactoryImpl<ExprFactory> {
+impl TriggerFactory for TriggerFactoryImpl {
     fn create(
         &self,
         trigger_proto: &TriggerProto,
@@ -95,9 +92,7 @@ impl<ExprFactory: ExpressionFactory> TriggerFactory for TriggerFactoryImpl<ExprF
                             .iter()
                             .map(|name| Arc::downgrade(&context.config.triggers[name]))
                             .collect(),
-                        selector_expression: self
-                            .expression_factory
-                            .create_from_node(selector_expression, context.expression_nodes),
+                        selector_expression: selector_expression.clone(),
                     }
                 }
                 _ => return Err(TriggerFactoryError::UnknownTriggerType),
@@ -108,8 +103,7 @@ impl<ExprFactory: ExpressionFactory> TriggerFactory for TriggerFactoryImpl<ExprF
 
 #[cfg(test)]
 mod tests {
-    use sdvtelemetry_proto_rust::expression::{NewProtoNode, Node};
-    use std::{collections::HashMap, sync::Mutex};
+    use std::collections::HashMap;
 
     use crate::metrics_config_orchestrator::publisher_factory::PublisherType;
 
@@ -117,29 +111,8 @@ mod tests {
 
     const TRIGGER_NAME: &str = "trigger";
 
-    struct MockExpressionFactory {
-        nodes: Mutex<Vec<Node>>,
-    }
-
-    impl ExpressionFactory for MockExpressionFactory {
-        fn create_from_node(&self, node: &Node, _other_nodes: &[Node]) -> ExpressionImpl {
-            self.nodes.lock().unwrap().push(node.clone());
-            ExpressionImpl {}
-        }
-
-        fn create_from_new_proto(
-            &self,
-            _node: &NewProtoNode,
-            _other_nodes: &[Node],
-        ) -> ExpressionImpl {
-            ExpressionImpl {}
-        }
-    }
-
-    fn create_factory() -> TriggerFactoryImpl<MockExpressionFactory> {
-        TriggerFactoryImpl {
-            expression_factory: MockExpressionFactory { nodes: Mutex::new(Vec::new()) },
-        }
+    fn create_factory() -> TriggerFactoryImpl {
+        TriggerFactoryImpl {}
     }
 
     fn new_trigger(name: &str) -> TriggerProto {
@@ -156,7 +129,7 @@ mod tests {
 
     fn run_using_factory_context<R, FE>(
         init_metrics_config_func: Option<Box<dyn FnOnce(&mut MetricsConfig)>>,
-        init_nodes_func: Option<Box<dyn FnOnce(&mut Vec<Node>)>>,
+        init_nodes_func: Option<Box<dyn FnOnce(&mut Vec<Arc<Node>>)>>,
         execute_func: FE,
     ) -> R
     where
@@ -208,7 +181,6 @@ mod tests {
                 } else {
                     panic!("Unexpected trigger type");
                 }
-                assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
             },
         );
     }
@@ -230,7 +202,6 @@ mod tests {
         } else {
             panic!("Unexpected trigger type");
         }
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -248,7 +219,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -266,7 +236,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -287,7 +256,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -305,16 +273,25 @@ mod tests {
             name: PARENT_TRIGGER_NAME.to_owned(),
             trigger_type: TriggerType::Periodic { interval_ms: INTERVAL },
         });
+
+        let node_0 = Arc::new(Node::default());
+        let node_1 = Arc::new(Node::default());
+        // make clones for the init_nodes func closure, otherwise compiler complains
+        // node_0 and node_1 don't live long enough.
+        let node_0_clone = node_0.clone();
+        let node_1_clone = node_1.clone();
         run_using_factory_context(
             Some(Box::new(move |configs| {
                 configs.triggers.insert(PARENT_TRIGGER_NAME.to_owned(), parent_trigger);
             })),
-            Some(Box::new(|nodes| nodes.push(Node::new()))),
+            Some(Box::new(|nodes| {
+                nodes.push(node_0_clone);
+                nodes.push(node_1_clone);
+            })),
             |context| {
                 let res = factory.create(&trigger, context).unwrap();
                 assert_eq!(res.name, TRIGGER_NAME);
-                if let TriggerType::Conditional { triggers, selector_expression: _ } =
-                    res.trigger_type
+                if let TriggerType::Conditional { triggers, selector_expression } = res.trigger_type
                 {
                     assert_eq!(triggers.len(), 1);
                     let parent_trigger = triggers[0].upgrade().unwrap();
@@ -323,11 +300,13 @@ mod tests {
                         parent_trigger.trigger_type,
                         TriggerType::Periodic { interval_ms: INTERVAL }
                     ));
+                    // selector_expression should match the node at index 0
+                    assert!(Arc::ptr_eq(&selector_expression, &node_0));
+                    assert!(!Arc::ptr_eq(&selector_expression, &node_1))
                 } else {
                     panic!("Unexpected trigger type");
                 }
             },
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 1);
     }
 }

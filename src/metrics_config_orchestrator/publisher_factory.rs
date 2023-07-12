@@ -1,8 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
+use sdv_ast::Node;
 use sdvtelemetry_proto_rust::{
-    expression::Node,
+    expression::NewProtoNode,
     metrics_configuration::{
         declarative_aggregation::AggregationType,
         AggregationPublisher as AggregationPublisherProto,
@@ -18,7 +19,6 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use crate::expression_evaluation::{ExpressionFactory, ExpressionFactoryImpl, ExpressionImpl};
 use crate::metrics_config_orchestrator::{trigger_factory::Trigger, MetricsConfig};
 
 pub trait MessageFactory {
@@ -45,10 +45,11 @@ pub trait PublisherFactory {
 #[allow(dead_code)]
 pub struct DeclarativeAggregation {
     field_name: String,
-    selector_expression: ExpressionImpl,
+    selector_expression: Arc<Node>,
     aggregation_type: AggregationType,
-    seed_expression: Option<ExpressionImpl>,
-    aggregation_expression: Option<ExpressionImpl>,
+    // TODO(b/293213911): Create new rust type and remove reference to protobuf message
+    seed_expression: Option<NewProtoNode>,
+    aggregation_expression: Option<NewProtoNode>,
 }
 
 pub struct MessageFactoryImpl {
@@ -77,7 +78,7 @@ pub enum PublisherType {
 
 pub struct PublisherFactoryContext<'a> {
     pub config: &'a MetricsConfig,
-    pub expression_nodes: &'a [Node],
+    pub expression_nodes: &'a Vec<Arc<Node>>,
     pub file_descriptors: &'a Vec<FileDescriptor>,
 }
 
@@ -103,9 +104,7 @@ pub enum PublisherFactoryError {
     UnknownPublisherType,
 }
 
-pub struct PublisherFactoryImpl<ExprFactory: ExpressionFactory = ExpressionFactoryImpl> {
-    expression_factory: ExprFactory,
-}
+pub struct PublisherFactoryImpl {}
 
 impl MessageFactory for MessageFactoryImpl {
     fn create(&self) -> Box<dyn protobuf::MessageDyn> {
@@ -115,11 +114,11 @@ impl MessageFactory for MessageFactoryImpl {
 
 impl PublisherFactoryImpl {
     pub fn new() -> Self {
-        PublisherFactoryImpl { expression_factory: ExpressionFactoryImpl {} }
+        PublisherFactoryImpl {}
     }
 }
 
-impl<ExprFactory: ExpressionFactory> PublisherFactoryImpl<ExprFactory> {
+impl PublisherFactoryImpl {
     /// Returns the first descriptor from the vector that has the specified type name.
     fn get_message_descriptor(
         &self,
@@ -167,7 +166,7 @@ impl<ExprFactory: ExpressionFactory> PublisherFactoryImpl<ExprFactory> {
         &self,
         declarative_aggregation_protos: &[DeclarativeAggregationProto],
         descriptor: &MessageDescriptor,
-        expression_nodes: &[Node],
+        expression_nodes: &[Arc<Node>],
     ) -> Result<Vec<DeclarativeAggregation>, PublisherFactoryError> {
         Ok(declarative_aggregation_protos
             .iter()
@@ -196,39 +195,32 @@ impl<ExprFactory: ExpressionFactory> PublisherFactoryImpl<ExprFactory> {
                         field_name: declarative_aggregation_proto.field_name.clone(),
                     })?;
 
-                let (seed_expression, aggregation_expression) =
-                    if aggregation_type == AggregationType::CUSTOM {
-                        if declarative_aggregation_proto.seed_expression.is_none() {
-                            return Err(PublisherFactoryError::SeedExpressionNotSet {
-                                field_name: declarative_aggregation_proto.field_name.clone(),
-                            });
-                        }
-                        if declarative_aggregation_proto.aggregation_expression.is_none() {
-                            return Err(PublisherFactoryError::AggregationExpressionNotSet {
-                                field_name: declarative_aggregation_proto.field_name.clone(),
-                            });
-                        }
-                        (
-                            Some(self.expression_factory.create_from_new_proto(
-                                &declarative_aggregation_proto.seed_expression,
-                                expression_nodes,
-                            )),
-                            Some(self.expression_factory.create_from_new_proto(
-                                &declarative_aggregation_proto.aggregation_expression,
-                                expression_nodes,
-                            )),
-                        )
-                    } else {
-                        (None, None)
-                    };
+                let (seed_expression, aggregation_expression) = if aggregation_type
+                    == AggregationType::CUSTOM
+                {
+                    if declarative_aggregation_proto.seed_expression.is_none() {
+                        return Err(PublisherFactoryError::SeedExpressionNotSet {
+                            field_name: declarative_aggregation_proto.field_name.clone(),
+                        });
+                    }
+                    if declarative_aggregation_proto.aggregation_expression.is_none() {
+                        return Err(PublisherFactoryError::AggregationExpressionNotSet {
+                            field_name: declarative_aggregation_proto.field_name.clone(),
+                        });
+                    }
+                    (
+                        Some(declarative_aggregation_proto.seed_expression.clone().unwrap()),
+                        Some(declarative_aggregation_proto.aggregation_expression.clone().unwrap()),
+                    )
+                } else {
+                    (None, None)
+                };
 
                 acc.try_insert_value(
                     &declarative_aggregation_proto.field_name,
                     DeclarativeAggregation {
                         field_name: declarative_aggregation_proto.field_name.clone(),
-                        selector_expression: self
-                            .expression_factory
-                            .create_from_node(selector_expression, expression_nodes),
+                        selector_expression: selector_expression.clone(),
                         aggregation_type,
                         seed_expression,
                         aggregation_expression,
@@ -248,7 +240,7 @@ impl<ExprFactory: ExpressionFactory> PublisherFactoryImpl<ExprFactory> {
     }
 }
 
-impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<ExprFactory> {
+impl PublisherFactory for PublisherFactoryImpl {
     fn create(
         &self,
         publisher_proto: &PublisherProto,
@@ -307,13 +299,13 @@ mod tests {
         EnumOrUnknown, MessageField,
     };
     use sdvtelemetry_proto_rust::{
-        expression::{NewProtoNode, Node},
+        expression::NewProtoNode,
         metrics_configuration::{
             AggregationPublisher as AggregationPublisherProto,
             DeclarativeAggregation as DeclarativeAggregationProto, Publisher as PublisherProto,
         },
     };
-    use std::{collections::HashMap, sync::Mutex};
+    use std::collections::HashMap;
 
     use super::*;
     use crate::collection_extension::VecExtension;
@@ -330,34 +322,8 @@ mod tests {
     const TRIGGER_NAME: &str = "trigger";
     const UNKNOWN_AGGREGATION_TYPE: i32 = i32::MAX;
 
-    struct MockExpressionFactory {
-        nodes: Mutex<Vec<Node>>,
-        new_proto_nodes: Mutex<Vec<NewProtoNode>>,
-    }
-
-    impl ExpressionFactory for MockExpressionFactory {
-        fn create_from_node(&self, node: &Node, _other_nodes: &[Node]) -> ExpressionImpl {
-            self.nodes.lock().unwrap().push(node.clone());
-            ExpressionImpl {}
-        }
-
-        fn create_from_new_proto(
-            &self,
-            node: &NewProtoNode,
-            _other_nodes: &[Node],
-        ) -> ExpressionImpl {
-            self.new_proto_nodes.lock().unwrap().push(node.clone());
-            ExpressionImpl {}
-        }
-    }
-
-    fn create_factory() -> PublisherFactoryImpl<MockExpressionFactory> {
-        PublisherFactoryImpl {
-            expression_factory: MockExpressionFactory {
-                nodes: Mutex::new(Vec::new()),
-                new_proto_nodes: Mutex::new(Vec::new()),
-            },
-        }
+    fn create_factory() -> PublisherFactoryImpl {
+        PublisherFactoryImpl {}
     }
 
     fn create_file_descriptor(field_names: &[&str]) -> FileDescriptor {
@@ -409,7 +375,7 @@ mod tests {
     fn run_using_factory_context<R, FE>(
         publishers: Option<Vec<Arc<Publisher>>>,
         triggers: Option<Vec<Arc<Trigger>>>,
-        nodes: Option<Vec<Node>>,
+        nodes: Option<Vec<Arc<Node>>>,
         file_descriptors: Option<Vec<FileDescriptor>>,
         execute_func: FE,
     ) -> R
@@ -579,8 +545,6 @@ mod tests {
         } else {
             panic!("Unexpected publisher type");
         }
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -597,8 +561,6 @@ mod tests {
         } else {
             panic!("Unexpected publisher type");
         }
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -615,8 +577,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -635,8 +595,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -655,8 +613,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -676,8 +632,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -689,7 +643,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Node::new()]),
+            Some(vec![Arc::new(Node::default())]),
             file_descriptors,
             |context| factory.create(&publisher, context),
         )
@@ -701,8 +655,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -714,7 +666,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Node::new(), Node::new()]),
+            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
             file_descriptors,
             |context| factory.create(&publisher, context),
         )
@@ -726,8 +678,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 2);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -738,7 +688,7 @@ mod tests {
         run_using_factory_context(
             None,
             triggers,
-            Some(vec![Node::new(), Node::new()]),
+            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
             file_descriptors,
             |context| {
                 let res = factory.create(&publisher, context).unwrap();
@@ -777,9 +727,6 @@ mod tests {
                 }
             },
         );
-
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 2);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -807,7 +754,7 @@ mod tests {
         let res = run_using_factory_context(
             None,
             Some(vec![trigger]),
-            Some(vec![Node::new()]),
+            Some(vec![Arc::new(Node::default())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -821,9 +768,6 @@ mod tests {
         } else {
             panic!("Unexpected publisher type");
         }
-
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 1);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -844,7 +788,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Node::new()]),
+            Some(vec![Arc::new(Node::default())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -856,8 +800,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -879,7 +821,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Node::new()]),
+            Some(vec![Arc::new(Node::default())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -891,8 +833,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -908,6 +848,7 @@ mod tests {
             create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
         declarative_proto.seed_expression = MessageField::some(NewProtoNode::new());
         declarative_proto.aggregation_expression = MessageField::some(NewProtoNode::new());
+
         let aggregation_proto = set_aggregation_publisher(
             &mut publisher,
             &file_descriptor.messages().next().unwrap(),
@@ -922,7 +863,7 @@ mod tests {
         let res = run_using_factory_context(
             None,
             Some(vec![trigger]),
-            Some(vec![Node::new()]),
+            Some(vec![Arc::new(Node::default())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -936,9 +877,6 @@ mod tests {
         } else {
             panic!("Unexpected publisher type");
         }
-
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 1);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 2);
     }
 
     #[test]
@@ -947,9 +885,6 @@ mod tests {
         let publisher = create_valid_signal_publisher();
 
         run_using_empty_factory_context(|context| factory.validate(&publisher, context)).unwrap();
-
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -958,9 +893,6 @@ mod tests {
         let publisher = create_valid_service_publisher();
 
         run_using_empty_factory_context(|context| factory.validate(&publisher, context)).unwrap();
-
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -977,8 +909,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -997,8 +927,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -1017,8 +945,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -1038,8 +964,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -1051,7 +975,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Node::new()]),
+            Some(vec![Arc::new(Node::default())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
         )
@@ -1063,8 +987,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 0);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -1076,7 +998,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Node::new(), Node::new()]),
+            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
         )
@@ -1088,8 +1010,6 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 2);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 
     #[test]
@@ -1100,13 +1020,10 @@ mod tests {
         run_using_factory_context(
             None,
             triggers,
-            Some(vec![Node::new(), Node::new()]),
+            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
         )
         .unwrap();
-
-        assert_eq!(factory.expression_factory.nodes.lock().unwrap().len(), 2);
-        assert_eq!(factory.expression_factory.new_proto_nodes.lock().unwrap().len(), 0);
     }
 }
