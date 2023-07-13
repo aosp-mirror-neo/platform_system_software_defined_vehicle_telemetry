@@ -73,4 +73,12 @@ rust_test_host {
         "automotive-sdv-tests",
     ],
     auto_gen_config: true,
+    target: {
+        host: {
+            data_libs: [
+                "liblog",
+                "libc++",
+            ],
+        },
+    },
 }

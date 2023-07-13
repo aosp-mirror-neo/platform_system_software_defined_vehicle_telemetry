@@ -253,6 +253,8 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerFactory, TriggerType};
     use crate::MetricsConfigOrchestratorImpl;
 
+    const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
     struct MockPublisherFactory {
         publisher_protos: Mutex<Vec<PublisherProto>>,
     }
@@ -449,7 +451,6 @@ mod tests {
 
     #[test]
     fn initialize_config_duplicate_uuid_fails() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         let orchestrator = create_orchestrator();
 
         let mut config1 = MetricsConfigProto::new();
@@ -511,7 +512,6 @@ mod tests {
 
     #[test]
     fn finish_config_invalid_config_uuid_fails() {
-        const UUID: &str = "uuid";
         let orchestrator = create_orchestrator();
 
         let err = orchestrator.finish_config(UUID).err().unwrap();
@@ -522,7 +522,6 @@ mod tests {
 
     #[test]
     fn finish_config_success() {
-        const UUID: &str = "uuid";
         let orchestrator = create_orchestrator();
 
         let mut metrics_config = MetricsConfigProto::new();
