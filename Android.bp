@@ -82,6 +82,7 @@ rust_test_host {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
+        "liblazy_static",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
@@ -93,5 +94,18 @@ rust_test_host {
         "general-tests",
         "automotive-sdv-tests",
     ],
+    target: {
+        host: {
+            data_libs: [
+                "libcutils",
+                "libbase",
+                "libc++",
+                "libutils",
+                "liblog",
+                "libbinder_ndk",
+                "libbinder",
+            ],
+        },
+    },
     auto_gen_config: true,
 }

@@ -152,7 +152,6 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 
-    #[allow(unused_variables)]
     async fn removeAllMetricsConfigs(&self) -> BinderResult<()> {
         info!("removeAllMetricsConfigs");
 
@@ -236,9 +235,12 @@ mod tests {
 
     #[tokio::test]
     async fn add_metrics_config() {
+        let dir_path = "add_metrics_config";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
         println!("Running add metrics configs");
 
         let mut config = MetricsConfig::new();
@@ -250,16 +252,21 @@ mod tests {
         let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
 
         let result = service.addMetricsConfig(serialized_config).await;
-
         assert!(result.is_ok());
+
+        // Test clean up
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 
     #[tokio::test]
     async fn remove_metrics_config() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+        let dir_path = "remove_metrics_config";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
 
         let mut config = MetricsConfig::new();
         config.uuid = UUID.to_owned();
@@ -267,64 +274,95 @@ mod tests {
 
         let result = service.removeMetricsConfig(UUID).await;
         assert!(result.is_ok());
+
+        // Test clean up
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 
     #[tokio::test]
     async fn remove_all_metrics_configs() {
+        let dir_path = "remove_all_metrics_configs";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
 
         let result = service.removeAllMetricsConfigs().await;
         assert!(result.is_ok());
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 
     #[tokio::test]
     async fn clear_report_ready_listener() {
+        let dir_path = "clear_repot_ready_listener";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
 
         let result = service.clearReportReadyListener().await;
         assert!(result.is_ok());
+
+        // Test clean up
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 
     #[tokio::test]
     async fn set_report_ready_listener() {
+        let dir_path = "set_report_ready_listener";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
 
         let listener: Strong<dyn ITelemetryReportReadyListener> =
             Strong::new(Box::new(TelemetryReportReadyListener));
 
         let result = service.setReportReadyListener(&listener).await;
         assert!(result.is_ok());
+
+        // Test clean up
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 
     #[tokio::test]
     async fn get_finished_report() {
+        let dir_path = "get_finished_report";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));
 
         let result = service.getFinishedReport("TestConfig", &listener).await;
         assert!(result.is_ok());
+
+        // Test clean up
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 
     #[tokio::test]
     async fn get_all_finished_report() {
+        let dir_path = "get_all_finished_report";
         // behind a reference
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
         let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new("").await);
+            Box::new(SdvTelemetryService::new(dir_path).await);
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));
 
         let result = service.getAllFinishedReports(&listener).await;
         assert!(result.is_ok());
+
+        // Test clean up
+        let _ = file_io_utils::remove_dir(&PathBuf::from(dir_path)).await;
     }
 }
