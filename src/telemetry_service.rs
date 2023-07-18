@@ -33,10 +33,7 @@ pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 
 static DATA_DIR: &str = "telemetry";
 
-// Limits the use of disk space for persisting metrics configs
-// Hardcoded for now. Will later be changed to a configurable value
-const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10 MBs
-                                                                      // stores the size of all the metric configs persisted in memory
+// stores the size of all the metric configs persisted in memory
 static PERSISTED_METRICS_TOTAL_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
@@ -53,6 +50,7 @@ pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
 /// This struct is defined to implement ITelemetryService AIDL interface.
 pub struct SdvTelemetryService {
     data_dir: String,
+    max_persistent_config_size: usize,
     /// Instance of Metrics Configuration Orchestrator.
     pub metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
     /// Hashmap to store the metricsConfigs's size passed by the client.
@@ -63,7 +61,7 @@ impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
-    pub async fn new(root_path: &str) -> Self {
+    pub async fn new(root_path: &str, config_store_size: usize) -> Self {
         let mut data_dir = DATA_DIR.to_string();
         if !root_path.is_empty() {
             data_dir = format!("{}/{}", root_path, DATA_DIR);
@@ -114,6 +112,7 @@ impl SdvTelemetryService {
         );
         SdvTelemetryService {
             data_dir,
+            max_persistent_config_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
         }
@@ -127,7 +126,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         info!("addMetricsConfig: {:?} of size: {}\n", config, metrics_config.len());
 
         if metrics_config.len() + PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
-            > MAX_PERSISTENT_CONFIGURATION_SIZE_MB
+            > self.max_persistent_config_size
         {
             error!("Memory limit exceeded");
             return to_binder_result(Err("Memory limit exceeded"));
@@ -246,6 +245,8 @@ mod tests {
     use binder::ParcelFileDescriptor;
     use protobuf::Message;
 
+    const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
+
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     struct TelemetryReportListener;
 
@@ -282,8 +283,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
         println!("Running add metrics configs");
 
         let mut config = MetricsConfig::new();
@@ -308,8 +310,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
 
         let mut config = MetricsConfig::new();
         config.uuid = UUID.to_owned();
@@ -328,8 +331,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
 
         let result = service.removeAllMetricsConfigs().await;
         assert!(result.is_ok());
@@ -342,8 +346,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
 
         let result = service.clearReportReadyListener().await;
         assert!(result.is_ok());
@@ -358,8 +363,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
 
         let listener: Strong<dyn ITelemetryReportReadyListener> =
             Strong::new(Box::new(TelemetryReportReadyListener));
@@ -377,8 +383,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));
@@ -396,8 +403,9 @@ mod tests {
         // behind a reference
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let service: Box<dyn ITelemetryServiceAsyncServer> =
-            Box::new(SdvTelemetryService::new(dir_path).await);
+        let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            SdvTelemetryService::new(dir_path, MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await,
+        );
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));

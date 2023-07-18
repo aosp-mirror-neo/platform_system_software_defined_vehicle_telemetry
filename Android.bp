@@ -72,6 +72,7 @@ rust_binary {
         "libsdv_telemetry",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
+        "librustutils",
     ],
 }
 
