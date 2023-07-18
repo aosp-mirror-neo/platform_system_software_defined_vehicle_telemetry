@@ -83,9 +83,10 @@ rust_test_host {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
+        "libfutures",
         "liblazy_static",
-        "libsdvtelemetry_proto_rust",
         "libprotobuf",
+        "libsdvtelemetry_proto_rust",
     ],
     proc_macros: [
         "libasync_trait",
