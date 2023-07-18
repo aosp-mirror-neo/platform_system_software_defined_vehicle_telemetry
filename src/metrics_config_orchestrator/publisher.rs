@@ -4,7 +4,9 @@ use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use sdvtelemetry_proto_rust::{
     expression::Node,
     metrics_configuration::{
-        declarative_aggregation::AggregationType, Publisher as PublisherProto,
+        declarative_aggregation::AggregationType,
+        AggregationPublisher,
+        {publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto},
     },
 };
 use std::{
@@ -18,6 +20,10 @@ use crate::collection_extension::HashMapExtension;
 use crate::expression_evaluation::{ExpressionFactory, ExpressionFactoryImpl, ExpressionImpl};
 use crate::metrics_config_orchestrator::{trigger::Trigger, MetricsConfig};
 
+pub trait MessageFactory {
+    fn create(&self) -> Box<dyn protobuf::MessageDyn>;
+}
+
 pub trait PublisherFactory {
     fn create(
         &self,
@@ -26,8 +32,43 @@ pub trait PublisherFactory {
     ) -> Result<Publisher, PublisherFactoryError>;
 }
 
-pub trait MessageFactory {
-    fn create(&self) -> Box<dyn protobuf::MessageDyn>;
+#[allow(dead_code)]
+pub struct DeclarativeAggregation {
+    field_name: String,
+    selector_expression: ExpressionImpl,
+    aggregation_type: AggregationType,
+    seed_expression: Option<ExpressionImpl>,
+    aggregation_expression: Option<ExpressionImpl>,
+}
+
+pub struct MessageFactoryImpl {
+    descriptor: MessageDescriptor,
+}
+
+pub struct Publisher {
+    pub name: String,
+    pub publisher_type: PublisherType,
+}
+
+pub enum PublisherType {
+    Signal {
+        signal_name: String,
+    },
+    Service {
+        service_name: String,
+    },
+    Aggregation {
+        triggers: Vec<Weak<Trigger>>,
+        message_factory: MessageFactoryImpl,
+        reset_on_get: bool,
+        declarative_aggregations: Vec<DeclarativeAggregation>,
+    },
+}
+
+pub struct PublisherFactoryContext<'a> {
+    pub config: &'a MetricsConfig,
+    pub expression_nodes: &'a [Node],
+    pub file_descriptors: &'a Vec<FileDescriptor>,
 }
 
 #[derive(Error, Debug)]
@@ -52,45 +93,6 @@ pub enum PublisherFactoryError {
     UnknownPublisherType,
 }
 
-pub struct PublisherFactoryContext<'a> {
-    pub config: &'a MetricsConfig,
-    pub expression_nodes: &'a [Node],
-    pub file_descriptors: &'a Vec<FileDescriptor>,
-}
-
-pub struct Publisher {
-    pub name: String,
-    pub publisher_type: PublisherType,
-}
-
-pub enum PublisherType {
-    Signal {
-        signal_name: String,
-    },
-    Service {
-        service_name: String,
-    },
-    Aggregation {
-        triggers: Vec<Weak<Trigger>>,
-        message_factory: MessageFactoryImpl,
-        reset_on_get: bool,
-        declarative_aggregations: Vec<DeclarativeAggregation>,
-    },
-}
-
-pub struct MessageFactoryImpl {
-    descriptor: MessageDescriptor,
-}
-
-#[allow(dead_code)]
-pub struct DeclarativeAggregation {
-    field_name: String,
-    selector_expression: ExpressionImpl,
-    aggregation_type: AggregationType,
-    seed_expression: Option<ExpressionImpl>,
-    aggregation_expression: Option<ExpressionImpl>,
-}
-
 pub struct PublisherFactoryImpl<ExprFactory: ExpressionFactory = ExpressionFactoryImpl> {
     expression_factory: ExprFactory,
 }
@@ -110,121 +112,126 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
         Ok(Publisher {
             name: publisher_proto.name.clone(),
             publisher_type: {
-                if publisher_proto.has_signal_publisher() {
-                    PublisherType::Signal {
-                        signal_name: publisher_proto.signal_publisher().signal_name.clone(),
+                match &publisher_proto.publisher_type {
+                    Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
+                        PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
                     }
-                } else if publisher_proto.has_service_publisher() {
-                    PublisherType::Service {
-                        service_name: publisher_proto.service_publisher().service_name.clone(),
+                    Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+                        PublisherType::Service {
+                            service_name: service_publisher.service_name.clone(),
+                        }
                     }
-                } else if publisher_proto.has_aggregation_publisher() {
-                    let aggregation_proto = publisher_proto.aggregation_publisher();
-                    let descriptor = context
-                        .file_descriptors
-                        .iter()
-                        .find_map(|descriptor| {
-                            descriptor.message_by_full_name(&aggregation_proto.message_type_name)
-                        })
-                        .ok_or_else(|| PublisherFactoryError::UnknownMessageType {
-                            message_type: aggregation_proto.message_type_name.clone(),
-                        })?;
-                    let declarative_aggregations = aggregation_proto
-                        .declarative_aggregations
-                        .iter()
-                        .try_fold(HashMap::new(), |mut acc, declarative_proto| {
-                            descriptor.field_by_name(&declarative_proto.field_name).ok_or(
-                                PublisherFactoryError::InvalidFieldName {
-                                    field_name: declarative_proto.field_name.clone(),
-                                },
-                            )?;
-                            let selector_node_index = declarative_proto.selector_node_index.ok_or(
-                                PublisherFactoryError::MissingNodeIndex {
-                                    field_name: declarative_proto.field_name.clone(),
-                                },
-                            )?;
-                            let selector_expression = context
-                                .expression_nodes
-                                .get(selector_node_index as usize)
-                                .ok_or(PublisherFactoryError::IncorrectNodeIndex {
-                                    node_index: selector_node_index,
-                                    field_name: declarative_proto.field_name.clone(),
-                                })?;
-                            let aggregation_type = declarative_proto
-                                .aggregation_type
-                                .enum_value()
-                                .map_err(|value| PublisherFactoryError::UnknownAggregationType {
-                                    aggregation_type: value,
-                                    field_name: declarative_proto.field_name.clone(),
-                                })?;
-
-                            let (seed_expression, aggregation_expression) =
-                                if aggregation_type == AggregationType::CUSTOM {
-                                    if declarative_proto.seed_expression.is_none() {
-                                        return Err(PublisherFactoryError::SeedExpressionNotSet {
-                                            field_name: declarative_proto.field_name.clone(),
-                                        });
-                                    }
-                                    if declarative_proto.aggregation_expression.is_none() {
-                                        return Err(
-                                            PublisherFactoryError::AggregationExpressionNotSet {
-                                                field_name: declarative_proto.field_name.clone(),
-                                            },
-                                        );
-                                    }
-                                    (
-                                        Some(self.expression_factory.create_from_new_proto(
-                                            &declarative_proto.seed_expression,
-                                            context.expression_nodes,
-                                        )),
-                                        Some(self.expression_factory.create_from_new_proto(
-                                            &declarative_proto.aggregation_expression,
-                                            context.expression_nodes,
-                                        )),
-                                    )
-                                } else {
-                                    (None, None)
-                                };
-
-                            acc.try_insert_value(
-                                &declarative_proto.field_name,
-                                DeclarativeAggregation {
-                                    field_name: declarative_proto.field_name.clone(),
-                                    selector_expression: self.expression_factory.create_from_node(
-                                        selector_expression,
-                                        context.expression_nodes,
-                                    ),
-                                    aggregation_type,
-                                    seed_expression,
-                                    aggregation_expression,
-                                },
-                            )
-                            .map_or_else(
-                                |()| {
-                                    Err(PublisherFactoryError::DuplicateFieldName {
-                                        field_name: declarative_proto.field_name.clone(),
-                                    })
-                                },
-                                |()| Ok(acc),
-                            )
-                        })?;
-
-                    PublisherType::Aggregation {
-                        triggers: aggregation_proto
-                            .trigger_names
-                            .iter()
-                            .map(|trigger_name| {
-                                Arc::downgrade(&context.config.triggers[trigger_name])
-                            })
-                            .collect(),
-                        message_factory: MessageFactoryImpl { descriptor },
-                        reset_on_get: aggregation_proto.reset_on_get,
-                        declarative_aggregations: declarative_aggregations.into_values().collect(),
+                    Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
+                        self.to_aggregation_publisher(aggregation_publisher, context)?
                     }
-                } else {
-                    return Err(PublisherFactoryError::UnknownPublisherType);
+                    _ => return Err(PublisherFactoryError::UnknownPublisherType),
                 }
             },
+        })
+    }
+}
+
+impl<ExprFactory: ExpressionFactory> PublisherFactoryImpl<ExprFactory> {
+    fn to_aggregation_publisher(
+        &self,
+        aggregation_publisher: &AggregationPublisher,
+        context: &PublisherFactoryContext,
+    ) -> Result<PublisherType, PublisherFactoryError> {
+        let descriptor = context
+            .file_descriptors
+            .iter()
+            .find_map(|descriptor| {
+                descriptor.message_by_full_name(&aggregation_publisher.message_type_name)
+            })
+            .ok_or_else(|| PublisherFactoryError::UnknownMessageType {
+                message_type: aggregation_publisher.message_type_name.clone(),
+            })?;
+        let declarative_aggregations = aggregation_publisher
+            .declarative_aggregations
+            .iter()
+            .try_fold(HashMap::new(), |mut acc, declarative_aggregation| {
+                descriptor.field_by_name(&declarative_aggregation.field_name).ok_or(
+                    PublisherFactoryError::InvalidFieldName {
+                        field_name: declarative_aggregation.field_name.clone(),
+                    },
+                )?;
+                let selector_node_index = declarative_aggregation.selector_node_index.ok_or(
+                    PublisherFactoryError::MissingNodeIndex {
+                        field_name: declarative_aggregation.field_name.clone(),
+                    },
+                )?;
+                let selector_expression = context
+                    .expression_nodes
+                    .get(selector_node_index as usize)
+                    .ok_or(PublisherFactoryError::IncorrectNodeIndex {
+                        node_index: selector_node_index,
+                        field_name: declarative_aggregation.field_name.clone(),
+                    })?;
+                let aggregation_type = declarative_aggregation
+                    .aggregation_type
+                    .enum_value()
+                    .map_err(|value| PublisherFactoryError::UnknownAggregationType {
+                        aggregation_type: value,
+                        field_name: declarative_aggregation.field_name.clone(),
+                    })?;
+
+                let (seed_expression, aggregation_expression) =
+                    if aggregation_type == AggregationType::CUSTOM {
+                        if declarative_aggregation.seed_expression.is_none() {
+                            return Err(PublisherFactoryError::SeedExpressionNotSet {
+                                field_name: declarative_aggregation.field_name.clone(),
+                            });
+                        }
+                        if declarative_aggregation.aggregation_expression.is_none() {
+                            return Err(PublisherFactoryError::AggregationExpressionNotSet {
+                                field_name: declarative_aggregation.field_name.clone(),
+                            });
+                        }
+                        (
+                            Some(self.expression_factory.create_from_new_proto(
+                                &declarative_aggregation.seed_expression,
+                                context.expression_nodes,
+                            )),
+                            Some(self.expression_factory.create_from_new_proto(
+                                &declarative_aggregation.aggregation_expression,
+                                context.expression_nodes,
+                            )),
+                        )
+                    } else {
+                        (None, None)
+                    };
+
+                acc.try_insert_value(
+                    &declarative_aggregation.field_name,
+                    DeclarativeAggregation {
+                        field_name: declarative_aggregation.field_name.clone(),
+                        selector_expression: self
+                            .expression_factory
+                            .create_from_node(selector_expression, context.expression_nodes),
+                        aggregation_type,
+                        seed_expression,
+                        aggregation_expression,
+                    },
+                )
+                .map_or_else(
+                    |()| {
+                        Err(PublisherFactoryError::DuplicateFieldName {
+                            field_name: declarative_aggregation.field_name.clone(),
+                        })
+                    },
+                    |()| Ok(acc),
+                )
+            })?;
+
+        Ok(PublisherType::Aggregation {
+            triggers: aggregation_publisher
+                .trigger_names
+                .iter()
+                .map(|trigger_name| Arc::downgrade(&context.config.triggers[trigger_name]))
+                .collect(),
+            message_factory: MessageFactoryImpl { descriptor },
+            reset_on_get: aggregation_publisher.reset_on_get,
+            declarative_aggregations: declarative_aggregations.into_values().collect(),
         })
     }
 }
