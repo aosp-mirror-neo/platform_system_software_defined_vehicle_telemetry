@@ -27,7 +27,6 @@ message ConstantLeafNode {
     int64 int64_value = 3;
     float float_value = 4;
     double double_value = 5;
-    string string_value = 6;
   }
 }
 
@@ -86,6 +85,7 @@ message CombinationNode {
     SUBTRACT = 1;
     MULTIPLY = 2;
     DIVIDE = 3;
+    // Both operands must be integer types.
     MODULUS = 4;
     POWER = 5;
   }
