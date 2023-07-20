@@ -128,7 +128,11 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
     async fn removeMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
         info!("removeMetricsConfig: {}", metrics_config_uuid);
-        self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
+        let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
+        if res.is_err() {
+            info!("Invalid Metric Config UUID");
+            return to_binder_result(res);
+        }
 
         let uuid = String::from(metrics_config_uuid);
         let delete_file = {
@@ -195,24 +199,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
 #[cfg(test)]
 mod tests {
-
     extern crate protobuf;
     use super::*;
     use binder::ParcelFileDescriptor;
     use protobuf::Message;
+
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
-    pub struct TelemetryReportListener;
+    struct TelemetryReportListener;
 
     impl Interface for TelemetryReportListener {}
 
     impl ITelemetryReportListener for TelemetryReportListener {
-        #[allow(unused_variables)]
         fn onResult(
             &self,
-            metrics_config_name: &str,
-            parcel: &ParcelFileDescriptor,
-            err: &[u8],
-            status: i32,
+            _metrics_config_name: &str,
+            _parcel: &ParcelFileDescriptor,
+            _err: &[u8],
+            _status: i32,
         ) -> BinderResult<()> {
             info!("onResult");
             Ok(())
@@ -220,13 +223,12 @@ mod tests {
     }
 
     /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
-    pub struct TelemetryReportReadyListener;
+    struct TelemetryReportReadyListener;
 
     impl Interface for TelemetryReportReadyListener {}
 
     impl ITelemetryReportReadyListener for TelemetryReportReadyListener {
-        #[allow(unused_variables)]
-        fn onReady(&self, metrics_config_name: &str) -> BinderResult<()> {
+        fn onReady(&self, _metrics_config_name: &str) -> BinderResult<()> {
             info!("onResult");
             Ok(())
         }
@@ -254,11 +256,16 @@ mod tests {
 
     #[tokio::test]
     async fn remove_metrics_config() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         // behind a reference
         let service: Box<dyn ITelemetryServiceAsyncServer> =
             Box::new(SdvTelemetryService::new("").await);
 
-        let result = service.removeMetricsConfig("TestConfig").await;
+        let mut config = MetricsConfig::new();
+        config.uuid = UUID.to_owned();
+        service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+
+        let result = service.removeMetricsConfig(UUID).await;
         assert!(result.is_ok());
     }
 
