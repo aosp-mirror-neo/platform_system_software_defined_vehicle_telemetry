@@ -4,10 +4,11 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
+use protobuf::reflect::{ReflectFieldRef, ReflectValueRef};
 use sdvtelemetry_proto_rust::expression::{
     combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
     constant_leaf_node::Node_value,
-    ConstantLeafNode,
+    ConstantLeafNode, FieldLeafNode,
 };
 
 const EPSILON: f32 = 1e-6;
@@ -71,6 +72,19 @@ impl NodeValue {
             Some(Node_value::DoubleValue(val)) => NodeValue::Double(*val),
             _ => NodeValue::None,
         }
+    }
+
+    /// Converts a FieldLeafNode into a NodeValue.
+    pub fn from_field_leaf_node<F: FnOnce(&str) -> &dyn protobuf::MessageDyn>(
+        field_leaf_node: &FieldLeafNode,
+        message_provider: F,
+    ) -> Result<NodeValue, String> {
+        let fields = &field_leaf_node.field_names;
+        if fields.is_empty() {
+            return Err(format!("Node {} has empty fields, cannot get any value", field_leaf_node));
+        }
+        let msg = message_provider(&field_leaf_node.publisher_name);
+        Self::extract_field_value(msg, fields)
     }
 
     /// Handle logical operations.
@@ -172,6 +186,63 @@ impl NodeValue {
 
     // private functions and methods below
 
+    /// Reads a value from a protobuf message using the protobuf reflection on the
+    /// provided field names.
+    fn extract_field_value(
+        msg: &dyn protobuf::MessageDyn,
+        fields: &[String],
+    ) -> Result<NodeValue, String> {
+        let msg_descriptor = msg.descriptor_dyn();
+        let field_name = &fields[0];
+        let field_descriptor = msg_descriptor.field_by_name(field_name).ok_or(format!(
+            "No field descriptor exists for field {} in message {}. Typo in field name?",
+            field_name,
+            msg_descriptor.name()
+        ))?;
+        let field_value = field_descriptor.get_reflect(msg);
+
+        // Base case for recursion: one field is provided, simply read the value
+        if fields.len() == 1 {
+            return Ok(match field_value {
+                ReflectFieldRef::Optional(singular_field) => {
+                    let field_value = singular_field.value().ok_or(format!(
+                        "No value exists for field {} in message {}",
+                        field_name,
+                        msg_descriptor.name()
+                    ))?;
+                    match field_value {
+                        ReflectValueRef::U32(v) => NodeValue::Int64(v as i64),
+                        ReflectValueRef::U64(v) => NodeValue::Int64(v as i64),
+                        ReflectValueRef::I32(v) => NodeValue::Int64(v as i64),
+                        ReflectValueRef::I64(v) => NodeValue::Int64(v),
+                        ReflectValueRef::F32(v) => NodeValue::Double(v as f64),
+                        ReflectValueRef::F64(v) => NodeValue::Double(v),
+                        ReflectValueRef::Bool(v) => NodeValue::Bool(v),
+                        ReflectValueRef::Enum(_, v) => NodeValue::Int32(v),
+                        _ => return Err("FieldLeafNode attempts to extract bytes, string, or protobuf message values, which is not supported".to_string()),
+                    }
+                }
+                _ => return Err("not implemented yet".to_string()),
+            });
+        }
+
+        // If fields length > 1, read field from nested messages
+        if let ReflectFieldRef::Optional(singular_field) = field_value {
+            let field_value = singular_field.value().ok_or(format!(
+                "No value exists for field {} in message {}",
+                field_name,
+                msg_descriptor.name()
+            ))?;
+            if let ReflectValueRef::Message(msg) = field_value {
+                Self::extract_field_value(&(*msg), &fields[1..])
+            } else {
+                Err("FieldLeafNode attempts to extract nested field value, but a non-terminal field is not a protobuf message".to_string())
+            }
+        } else {
+            Err("FieldLeafNode attempts to extract nested field values, but a non-terminal field is either repeated or a map".to_string())
+        }
+    }
+
     /// Check if node holds a boolean-compatible value.
     fn is_bool(&self) -> bool {
         matches!(self, NodeValue::Bool(_) | NodeValue::None)
@@ -253,15 +324,15 @@ impl NodeValue {
     }
 }
 
-/// Per go/sdv-rust-testing, unit tests are to be written in the same file.
 #[cfg(test)]
 mod tests {
 
+    use lazy_static::lazy_static;
     use sdv_node_value::NodeValue;
-
+    use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
-        ConstantLeafNode,
+        ConstantLeafNode, FieldLeafNode,
     };
 
     // Static variables within the tests module scope that are reused across tests.
@@ -281,6 +352,35 @@ mod tests {
     static OP_GT_OR_EQ: RelationalOperator = RelationalOperator::GT_OR_EQ;
     static OP_LT: RelationalOperator = RelationalOperator::LT;
     static OP_LT_OR_EQ: RelationalOperator = RelationalOperator::LT_OR_EQ;
+
+    // See ast.rs on why this is needed.
+    lazy_static! {
+        static ref TEST_MESSAGE: TestMessage = {
+            let mut test_message = TestMessage::new();
+            test_message.int_field = 80;
+            test_message.float_field = 100.0;
+            test_message.string_field = "Hello world".to_string();
+            test_message.enum_field = TestEnum::SOME.into();
+
+            let mut test_nested_message = TestNestedMessage::new();
+            test_nested_message.bool_field = true;
+            test_nested_message.repeated_int_fields.push(1);
+            test_nested_message.repeated_int_fields.push(2);
+            test_message.message_field = protobuf::MessageField::some(test_nested_message);
+
+            test_message
+        };
+    }
+
+    fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
+        &*TEST_MESSAGE
+    }
+
+    fn create_field_leaf_node() -> FieldLeafNode {
+        let mut field_leaf_node = FieldLeafNode::new();
+        field_leaf_node.publisher_name = "publisher_name".to_string();
+        field_leaf_node
+    }
 
     #[test]
     fn test_from_constant_leaf_node() {
@@ -320,6 +420,87 @@ mod tests {
         assert_eq!(
             NodeValue::from_constant_leaf_node(&constant_leaf_node_double),
             NodeValue::Double(1.5)
+        );
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_int_field_ok() {
+        let mut int_field_node = create_field_leaf_node();
+        int_field_node.field_names.push("int_field".to_string());
+
+        assert_eq!(
+            NodeValue::from_field_leaf_node(&int_field_node, provide_test_message),
+            Ok(NodeValue::Int64(80))
+        );
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_float_field_ok() {
+        let mut float_field_node = create_field_leaf_node();
+        float_field_node.field_names.push("float_field".to_string());
+
+        assert_eq!(
+            NodeValue::from_field_leaf_node(&float_field_node, provide_test_message),
+            Ok(NodeValue::Double(100.0))
+        );
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_enum_field_ok() {
+        let mut enum_field_node = create_field_leaf_node();
+        enum_field_node.field_names.push("enum_field".to_string());
+
+        assert_eq!(
+            NodeValue::from_field_leaf_node(&enum_field_node, provide_test_message),
+            Ok(NodeValue::Int32(1))
+        );
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_nested_field_ok() {
+        let mut bool_field_node = create_field_leaf_node();
+        bool_field_node.field_names.push("message_field".to_string());
+        bool_field_node.field_names.push("bool_field".to_string());
+
+        assert_eq!(
+            NodeValue::from_field_leaf_node(&bool_field_node, provide_test_message),
+            Ok(NodeValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_string_field_should_err() {
+        let mut string_field_node = create_field_leaf_node();
+        string_field_node.field_names.push("string_field".to_string());
+
+        assert!(NodeValue::from_field_leaf_node(&string_field_node, provide_test_message).is_err());
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_message_field_should_err() {
+        let mut msg_field_node = create_field_leaf_node();
+        msg_field_node.field_names.push("message_field".to_string());
+
+        assert!(NodeValue::from_field_leaf_node(&msg_field_node, provide_test_message).is_err());
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_repeated_field_should_err() {
+        let mut repeated_int_field_node = create_field_leaf_node();
+        repeated_int_field_node.field_names.push("message_field".to_string());
+        repeated_int_field_node.field_names.push("repeated_int_fields".to_string());
+
+        assert!(NodeValue::from_field_leaf_node(&repeated_int_field_node, provide_test_message)
+            .is_err());
+    }
+
+    #[test]
+    fn test_from_field_leaf_node_nonexistent_field_should_err() {
+        let mut nonexistent_field_node = create_field_leaf_node();
+        nonexistent_field_node.field_names.push("foo".to_string());
+
+        assert!(
+            NodeValue::from_field_leaf_node(&nonexistent_field_node, provide_test_message).is_err()
         );
     }
 

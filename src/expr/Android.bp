@@ -31,6 +31,18 @@ rust_library {
     ],
 }
 
+rust_protobuf {
+    name: "libsdv_telem_expr_test_proto",
+    host_supported: true,
+    crate_name: "sdv_telem_expr_test_proto",
+    protos: ["test_message.proto"],
+    proto_flags: [
+        "-I external/protobuf/src",
+    ],
+    source_stem: "sdv_telem_expr_test_proto",
+    use_protobuf3: true,
+}
+
 rust_binary {
     name: "ast",
     defaults: ["sdv_ast_defaults"],
@@ -38,7 +50,9 @@ rust_binary {
         "main.rs",
     ],
     rustlibs: [
+        "liblazy_static",
         "libsdv_ast_traversal",
+        "libsdv_telem_expr_test_proto",
     ],
 }
 
@@ -49,15 +63,14 @@ rust_test_host {
         "ast.rs",
     ],
     rustlibs: [
+        "liblazy_static",
         "libsdv_ast_traversal",
         "libsdv_node_value",
+        "libsdv_telem_expr_test_proto",
     ],
     test_suites: [
         "general-tests",
         "automotive-sdv-tests",
     ],
-    test_options: {
-        unit_test: true,
-    },
     auto_gen_config: true,
 }

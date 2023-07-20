@@ -134,17 +134,20 @@ impl<'a> Node<'a> {
     }
 
     /// Evaluate AST recursively using pre-order traversal.
-    pub fn evaluate(&self) -> Result<NodeValue, String> {
+    pub fn evaluate<F: Fn(&str) -> &dyn protobuf::MessageDyn>(
+        &self,
+        message_provider: &F,
+    ) -> Result<NodeValue, String> {
         // Base case of recursion: node is a leaf node, return value
         match &self.proto_node.node_type {
             Some(Node_type::ConstantLeafNode(constant_leaf_node)) => {
                 return Ok(NodeValue::from_constant_leaf_node(constant_leaf_node));
             }
-            Some(Node_type::FieldLeafNode(_)) => {
-                return Err("Not implemented".to_string());
+            Some(Node_type::FieldLeafNode(field_leaf_node)) => {
+                return NodeValue::from_field_leaf_node(field_leaf_node, message_provider);
             }
             _ => {
-                info!("Node is a not a leaf node, will recursively evaluate its children");
+                // Node is a not a leaf node, will recursively evaluate its children
             }
         }
 
@@ -152,14 +155,14 @@ impl<'a> Node<'a> {
 
         // evaluate left branch recursively
         let left_val = match &self.left {
-            Some(left) => left.borrow().evaluate(),
+            Some(left) => left.borrow().evaluate(message_provider),
             None => Err("Incorrect Node! Every non-leaf Node should have a left child".to_string()),
         }?; // `?` returns early if error
         info!("left val = {:?}", left_val);
 
         // evaluate right branch recursively
         let right_val = match &self.right {
-            Some(right) => right.borrow().evaluate(),
+            Some(right) => right.borrow().evaluate(message_provider),
             None => {
                 if Self::has_unary_operator(proto_combination_node) {
                     return Ok(NodeValue::None);
@@ -190,11 +193,43 @@ impl<'a> Node<'a> {
 #[cfg(test)]
 mod tests {
     use super::Node;
+    use lazy_static::lazy_static;
     use sdv_node_value::NodeValue;
+    use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
-        CombinationNode, ConstantLeafNode, Node as NodeProto,
+        CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
+
+    // Use static variable to store the protobuf message that will be returned by the
+    // `provide_test_message` function, which is an argument to `evaluate()`.
+    // Cannot use local variable because Rust compiler complains that the proto msg
+    // returned by the closure does not live long enough, so we must give it a
+    // static lifetime to ensure it outlives evaluate().
+    // Lazy static is used because Node::new() does not return a 'static lifetime, so its
+    // return value cannot be stored in a static variable. Hence we use lazy_static
+    lazy_static! {
+        static ref TEST_MESSAGE: TestMessage = {
+            let mut test_message = TestMessage::new();
+            test_message.int_field = 80;
+            test_message.float_field = 100.0;
+            test_message.string_field = "Hello world".to_string();
+            test_message.enum_field = TestEnum::SOME.into();
+
+            let mut test_nested_message = TestNestedMessage::new();
+            test_nested_message.bool_field = true;
+            test_nested_message.repeated_int_fields.push(1);
+            test_nested_message.repeated_int_fields.push(2);
+            test_message.message_field = protobuf::MessageField::some(test_nested_message);
+
+            test_message
+        };
+    }
+
+    /// This function is an argument to `Node#evaluate()`.
+    fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
+        &*TEST_MESSAGE
+    }
 
     /// Helper function that returns this tree:
     ///            index 2 (OPERATOR)
@@ -345,7 +380,7 @@ mod tests {
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
         {
-            assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -407,7 +442,7 @@ mod tests {
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
         {
-            assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -470,7 +505,69 @@ mod tests {
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
         {
-            assert_eq!(rust_node_ref.borrow().evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_evaluate_mixed_leaf_node_types() -> Result<(), String> {
+        // setup this tree which uses the protobuf message initialized in the lazy_static block
+        //                           index 4 (<)
+        //                       /               \
+        //                index 2                  index 3
+        //                 DIVIDE                TestMessage.int_field
+        //           /                \
+        //     index 0               index 1
+        // TestMessage.float_field       2
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut node_2 = NodeProto::new();
+        let mut node_3 = NodeProto::new();
+        let mut node_4 = NodeProto::new();
+
+        let mut float_field_node = FieldLeafNode::new();
+        float_field_node.publisher_name = "publisher_name".to_string();
+        float_field_node.field_names.push("float_field".to_string());
+        node_0.set_field_leaf_node(float_field_node);
+
+        let mut constant_leaf_two = ConstantLeafNode::new();
+        constant_leaf_two.set_int32_value(2);
+        node_1.set_constant_leaf_node(constant_leaf_two);
+
+        let mut combination_divide = CombinationNode::new();
+        combination_divide.set_arithmetic_operator(ArithmeticOperator::DIVIDE);
+        combination_divide.left_index = Some(0);
+        combination_divide.right_index = Some(1);
+        node_2.set_combination_node(combination_divide);
+
+        let mut int_field_node = FieldLeafNode::new();
+        int_field_node.publisher_name = "publisher_name".to_string();
+        int_field_node.field_names.push("int_field".to_string());
+        node_3.set_field_leaf_node(int_field_node);
+
+        let mut combination_less_than = CombinationNode::new();
+        combination_less_than.set_relational_operator(RelationalOperator::LT);
+        combination_less_than.left_index = Some(2);
+        combination_less_than.right_index = Some(3);
+        node_4.set_combination_node(combination_less_than);
+
+        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
+        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+
+        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        let expected_results = vec![
+            NodeValue::Double(100.0), // index 0 = field value of 100
+            NodeValue::Int32(2),      // index 1 = constant value of 2
+            NodeValue::Double(50.0),  // index 2 = 100 / 2 = 50
+            NodeValue::Int64(80),     // index 3 = field value of 80
+            NodeValue::Bool(true),    // index 4 = 50 < 80 = true
+        ];
+
+        // assert that evaluated_result[i] == expected_result[i]  for all index i
+        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
+        {
+            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -494,7 +591,7 @@ mod tests {
         let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
 
         // Index 1 expr is "True < True"
-        let result = converted_nodes[1].borrow().evaluate();
+        let result = converted_nodes[1].borrow().evaluate(&provide_test_message);
 
         // True cannot be less than True
         assert!(result.is_err());
