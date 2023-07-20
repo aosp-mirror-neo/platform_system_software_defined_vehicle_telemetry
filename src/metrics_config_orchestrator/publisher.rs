@@ -35,20 +35,20 @@ pub trait MessageFactory {
 
 #[derive(Error, Debug)]
 pub enum PublisherFactoryError {
-    #[error("Unknown message type {message_type} in publisher {publisher_name}")]
-    UnknownMessageType { message_type: String, publisher_name: String },
-    #[error("Field with name {field_name} doesn't exist in the message associated with publisher {publisher_name}")]
-    InvalidFieldName { field_name: String, publisher_name: String },
-    #[error("Required field node_index is not set in declarative aggregation {field_name} of publisher {publisher_name}")]
-    MissingNodeIndex { field_name: String, publisher_name: String },
-    #[error("Incorrect node index {node_index} in declarative aggregation {field_name} of publisher {publisher_name}")]
-    IncorrectNodeIndex { node_index: u32, field_name: String, publisher_name: String },
-    #[error("Unknown aggregation type {aggregation_type} in declarative aggregation {field_name} of publisher {publisher_name}")]
-    UnknownAggregationType { aggregation_type: i32, field_name: String, publisher_name: String },
-    #[error("Field name {field_name} used more than once in declarative aggregation of publisher {publisher_name}")]
-    DuplicateFieldName { field_name: String, publisher_name: String },
-    #[error("Unknown publisher type for publisher {publisher_name}")]
-    UnknownPublisherType { publisher_name: String },
+    #[error("Unknown message type {message_type} set for aggregation publisher")]
+    UnknownMessageType { message_type: String },
+    #[error("Field with name {field_name} doesn't exist in the message associated with aggregation publisher")]
+    InvalidFieldName { field_name: String },
+    #[error("Required field node_index is not set in declarative aggregation {field_name}")]
+    MissingNodeIndex { field_name: String },
+    #[error("Incorrect node index {node_index} in declarative aggregation {field_name}")]
+    IncorrectNodeIndex { node_index: u32, field_name: String },
+    #[error("Unknown aggregation type {aggregation_type} in declarative aggregation {field_name}")]
+    UnknownAggregationType { aggregation_type: i32, field_name: String },
+    #[error("Field name {field_name} used more than once in declarative aggregation")]
+    DuplicateFieldName { field_name: String },
+    #[error("Unknown publisher type")]
+    UnknownPublisherType,
 }
 
 pub struct PublisherFactoryContext<'a> {
@@ -140,7 +140,6 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
                         })
                         .ok_or_else(|| PublisherFactoryError::UnknownMessageType {
                             message_type: aggregation_proto.message_type_name.clone(),
-                            publisher_name: publisher_proto.name.clone(),
                         })?;
                     let declarative_aggregations = aggregation_proto
                         .declarative_aggregations
@@ -149,13 +148,11 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
                             descriptor.field_by_name(&declarative_proto.field_name).ok_or(
                                 PublisherFactoryError::InvalidFieldName {
                                     field_name: declarative_proto.field_name.clone(),
-                                    publisher_name: publisher_proto.name.clone(),
                                 },
                             )?;
                             let selector_node_index = declarative_proto.selector_node_index.ok_or(
                                 PublisherFactoryError::MissingNodeIndex {
                                     field_name: declarative_proto.field_name.clone(),
-                                    publisher_name: publisher_proto.name.clone(),
                                 },
                             )?;
                             let selector_expression = context
@@ -164,7 +161,6 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
                                 .ok_or(PublisherFactoryError::IncorrectNodeIndex {
                                     node_index: selector_node_index,
                                     field_name: declarative_proto.field_name.clone(),
-                                    publisher_name: publisher_proto.name.clone(),
                                 })?;
                             let aggregation_type = declarative_proto
                                 .aggregation_type
@@ -172,7 +168,6 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
                                 .map_err(|value| PublisherFactoryError::UnknownAggregationType {
                                     aggregation_type: value,
                                     field_name: declarative_proto.field_name.clone(),
-                                    publisher_name: publisher_proto.name.clone(),
                                 })?;
 
                             acc.try_insert_value(
@@ -198,7 +193,6 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
                                 |()| {
                                     Err(PublisherFactoryError::DuplicateFieldName {
                                         field_name: declarative_proto.field_name.clone(),
-                                        publisher_name: publisher_proto.name.clone(),
                                     })
                                 },
                                 |()| Ok(acc),
@@ -218,9 +212,7 @@ impl<ExprFactory: ExpressionFactory> PublisherFactory for PublisherFactoryImpl<E
                         declarative_aggregations: declarative_aggregations.into_values().collect(),
                     }
                 } else {
-                    return Err(PublisherFactoryError::UnknownPublisherType {
-                        publisher_name: publisher_proto.name.clone(),
-                    });
+                    return Err(PublisherFactoryError::UnknownPublisherType);
                 }
             },
         })
@@ -427,7 +419,7 @@ mod tests {
             .err()
             .unwrap();
         assert!(
-            matches!(err, PublisherFactoryError::UnknownMessageType { ref message_type, ref publisher_name } if message_type == MESSAGE_TYPE && publisher_name == PUBLISHER_NAME ),
+            matches!(err, PublisherFactoryError::UnknownMessageType { ref message_type } if message_type == MESSAGE_TYPE),
             "Unexpected error: {:?}",
             err
         );
@@ -459,7 +451,7 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            matches!(err, PublisherFactoryError::InvalidFieldName { ref field_name, ref publisher_name } if field_name == FIELD_NAME && publisher_name == PUBLISHER_NAME),
+            matches!(err, PublisherFactoryError::InvalidFieldName { ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );
@@ -491,7 +483,7 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            matches!(err, PublisherFactoryError::MissingNodeIndex { ref field_name, ref publisher_name } if field_name == FIELD_NAME && publisher_name == PUBLISHER_NAME),
+            matches!(err, PublisherFactoryError::MissingNodeIndex { ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );
@@ -524,7 +516,7 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            matches!(err, PublisherFactoryError::IncorrectNodeIndex { node_index:NODE_INDEX, ref field_name, ref publisher_name } if field_name == FIELD_NAME && publisher_name == PUBLISHER_NAME),
+            matches!(err, PublisherFactoryError::IncorrectNodeIndex { node_index:NODE_INDEX, ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );
@@ -558,7 +550,7 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            matches!(err, PublisherFactoryError::UnknownAggregationType { aggregation_type:UNKNOWN_AGGREGATION_TYPE, ref field_name, ref publisher_name } if field_name == FIELD_NAME && publisher_name == PUBLISHER_NAME),
+            matches!(err, PublisherFactoryError::UnknownAggregationType { aggregation_type:UNKNOWN_AGGREGATION_TYPE, ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );
@@ -596,7 +588,7 @@ mod tests {
         .err()
         .unwrap();
         assert!(
-            matches!(err, PublisherFactoryError::DuplicateFieldName { ref field_name, ref publisher_name } if field_name == FIELD_NAME && publisher_name == PUBLISHER_NAME),
+            matches!(err, PublisherFactoryError::DuplicateFieldName { ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );
