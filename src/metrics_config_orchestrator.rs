@@ -3,15 +3,21 @@
 mod publisher;
 mod trigger;
 
+use protobuf::reflect::FileDescriptor;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, Publisher as PublisherProto, Trigger as TriggerProto,
 };
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use publisher::{Publisher, PublisherFactory, PublisherFactoryImpl};
+use publisher::{Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryImpl};
 use trigger::{Trigger, TriggerFactory, TriggerFactoryImpl};
+
+use self::publisher::PublisherFactoryError;
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 pub trait MetricsConfigOrchestrator {
@@ -37,6 +43,13 @@ pub enum MetricsConfigOrchestratorError {
     InvalidDependency { dependency_name: String },
     #[error("Duplicate metrics config identifier: {uuid}")]
     DuplicateMetricsConfigUuid { uuid: String },
+    #[error("Invalid definition for publisher {publisher_name}")]
+    InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
+    #[error("Invalid descriptor protos")]
+    InvalidDescriptorProtos {
+        #[from]
+        error: protobuf::Error,
+    },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -50,15 +63,15 @@ pub struct MetricsConfigOrchestratorImpl<
 }
 
 pub struct MetricsConfig {
-    publishers: HashMap<String, Publisher>,
-    triggers: HashMap<String, Trigger>,
+    publishers: HashMap<String, Arc<Publisher>>,
+    triggers: HashMap<String, Arc<Trigger>>,
 }
 
 impl MetricsConfigOrchestratorImpl {
     pub fn new() -> Self {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            publisher_factory: PublisherFactoryImpl {},
+            publisher_factory: PublisherFactoryImpl::new(),
             trigger_factory: TriggerFactoryImpl {},
         }
     }
@@ -137,27 +150,45 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
 
         // Iterate over topologically sorted vector of keys and create publisher and trigger encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
-        let config = sorted_vector.iter().try_fold(
-            MetricsConfig { publishers: HashMap::new(), triggers: HashMap::new() },
-            |mut acc, container_name| {
-                match dependency_map.get(*container_name) {
-                    Some(DependencyContainer::Publisher { publisher_proto, .. }) => {
-                        let container = self.publisher_factory.create(publisher_proto, &acc);
-                        acc.publishers.insert(container_name.to_string(), container);
-                    }
-                    Some(DependencyContainer::Trigger { trigger_proto, .. }) => {
-                        let container = self.trigger_factory.create(trigger_proto, &acc);
-                        acc.triggers.insert(container_name.to_string(), container);
-                    }
-                    None => {
-                        return Err(MetricsConfigOrchestratorError::InvalidDependency {
-                            dependency_name: container_name.to_string(),
-                        })
-                    }
-                };
-                Ok(acc)
-            },
-        )?;
+        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
+        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
+
+        let config =
+            sorted_vector.iter().try_fold(
+                MetricsConfig { publishers: HashMap::new(), triggers: HashMap::new() },
+                |mut acc, container_name| {
+                    let context = PublisherFactoryContext {
+                        config: &acc,
+                        expression_nodes: &config_proto.expression_nodes,
+                        file_descriptors: &file_descriptors,
+                    };
+                    match dependency_map.get(*container_name) {
+                        Some(DependencyContainer::Publisher { publisher_proto, .. }) => {
+                            match self.publisher_factory.create(publisher_proto, &context) {
+                                Ok(publisher) => acc
+                                    .publishers
+                                    .insert(publisher_proto.name.clone(), publisher.into()),
+                                Err(factory_error) => return Err(
+                                    MetricsConfigOrchestratorError::InvalidPublisherDefinition {
+                                        publisher_name: publisher_proto.name.clone(),
+                                        factory_error,
+                                    },
+                                ),
+                            };
+                        }
+                        Some(DependencyContainer::Trigger { trigger_proto, .. }) => {
+                            let container = self.trigger_factory.create(trigger_proto, &acc);
+                            acc.triggers.insert(container_name.to_string(), container.into());
+                        }
+                        None => {
+                            return Err(MetricsConfigOrchestratorError::InvalidDependency {
+                                dependency_name: container_name.to_string(),
+                            })
+                        }
+                    };
+                    Ok(acc)
+                },
+            )?;
 
         // Store MetricsConfig with encapsulated objects.
         let mut configs = self.configs.lock().unwrap();
@@ -181,14 +212,14 @@ mod tests {
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
         MetricsConfig as MetricsConfigProto, PeriodicTrigger as PeriodicTriggerProto,
         Publisher as PublisherProto, ServicePublisher as ServicePublisherProto,
-        TaxoPublisher as TaxoPublisherProto, Trigger as TriggerProto,
+        SignalPublisher as SignalPublisherProto, Trigger as TriggerProto,
     };
     use std::collections::HashMap;
     use std::sync::Mutex;
 
     use super::*;
     use crate::metrics_config_orchestrator::publisher::{
-        Publisher, PublisherFactory, PublisherType,
+        Publisher, PublisherFactory, PublisherFactoryError, PublisherType,
     };
     use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerFactory, TriggerType};
     use crate::MetricsConfigOrchestratorImpl;
@@ -204,12 +235,16 @@ mod tests {
     }
 
     impl PublisherFactory for MockPublisherFactory {
-        fn create(&self, publisher_proto: &PublisherProto, _context: &MetricsConfig) -> Publisher {
+        fn create(
+            &self,
+            publisher_proto: &PublisherProto,
+            _context: &PublisherFactoryContext,
+        ) -> Result<Publisher, PublisherFactoryError> {
             self.publisher_protos.lock().unwrap().push(publisher_proto.clone());
-            Publisher {
+            Ok(Publisher {
                 name: publisher_proto.name.clone(),
-                publisher_type: PublisherType::Service {},
-            }
+                publisher_type: PublisherType::Service { service_name: "Foo".to_string() },
+            })
         }
     }
 
@@ -249,7 +284,7 @@ mod tests {
 
         let mut publisher1 = PublisherProto::new();
         publisher1.name = NAME.to_owned();
-        publisher1.set_taxo_publisher(TaxoPublisherProto::new());
+        publisher1.set_signal_publisher(SignalPublisherProto::new());
 
         let mut publisher2 = PublisherProto::new();
         publisher2.name = publisher1.name.clone();

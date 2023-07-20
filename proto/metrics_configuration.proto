@@ -102,7 +102,7 @@ message ConditionalTrigger {
   // numeric type or a boolean. If a message from a publisher is not present in
   // the activation context, the context will be populated with the latest
   // published message.
-  uint32 selector_node_index = 2;
+  optional uint32 selector_node_index = 2;
 
   // Type of value change.
   enum ChangeType {
@@ -127,17 +127,17 @@ message Publisher {
   string name = 1;
 
   oneof option {
-    TaxoPublisher taxo_publisher = 2;
+    SignalPublisher signal_publisher = 2;
     ServicePublisher service_publisher = 3;
     AggregationPublisher aggregation_publisher = 4;
   }
 }
 
 // Publishes well-known data taxonomy signals exposed by the middleware layer.
-message TaxoPublisher {
+message SignalPublisher {
   // Required.
   // Data taxonomy signal name.
-  string taxo_name = 1;
+  string signal_name = 1;
 }
 
 // Publishes messages from a customizable external service.
@@ -196,7 +196,7 @@ message DeclarativeAggregation {
   // aggregation_type must be VECTOR, LATEST or CUSTOM. If a message from
   // a publisher is not present in the activation context, the context will be
   // populated with the latest published message.
-  uint32 selector_node_index = 2;
+  optional uint32 selector_node_index = 2;
 
   enum AggregationType {
     AGGREGATION_TYPE_UNSPECIFIED = 0;
