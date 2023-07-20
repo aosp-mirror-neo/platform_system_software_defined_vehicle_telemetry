@@ -56,14 +56,7 @@ int main() {
   setReportReadyListener(
                 holder, static_cast<void*>(listener.get()), &trigger_report_ready_listener);
 
-  sleep(3);
-  removeMetricsConfig(holder, config.uuid().c_str());
   removeAllMetricsConfigs(holder);
-
-  // adding sleep for 3 seconds to let async callback finish.
-  // Used only for testing purposes.
-  // TODO fix b/284363036 and replace sleep with sync primitives
-  sleep(3);
 
   ALOGI("Releasing binder service");
   stop_telemetry_service(holder);

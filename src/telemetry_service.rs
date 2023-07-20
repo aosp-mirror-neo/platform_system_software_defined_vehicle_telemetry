@@ -116,20 +116,12 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         }
 
         let bytes = metrics_config.to_vec();
+        let path = PathBuf::from(self.data_dir.clone() + "/" + &config.uuid.clone());
 
-        let db = self.metrics_configs_store.clone();
-        let data_dir = self.data_dir.clone();
-
-        // Spawning a new task since file I/O ops are slow and waiting on them to finish will block the calling client thread.
-        let _handle = tokio::spawn(async move {
-            let uuid = config.uuid.clone();
-            let path = PathBuf::from(data_dir + "/" + &uuid);
-            file_io_utils::write_to_file(&path, &bytes).await.unwrap();
-            {
-                let mut db = db.lock().unwrap();
-                db.insert(uuid, config);
-            }
-        });
+        //TODO (b/290638883): Handle errors with file IO
+        file_io_utils::write_to_file(&path, &bytes).await.unwrap();
+        let mut db = self.metrics_configs_store.lock().unwrap();
+        db.insert(config.uuid.clone(), config);
 
         Ok(())
     }
@@ -139,16 +131,16 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
 
         let uuid = String::from(metrics_config_uuid);
-        let mut db = self.metrics_configs_store.lock().unwrap();
+        let delete_file = {
+            let mut db = self.metrics_configs_store.lock().unwrap();
+            db.remove(&uuid).is_some()
+        };
 
-        if db.contains_key(&uuid) {
-            db.remove(&uuid);
-            let data_dir = self.data_dir.clone();
-            // Spawning a new task since file I/O ops are slow and waiting on them to finish will block the calling client thread.
-            let _handle = tokio::spawn(async move {
-                let path = PathBuf::from(data_dir + "/" + &uuid);
-                file_io_utils::remove_file(&path).await.unwrap();
-            });
+        if delete_file {
+            let path = PathBuf::from(self.data_dir.clone() + "/" + &uuid);
+
+            //TODO: Handle errors with file IO b/290638883
+            file_io_utils::remove_file(&path).await.unwrap();
         } else {
             info!("Config not found {:}", uuid);
         }
@@ -159,17 +151,12 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     #[allow(unused_variables)]
     async fn removeAllMetricsConfigs(&self) -> BinderResult<()> {
         info!("removeAllMetricsConfigs");
+
+        for entry in fs::read_dir(self.data_dir.clone()).unwrap() {
+            file_io_utils::remove_file(&entry.unwrap().path()).await.unwrap();
+        }
         let mut db = self.metrics_configs_store.lock().unwrap();
-
-        // Spawning a new task since file I/O ops are slow and waiting on them to finish will block the calling client thread.
-        let data_dir = self.data_dir.clone();
-        let _handle = tokio::spawn(async move {
-            for entry in fs::read_dir(data_dir).unwrap() {
-                file_io_utils::remove_file(&entry.unwrap().path()).await.unwrap();
-            }
-        });
         db.clear();
-
         Ok(())
     }
 
