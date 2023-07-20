@@ -18,19 +18,26 @@ use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Status, S
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
-use log::info;
+use log::{error, info};
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self};
 use std::marker::{Send, Sync};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
 
 pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 
 static DATA_DIR: &str = "telemetry";
+
+// Limits the use of disk space for persisting metrics configs
+// Hardcoded for now. Will later be changed to a configurable value
+const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10 MBs
+                                                                      // stores the size of all the metric configs persisted in memory
+static PERSISTED_METRICS_TOTAL_SIZE: AtomicUsize = AtomicUsize::new(0);
 
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
 /// preserving the content as far as possible.
@@ -48,14 +55,13 @@ pub struct SdvTelemetryService {
     data_dir: String,
     /// Instance of Metrics Configuration Orchestrator.
     pub metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
-    /// Hashmap to store the metricsConfigs passed by the client.
-    pub metrics_configs_store: Arc<Mutex<HashMap<String, MetricsConfig>>>,
+    /// Hashmap to store the metricsConfigs's size passed by the client.
+    pub metrics_configs_store: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
-    #[allow(dead_code)]
     /// Instantiates an instance of SdvTelemetryService
     pub async fn new(root_path: &str) -> Self {
         let mut data_dir = DATA_DIR.to_string();
@@ -66,6 +72,7 @@ impl SdvTelemetryService {
         let dir_path = Path::new(&data_dir);
 
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
+        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new());
 
         let mut configs_loaded = 0;
 
@@ -81,10 +88,18 @@ impl SdvTelemetryService {
                     let config: MetricsConfig =
                         protobuf::Message::parse_from_bytes(&bytes).unwrap();
                     let uuid = config.uuid.clone();
-                    {
-                        let mut db = configs_store.lock().unwrap();
-                        db.insert(uuid, config);
-                        configs_loaded += 1;
+
+                    // Validates and initializes metrics config
+                    match config_orchestrator.initialize_config(&config) {
+                        Ok(()) => {
+                            let mut metric_config_map = configs_store.lock().unwrap();
+                            metric_config_map.insert(uuid, bytes.len());
+                            configs_loaded += 1;
+                            PERSISTED_METRICS_TOTAL_SIZE.fetch_add(bytes.len(), Ordering::SeqCst);
+                        }
+                        Err(e) => {
+                            error!("Error {} in loading {} Config", e, uuid);
+                        }
                     }
                 }
             }
@@ -92,10 +107,14 @@ impl SdvTelemetryService {
             file_io_utils::create_dir(&dir_path.to_path_buf()).await.unwrap();
         }
 
-        info!("Telemetry service initialized with {:} configs loaded from memory", configs_loaded);
+        info!(
+            "Telemetry service initialized with {:} configs occupying {} memory",
+            configs_loaded,
+            PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
+        );
         SdvTelemetryService {
             data_dir,
-            metrics_config_orchestrator: Box::new(MetricsConfigOrchestratorImpl::new()),
+            metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
         }
     }
@@ -105,7 +124,14 @@ impl SdvTelemetryService {
 impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn addMetricsConfig(&self, metrics_config: &[u8]) -> BinderResult<()> {
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config).unwrap();
-        info!("addMetricsConfig: {:?}\n", config);
+        info!("addMetricsConfig: {:?} of size: {}\n", config, metrics_config.len());
+
+        if metrics_config.len() + PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
+            > MAX_PERSISTENT_CONFIGURATION_SIZE_MB
+        {
+            error!("Memory limit exceeded");
+            return to_binder_result(Err("Memory limit exceeded"));
+        }
 
         let res = self.metrics_config_orchestrator.initialize_config(&config);
 
@@ -120,8 +146,14 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         //TODO (b/290638883): Handle errors with file IO
         file_io_utils::write_to_file(&path, &bytes).await.unwrap();
-        let mut db = self.metrics_configs_store.lock().unwrap();
-        db.insert(config.uuid.clone(), config);
+        let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
+        // Storing the size of the metrics configs in metric_config_map to allow easy access
+        // during remove metrics API call. PERSISTED_METRICS_TOTAL_SIZE needs to be
+        // updated during each API call that modifies active metrics configs.
+        // Alternate to metric_config_map would be read the file size from memory which constitutes
+        // an IO operation and is inefficient.
+        metric_config_map.insert(config.uuid.clone(), bytes.len());
+        PERSISTED_METRICS_TOTAL_SIZE.fetch_add(bytes.len(), Ordering::SeqCst);
 
         Ok(())
     }
@@ -135,19 +167,22 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         }
 
         let uuid = String::from(metrics_config_uuid);
-        let delete_file = {
-            let mut db = self.metrics_configs_store.lock().unwrap();
-            db.remove(&uuid).is_some()
+        let config_size = {
+            let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
+            match metric_config_map.remove(&uuid) {
+                Some(size) => size,
+                None => {
+                    error!("Config not found {:}", uuid);
+                    return to_binder_result(Err("Config not found"));
+                }
+            }
         };
 
-        if delete_file {
-            let path = PathBuf::from(self.data_dir.clone() + "/" + &uuid);
+        let path = PathBuf::from(self.data_dir.clone() + "/" + &uuid);
 
-            //TODO: Handle errors with file IO b/290638883
-            file_io_utils::remove_file(&path).await.unwrap();
-        } else {
-            info!("Config not found {:}", uuid);
-        }
+        //TODO: Handle errors with file IO b/290638883
+        file_io_utils::remove_file(&path).await.unwrap();
+        PERSISTED_METRICS_TOTAL_SIZE.fetch_sub(config_size, Ordering::SeqCst);
 
         Ok(())
     }
@@ -158,8 +193,16 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         for entry in fs::read_dir(self.data_dir.clone()).unwrap() {
             file_io_utils::remove_file(&entry.unwrap().path()).await.unwrap();
         }
-        let mut db = self.metrics_configs_store.lock().unwrap();
-        db.clear();
+
+        let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
+        for uuid in metric_config_map.keys() {
+            let res = self.metrics_config_orchestrator.finish_config(uuid);
+            if res.is_err() {
+                info!("Error in removing config {:?}", res);
+            }
+        }
+        metric_config_map.clear();
+        PERSISTED_METRICS_TOTAL_SIZE.store(0, Ordering::SeqCst);
         Ok(())
     }
 
