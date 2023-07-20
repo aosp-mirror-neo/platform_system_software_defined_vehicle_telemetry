@@ -101,27 +101,21 @@ impl NodeValue {
             return Err("Arithmetic operators must have numeric operands".to_string());
         }
         match op {
-            ArithmeticOperator::ADD => {
-                if self.is_int() && other.is_int() {
-                    Ok(NodeValue::Int64(self.get_int() + other.get_int()))
-                } else {
-                    Ok(NodeValue::Double(self.get_double() + other.get_double()))
-                }
-            }
-            ArithmeticOperator::SUBTRACT => {
-                if self.is_int() && other.is_int() {
-                    Ok(NodeValue::Int64(self.get_int() - other.get_int()))
-                } else {
-                    Ok(NodeValue::Double(self.get_double() - other.get_double()))
-                }
-            }
-            ArithmeticOperator::MULTIPLY => {
-                if self.is_int() && other.is_int() {
-                    Ok(NodeValue::Int64(self.get_int() * other.get_int()))
-                } else {
-                    Ok(NodeValue::Double(self.get_double() * other.get_double()))
-                }
-            }
+            ArithmeticOperator::ADD => self.apply_numeric(
+                other,
+                |a, b| NodeValue::Int64(a + b),
+                |a, b| NodeValue::Double(a + b),
+            ),
+            ArithmeticOperator::SUBTRACT => self.apply_numeric(
+                other,
+                |a, b| NodeValue::Int64(a - b),
+                |a, b| NodeValue::Double(a - b),
+            ),
+            ArithmeticOperator::MULTIPLY => self.apply_numeric(
+                other,
+                |a, b| NodeValue::Int64(a * b),
+                |a, b| NodeValue::Double(a * b),
+            ),
             ArithmeticOperator::DIVIDE => {
                 if other.is_zero() {
                     return Err("Cannot divide by zero".to_string());
@@ -137,12 +131,11 @@ impl NodeValue {
                 }
                 Ok(NodeValue::Int64(self.get_int() % other.get_int()))
             }
-            ArithmeticOperator::POWER => {
-                if self.is_int() && other.is_int() {
-                    return Ok(NodeValue::Int64(self.get_int().pow(other.get_int() as u32)));
-                }
-                Ok(NodeValue::Double(self.get_double().powf(other.get_double())))
-            }
+            ArithmeticOperator::POWER => self.apply_numeric(
+                other,
+                |a, b| NodeValue::Int64(a.pow(b as u32)),
+                |a, b| NodeValue::Double(a.powf(b)),
+            ),
         }
     }
 
@@ -152,7 +145,29 @@ impl NodeValue {
         op: &RelationalOperator,
         other: &NodeValue,
     ) -> Result<NodeValue, String> {
-        Err("Relational operators are not implemented yet".to_string())
+        Ok(NodeValue::Bool(match op {
+            RelationalOperator::EQ => {
+                if !self.is_numeric() || !other.is_numeric() {
+                    return Ok(NodeValue::Bool(self == other));
+                }
+                self.apply_numeric(other, |a, b| a == b, approximately_equal)
+            }
+            RelationalOperator::NOT_EQ => {
+                if !self.is_numeric() || !other.is_numeric() {
+                    return Ok(NodeValue::Bool(self != other));
+                }
+                self.apply_numeric(other, |a, b| a != b, |a, b| !approximately_equal(a, b))
+            }
+            RelationalOperator::GT => self.apply_numeric(other, |a, b| a > b, |a, b| a > b),
+            RelationalOperator::GT_OR_EQ => {
+                self.apply_numeric(other, |a, b| a >= b, |a, b| a >= b || approximately_equal(a, b))
+            }
+            RelationalOperator::LT => self.apply_numeric(other, |a, b| a < b, |a, b| a < b),
+            RelationalOperator::LT_OR_EQ => {
+                self.apply_numeric(other, |a, b| a <= b, |a, b| a <= b || approximately_equal(a, b))
+            }
+            _ => Err("Other relational operators are not implemented yet".to_string()),
+        }?))
     }
 
     // private functions and methods below
@@ -213,6 +228,29 @@ impl NodeValue {
             _ => true, // if not a numeric type, their numeric value is by default 0
         }
     }
+
+    /// Applies the provided function on two numeric NodeValues based on
+    /// the numeric type (integer or floating point).
+    /// Returns an error if the NodeValues are not numeric types.
+    fn apply_numeric<IF, FF, R>(
+        &self,
+        other: &NodeValue,
+        int_func: IF,
+        float_func: FF,
+    ) -> Result<R, String>
+    where
+        IF: FnOnce(i64, i64) -> R,
+        FF: FnOnce(f64, f64) -> R,
+    {
+        if self.is_int() && other.is_int() {
+            Ok(int_func(self.get_int(), other.get_int()))
+        } else if self.is_numeric() && other.is_numeric() {
+            Ok(float_func(self.get_double(), other.get_double()))
+        } else {
+            Err("Operator requires numeric operands but incompatible operands were provided"
+                .to_string())
+        }
+    }
 }
 
 /// Per go/sdv-rust-testing, unit tests are to be written in the same file.
@@ -222,7 +260,7 @@ mod tests {
     use sdv_node_value::NodeValue;
 
     use sdvtelemetry_proto_rust::expression::{
-        combination_node::{ArithmeticOperator, LogicalOperator},
+        combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
         ConstantLeafNode,
     };
 
@@ -237,6 +275,12 @@ mod tests {
     static OP_DIVIDE: ArithmeticOperator = ArithmeticOperator::DIVIDE;
     static OP_MODULUS: ArithmeticOperator = ArithmeticOperator::MODULUS;
     static OP_POWER: ArithmeticOperator = ArithmeticOperator::POWER;
+    static OP_EQ: RelationalOperator = RelationalOperator::EQ;
+    static OP_NOT_EQ: RelationalOperator = RelationalOperator::NOT_EQ;
+    static OP_GT: RelationalOperator = RelationalOperator::GT;
+    static OP_GT_OR_EQ: RelationalOperator = RelationalOperator::GT_OR_EQ;
+    static OP_LT: RelationalOperator = RelationalOperator::LT;
+    static OP_LT_OR_EQ: RelationalOperator = RelationalOperator::LT_OR_EQ;
 
     #[test]
     fn test_from_constant_leaf_node() {
@@ -453,5 +497,83 @@ mod tests {
             two_point_five.handle_arithmetic(&OP_POWER, &two_point_five),
             Ok(NodeValue::Double(expected))
         );
+    }
+
+    #[test]
+    fn test_handle_relational_eq() {
+        let two = NodeValue::Int32(2);
+        let two_i64 = NodeValue::Int64(2);
+        let two_f32 = NodeValue::Float(2.0);
+        let two_f64 = NodeValue::Double(2.0);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(two.handle_relational(&OP_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_EQ, &two_i64), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_EQ, &two_f32), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_EQ, &two_f64), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_EQ, &five), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.handle_relational(&OP_EQ, &true_val), Ok(NodeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_handle_relational_not_eq() {
+        let two = NodeValue::Int32(2);
+        let two_f32 = NodeValue::Float(2.0);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(two.handle_relational(&OP_NOT_EQ, &two), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.handle_relational(&OP_NOT_EQ, &two_f32), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.handle_relational(&OP_NOT_EQ, &five), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_NOT_EQ, &true_val), Ok(NodeValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_handle_relational_gt() {
+        let two = NodeValue::Int32(2);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(two.handle_relational(&OP_GT, &two), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.handle_relational(&OP_GT, &five), Ok(NodeValue::Bool(false)));
+        assert_eq!(five.handle_relational(&OP_GT, &two), Ok(NodeValue::Bool(true)));
+        assert!(five.handle_relational(&OP_GT, &true_val).is_err());
+    }
+
+    #[test]
+    fn test_handle_relational_gt_or_eq() {
+        let two = NodeValue::Int32(2);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(two.handle_relational(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_GT_OR_EQ, &five), Ok(NodeValue::Bool(false)));
+        assert_eq!(five.handle_relational(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert!(five.handle_relational(&OP_GT_OR_EQ, &true_val).is_err());
+    }
+
+    #[test]
+    fn test_handle_relational_lt() {
+        let two = NodeValue::Int32(2);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(two.handle_relational(&OP_LT, &two), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.handle_relational(&OP_LT, &five), Ok(NodeValue::Bool(true)));
+        assert_eq!(five.handle_relational(&OP_LT, &two), Ok(NodeValue::Bool(false)));
+        assert!(five.handle_relational(&OP_LT, &true_val).is_err());
+    }
+
+    #[test]
+    fn test_handle_relational_lt_or_eq() {
+        let two = NodeValue::Int32(2);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(two.handle_relational(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.handle_relational(&OP_LT_OR_EQ, &five), Ok(NodeValue::Bool(true)));
+        assert_eq!(five.handle_relational(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(false)));
+        assert!(five.handle_relational(&OP_LT_OR_EQ, &true_val).is_err());
     }
 }

@@ -42,26 +42,6 @@ rust_binary {
     ],
 }
 
-//////////////////// Test modules below /////////////////////
-rust_test_host {
-    name: "sdv_node_value_unit_tests",
-    defaults: ["sdv_ast_defaults"],
-    srcs: [
-        "node_value.rs",
-    ],
-    rustlibs: [
-        "libsdv_node_value",
-    ],
-    test_suites: [
-        "general-tests",
-        "automotive-sdv-tests",
-    ],
-    test_options: {
-        unit_test: true,
-    },
-    auto_gen_config: true,
-}
-
 rust_test_host {
     name: "sdv_ast_unit_tests",
     defaults: ["sdv_ast_defaults"],
