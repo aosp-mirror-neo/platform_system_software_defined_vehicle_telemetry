@@ -30,6 +30,12 @@ void removeAllMetricsConfigs(ServiceHolder* holder){
     service->removeAllMetricsConfigs();
 }
 
+void removeMetricsConfig(ServiceHolder* holder, const char* config_uuid) {
+    android::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    service->removeMetricsConfig(std::string(config_uuid));
+}
+
 void setReportReadyListener(
     ServiceHolder* holder, void* listener, void (*cbFunc)(void*, const char*, size_t))
 {

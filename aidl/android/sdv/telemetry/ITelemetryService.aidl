@@ -29,7 +29,7 @@ interface ITelemetryService {
 
     /**
      * Sends finished telemetry reports or errors associated with the given uuid using the
-     * {@code ITelemetryServiceListener}.
+     * {@code ITelemetryReportListener}.
      */
     void getFinishedReport(
             in @utf8InCpp String metricsConfigUuid, in ITelemetryReportListener listener);
