@@ -66,7 +66,7 @@ message Trigger {
   // in the Metrics Configuration.
   string name = 1;
 
-  oneof option {
+  oneof trigger_type {
     DataTrigger data_trigger = 2;
     PeriodicTrigger periodic_trigger = 3;
     ConditionalTrigger conditional_trigger = 4;
@@ -126,7 +126,7 @@ message Publisher {
   // triggers in the Metrics Configuration.
   string name = 1;
 
-  oneof option {
+  oneof publisher_type {
     SignalPublisher signal_publisher = 2;
     ServicePublisher service_publisher = 3;
     AggregationPublisher aggregation_publisher = 4;
