@@ -112,6 +112,8 @@ mod tests {
 
     use super::*;
 
+    const TRIGGER_NAME: &str = "trigger";
+
     struct MockExpressionFactory {
         nodes: Mutex<Vec<Node>>,
     }
@@ -172,7 +174,6 @@ mod tests {
 
     #[test]
     fn create_data_trigger_success() {
-        const TRIGGER_NAME: &str = "trigger";
         const PUBLISHER_NAME: &str = "publisher";
         const SIGNAL_NAME: &str = "signal";
         let factory = create_factory();
@@ -211,7 +212,6 @@ mod tests {
 
     #[test]
     fn create_periodic_trigger_success() {
-        const TRIGGER_NAME: &str = "trigger";
         const INTERVAL: u64 = u64::MAX;
         let factory = create_factory();
 
@@ -232,7 +232,6 @@ mod tests {
 
     #[test]
     fn create_conditional_trigger_no_parent_triggers_fails() {
-        const TRIGGER_NAME: &str = "trigger";
         let factory = create_factory();
 
         let mut trigger = new_trigger(TRIGGER_NAME);
@@ -251,7 +250,6 @@ mod tests {
 
     #[test]
     fn create_conditional_trigger_missing_node_index_fails() {
-        const TRIGGER_NAME: &str = "trigger";
         let factory = create_factory();
 
         let mut trigger = new_trigger(TRIGGER_NAME);
@@ -270,7 +268,6 @@ mod tests {
 
     #[test]
     fn create_conditional_trigger_incorrect_node_index_fails() {
-        const TRIGGER_NAME: &str = "trigger";
         const NODE_INDEX: u32 = 42;
         let factory = create_factory();
 
@@ -292,7 +289,6 @@ mod tests {
 
     #[test]
     fn create_conditional_trigger_success() {
-        const TRIGGER_NAME: &str = "trigger";
         const PARENT_TRIGGER_NAME: &str = "parent_trigger";
         const INTERVAL: u64 = u64::MAX;
         let factory = create_factory();

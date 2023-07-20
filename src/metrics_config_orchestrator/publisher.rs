@@ -254,6 +254,9 @@ mod tests {
 
     use super::*;
 
+    const PUBLISHER_NAME: &str = "publisher";
+    const FIELD_NAME: &str = "field";
+
     struct MockExpressionFactory {
         nodes: Mutex<Vec<Node>>,
         new_proto_nodes: Mutex<Vec<NewProtoNode>>,
@@ -374,7 +377,6 @@ mod tests {
 
     #[test]
     fn create_signal_publisher_success() {
-        const PUBLISHER_NAME: &str = "publisher";
         const SIGNAL_NAME: &str = "signal";
         let factory = create_factory();
 
@@ -397,7 +399,6 @@ mod tests {
 
     #[test]
     fn create_service_publisher_success() {
-        const PUBLISHER_NAME: &str = "publisher";
         const SERVICE_NAME: &str = "service";
         let factory = create_factory();
 
@@ -420,7 +421,6 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_unknown_message_type_fails() {
-        const PUBLISHER_NAME: &str = "publisher";
         const MESSAGE_TYPE: &str = "messagetype";
         let factory = create_factory();
 
@@ -442,8 +442,6 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_invalid_field_name_fails() {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field1";
         let factory = create_factory();
 
         let file_descriptor = create_file_descriptor(&[]);
@@ -475,8 +473,6 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_missing_node_index_fails() {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field1";
         let factory = create_factory();
 
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
@@ -508,8 +504,6 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_incorrect_node_index_fails() {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field1";
         const NODE_INDEX: u32 = 42;
         let factory = create_factory();
 
@@ -542,10 +536,9 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_unknown_aggregation_type_fails() {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field1";
         const UNKNOWN_AGGREGATION_TYPE: i32 = i32::MAX;
         let factory = create_factory();
+
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
         let mut publisher = new_publisher(PUBLISHER_NAME);
         let mut declarative_proto = new_declarative_aggregation(FIELD_NAME, Some(0), None);
@@ -577,8 +570,6 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_duplicate_field_name_fails() {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field1";
         let factory = create_factory();
 
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
@@ -616,8 +607,7 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_success() {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME1: &str = "field1";
+        const FIELD_NAME1: &str = FIELD_NAME;
         const FIELD_NAME2: &str = "field2";
         const TRIGGER_NAME: &str = "trigger";
         const INTERVAL_MS: u64 = 42;
@@ -695,8 +685,6 @@ mod tests {
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_no_custom_expressions_expressions_not_returned(
     ) {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field";
         const TRIGGER_NAME: &str = "trigger";
         const INTERVAL_MS: u64 = 42;
         let factory = create_factory();
@@ -742,8 +730,6 @@ mod tests {
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_seed_expression_fails(
     ) {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field";
         let factory = create_factory();
 
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
@@ -779,8 +765,6 @@ mod tests {
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_aggregation_expression_fails(
     ) {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field";
         let factory = create_factory();
 
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
@@ -817,8 +801,6 @@ mod tests {
     #[test]
     fn create_aggregation_publisher_declarative_aggregation_custom_expressions_expressions_returned(
     ) {
-        const PUBLISHER_NAME: &str = "publisher";
-        const FIELD_NAME: &str = "field";
         const TRIGGER_NAME: &str = "trigger";
         const INTERVAL_MS: u64 = 42;
         let factory = create_factory();
@@ -829,7 +811,6 @@ mod tests {
             new_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
         declarative_proto.seed_expression = MessageField::some(NewProtoNode::new());
         declarative_proto.aggregation_expression = MessageField::some(NewProtoNode::new());
-
         let aggregation_proto = set_aggregation_publisher(
             &mut publisher,
             &file_descriptor.messages().next().unwrap(),
