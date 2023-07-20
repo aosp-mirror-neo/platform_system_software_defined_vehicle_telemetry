@@ -279,6 +279,14 @@ mod tests {
                 publisher_type: PublisherType::Service { service_name: "Foo".to_string() },
             })
         }
+
+        fn validate(
+            &self,
+            _publisher_proto: &PublisherProto,
+            _context: &PublisherFactoryContext,
+        ) -> Result<(), PublisherFactoryError> {
+            Ok(())
+        }
     }
 
     struct MockTriggerFactory {
