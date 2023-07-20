@@ -44,7 +44,7 @@ fn main() -> Result<(), binder::Status> {
             serialized_config.as_ptr() as *mut u8,
             serialized_config.len(),
         );
-        rust_to_c::removeMetricsConfig(service, config.uuid.as_ptr() as *const i8);
+        rust_to_c::removeMetricsConfig(service, config.uuid.as_ptr() as *const std::ffi::c_char);
         rust_to_c::stop_telemetry_service(service);
     }
 
