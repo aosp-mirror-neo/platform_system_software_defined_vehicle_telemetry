@@ -8,8 +8,12 @@ use binder_tokio::TokioRuntime;
 use log::info;
 use tokio::runtime::Builder;
 
+use rustutils::system_properties::PropertyWatcher;
 use sdv_telemetry::SdvTelemetryService;
 
+const SIZE_MB: usize = 1024 * 1024;
+
+static METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.telemetry.metric_config_store_in_mb";
 static LOG_TAG: &str = "SdvTelemetryService";
 static ROOT_DIR: &str = "/data/local/tmp";
 
@@ -22,10 +26,15 @@ fn main() {
         _ => panic!("{}", error),
     });
 
-    let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-    info!("Creating telemetry service with hashmap");
+    let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
+    let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap();
 
-    let service = runtime.block_on(SdvTelemetryService::new(ROOT_DIR));
+    let configured_size: usize = value.parse().unwrap_or(1); // Default size 1 MB
+
+    let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    info!("Creating telemetry service with {}MBs metric store size", configured_size);
+
+    let service = runtime.block_on(SdvTelemetryService::new(ROOT_DIR, configured_size * SIZE_MB));
     let descriptor = <BpTelemetryService as ITelemetryService>::get_descriptor();
 
     println!("Adding {descriptor} service to binder");
