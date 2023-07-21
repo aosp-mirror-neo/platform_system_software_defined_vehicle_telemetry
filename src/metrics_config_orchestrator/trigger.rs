@@ -182,7 +182,7 @@ mod tests {
         let factory = create_factory();
 
         let mut trigger = new_trigger(TRIGGER_NAME);
-        let mut data_trigger = trigger.mut_data_trigger();
+        let data_trigger = trigger.mut_data_trigger();
         data_trigger.publisher_name = PUBLISHER_NAME.to_owned();
 
         let publisher = Arc::new(Publisher {
@@ -219,7 +219,7 @@ mod tests {
         let factory = create_factory();
 
         let mut trigger = new_trigger(TRIGGER_NAME);
-        let mut periodic_trigger = trigger.mut_periodic_trigger();
+        let periodic_trigger = trigger.mut_periodic_trigger();
         periodic_trigger.interval_ms = INTERVAL;
 
         let res =
@@ -297,7 +297,7 @@ mod tests {
         let factory = create_factory();
 
         let mut trigger = new_trigger(TRIGGER_NAME);
-        let mut conditional_trigger = trigger.mut_conditional_trigger();
+        let conditional_trigger = trigger.mut_conditional_trigger();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
