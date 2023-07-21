@@ -335,7 +335,7 @@ mod tests {
         message_descriptor: &MessageDescriptor,
         declarative_aggregations: Vec<DeclarativeAggregationProto>,
     ) -> &'a mut AggregationPublisherProto {
-        let mut aggregation_proto = publisher.mut_aggregation_publisher();
+        let aggregation_proto = publisher.mut_aggregation_publisher();
         aggregation_proto.message_type_name = to_full_name(message_descriptor);
         aggregation_proto.declarative_aggregations = declarative_aggregations;
         aggregation_proto
@@ -388,7 +388,7 @@ mod tests {
         let factory = create_factory();
 
         let mut publisher = new_publisher(PUBLISHER_NAME);
-        let mut signal_publisher = publisher.mut_signal_publisher();
+        let signal_publisher = publisher.mut_signal_publisher();
         signal_publisher.signal_name = SIGNAL_NAME.to_owned();
 
         let res =
@@ -410,7 +410,7 @@ mod tests {
         let factory = create_factory();
 
         let mut publisher = new_publisher(PUBLISHER_NAME);
-        let mut service_publisher = publisher.mut_service_publisher();
+        let service_publisher = publisher.mut_service_publisher();
         service_publisher.service_name = SERVICE_NAME.to_owned();
 
         let res =
@@ -626,7 +626,7 @@ mod tests {
             new_declarative_aggregation(FIELD_NAME1, Some(0), Some(AggregationType::COUNT));
         let declarative_proto2 =
             new_declarative_aggregation(FIELD_NAME2, Some(1), Some(AggregationType::VECTOR));
-        let mut aggregation_proto = set_aggregation_publisher(
+        let aggregation_proto = set_aggregation_publisher(
             &mut publisher,
             &file_descriptor.messages().next().unwrap(),
             vec![declarative_proto1, declarative_proto2],
