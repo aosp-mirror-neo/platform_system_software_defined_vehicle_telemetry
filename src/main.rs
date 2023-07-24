@@ -5,7 +5,7 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
 use binder_tokio::TokioRuntime;
-use log::info;
+use log::{error, info};
 use tokio::runtime::Builder;
 
 use rustutils::system_properties::PropertyWatcher;
@@ -34,7 +34,15 @@ fn main() {
     let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     info!("Creating telemetry service with {}MBs metric store size", configured_size);
 
-    let service = runtime.block_on(SdvTelemetryService::new(ROOT_DIR, configured_size * SIZE_MB));
+    let service =
+        match runtime.block_on(SdvTelemetryService::new(ROOT_DIR, configured_size * SIZE_MB)) {
+            Some(telemetry_service) => telemetry_service,
+            None => {
+                error!("Error in initialization telemetry service. Aborting.");
+                return;
+            }
+        };
+
     let descriptor = <BpTelemetryService as ITelemetryService>::get_descriptor();
 
     println!("Adding {descriptor} service to binder");

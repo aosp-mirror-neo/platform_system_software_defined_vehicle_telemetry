@@ -61,7 +61,7 @@ impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
-    pub async fn new(root_path: &str, config_store_size: usize) -> Self {
+    pub async fn new(root_path: &str, config_store_size: usize) -> Option<Self> {
         let mut data_dir = DATA_DIR.to_string();
         if !root_path.is_empty() {
             data_dir = format!("{}/{}", root_path, DATA_DIR);
@@ -80,8 +80,15 @@ impl SdvTelemetryService {
                 let entry = entry_result.unwrap();
                 let path = entry.path();
                 if path.is_file() {
-                    let bytes = file_io_utils::read_from_file(&path).await.unwrap();
-                    // bytes now contains the bytes of the file
+                    let bytes = match file_io_utils::read_from_file(&path).await {
+                        Ok(data) => data,
+                        Err(e) => {
+                            info!("An error occurred while trying to read file: {}", e);
+                            continue;
+                        }
+                    };
+
+                    // bytes now contains the contents of the file
 
                     let config: MetricsConfig =
                         protobuf::Message::parse_from_bytes(&bytes).unwrap();
@@ -97,12 +104,24 @@ impl SdvTelemetryService {
                         }
                         Err(e) => {
                             error!("Error {} in loading {} Config", e, uuid);
+                            file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
+                                error!("An error occurred in removing corrupt config: {}", e)
+                            });
                         }
                     }
                 }
             }
         } else {
-            file_io_utils::create_dir(&dir_path.to_path_buf()).await.unwrap();
+            match file_io_utils::create_dir(&dir_path.to_path_buf()).await {
+                Ok(_) => {
+                    // Success, directory was created or already exists
+                    info!("telemetry directory created");
+                }
+                Err(e) => {
+                    error!("An error occurred in creating directory: {}", e);
+                    return None;
+                }
+            };
         }
 
         info!(
@@ -110,12 +129,12 @@ impl SdvTelemetryService {
             configs_loaded,
             PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
         );
-        SdvTelemetryService {
+        Some(SdvTelemetryService {
             data_dir,
             max_persistent_config_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
-        }
+        })
     }
 }
 
@@ -143,8 +162,16 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let bytes = metrics_config.to_vec();
         let path = PathBuf::from(self.data_dir.clone() + "/" + &config.uuid.clone());
 
-        //TODO (b/290638883): Handle errors with file IO
-        file_io_utils::write_to_file(&path, &bytes).await.unwrap();
+        if let Err(e) = file_io_utils::write_to_file(&path, &bytes).await {
+            error!("An error occurred while writing to file: {}", e);
+            if path.is_file() {
+                file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
+                    error!("An error occurred in removing corrupt config: {}", e)
+                });
+            }
+            return to_binder_result(Err("Metric config activated but not persisted in memory"));
+        }
+
         let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
         // Storing the size of the metrics configs in metric_config_map to allow easy access
         // during remove metrics API call. PERSISTED_METRICS_TOTAL_SIZE needs to be
@@ -179,18 +206,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         let path = PathBuf::from(self.data_dir.clone() + "/" + &uuid);
 
-        //TODO: Handle errors with file IO b/290638883
-        file_io_utils::remove_file(&path).await.unwrap();
-        PERSISTED_METRICS_TOTAL_SIZE.fetch_sub(config_size, Ordering::SeqCst);
+        if let Err(e) = file_io_utils::remove_file(&path).await {
+            error!("An error occurred in removing file: {}", e);
+            return to_binder_result(Err("Could not remove config from memory"));
+        }
 
+        PERSISTED_METRICS_TOTAL_SIZE.fetch_sub(config_size, Ordering::SeqCst);
         Ok(())
     }
 
     async fn removeAllMetricsConfigs(&self) -> BinderResult<()> {
         info!("removeAllMetricsConfigs");
 
+        // remove all configs from directory
         for entry in fs::read_dir(self.data_dir.clone()).unwrap() {
-            file_io_utils::remove_file(&entry.unwrap().path()).await.unwrap();
+            file_io_utils::remove_file(&entry.unwrap().path())
+                .await
+                .unwrap_or_else(|e| error!("An error occurred in removing corrupt config: {}", e));
         }
 
         let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
@@ -256,7 +288,8 @@ mod tests {
         async fn new(dir_path: String) -> TestEnvironment {
             let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
                 SdvTelemetryService::new(dir_path.as_str(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB)
-                    .await,
+                    .await
+                    .unwrap(),
             );
             TestEnvironment { dir_path, service }
         }
