@@ -339,14 +339,16 @@ mod tests {
 
     #[tokio::test]
     async fn add_metrics_config() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let dir_path = "add_metrics_config";
+        const ROOT_PATH: &str = "add_metrics_config";
+        let file_path = PathBuf::from(format!("{}/{}/{}", ROOT_PATH, DATA_DIR, UUID));
 
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let mut config = MetricsConfig::new();
-        config.uuid = "01bf0754-df95-46bb-bb35-522b6af66600".to_string();
+        config.uuid = UUID.to_string();
         config.version = 2;
         config.script = "Sample Script".to_string();
 
@@ -355,43 +357,48 @@ mod tests {
 
         let result = test_environment.service.addMetricsConfig(serialized_config).await;
         assert!(result.is_ok());
+        assert!(file_path.is_file());
     }
 
     #[tokio::test]
     async fn remove_metrics_config() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-        let dir_path = "remove_metrics_config";
+
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
+        const ROOT_PATH: &str = "remove_metrics_config";
+        let file_path = PathBuf::from(format!("{}/{}/{}", ROOT_PATH, DATA_DIR, UUID));
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let mut config = MetricsConfig::new();
         config.uuid = UUID.to_owned();
         test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+        assert!(file_path.is_file());
 
         let result = test_environment.service.removeMetricsConfig(UUID).await;
         assert!(result.is_ok());
+        assert!(!file_path.is_file());
     }
 
     #[tokio::test]
     async fn remove_all_metrics_configs() {
-        let dir_path = "remove_all_metrics_configs";
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
+        const ROOT_PATH: &str = "remove_all_metrics_configs";
+        let dir_path_buf = PathBuf::from(format!("{}/{}", ROOT_PATH, DATA_DIR));
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let result = test_environment.service.removeAllMetricsConfigs().await;
         assert!(result.is_ok());
+        assert_eq!(dir_path_buf.read_dir().unwrap().count(), 0); // check if directory is empty
     }
 
     #[tokio::test]
     async fn clear_report_ready_listener() {
-        let dir_path = "clear_repot_ready_listener";
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
+        const ROOT_PATH: &str = "clear_repot_ready_listener";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let result = test_environment.service.clearReportReadyListener().await;
         assert!(result.is_ok());
@@ -399,11 +406,10 @@ mod tests {
 
     #[tokio::test]
     async fn set_report_ready_listener() {
-        let dir_path = "set_report_ready_listener";
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
+        const ROOT_PATH: &str = "set_report_ready_listener";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let listener: Strong<dyn ITelemetryReportReadyListener> =
             Strong::new(Box::new(TelemetryReportReadyListener));
@@ -414,10 +420,10 @@ mod tests {
 
     #[tokio::test]
     async fn get_finished_report() {
-        let dir_path = "get_finished_report";
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
+        const ROOT_PATH: &str = "get_finished_report";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));
@@ -428,10 +434,10 @@ mod tests {
 
     #[tokio::test]
     async fn get_all_finished_report() {
-        let dir_path = "get_all_finished_report";
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        let test_environment = TestEnvironment::new(String::from(dir_path)).await;
+        const ROOT_PATH: &str = "get_all_finished_report";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let listener: Strong<dyn ITelemetryReportListener> =
             Strong::new(Box::new(TelemetryReportListener));
