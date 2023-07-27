@@ -111,7 +111,7 @@ mod tests {
     use sdvtelemetry_proto_rust::expression::{NewProtoNode, Node};
     use std::{collections::HashMap, sync::Mutex};
 
-    use crate::metrics_config_orchestrator::{publisher::PublisherType, trigger::TriggerType};
+    use crate::metrics_config_orchestrator::publisher::PublisherType;
 
     use super::*;
 

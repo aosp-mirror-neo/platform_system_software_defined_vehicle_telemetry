@@ -18,7 +18,7 @@ use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
 use crate::expression_evaluation::{ExpressionFactory, ExpressionFactoryImpl, ExpressionImpl};
-use crate::metrics_config_orchestrator::{trigger::Trigger, MetricsConfig};
+use crate::metrics_config_orchestrator::{trigger_factory::Trigger, MetricsConfig};
 
 pub trait MessageFactory {
     fn create(&self) -> Box<dyn protobuf::MessageDyn>;
@@ -257,7 +257,7 @@ mod tests {
     };
     use std::{collections::HashMap, sync::Mutex};
 
-    use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::metrics_config_orchestrator::trigger_factory::TriggerType;
 
     use super::*;
 

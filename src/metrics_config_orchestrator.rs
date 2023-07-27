@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 mod publisher;
-mod trigger;
+mod trigger_factory;
 
 use protobuf::reflect::FileDescriptor;
 use sdvtelemetry_proto_rust::metrics_configuration::{
@@ -18,7 +18,7 @@ use publisher::{
     Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryError,
     PublisherFactoryImpl,
 };
-use trigger::{
+use trigger_factory::{
     Trigger, TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
 };
 
@@ -250,7 +250,9 @@ mod tests {
     use crate::metrics_config_orchestrator::publisher::{
         Publisher, PublisherFactory, PublisherFactoryError, PublisherType,
     };
-    use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerFactory, TriggerType};
+    use crate::metrics_config_orchestrator::trigger_factory::{
+        Trigger, TriggerFactory, TriggerType,
+    };
     use crate::MetricsConfigOrchestratorImpl;
 
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
