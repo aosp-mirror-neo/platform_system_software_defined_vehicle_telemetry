@@ -5,13 +5,11 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
     Trigger as TriggerProto,
 };
-use std::{
-    fmt::Debug,
-    sync::{Arc, Weak},
-};
+use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 
-use crate::metrics_config_orchestrator::{MetricsConfig, Publisher};
+use crate::metrics_config_orchestrator::trigger::TriggerType;
+use crate::metrics_config_orchestrator::{MetricsConfig, Trigger};
 
 pub trait TriggerFactory {
     /// Returns a new trigger encapsulated object based on the protobuf message.
@@ -27,17 +25,6 @@ pub trait TriggerFactory {
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryContext,
     ) -> Result<(), TriggerFactoryError>;
-}
-
-pub struct Trigger {
-    pub name: String,
-    pub trigger_type: TriggerType,
-}
-
-pub enum TriggerType {
-    Data { publisher: Weak<Publisher> },
-    Periodic { interval_ms: u64 },
-    Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: Arc<Node> },
 }
 
 pub struct TriggerFactoryContext<'a> {
@@ -93,9 +80,9 @@ impl TriggerFactory for TriggerFactoryImpl {
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryContext,
     ) -> Result<Trigger, TriggerFactoryError> {
-        Ok(Trigger {
-            name: trigger_proto.name.clone(),
-            trigger_type: match &trigger_proto.trigger_type {
+        Ok(Trigger::new(
+            trigger_proto.name.clone(),
+            match &trigger_proto.trigger_type {
                 Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
                     publisher: Arc::downgrade(
                         &context.config.publishers[&data_trigger.publisher_name],
@@ -122,7 +109,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                 }
                 _ => return Err(TriggerFactoryError::UnknownTriggerType),
             },
-        })
+        ))
     }
 
     fn validate(
@@ -152,7 +139,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::publisher_factory::PublisherType;
+    use crate::metrics_config_orchestrator::{publisher_factory::PublisherType, Publisher};
 
     const INTERVAL: u64 = u64::MAX;
     const NODE_INDEX: u32 = 42;
@@ -241,10 +228,10 @@ mod tests {
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
-        let parent_trigger = Arc::new(Trigger {
-            name: PARENT_TRIGGER_NAME.to_owned(),
-            trigger_type: TriggerType::Periodic { interval_ms: INTERVAL },
-        });
+        let parent_trigger = Arc::new(Trigger::new(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval_ms: INTERVAL },
+        ));
 
         (trigger, Some(vec![parent_trigger]))
     }

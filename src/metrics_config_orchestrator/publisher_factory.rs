@@ -19,7 +19,7 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use crate::metrics_config_orchestrator::{trigger_factory::Trigger, MetricsConfig};
+use crate::metrics_config_orchestrator::{MetricsConfig, Trigger};
 
 pub trait MessageFactory {
     fn create(&self) -> Box<dyn protobuf::MessageDyn>;
@@ -309,7 +309,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::trigger_factory::TriggerType;
+    use crate::metrics_config_orchestrator::trigger::TriggerType;
 
     const FIELD_NAME: &str = "field";
     const FIELD_NAME2: &str = "field2";
@@ -523,10 +523,10 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = Arc::new(Trigger {
-            name: TRIGGER_NAME.to_owned(),
-            trigger_type: TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        });
+        let trigger = Arc::new(Trigger::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval_ms: INTERVAL_MS },
+        ));
 
         (publisher, Some(vec![file_descriptor]), Some(vec![trigger]))
     }
@@ -747,10 +747,10 @@ mod tests {
         );
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
 
-        let trigger = Arc::new(Trigger {
-            name: TRIGGER_NAME.to_owned(),
-            trigger_type: TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        });
+        let trigger = Arc::new(Trigger::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval_ms: INTERVAL_MS },
+        ));
         let res = run_using_factory_context(
             None,
             Some(vec![trigger]),
@@ -856,10 +856,10 @@ mod tests {
         );
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
 
-        let trigger = Arc::new(Trigger {
-            name: TRIGGER_NAME.to_owned(),
-            trigger_type: TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        });
+        let trigger = Arc::new(Trigger::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval_ms: INTERVAL_MS },
+        ));
         let res = run_using_factory_context(
             None,
             Some(vec![trigger]),
