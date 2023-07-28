@@ -4,19 +4,36 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
-/// Additional HashMap functions that are either not available in the standard library, or hidden behind experiment flags.
+/// Additional HashMap functions that are either not available in the standard library, or hidden
+/// behind experiment flags.
 pub trait HashMapExtension<K: Eq + Hash, V> {
-    /// Creates topologically sorted vector of keys using Kahn's algorithm based on dependency information stored in a HashMap.
+    /// Creates topologically sorted vector of keys using Kahn's algorithm based on dependency
+    /// information stored in a HashMap.
     ///
     /// # Arguments
     ///
-    /// * `dependency_selector` - A function that accepts HashMap value and returns keys that are dependent on the corresponding entry.
+    /// * `dependency_selector` - A function that accepts HashMap value and returns keys that are
+    ///   dependent on the corresponding entry.
     fn to_topological_sorted_vec<F: Fn(&V) -> &Vec<K>>(
         &self,
         dependency_selector: F,
     ) -> Option<Vec<&K>>;
 
+    /// Tries to insert a key-value pair into the map, and returns Ok if insertion was successful.
+    /// If the map already had this key present, nothing is updated, and Err is returned.
     fn try_insert_value(&mut self, key: K, value: V) -> Result<(), ()>;
+}
+
+/// Additional Vec functions that are either not available in the standard library, or hidden
+/// behind experiment flags.
+pub trait VecExtension<T> {
+    /// Consumes vector and returns a HashMap with vector elements as values.
+    ///
+    /// # Arguments
+    ///
+    /// * `key_provider` - A function that accepts vector element and returns the key that will
+    ///   correspond to the element in HashMap.
+    fn into_hash_map<K: Eq + Hash, F: Fn(&T) -> K>(self, key_provider: F) -> HashMap<K, T>;
 }
 
 impl<K: Eq + Hash, V> HashMapExtension<K, V> for HashMap<K, V> {
@@ -72,5 +89,11 @@ impl<K: Eq + Hash, V> HashMapExtension<K, V> for HashMap<K, V> {
                 Ok(())
             }
         }
+    }
+}
+
+impl<T> VecExtension<T> for Vec<T> {
+    fn into_hash_map<K: Eq + Hash, F: Fn(&T) -> K>(self, key_provider: F) -> HashMap<K, T> {
+        self.into_iter().map(|val| (key_provider(&val), val)).collect()
     }
 }
