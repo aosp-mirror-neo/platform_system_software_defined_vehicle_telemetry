@@ -1,6 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-mod publisher;
+mod publisher_factory;
 mod trigger_factory;
 
 use protobuf::reflect::FileDescriptor;
@@ -14,7 +14,7 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use publisher::{
+use publisher_factory::{
     Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryError,
     PublisherFactoryImpl,
 };
@@ -247,7 +247,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::metrics_config_orchestrator::publisher::{
+    use crate::metrics_config_orchestrator::publisher_factory::{
         Publisher, PublisherFactory, PublisherFactoryError, PublisherType,
     };
     use crate::metrics_config_orchestrator::trigger_factory::{
