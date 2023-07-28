@@ -11,23 +11,11 @@ rust_defaults {
 }
 
 rust_library {
-    name: "libsdv_node_value",
-    crate_name: "sdv_node_value",
-    defaults: ["sdv_ast_defaults"],
-    srcs: [
-        "node_value.rs",
-    ],
-}
-
-rust_library {
     name: "libsdv_ast_traversal",
     crate_name: "sdv_ast",
     defaults: ["sdv_ast_defaults"],
     srcs: [
         "ast.rs",
-    ],
-    rustlibs: [
-        "libsdv_node_value",
     ],
 }
 
@@ -65,7 +53,6 @@ rust_test_host {
     rustlibs: [
         "liblazy_static",
         "libsdv_ast_traversal",
-        "libsdv_node_value",
         "libsdv_telem_expr_test_proto",
     ],
     test_suites: [

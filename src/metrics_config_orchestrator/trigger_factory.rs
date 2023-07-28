@@ -135,6 +135,7 @@ impl TriggerFactory for TriggerFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use sdv_ast::NodeValue;
     use std::collections::HashMap;
 
     use super::*;
@@ -156,6 +157,10 @@ mod tests {
         let mut trigger = TriggerProto::new();
         trigger.name = name.to_owned();
         trigger
+    }
+
+    fn create_node() -> Node {
+        Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
     fn run_using_empty_factory_context<R, F: FnOnce(&TriggerFactoryContext) -> R>(
@@ -337,8 +342,8 @@ mod tests {
         let factory = create_factory();
         let (trigger, parent_triggers) = create_valid_conditional_trigger();
 
-        let node_0 = Arc::new(Node::default());
-        let node_1 = Arc::new(Node::default());
+        let node_0 = Arc::new(create_node());
+        let node_1 = Arc::new(create_node());
         let res = run_using_factory_context(
             None,
             parent_triggers.clone(),
@@ -439,7 +444,7 @@ mod tests {
         run_using_factory_context(
             None,
             parent_triggers,
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             |context| factory.create(&trigger, context),
         )
         .unwrap();

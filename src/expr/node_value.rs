@@ -6,9 +6,11 @@
 
 use protobuf::reflect::{ReflectFieldRef, ReflectValueRef};
 use sdvtelemetry_proto_rust::expression::{
-    combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
-    constant_leaf_node::Node_value,
-    ConstantLeafNode, FieldLeafNode,
+    combination_node::{
+        ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+    },
+    constant_leaf_node::Node_value as NodeValueProto,
+    ConstantLeafNode as ConstantLeafNodeProto,
 };
 
 const EPSILON: f32 = 1e-6;
@@ -16,7 +18,7 @@ const EPSILON: f32 = 1e-6;
 /// Holds a generic value.
 /// TODO(b/288481877): Add list value because FieldLeafNode can extract values
 /// from repeated fields.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum NodeValue {
     /// No value.
     None,
@@ -60,52 +62,63 @@ impl PartialEq for NodeValue {
     }
 }
 
-#[allow(dead_code, unused_variables)]
 impl NodeValue {
     /// Converts a ConstantLeafNode into a NodeValue.
-    pub fn from_constant_leaf_node(constant_leaf_node: &ConstantLeafNode) -> NodeValue {
-        match &constant_leaf_node.node_value {
-            Some(Node_value::BoolValue(val)) => NodeValue::Bool(*val),
-            Some(Node_value::Int32Value(val)) => NodeValue::Int32(*val),
-            Some(Node_value::Int64Value(val)) => NodeValue::Int64(*val),
-            Some(Node_value::FloatValue(val)) => NodeValue::Float(*val),
-            Some(Node_value::DoubleValue(val)) => NodeValue::Double(*val),
-            _ => NodeValue::None,
-        }
+    pub fn from_constant_leaf_node(
+        constant_leaf_node: &ConstantLeafNodeProto,
+    ) -> Result<NodeValue, String> {
+        Ok(match &constant_leaf_node.node_value {
+            Some(NodeValueProto::BoolValue(val)) => NodeValue::Bool(*val),
+            Some(NodeValueProto::Int32Value(val)) => NodeValue::Int32(*val),
+            Some(NodeValueProto::Int64Value(val)) => NodeValue::Int64(*val),
+            Some(NodeValueProto::FloatValue(val)) => NodeValue::Float(*val),
+            Some(NodeValueProto::DoubleValue(val)) => NodeValue::Double(*val),
+            _ => return Err(format!("Node {:?} did not specify a node_value", constant_leaf_node)),
+        })
     }
 
-    /// Converts a FieldLeafNode into a NodeValue.
-    pub fn from_field_leaf_node<F: FnOnce(&str) -> &dyn protobuf::MessageDyn>(
-        field_leaf_node: &FieldLeafNode,
-        message_provider: F,
-    ) -> Result<NodeValue, String> {
-        let fields = &field_leaf_node.field_names;
-        if fields.is_empty() {
-            return Err(format!("Node {} has empty fields, cannot get any value", field_leaf_node));
+    /// Performs operations using the operator.
+    /// If unary operator, then operates on self.
+    /// If binary operator, then [self] <operator> [other].
+    pub fn operate(&self, op: &OperatorProto, other: &NodeValue) -> Result<NodeValue, String> {
+        match op {
+            OperatorProto::ArithmeticOperator(op) => self.handle_arithmetic(
+                &op.enum_value().map_err(|i| {
+                    format!("Arithmetic operator with enum value {} not recognized", i)
+                })?,
+                other,
+            ),
+            OperatorProto::LogicalOperator(op) => self.handle_logical(
+                &op.enum_value().map_err(|i| {
+                    format!("Logical operator with enum value {} not recognized", i)
+                })?,
+                other,
+            ),
+            OperatorProto::RelationalOperator(op) => self.handle_relational(
+                &op.enum_value().map_err(|i| {
+                    format!("Relational operator with enum value {} not recognized", i)
+                })?,
+                other,
+            ),
+            _ => Err(format!("Operator {:?} not recognized.", op)),
         }
-        let msg = message_provider(&field_leaf_node.publisher_name);
-        Self::extract_field_value(msg, fields)
     }
 
     /// Handle logical operations.
-    pub fn handle_logical(
-        &self,
-        op: &LogicalOperator,
-        other: &NodeValue,
-    ) -> Result<NodeValue, String> {
+    fn handle_logical(&self, op: &LogicalOperator, other: &NodeValue) -> Result<NodeValue, String> {
         if !self.is_bool() || !other.is_bool() {
             return Err("Logical operators must have boolean operands".to_string());
         }
-        match op {
-            LogicalOperator::AND => Ok(NodeValue::Bool(self.get_bool() && other.get_bool())),
-            LogicalOperator::OR => Ok(NodeValue::Bool(self.get_bool() || other.get_bool())),
-            LogicalOperator::XOR => Ok(NodeValue::Bool(self.get_bool() != other.get_bool())),
-            LogicalOperator::NOT => Ok(NodeValue::Bool(!self.get_bool())),
-        }
+        Ok(NodeValue::Bool(match op {
+            LogicalOperator::AND => self.get_bool() && other.get_bool(),
+            LogicalOperator::OR => self.get_bool() || other.get_bool(),
+            LogicalOperator::XOR => self.get_bool() != other.get_bool(),
+            LogicalOperator::NOT => !self.get_bool(),
+        }))
     }
 
     /// Handle arithmetic operations.
-    pub fn handle_arithmetic(
+    fn handle_arithmetic(
         &self,
         op: &ArithmeticOperator,
         other: &NodeValue,
@@ -131,19 +144,19 @@ impl NodeValue {
                 |a, b| NodeValue::Double(a * b),
             ),
             ArithmeticOperator::DIVIDE => {
-                if other.is_zero() {
+                if other.is_zero()? {
                     return Err("Cannot divide by zero".to_string());
                 }
-                Ok(NodeValue::Double(self.get_double() / other.get_double()))
+                Ok(NodeValue::Double(self.get_double()? / other.get_double()?))
             }
             ArithmeticOperator::MODULUS => {
                 if !self.is_int() || !other.is_int() {
                     return Err("Modulus operator requires integer operands".to_string());
                 }
-                if other.is_zero() {
+                if other.is_zero()? {
                     return Err("Cannot perform mod 0. Divide by 0 is undefined.".to_string());
                 }
-                Ok(NodeValue::Int64(self.get_int() % other.get_int()))
+                Ok(NodeValue::Int64(self.get_int()? % other.get_int()?))
             }
             ArithmeticOperator::POWER => self.apply_numeric(
                 other,
@@ -154,7 +167,7 @@ impl NodeValue {
     }
 
     /// Handle relational operations.
-    pub fn handle_relational(
+    fn handle_relational(
         &self,
         op: &RelationalOperator,
         other: &NodeValue,
@@ -184,16 +197,15 @@ impl NodeValue {
         }?))
     }
 
-    // private functions and methods below
-
-    /// Reads a value from a protobuf message using the protobuf reflection on the
-    /// provided field names.
-    fn extract_field_value(
+    /// Reads a field value from a protobuf message using the reflection.
+    pub fn extract_field_value(
         msg: &dyn protobuf::MessageDyn,
         fields: &[String],
     ) -> Result<NodeValue, String> {
         let msg_descriptor = msg.descriptor_dyn();
-        let field_name = &fields[0];
+        let field_name = fields
+            .get(0)
+            .ok_or("FieldLeafNodes should provide at least one field name".to_string())?;
         let field_descriptor = msg_descriptor.field_by_name(field_name).ok_or(format!(
             "No field descriptor exists for field {} in message {}. Typo in field name?",
             field_name,
@@ -213,13 +225,17 @@ impl NodeValue {
                     match field_value {
                         ReflectValueRef::U32(v) => NodeValue::Int64(v as i64),
                         ReflectValueRef::U64(v) => NodeValue::Int64(v as i64),
-                        ReflectValueRef::I32(v) => NodeValue::Int64(v as i64),
+                        ReflectValueRef::I32(v) => NodeValue::Int32(v),
                         ReflectValueRef::I64(v) => NodeValue::Int64(v),
-                        ReflectValueRef::F32(v) => NodeValue::Double(v as f64),
+                        ReflectValueRef::F32(v) => NodeValue::Float(v),
                         ReflectValueRef::F64(v) => NodeValue::Double(v),
                         ReflectValueRef::Bool(v) => NodeValue::Bool(v),
                         ReflectValueRef::Enum(_, v) => NodeValue::Int32(v),
-                        _ => return Err("FieldLeafNode attempts to extract bytes, string, or protobuf message values, which is not supported".to_string()),
+                        _ => {
+                            return Err("FieldLeafNode attempts to extract bytes, string, or \
+                                       protobuf message values, which is not supported"
+                                .to_string())
+                        }
                     }
                 }
                 _ => return Err("not implemented yet".to_string()),
@@ -236,12 +252,18 @@ impl NodeValue {
             if let ReflectValueRef::Message(msg) = field_value {
                 Self::extract_field_value(&(*msg), &fields[1..])
             } else {
-                Err("FieldLeafNode attempts to extract nested field value, but a non-terminal field is not a protobuf message".to_string())
+                Err("FieldLeafNode attempts to extract nested field value, but a \
+                    non-terminal field is not a protobuf message"
+                    .to_string())
             }
         } else {
-            Err("FieldLeafNode attempts to extract nested field values, but a non-terminal field is either repeated or a map".to_string())
+            Err("FieldLeafNode attempts to extract nested field values, but a \
+                non-terminal field is either repeated or a map"
+                .to_string())
         }
     }
+
+    // private functions and methods below
 
     /// Check if node holds a boolean-compatible value.
     fn is_bool(&self) -> bool {
@@ -269,35 +291,35 @@ impl NodeValue {
         matches!(self, NodeValue::Int32(_) | NodeValue::Int64(_))
     }
 
-    /// Returns the int value or 0 by default.
-    fn get_int(&self) -> i64 {
-        match self {
+    /// Returns the int value or error if NodeValue is not numeric.
+    fn get_int(&self) -> Result<i64, String> {
+        Ok(match self {
             NodeValue::Int32(val) => *val as i64,
             NodeValue::Int64(val) => *val,
-            _ => 0,
-        }
+            _ => return Err(format!("get_int() invoked on non-int NodeValue: {:?}", self)),
+        })
     }
 
-    /// Returns the double value or 0 by default.
-    fn get_double(&self) -> f64 {
-        match self {
+    /// Returns the double value or error if NodeValue is not numeric.
+    fn get_double(&self) -> Result<f64, String> {
+        Ok(match self {
             NodeValue::Int32(val) => *val as f64,
             NodeValue::Int64(val) => *val as f64,
             NodeValue::Float(val) => *val as f64,
             NodeValue::Double(val) => *val,
-            _ => 0.0,
-        }
+            _ => return Err(format!("get_double() invoked on non-numeric NodeValue: {:?}", self)),
+        })
     }
 
     /// Checks whether the node value is zero.
-    fn is_zero(&self) -> bool {
-        match self {
+    fn is_zero(&self) -> Result<bool, String> {
+        Ok(match self {
             NodeValue::Int32(val) => *val == 0,
             NodeValue::Int64(val) => *val == 0,
             NodeValue::Float(val) => (*val).abs() < EPSILON,
             NodeValue::Double(val) => (*val).abs() < EPSILON.into(),
-            _ => true, // if not a numeric type, their numeric value is by default 0
-        }
+            _ => return Err(format!("is_zero() invoked on non-numeric NodeValue: {:?}", self)),
+        })
     }
 
     /// Applies the provided function on two numeric NodeValues based on
@@ -314,9 +336,9 @@ impl NodeValue {
         FF: FnOnce(f64, f64) -> R,
     {
         if self.is_int() && other.is_int() {
-            Ok(int_func(self.get_int(), other.get_int()))
+            Ok(int_func(self.get_int()?, other.get_int()?))
         } else if self.is_numeric() && other.is_numeric() {
-            Ok(float_func(self.get_double(), other.get_double()))
+            Ok(float_func(self.get_double()?, other.get_double()?))
         } else {
             Err("Operator requires numeric operands but incompatible operands were provided"
                 .to_string())
@@ -327,34 +349,50 @@ impl NodeValue {
 #[cfg(test)]
 mod tests {
 
+    use super::NodeValue;
     use lazy_static::lazy_static;
-    use sdv_node_value::NodeValue;
     use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
-        combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
-        ConstantLeafNode, FieldLeafNode,
+        combination_node::{
+            ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+        },
+        ConstantLeafNode,
     };
 
     // Static variables within the tests module scope that are reused across tests.
-    static OP_AND: LogicalOperator = LogicalOperator::AND;
-    static OP_OR: LogicalOperator = LogicalOperator::OR;
-    static OP_XOR: LogicalOperator = LogicalOperator::XOR;
-    static OP_NOT: LogicalOperator = LogicalOperator::NOT;
-    static OP_ADD: ArithmeticOperator = ArithmeticOperator::ADD;
-    static OP_SUBTRACT: ArithmeticOperator = ArithmeticOperator::SUBTRACT;
-    static OP_MULTIPLY: ArithmeticOperator = ArithmeticOperator::MULTIPLY;
-    static OP_DIVIDE: ArithmeticOperator = ArithmeticOperator::DIVIDE;
-    static OP_MODULUS: ArithmeticOperator = ArithmeticOperator::MODULUS;
-    static OP_POWER: ArithmeticOperator = ArithmeticOperator::POWER;
-    static OP_EQ: RelationalOperator = RelationalOperator::EQ;
-    static OP_NOT_EQ: RelationalOperator = RelationalOperator::NOT_EQ;
-    static OP_GT: RelationalOperator = RelationalOperator::GT;
-    static OP_GT_OR_EQ: RelationalOperator = RelationalOperator::GT_OR_EQ;
-    static OP_LT: RelationalOperator = RelationalOperator::LT;
-    static OP_LT_OR_EQ: RelationalOperator = RelationalOperator::LT_OR_EQ;
-
-    // See ast.rs on why this is needed.
     lazy_static! {
+        static ref OP_AND: OperatorProto =
+            OperatorProto::LogicalOperator(LogicalOperator::AND.into());
+        static ref OP_OR: OperatorProto =
+            OperatorProto::LogicalOperator(LogicalOperator::OR.into());
+        static ref OP_XOR: OperatorProto =
+            OperatorProto::LogicalOperator(LogicalOperator::XOR.into());
+        static ref OP_NOT: OperatorProto =
+            OperatorProto::LogicalOperator(LogicalOperator::NOT.into());
+        static ref OP_ADD: OperatorProto =
+            OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into());
+        static ref OP_SUBTRACT: OperatorProto =
+            OperatorProto::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into());
+        static ref OP_MULTIPLY: OperatorProto =
+            OperatorProto::ArithmeticOperator(ArithmeticOperator::MULTIPLY.into());
+        static ref OP_DIVIDE: OperatorProto =
+            OperatorProto::ArithmeticOperator(ArithmeticOperator::DIVIDE.into());
+        static ref OP_MODULUS: OperatorProto =
+            OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULUS.into());
+        static ref OP_POWER: OperatorProto =
+            OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into());
+        static ref OP_EQ: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::EQ.into());
+        static ref OP_NOT_EQ: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into());
+        static ref OP_GT: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::GT.into());
+        static ref OP_GT_OR_EQ: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::GT_OR_EQ.into());
+        static ref OP_LT: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::LT.into());
+        static ref OP_LT_OR_EQ: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into());
         static ref TEST_MESSAGE: TestMessage = {
             let mut test_message = TestMessage::new();
             test_message.int_field = 80;
@@ -372,18 +410,8 @@ mod tests {
         };
     }
 
-    fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
-        &*TEST_MESSAGE
-    }
-
-    fn create_field_leaf_node() -> FieldLeafNode {
-        let mut field_leaf_node = FieldLeafNode::new();
-        field_leaf_node.publisher_name = "publisher_name".to_string();
-        field_leaf_node
-    }
-
     #[test]
-    fn test_from_constant_leaf_node() {
+    fn test_from_constant_leaf_node() -> Result<(), String> {
         // setup
         let mut constant_leaf_node_bool = ConstantLeafNode::new();
         constant_leaf_node_bool.set_bool_value(true);
@@ -402,286 +430,279 @@ mod tests {
 
         // assert
         assert_eq!(
-            NodeValue::from_constant_leaf_node(&constant_leaf_node_bool),
+            NodeValue::from_constant_leaf_node(&constant_leaf_node_bool)?,
             NodeValue::Bool(true)
         );
         assert_eq!(
-            NodeValue::from_constant_leaf_node(&constant_leaf_node_i32),
+            NodeValue::from_constant_leaf_node(&constant_leaf_node_i32)?,
             NodeValue::Int32(32)
         );
         assert_eq!(
-            NodeValue::from_constant_leaf_node(&constant_leaf_node_i64),
+            NodeValue::from_constant_leaf_node(&constant_leaf_node_i64)?,
             NodeValue::Int64(64)
         );
         assert_eq!(
-            NodeValue::from_constant_leaf_node(&constant_leaf_node_float),
+            NodeValue::from_constant_leaf_node(&constant_leaf_node_float)?,
             NodeValue::Float(1.5)
         );
         assert_eq!(
-            NodeValue::from_constant_leaf_node(&constant_leaf_node_double),
+            NodeValue::from_constant_leaf_node(&constant_leaf_node_double)?,
             NodeValue::Double(1.5)
         );
+        Ok(())
     }
 
     #[test]
-    fn test_from_field_leaf_node_int_field_ok() {
-        let mut int_field_node = create_field_leaf_node();
-        int_field_node.field_names.push("int_field".to_string());
+    fn test_extract_field_value_no_field_names_should_err() {
+        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &[]).is_err());
+    }
+
+    #[test]
+    fn test_extract_field_value_int_field_ok() {
+        let field_names = ["int_field".to_string()];
 
         assert_eq!(
-            NodeValue::from_field_leaf_node(&int_field_node, provide_test_message),
-            Ok(NodeValue::Int64(80))
+            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
+            Ok(NodeValue::Int32(80))
         );
     }
 
     #[test]
-    fn test_from_field_leaf_node_float_field_ok() {
-        let mut float_field_node = create_field_leaf_node();
-        float_field_node.field_names.push("float_field".to_string());
+    fn test_extract_field_value_float_field_ok() {
+        let field_names = ["float_field".to_string()];
 
         assert_eq!(
-            NodeValue::from_field_leaf_node(&float_field_node, provide_test_message),
-            Ok(NodeValue::Double(100.0))
+            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
+            Ok(NodeValue::Float(100.0))
         );
     }
 
     #[test]
-    fn test_from_field_leaf_node_enum_field_ok() {
-        let mut enum_field_node = create_field_leaf_node();
-        enum_field_node.field_names.push("enum_field".to_string());
+    fn test_extract_field_value_enum_field_ok() {
+        let field_names = ["enum_field".to_string()];
 
         assert_eq!(
-            NodeValue::from_field_leaf_node(&enum_field_node, provide_test_message),
+            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
             Ok(NodeValue::Int32(1))
         );
     }
 
     #[test]
-    fn test_from_field_leaf_node_nested_field_ok() {
-        let mut bool_field_node = create_field_leaf_node();
-        bool_field_node.field_names.push("message_field".to_string());
-        bool_field_node.field_names.push("bool_field".to_string());
+    fn test_extract_field_value_nested_field_ok() {
+        let field_names = ["message_field".to_string(), "bool_field".to_string()];
 
         assert_eq!(
-            NodeValue::from_field_leaf_node(&bool_field_node, provide_test_message),
+            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
             Ok(NodeValue::Bool(true))
         );
     }
 
     #[test]
-    fn test_from_field_leaf_node_string_field_should_err() {
-        let mut string_field_node = create_field_leaf_node();
-        string_field_node.field_names.push("string_field".to_string());
+    fn test_extract_field_value_string_field_should_err() {
+        let field_names = ["string_field".to_string()];
 
-        assert!(NodeValue::from_field_leaf_node(&string_field_node, provide_test_message).is_err());
+        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
-    fn test_from_field_leaf_node_message_field_should_err() {
-        let mut msg_field_node = create_field_leaf_node();
-        msg_field_node.field_names.push("message_field".to_string());
+    fn test_extract_field_value_message_field_should_err() {
+        let field_names = ["message_field".to_string()];
 
-        assert!(NodeValue::from_field_leaf_node(&msg_field_node, provide_test_message).is_err());
+        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
-    fn test_from_field_leaf_node_repeated_field_should_err() {
-        let mut repeated_int_field_node = create_field_leaf_node();
-        repeated_int_field_node.field_names.push("message_field".to_string());
-        repeated_int_field_node.field_names.push("repeated_int_fields".to_string());
+    fn test_extract_field_value_repeated_field_should_err() {
+        let field_names = ["message_field".to_string(), "repeated_int_fields".to_string()];
 
-        assert!(NodeValue::from_field_leaf_node(&repeated_int_field_node, provide_test_message)
-            .is_err());
+        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
-    fn test_from_field_leaf_node_nonexistent_field_should_err() {
-        let mut nonexistent_field_node = create_field_leaf_node();
-        nonexistent_field_node.field_names.push("foo".to_string());
+    fn test_extract_field_value_nonexistent_field_should_err() {
+        let field_names = ["foo".to_string()];
 
-        assert!(
-            NodeValue::from_field_leaf_node(&nonexistent_field_node, provide_test_message).is_err()
-        );
+        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
-    fn test_handle_logical_requires_boolean_types() {
+    fn test_operate_logical_requires_boolean_types() {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
-        assert!(true_val.handle_logical(&OP_AND, &int_val).is_err());
-        assert!(int_val.handle_logical(&OP_AND, &true_val).is_err());
+        assert!(true_val.operate(&OP_AND, &int_val).is_err());
+        assert!(int_val.operate(&OP_AND, &true_val).is_err());
     }
 
     #[test]
-    fn test_handle_logical_and() {
+    fn test_operate_logical_and() {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         // true && true = true
-        assert_eq!(true_val.handle_logical(&OP_AND, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_AND, &true_val), Ok(NodeValue::Bool(true)));
         // true && false = false
-        assert_eq!(true_val.handle_logical(&OP_AND, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(true_val.operate(&OP_AND, &false_val), Ok(NodeValue::Bool(false)));
         // false && false = false
-        assert_eq!(false_val.handle_logical(&OP_AND, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(false_val.operate(&OP_AND, &false_val), Ok(NodeValue::Bool(false)));
     }
 
     #[test]
-    fn test_handle_logical_or() {
+    fn test_operate_logical_or() {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         // true || true = true
-        assert_eq!(true_val.handle_logical(&OP_OR, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_OR, &true_val), Ok(NodeValue::Bool(true)));
         // true || false = true
-        assert_eq!(true_val.handle_logical(&OP_OR, &false_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_OR, &false_val), Ok(NodeValue::Bool(true)));
         // false || false = false
-        assert_eq!(false_val.handle_logical(&OP_OR, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(false_val.operate(&OP_OR, &false_val), Ok(NodeValue::Bool(false)));
     }
 
     #[test]
-    fn test_handle_logical_xor() {
+    fn test_operate_logical_xor() {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         // true XOR true = false
-        assert_eq!(true_val.handle_logical(&OP_XOR, &true_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(true_val.operate(&OP_XOR, &true_val), Ok(NodeValue::Bool(false)));
         // true XOR false = true
-        assert_eq!(true_val.handle_logical(&OP_XOR, &false_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_XOR, &false_val), Ok(NodeValue::Bool(true)));
         // false XOR false = false
-        assert_eq!(false_val.handle_logical(&OP_XOR, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(false_val.operate(&OP_XOR, &false_val), Ok(NodeValue::Bool(false)));
     }
 
     #[test]
-    fn test_handle_logical_not() {
+    fn test_operate_logical_not() {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         // !true = false
-        assert_eq!(true_val.handle_logical(&OP_NOT, &NodeValue::None), Ok(NodeValue::Bool(false)));
+        assert_eq!(true_val.operate(&OP_NOT, &NodeValue::None), Ok(NodeValue::Bool(false)));
         // !false = true
-        assert_eq!(false_val.handle_logical(&OP_NOT, &NodeValue::None), Ok(NodeValue::Bool(true)));
+        assert_eq!(false_val.operate(&OP_NOT, &NodeValue::None), Ok(NodeValue::Bool(true)));
     }
 
     #[test]
-    fn test_handle_arithmetic_requires_numeric_types() {
+    fn test_operate_arithmetic_requires_numeric_types() {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
-        assert!(true_val.handle_arithmetic(&OP_ADD, &int_val).is_err());
-        assert!(int_val.handle_arithmetic(&OP_ADD, &true_val).is_err());
+        assert!(true_val.operate(&OP_ADD, &int_val).is_err());
+        assert!(int_val.operate(&OP_ADD, &true_val).is_err());
     }
 
     #[test]
-    fn test_handle_arithmetic_add_integers() {
+    fn test_operate_arithmetic_add_integers() {
         let five = NodeValue::Int32(5);
         let twenty = NodeValue::Int32(20);
 
         // 5 + 20 = 25
-        assert_eq!(five.handle_arithmetic(&OP_ADD, &twenty), Ok(NodeValue::Int64(25)));
+        assert_eq!(five.operate(&OP_ADD, &twenty), Ok(NodeValue::Int64(25)));
     }
 
     #[test]
-    fn test_handle_arithmetic_add_floats() {
+    fn test_operate_arithmetic_add_floats() {
         let five = NodeValue::Float(5.2);
         let twenty = NodeValue::Double(20.1);
 
         // 5.2 + 20.1 = 25.3
-        assert_eq!(five.handle_arithmetic(&OP_ADD, &twenty), Ok(NodeValue::Double(25.3)));
+        assert_eq!(five.operate(&OP_ADD, &twenty), Ok(NodeValue::Double(25.3)));
     }
 
     #[test]
-    fn test_handle_arithmetic_subtract_integers() {
+    fn test_operate_arithmetic_subtract_integers() {
         let five = NodeValue::Int32(5);
         let twenty = NodeValue::Int32(20);
 
         // 5 - 20 = -15
-        assert_eq!(five.handle_arithmetic(&OP_SUBTRACT, &twenty), Ok(NodeValue::Int64(-15)));
+        assert_eq!(five.operate(&OP_SUBTRACT, &twenty), Ok(NodeValue::Int64(-15)));
     }
 
     #[test]
-    fn test_handle_arithmetic_subtract_floats() {
+    fn test_operate_arithmetic_subtract_floats() {
         let five = NodeValue::Float(5.2);
         let twenty = NodeValue::Double(20.1);
 
         // 5.2 - 20.1 = -14.9
-        assert_eq!(five.handle_arithmetic(&OP_SUBTRACT, &twenty), Ok(NodeValue::Double(-14.9)));
+        assert_eq!(five.operate(&OP_SUBTRACT, &twenty), Ok(NodeValue::Double(-14.9)));
     }
 
     #[test]
-    fn test_handle_arithmetic_multiply() {
+    fn test_operate_arithmetic_multiply() {
         let five = NodeValue::Int32(5);
         let point_five = NodeValue::Float(0.5);
 
         // 5 * 0.5 = 2.5
-        assert_eq!(five.handle_arithmetic(&OP_MULTIPLY, &point_five), Ok(NodeValue::Double(2.5)));
+        assert_eq!(five.operate(&OP_MULTIPLY, &point_five), Ok(NodeValue::Double(2.5)));
     }
 
     #[test]
-    fn test_handle_arithmetic_divide_by_zero() {
+    fn test_operate_arithmetic_divide_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
-        assert!(five.handle_arithmetic(&OP_DIVIDE, &zero).is_err());
+        assert!(five.operate(&OP_DIVIDE, &zero).is_err());
     }
 
     #[test]
-    fn test_handle_arithmetic_divide() {
+    fn test_operate_arithmetic_divide() {
         let five = NodeValue::Int32(5);
         let two = NodeValue::Int32(2);
 
         // 5 / 2 = 2.5
-        assert_eq!(five.handle_arithmetic(&OP_DIVIDE, &two), Ok(NodeValue::Double(2.5)));
+        assert_eq!(five.operate(&OP_DIVIDE, &two), Ok(NodeValue::Double(2.5)));
     }
 
     #[test]
-    fn test_handle_arithmetic_modulus_by_zero() {
+    fn test_operate_arithmetic_modulus_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
-        assert!(five.handle_arithmetic(&OP_MODULUS, &zero).is_err());
+        assert!(five.operate(&OP_MODULUS, &zero).is_err());
     }
 
     #[test]
-    fn test_handle_arithmetic_modulus() {
+    fn test_operate_arithmetic_modulus() {
         let five = NodeValue::Int32(5);
         let two = NodeValue::Int32(2);
 
         // 5 % 2 = 1
-        assert_eq!(five.handle_arithmetic(&OP_MODULUS, &two), Ok(NodeValue::Int64(1)));
+        assert_eq!(five.operate(&OP_MODULUS, &two), Ok(NodeValue::Int64(1)));
     }
 
     #[test]
-    fn test_handle_arithmetic_modulus_no_floating_points() {
+    fn test_operate_arithmetic_modulus_no_floating_points() {
         let five = NodeValue::Float(5.0);
         let two = NodeValue::Int32(2);
 
         // both operands must be integers
-        assert!(five.handle_arithmetic(&OP_MODULUS, &two).is_err());
+        assert!(five.operate(&OP_MODULUS, &two).is_err());
     }
 
     #[test]
-    fn test_handle_arithmetic_power_integers() {
+    fn test_operate_arithmetic_power_integers() {
         let two = NodeValue::Int32(2);
 
         // 2^2 = 4
-        assert_eq!(two.handle_arithmetic(&OP_POWER, &two), Ok(NodeValue::Int64(4)));
+        assert_eq!(two.operate(&OP_POWER, &two), Ok(NodeValue::Int64(4)));
     }
 
     #[test]
-    fn test_handle_arithmetic_power_floats() {
+    fn test_operate_arithmetic_power_floats() {
         let val = 2.5_f64;
         let expected = val.powf(val);
         let two_point_five = NodeValue::Double(val);
 
         assert_eq!(
-            two_point_five.handle_arithmetic(&OP_POWER, &two_point_five),
+            two_point_five.operate(&OP_POWER, &two_point_five),
             Ok(NodeValue::Double(expected))
         );
     }
 
     #[test]
-    fn test_handle_relational_eq() {
+    fn test_operate_relational_eq() {
         let two = NodeValue::Int32(2);
         let two_i64 = NodeValue::Int64(2);
         let two_f32 = NodeValue::Float(2.0);
@@ -689,72 +710,72 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.handle_relational(&OP_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_EQ, &two_i64), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_EQ, &two_f32), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_EQ, &two_f64), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_EQ, &five), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.handle_relational(&OP_EQ, &true_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, &two_i64), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, &two_f32), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, &two_f64), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, &five), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_EQ, &true_val), Ok(NodeValue::Bool(false)));
     }
 
     #[test]
-    fn test_handle_relational_not_eq() {
+    fn test_operate_relational_not_eq() {
         let two = NodeValue::Int32(2);
         let two_f32 = NodeValue::Float(2.0);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.handle_relational(&OP_NOT_EQ, &two), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.handle_relational(&OP_NOT_EQ, &two_f32), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.handle_relational(&OP_NOT_EQ, &five), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_NOT_EQ, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_NOT_EQ, &two), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_NOT_EQ, &two_f32), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_NOT_EQ, &five), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_NOT_EQ, &true_val), Ok(NodeValue::Bool(true)));
     }
 
     #[test]
-    fn test_handle_relational_gt() {
+    fn test_operate_relational_gt() {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.handle_relational(&OP_GT, &two), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.handle_relational(&OP_GT, &five), Ok(NodeValue::Bool(false)));
-        assert_eq!(five.handle_relational(&OP_GT, &two), Ok(NodeValue::Bool(true)));
-        assert!(five.handle_relational(&OP_GT, &true_val).is_err());
+        assert_eq!(two.operate(&OP_GT, &two), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_GT, &five), Ok(NodeValue::Bool(false)));
+        assert_eq!(five.operate(&OP_GT, &two), Ok(NodeValue::Bool(true)));
+        assert!(five.operate(&OP_GT, &true_val).is_err());
     }
 
     #[test]
-    fn test_handle_relational_gt_or_eq() {
+    fn test_operate_relational_gt_or_eq() {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.handle_relational(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_GT_OR_EQ, &five), Ok(NodeValue::Bool(false)));
-        assert_eq!(five.handle_relational(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert!(five.handle_relational(&OP_GT_OR_EQ, &true_val).is_err());
+        assert_eq!(two.operate(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_GT_OR_EQ, &five), Ok(NodeValue::Bool(false)));
+        assert_eq!(five.operate(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert!(five.operate(&OP_GT_OR_EQ, &true_val).is_err());
     }
 
     #[test]
-    fn test_handle_relational_lt() {
+    fn test_operate_relational_lt() {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.handle_relational(&OP_LT, &two), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.handle_relational(&OP_LT, &five), Ok(NodeValue::Bool(true)));
-        assert_eq!(five.handle_relational(&OP_LT, &two), Ok(NodeValue::Bool(false)));
-        assert!(five.handle_relational(&OP_LT, &true_val).is_err());
+        assert_eq!(two.operate(&OP_LT, &two), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_LT, &five), Ok(NodeValue::Bool(true)));
+        assert_eq!(five.operate(&OP_LT, &two), Ok(NodeValue::Bool(false)));
+        assert!(five.operate(&OP_LT, &true_val).is_err());
     }
 
     #[test]
-    fn test_handle_relational_lt_or_eq() {
+    fn test_operate_relational_lt_or_eq() {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.handle_relational(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.handle_relational(&OP_LT_OR_EQ, &five), Ok(NodeValue::Bool(true)));
-        assert_eq!(five.handle_relational(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(false)));
-        assert!(five.handle_relational(&OP_LT_OR_EQ, &true_val).is_err());
+        assert_eq!(two.operate(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_LT_OR_EQ, &five), Ok(NodeValue::Bool(true)));
+        assert_eq!(five.operate(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(false)));
+        assert!(five.operate(&OP_LT_OR_EQ, &true_val).is_err());
     }
 }

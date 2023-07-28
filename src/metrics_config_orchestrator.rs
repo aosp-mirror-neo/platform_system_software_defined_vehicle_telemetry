@@ -252,7 +252,7 @@ impl<NdFactory: NodeFactory, PubFactory: PublisherFactory, TrigFactory: TriggerF
 
 #[cfg(test)]
 mod tests {
-    use sdv_ast::Node;
+    use sdv_ast::{Node, NodeValue};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -298,7 +298,7 @@ mod tests {
             *self.num_nodes.lock().unwrap() = proto_nodes.len();
             Ok({
                 let mut v = Vec::with_capacity(proto_nodes.len());
-                (0..proto_nodes.len()).for_each(|_| v.push(Arc::new(Node::default())));
+                (0..proto_nodes.len()).for_each(|_| v.push(Arc::new(create_node())));
                 v
             })
         }
@@ -377,6 +377,10 @@ mod tests {
             publisher_factory: MockPublisherFactory::new(),
             trigger_factory: MockTriggerFactory::new(),
         }
+    }
+
+    fn create_node() -> Node {
+        Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
     #[test]

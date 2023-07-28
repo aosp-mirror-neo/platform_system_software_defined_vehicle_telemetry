@@ -54,7 +54,6 @@ rust_library {
     ],
     rustlibs: [
         "libsdv_ast_traversal",
-        "libsdv_node_value",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
