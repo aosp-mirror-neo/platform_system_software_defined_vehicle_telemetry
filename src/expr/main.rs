@@ -18,6 +18,8 @@ lazy_static! {
     static ref TEST_MESSAGE: TestMessage = {
         let mut test_message = TestMessage::new();
         test_message.int_field = 10;
+        test_message.repeated_doubles =
+            vec![std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
         test_message
     };
 }
@@ -41,11 +43,13 @@ fn main() {
     let mut left_node = NodeProto::new();
     let mut right_node = NodeProto::new();
     let mut root_node = NodeProto::new();
+    let mut value_node = NodeProto::new();
 
     let mut field_leaf = FieldLeafNode::new();
     field_leaf.publisher_name = "publisher_name".to_string();
     field_leaf.field_names.push("int_field".to_string());
     left_node.set_field_leaf_node(field_leaf); // left = 10
+
     let mut constant_leaf = ConstantLeafNode::new();
     constant_leaf.set_int32_value(3);
     right_node.set_constant_leaf_node(constant_leaf.clone()); // right = 3
@@ -56,7 +60,12 @@ fn main() {
     combination_node.set_arithmetic_operator(ArithmeticOperator::DIVIDE);
     root_node.set_combination_node(combination_node); // root = 10 / 3 = 3.3333
 
-    let all_nodes = vec![left_node, right_node, root_node];
+    let mut field_leaf = FieldLeafNode::new();
+    field_leaf.publisher_name = "publisher_name".to_string();
+    field_leaf.field_names.push("repeated_doubles".to_string());
+    value_node.set_field_leaf_node(field_leaf); // list = [3.14, 6.28, 2.718]
+
+    let all_nodes = vec![left_node, right_node, root_node, value_node];
 
     let node_factory = NodeFactoryImpl::new();
     match node_factory.create_nodes(&all_nodes) {
