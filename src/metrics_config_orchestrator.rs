@@ -4,6 +4,7 @@ mod publisher_factory;
 mod trigger_factory;
 
 use protobuf::reflect::FileDescriptor;
+use sdv_ast::{NodeFactory, NodeFactoryImpl};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, Publisher as PublisherProto, Trigger as TriggerProto,
 };
@@ -57,14 +58,18 @@ pub enum MetricsConfigOrchestratorError {
     },
     #[error("Metric Config with UUID {uuid} doesn't exist")]
     InvalidConfigUuid { uuid: String },
+    #[error("Invalid expression nodes. Reason: {error_detail}")]
+    InvalidExpressionNodes { error_detail: String },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
 pub struct MetricsConfigOrchestratorImpl<
+    NdFactory: NodeFactory = NodeFactoryImpl,
     PubFactory: PublisherFactory = PublisherFactoryImpl,
     TrigFactory: TriggerFactory = TriggerFactoryImpl,
 > {
     configs: Mutex<HashMap<String, MetricsConfig>>,
+    node_factory: NdFactory,
     publisher_factory: PubFactory,
     trigger_factory: TrigFactory,
 }
@@ -78,14 +83,16 @@ impl MetricsConfigOrchestratorImpl {
     pub fn new() -> Self {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
+            node_factory: NodeFactoryImpl::new(),
             publisher_factory: PublisherFactoryImpl::new(),
             trigger_factory: TriggerFactoryImpl::new(),
         }
     }
 }
 
-impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrchestrator
-    for MetricsConfigOrchestratorImpl<PubFactory, TrigFactory>
+impl<NdFactory: NodeFactory, PubFactory: PublisherFactory, TrigFactory: TriggerFactory>
+    MetricsConfigOrchestrator
+    for MetricsConfigOrchestratorImpl<NdFactory, PubFactory, TrigFactory>
 {
     fn initialize_config(
         &self,
@@ -160,6 +167,13 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
 
+        let expression_nodes = self
+            .node_factory
+            .create_nodes(&config_proto.expression_nodes)
+            .map_err(|error_detail| MetricsConfigOrchestratorError::InvalidExpressionNodes {
+                error_detail,
+            })?;
+
         let config =
             sorted_vector.iter().try_fold(
                 MetricsConfig { publishers: HashMap::new(), triggers: HashMap::new() },
@@ -168,7 +182,7 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
                         Some(DependencyContainer::Publisher { publisher_proto, .. }) => {
                             let context = PublisherFactoryContext {
                                 config: &acc,
-                                expression_nodes: &config_proto.expression_nodes,
+                                expression_nodes: &expression_nodes,
                                 file_descriptors: &file_descriptors,
                             };
                             match self.publisher_factory.create(publisher_proto, &context) {
@@ -186,7 +200,7 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
                         Some(DependencyContainer::Trigger { trigger_proto, .. }) => {
                             let context = TriggerFactoryContext {
                                 config: &acc,
-                                expression_nodes: &config_proto.expression_nodes,
+                                expression_nodes: &expression_nodes,
                             };
                             match self.trigger_factory.create(trigger_proto, &context) {
                                 Ok(trigger) => {
@@ -236,6 +250,8 @@ impl<PubFactory: PublisherFactory, TrigFactory: TriggerFactory> MetricsConfigOrc
 
 #[cfg(test)]
 mod tests {
+    use sdv_ast::Node;
+    use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
@@ -256,6 +272,36 @@ mod tests {
     use crate::MetricsConfigOrchestratorImpl;
 
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+    struct MockNodeFactory {
+        fail_create_nodes: bool,
+        num_nodes: Mutex<usize>,
+    }
+
+    impl MockNodeFactory {
+        fn new() -> Self {
+            MockNodeFactory { fail_create_nodes: false, num_nodes: Mutex::new(0) }
+        }
+
+        /// Cause `create_nodes` method to return an error.
+        fn fail_create_nodes(&mut self) {
+            self.fail_create_nodes = true;
+        }
+    }
+
+    impl NodeFactory for MockNodeFactory {
+        fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String> {
+            if self.fail_create_nodes {
+                return Err("Simulated failure".to_string());
+            }
+            *self.num_nodes.lock().unwrap() = proto_nodes.len();
+            Ok({
+                let mut v = Vec::with_capacity(proto_nodes.len());
+                (0..proto_nodes.len()).for_each(|_| v.push(Arc::new(Node::default())));
+                v
+            })
+        }
+    }
 
     struct MockPublisherFactory {
         publisher_protos: Mutex<Vec<PublisherProto>>,
@@ -314,9 +360,11 @@ mod tests {
     }
 
     fn create_orchestrator(
-    ) -> MetricsConfigOrchestratorImpl<MockPublisherFactory, MockTriggerFactory> {
+    ) -> MetricsConfigOrchestratorImpl<MockNodeFactory, MockPublisherFactory, MockTriggerFactory>
+    {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
+            node_factory: MockNodeFactory::new(),
             publisher_factory: MockPublisherFactory::new(),
             trigger_factory: MockTriggerFactory::new(),
         }
@@ -479,6 +527,20 @@ mod tests {
     }
 
     #[test]
+    fn initialize_config_invalid_expression_nodes_fails() {
+        let mut orchestrator = create_orchestrator();
+        orchestrator.node_factory.fail_create_nodes();
+
+        let mut config = MetricsConfigProto::new();
+        config.expression_nodes.push(NodeProto::new());
+
+        assert!(matches!(
+            orchestrator.initialize_config(&config),
+            Err(MetricsConfigOrchestratorError::InvalidExpressionNodes { .. })
+        ));
+    }
+
+    #[test]
     fn initialize_config_success() {
         let orchestrator = create_orchestrator();
 
@@ -509,8 +571,10 @@ mod tests {
         config.publishers.push(publisher2);
         config.triggers.push(trigger1);
         config.triggers.push(trigger2);
+        config.expression_nodes.push(NodeProto::new());
 
         assert!(orchestrator.initialize_config(&config).is_ok());
+        assert_eq!(*orchestrator.node_factory.num_nodes.lock().unwrap(), 1);
         assert_eq!(orchestrator.publisher_factory.publisher_protos.lock().unwrap().len(), 2);
         assert_eq!(orchestrator.trigger_factory.trigger_protos.lock().unwrap().len(), 2);
         let contexts = orchestrator.configs.lock().unwrap();

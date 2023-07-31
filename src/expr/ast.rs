@@ -11,32 +11,38 @@ use sdvtelemetry_proto_rust::expression::{
     Node as NodeProto,
 };
 use std::fmt;
-use std::{cell::RefCell, rc::Rc};
+use std::sync::Arc;
+
+/// Creates rust nodes from protobuf expression nodes.
+pub trait NodeFactory {
+    /// Creates rust Nodes from protobuf Nodes.
+    /// Protobuf nodes use indices to represent left and right children.
+    /// Rust nodes have a pointer to the actual children instead of an index.
+    fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String>;
+}
 
 /// A wrapper around a protobuf Node.
 #[derive(Default, Clone, PartialEq)]
-pub struct Node<'a> {
-    proto_node: &'a NodeProto,
+pub struct Node {
+    // TODO(b/293212607): remove protobuf Node reference in rust struct
+    proto_node: NodeProto,
     // Option<T> means the variable can either hold nothing or T. Rust
     // variables cannot be null by default so we use Option<T>.
-    // Rc<RefCell<T>> is to explicitly allow Nodes to reference each other.
-    // Rc<T> means it is holding reference-counted pointer to T. You
-    // cannot modify the object T in a Rc<T>, so we use Rc<RefCell<T>>
-    // RefCell<T> means you can modify the object T.
-    left: Option<Rc<RefCell<Node<'a>>>>,
-    right: Option<Rc<RefCell<Node<'a>>>>,
+    // Arc<T> means it is holding an atomic reference-counted pointer to T.
+    left: Option<Arc<Node>>,
+    right: Option<Arc<Node>>,
 }
 
-/// Pretty print Node's debug string, reducing clutter caused by Option<Rc<RefCell<T>>>.
-impl<'a> fmt::Debug for Node<'a> {
+/// Pretty print Node's debug string, reducing clutter caused by Option<Arc<T>>.
+impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let left_string = if let Some(left_child_ref) = &self.left {
-            format!("{:#?}", *left_child_ref.borrow())
+            format!("{:#?}", left_child_ref)
         } else {
             "Empty".to_string()
         };
         let right_string = if let Some(right_child_ref) = &self.right {
-            format!("{:#?}", *right_child_ref.borrow())
+            format!("{:#?}", right_child_ref)
         } else {
             "Empty".to_string()
         };
@@ -48,92 +54,105 @@ impl<'a> fmt::Debug for Node<'a> {
     }
 }
 
-impl<'a> Node<'a> {
-    /// Convert protobuf Nodes into rust wrapper Nodes.
-    /// Protobuf nodes use indices to represent left and right children.
-    /// Rust nodes have a pointer to the actual node instead of an index.
-    pub fn convert_nodes(proto_nodes: &'a [NodeProto]) -> Result<Vec<Rc<RefCell<Node>>>, String> {
-        // Iterate over protobuf nodes and create rust wrapper nodes
-        let rust_nodes: Vec<Rc<RefCell<Node>>> = proto_nodes
-            .iter()
-            .map(|proto_node| {
-                Rc::new(RefCell::new(Node {
-                    proto_node, // short hand for `proto_node: proto_node,`
-                    left: None, // children to be initialized in the next loop
-                    right: None,
-                }))
-            })
-            .collect();
+/// Implementation of NodeFactory trait.
+#[derive(Default)]
+pub struct NodeFactoryImpl {}
 
-        // This loop sets up references to child nodes
-        // TODO(b/289295418): type check the child nodes to ensure they have compatible types
-        for (i, rust_node) in rust_nodes.iter().enumerate() {
-            let proto_node = rust_node.borrow().proto_node;
-
-            // We only care about non-leaf nodes because they have children
-            // if-let syntax matches 1 enum variant - CombinationNode variant,
-            // the enum is a generated type from the protobuf codegen
-            if let Some(Node_type::CombinationNode(pb_combination_node)) = &proto_node.node_type {
-                // set up reference to left child
-                match pb_combination_node.left_index {
-                    Some(left_index) => {
-                        // `rust_nodes.get()` returns Option<T> enum
-                        // Use if-let syntax to match the `Some` enum variant from the
-                        // Option<T> enum
-                        if let Some(left_node_ref) = rust_nodes.get(left_index as usize) {
-                            // cloning Rc<T> just increments the reference count, the
-                            // underlying node it points to is not cloned.
-                            rust_node.borrow_mut().left = Some(left_node_ref.clone());
-                        } else {
-                            // rust_nodes.get() returns None, bad AST
-                            return Err(format!(
-                                "Bad AST. Left child index is invalid for node at index {} = {}",
-                                i, proto_node
-                            ));
-                        }
-                    }
-                    None => {
-                        return Err(format!("Bad AST. CombinationNode should always specify the left child. Node causing error is: {}", proto_node));
-                    }
-                }
-
-                // set up reference to right child
-                match pb_combination_node.right_index {
-                    Some(right_index) => {
-                        // nodes with 2 children must have binary operators
-                        if Self::has_unary_operator(pb_combination_node) {
-                            return Err(format!(
-                                "Node {} should not specify right child because operator is unary",
-                                proto_node
-                            ));
-                        }
-                        // set up references to right child
-                        if let Some(right_node_ref) = rust_nodes.get(right_index as usize) {
-                            // set correct reference to right child
-                            rust_node.borrow_mut().right = Some(right_node_ref.clone());
-                        } else {
-                            return Err(format!(
-                                "Bad AST. Right child index is invalid for node at index {} = {}",
-                                i, proto_node
-                            ));
-                        }
-                    }
-                    None => {
-                        // if binary operator, right child should always be specified
-                        if !Self::has_unary_operator(pb_combination_node) {
-                            return Err(format!(
-                                "Bad AST. Protobuf node did not specify right child for binary operator: {}",
-                                proto_node
-                            ));
-                        }
-                    }
-                }
-            }
-        }
-        Ok(rust_nodes)
+impl NodeFactoryImpl {
+    /// Constructor.
+    pub fn new() -> Self {
+        NodeFactoryImpl {}
     }
 
-    /// Evaluate AST recursively using pre-order traversal.
+    /// Initialize rust Node struct at the specified index using the protobuf Nodes.
+    /// This function will create rust Node structs for all of its children first.
+    /// Returns the rust Node at that index.
+    fn initialize(
+        index: usize,
+        nodes: &mut Vec<Option<Arc<Node>>>,
+        proto_nodes: &[NodeProto],
+    ) -> Result<Arc<Node>, String> {
+        // index out of bound check & return immediately if rust node is already initialized
+        if let Some(initialized_node) = nodes.get(index).ok_or(format!(
+            "Index {} out of bound. Expression nods have size {}",
+            index,
+            proto_nodes.len()
+        ))? {
+            return Ok(initialized_node.clone());
+        }
+
+        let proto_node = &proto_nodes[index];
+        // if combination node, initialize left and right children first
+        // TODO(b/289295418): type check the child nodes to ensure they have compatible types
+        let rust_node = if let Some(Node_type::CombinationNode(combination_node)) =
+            &proto_node.node_type
+        {
+            // initialize left child
+            let left_child = Some(Self::initialize(
+                combination_node.left_index.ok_or(format!(
+                    "Node at index {} is invalid. All CombinationNodes must specify a left child.",
+                    index
+                ))? as usize,
+                nodes,
+                proto_nodes,
+            )?);
+
+            // initialize right child as needed
+            let right_child = match combination_node.right_index {
+                Some(right_idx) => {
+                    if combination_node.has_unary_operator() {
+                        return Err(format!(
+                            "Node at index {} has unary operator but specified two children",
+                            index
+                        ));
+                    }
+                    Some(Self::initialize(right_idx as usize, nodes, proto_nodes)?)
+                }
+                None => {
+                    if !combination_node.has_unary_operator() {
+                        return Err(format!(
+                            "Node at index {} has binary operator but did not specify right child",
+                            index
+                        ));
+                    }
+                    None
+                }
+            };
+            Arc::new(Node { proto_node: proto_node.clone(), left: left_child, right: right_child })
+        } else {
+            // leaf node, no left and right children
+            Arc::new(Node { proto_node: proto_node.clone(), left: None, right: None })
+        };
+
+        // cloning Arc<Node> clones the reference, not the underlying Node
+        nodes[index] = Some(rust_node.clone());
+        Ok(rust_node)
+    }
+}
+
+impl NodeFactory for NodeFactoryImpl {
+    fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String> {
+        let mut rust_nodes: Vec<Option<Arc<Node>>> = vec![None; proto_nodes.len()];
+
+        for i in 0..proto_nodes.len() {
+            Self::initialize(i, &mut rust_nodes, proto_nodes)?;
+        }
+        // flatten all Vec<Option<T>> into Vec<T>, ignoring None values.
+        let nodes: Vec<Arc<Node>> = rust_nodes.into_iter().flatten().collect();
+        if nodes.len() != proto_nodes.len() {
+            return Err(format!(
+                "failed to initialize expression nodes, \
+                expected {} nodes, but initialized {} nodes",
+                proto_nodes.len(),
+                nodes.len()
+            ));
+        }
+        Ok(nodes)
+    }
+}
+
+impl Node {
+    /// Evaluate AST recursively with messages from the "message_provider".
     pub fn evaluate<F: Fn(&str) -> &dyn protobuf::MessageDyn>(
         &self,
         message_provider: &F,
@@ -155,16 +174,16 @@ impl<'a> Node<'a> {
 
         // evaluate left branch recursively
         let left_val = match &self.left {
-            Some(left) => left.borrow().evaluate(message_provider),
+            Some(left) => left.evaluate(message_provider),
             None => Err("Incorrect Node! Every non-leaf Node should have a left child".to_string()),
         }?; // `?` returns early if error
         info!("left val = {:?}", left_val);
 
         // evaluate right branch recursively
         let right_val = match &self.right {
-            Some(right) => right.borrow().evaluate(message_provider),
+            Some(right) => right.evaluate(message_provider),
             None => {
-                if Self::has_unary_operator(proto_combination_node) {
+                if proto_combination_node.has_unary_operator() {
                     return Ok(NodeValue::None);
                 }
                 return Err("Incorrect AST, right child should always be specified for nodes with binary operators.".to_string());
@@ -182,17 +201,23 @@ impl<'a> Node<'a> {
             left_val.handle_relational(&proto_combination_node.relational_operator(), &right_val)
         }
     }
+}
 
+trait CombinationNodeExtension {
+    fn has_unary_operator(&self) -> bool;
+}
+
+impl CombinationNodeExtension for CombinationNodeProto {
     /// Helper function to check if protobuf CombinationNode has unary operator.
-    fn has_unary_operator(node: &CombinationNodeProto) -> bool {
-        node.has_logical_operator() && node.logical_operator() == LogicalOperator::NOT
+    fn has_unary_operator(&self) -> bool {
+        self.has_logical_operator() && self.logical_operator() == LogicalOperator::NOT
     }
 }
 
 /// Per go/sdv-rust-testing, unit tests are to be written in the same file.
 #[cfg(test)]
 mod tests {
-    use super::Node;
+    use super::{NodeFactory, NodeFactoryImpl};
     use lazy_static::lazy_static;
     use sdv_node_value::NodeValue;
     use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
@@ -200,6 +225,7 @@ mod tests {
         combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
+    use std::sync::Arc;
 
     // Use static variable to store the protobuf message that will be returned by the
     // `provide_test_message` function, which is an argument to `evaluate()`.
@@ -258,53 +284,51 @@ mod tests {
     }
 
     #[test]
-    fn test_convert_nodes_ok() {
+    fn test_create_nodes_ok() -> Result<(), String> {
         // setup
+        let node_factory = NodeFactoryImpl::new();
         let all_proto_nodes = create_true_false_branch(LogicalOperator::AND);
 
         // action
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes);
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
-        // assert
-        assert!(converted_nodes.is_ok());
-        let converted_nodes = converted_nodes.ok().unwrap();
         // assert 1-1 correspondence between rust node and protobuf node
-        for (i, rust_node_ref) in converted_nodes.iter().enumerate() {
-            let rust_node = rust_node_ref.borrow();
-            assert_eq!(*rust_node.proto_node, all_proto_nodes[i]);
+        for (i, rust_node) in nodes.iter().enumerate() {
+            assert_eq!(rust_node.proto_node, all_proto_nodes[i]);
             if rust_node.proto_node.has_combination_node() {
-                assert_eq!(
-                    *rust_node.left.as_ref().unwrap(),
-                    converted_nodes
-                        [rust_node.proto_node.combination_node().left_index.unwrap() as usize]
-                );
-                assert_eq!(
-                    *rust_node.right.as_ref().unwrap(),
-                    converted_nodes
-                        [rust_node.proto_node.combination_node().right_index.unwrap() as usize]
-                );
+                assert!(Arc::ptr_eq(
+                    rust_node.left.as_ref().unwrap(),
+                    &nodes[rust_node.proto_node.combination_node().left_index.unwrap() as usize]
+                ));
+                assert!(Arc::ptr_eq(
+                    rust_node.right.as_ref().unwrap(),
+                    &nodes[rust_node.proto_node.combination_node().right_index.unwrap() as usize]
+                ));
             } else {
-                assert_eq!(rust_node.left, None);
-                assert_eq!(rust_node.right, None);
+                assert!(rust_node.left.is_none());
+                assert!(rust_node.right.is_none());
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn test_convert_nodes_unary_operator_cannot_have_two_children() {
+    fn test_create_nodes_unary_operator_cannot_have_two_children() {
         // setup - root node has 2 child nodes but unary operator (NOT)
         let all_proto_nodes = create_true_false_branch(LogicalOperator::NOT);
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes);
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
 
         // assert
-        assert!(converted_nodes.is_err());
+        assert!(nodes.is_err());
     }
 
     #[test]
-    fn test_convert_nodes_handles_missing_right_child() {
+    fn test_create_nodes_handles_missing_right_child() {
         // setup
+        let node_factory = NodeFactoryImpl::new();
         let mut leaf_true = NodeProto::new();
         let mut root_node = NodeProto::new();
 
@@ -324,10 +348,10 @@ mod tests {
         let all_proto_nodes = vec![leaf_true.clone(), root_node.clone()];
 
         // action
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes);
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
 
         // assert ok because unary operator
-        assert!(converted_nodes.is_ok());
+        assert!(nodes.is_ok());
 
         // if binary operator and right child is missing
         combination_node.set_logical_operator(LogicalOperator::AND);
@@ -335,14 +359,35 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes);
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
 
         // assert error because binary operator needs 2 children
-        assert!(converted_nodes.is_err());
+        assert!(nodes.is_err());
+    }
+
+    #[test]
+    fn test_create_nodes_handles_index_out_bound() {
+        // setup root node with children at index 10 and 20 (out of bound)
+        let node_factory = NodeFactoryImpl::new();
+        let mut proto_node = NodeProto::new();
+        let mut combination_node = CombinationNode::new();
+        combination_node.left_index = Some(10);
+        combination_node.right_index = Some(20);
+        combination_node.set_logical_operator(LogicalOperator::AND);
+        proto_node.set_combination_node(combination_node);
+
+        let all_proto_nodes = vec![proto_node];
+
+        // action
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
+
+        // assert
+        assert!(nodes.is_err());
     }
 
     #[test]
     fn test_evaluate_and_or_ok() -> Result<(), String> {
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree:
         //            index 3 (AND)
         //          /              \
@@ -366,9 +411,9 @@ mod tests {
         root_node.set_combination_node(combination_node.clone());
         all_proto_nodes.push(root_node.clone());
 
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
-        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
             NodeValue::Bool(true),  // index 0 = constant value of T
             NodeValue::Bool(false), // index 1 = constant value of F
@@ -378,15 +423,15 @@ mod tests {
         ];
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
-        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
-        {
-            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
+        for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_arithmetic_ok() -> Result<(), String> {
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree: 5 / 2 * 5^2
         //            index 4 (MULTIPLY)
         //          /              \
@@ -428,9 +473,9 @@ mod tests {
         node_4.set_combination_node(combination_multiply);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
-        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
             NodeValue::Int32(5),     // index 0 = constant value of 5
             NodeValue::Int32(2),     // index 1 = constant value of 2
@@ -440,15 +485,15 @@ mod tests {
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
-        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
-        {
-            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
+        for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_mixed_operators() -> Result<(), String> {
+        let node_factory = NodeFactoryImpl::new();
         // setup tree containing all 3 types of operators
         //                       index 4 (&&)
         //                    /               \
@@ -491,9 +536,9 @@ mod tests {
         node_4.set_combination_node(and_node);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
-        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
             NodeValue::Int32(5),   // index 0 = 5
             NodeValue::Int64(10),  // index 1 = 5+5 = 10
@@ -503,15 +548,15 @@ mod tests {
         ];
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
-        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
-        {
-            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
+        for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_mixed_leaf_node_types() -> Result<(), String> {
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree which uses the protobuf message initialized in the lazy_static block
         //                           index 4 (<)
         //                       /               \
@@ -553,9 +598,9 @@ mod tests {
         node_4.set_combination_node(combination_less_than);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
-        // we will evaluate every node in `converted_nodes`, and we expect these results:
+        // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
             NodeValue::Double(100.0), // index 0 = field value of 100
             NodeValue::Int32(2),      // index 1 = constant value of 2
@@ -565,15 +610,15 @@ mod tests {
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
-        for (rust_node_ref, expected_val_ref) in converted_nodes.iter().zip(expected_results.iter())
-        {
-            assert_eq!(rust_node_ref.borrow().evaluate(&provide_test_message)?, *expected_val_ref);
+        for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_incompatible_types_should_fail() -> Result<(), String> {
+        let node_factory = NodeFactoryImpl::new();
         let mut node_0 = NodeProto::new();
         let mut node_1 = NodeProto::new();
 
@@ -588,10 +633,10 @@ mod tests {
         node_1.set_combination_node(lt_node);
 
         let all_proto_nodes = vec![node_0, node_1];
-        let converted_nodes = Node::convert_nodes(&all_proto_nodes)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // Index 1 expr is "True < True"
-        let result = converted_nodes[1].borrow().evaluate(&provide_test_message);
+        let result = nodes[1].evaluate(&provide_test_message);
 
         // True cannot be less than True
         assert!(result.is_err());
