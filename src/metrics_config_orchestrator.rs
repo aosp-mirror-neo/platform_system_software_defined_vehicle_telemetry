@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+mod publisher;
 mod publisher_factory;
 mod trigger;
 mod trigger_factory;
@@ -16,9 +17,9 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
+use publisher::Publisher;
 use publisher_factory::{
-    Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryError,
-    PublisherFactoryImpl,
+    PublisherFactory, PublisherFactoryContext, PublisherFactoryError, PublisherFactoryImpl,
 };
 use trigger::Trigger;
 use trigger_factory::{
@@ -265,10 +266,11 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::metrics_config_orchestrator::publisher::PublisherType;
     use crate::metrics_config_orchestrator::publisher_factory::{
-        Publisher, PublisherFactory, PublisherFactoryError, PublisherType,
+        PublisherFactory, PublisherFactoryError,
     };
-    use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerType};
+    use crate::metrics_config_orchestrator::trigger::TriggerType;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::MetricsConfigOrchestratorImpl;
 
