@@ -9,7 +9,8 @@ use tokio::time::Duration;
 
 use crate::metrics_config_orchestrator::Publisher;
 
-pub struct Trigger {
+#[allow(dead_code)]
+pub(crate) struct Trigger {
     pub name: String,
     pub trigger_type: TriggerType,
 
@@ -19,19 +20,20 @@ pub struct Trigger {
     is_active: Mutex<Arc<bool>>,
 }
 
-pub enum TriggerType {
+#[allow(dead_code)]
+pub(crate) enum TriggerType {
     Data { publisher: Weak<Publisher> },
     Periodic { interval_ms: u64 },
     Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: Arc<Node> },
 }
 
 impl Trigger {
-    pub fn new(name: String, trigger_type: TriggerType) -> Self {
+    pub(super) fn new(name: String, trigger_type: TriggerType) -> Self {
         Trigger { name, trigger_type, is_active: Mutex::new(Arc::new(false)) }
     }
 
     #[allow(dead_code)]
-    pub fn activate(&self, on_fired_callback: Box<dyn Fn() + Send>) -> Result<(), String> {
+    pub(super) fn activate(&self, on_fired_callback: Box<dyn Fn() + Send>) -> Result<(), String> {
         let mut is_active = self.is_active.lock().unwrap();
 
         if **is_active {
@@ -46,7 +48,7 @@ impl Trigger {
     }
 
     #[allow(dead_code)]
-    pub fn deactivate(&self) -> Result<(), String> {
+    pub(super) fn deactivate(&self) -> Result<(), String> {
         let mut is_active = self.is_active.lock().unwrap();
 
         if !**is_active {
@@ -61,7 +63,7 @@ impl Trigger {
 }
 
 impl TriggerType {
-    pub fn activate(
+    pub(super) fn activate(
         &self,
         on_fired_callback: Box<dyn Fn() + Send>,
         weak_is_active: Weak<bool>,
