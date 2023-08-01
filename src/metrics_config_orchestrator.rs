@@ -357,6 +357,14 @@ mod tests {
                 trigger_type: TriggerType::Periodic { interval_ms: u64::MAX },
             })
         }
+
+        fn validate(
+            &self,
+            _trigger_proto: &TriggerProto,
+            _context: &TriggerFactoryContext,
+        ) -> Result<(), TriggerFactoryError> {
+            Ok(())
+        }
     }
 
     fn create_orchestrator(
