@@ -2,28 +2,20 @@
 
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use sdv_ast::Node;
-use sdvtelemetry_proto_rust::{
-    expression::NewProtoNode,
-    metrics_configuration::{
-        declarative_aggregation::AggregationType,
-        AggregationPublisher as AggregationPublisherProto,
-        DeclarativeAggregation as DeclarativeAggregationProto,
-        {publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto},
-    },
+use sdvtelemetry_proto_rust::metrics_configuration::{
+    declarative_aggregation::AggregationType,
+    AggregationPublisher as AggregationPublisherProto,
+    DeclarativeAggregation as DeclarativeAggregationProto,
+    {publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto},
 };
-use std::{
-    collections::HashMap,
-    fmt::Debug,
-    sync::{Arc, Weak},
-};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use crate::metrics_config_orchestrator::{MetricsConfig, Trigger};
-
-pub trait MessageFactory {
-    fn create(&self) -> Box<dyn protobuf::MessageDyn>;
-}
+use crate::metrics_config_orchestrator::{
+    publisher::{DeclarativeAggregation, PublisherType},
+    MetricsConfig, Publisher,
+};
 
 pub trait PublisherFactory {
     /// Returns a new publisher encapsulated object based on the protobuf message.
@@ -40,40 +32,6 @@ pub trait PublisherFactory {
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryContext,
     ) -> Result<(), PublisherFactoryError>;
-}
-
-#[allow(dead_code)]
-pub struct DeclarativeAggregation {
-    field_name: String,
-    selector_expression: Arc<Node>,
-    aggregation_type: AggregationType,
-    // TODO(b/293213911): Create new rust type and remove reference to protobuf message
-    seed_expression: Option<NewProtoNode>,
-    aggregation_expression: Option<NewProtoNode>,
-}
-
-pub struct MessageFactoryImpl {
-    descriptor: MessageDescriptor,
-}
-
-pub struct Publisher {
-    pub name: String,
-    pub publisher_type: PublisherType,
-}
-
-pub enum PublisherType {
-    Signal {
-        signal_name: String,
-    },
-    Service {
-        service_name: String,
-    },
-    Aggregation {
-        triggers: Vec<Weak<Trigger>>,
-        message_factory: MessageFactoryImpl,
-        reset_on_get: bool,
-        declarative_aggregations: Vec<DeclarativeAggregation>,
-    },
 }
 
 pub struct PublisherFactoryContext<'a> {
@@ -105,12 +63,6 @@ pub enum PublisherFactoryError {
 }
 
 pub struct PublisherFactoryImpl {}
-
-impl MessageFactory for MessageFactoryImpl {
-    fn create(&self) -> Box<dyn protobuf::MessageDyn> {
-        self.descriptor.new_instance()
-    }
-}
 
 impl PublisherFactoryImpl {
     pub fn new() -> Self {
@@ -154,7 +106,7 @@ impl PublisherFactoryImpl {
                 .iter()
                 .map(|trigger_name| Arc::downgrade(&context.config.triggers[trigger_name]))
                 .collect(),
-            message_factory: MessageFactoryImpl { descriptor },
+            message_descriptor: descriptor,
             reset_on_get: aggregation_publisher_proto.reset_on_get,
             declarative_aggregations,
         })
@@ -309,7 +261,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::metrics_config_orchestrator::{trigger::TriggerType, Trigger};
 
     const FIELD_NAME: &str = "field";
     const FIELD_NAME2: &str = "field2";
@@ -695,7 +647,7 @@ mod tests {
                 assert_eq!(res.name, PUBLISHER_NAME);
                 if let PublisherType::Aggregation {
                     triggers,
-                    message_factory: _,
+                    message_descriptor,
                     reset_on_get,
                     declarative_aggregations,
                 } = res.publisher_type
@@ -707,6 +659,10 @@ mod tests {
                         trigger.trigger_type,
                         TriggerType::Periodic { interval_ms: INTERVAL_MS }
                     ));
+                    assert_eq!(
+                        message_descriptor.full_name(),
+                        "android.sdv.telemetry.tests.TestMessage"
+                    );
                     assert!(reset_on_get);
                     assert_eq!(declarative_aggregations.len(), 2);
                     for aggregation in declarative_aggregations {

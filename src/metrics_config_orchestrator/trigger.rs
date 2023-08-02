@@ -118,7 +118,7 @@ mod tests {
     use std::sync::Mutex;
     use tokio::time;
 
-    use crate::metrics_config_orchestrator::publisher_factory::PublisherType;
+    use crate::metrics_config_orchestrator::publisher::PublisherType;
 
     use super::*;
 

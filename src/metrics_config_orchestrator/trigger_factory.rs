@@ -8,8 +8,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::{fmt::Debug, sync::Arc};
 use thiserror::Error;
 
-use crate::metrics_config_orchestrator::trigger::TriggerType;
-use crate::metrics_config_orchestrator::{MetricsConfig, Trigger};
+use crate::metrics_config_orchestrator::{trigger::TriggerType, MetricsConfig, Trigger};
 
 pub trait TriggerFactory {
     /// Returns a new trigger encapsulated object based on the protobuf message.
@@ -139,7 +138,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::{publisher_factory::PublisherType, Publisher};
+    use crate::metrics_config_orchestrator::{publisher::PublisherType, Publisher};
 
     const INTERVAL: u64 = u64::MAX;
     const NODE_INDEX: u32 = 42;
