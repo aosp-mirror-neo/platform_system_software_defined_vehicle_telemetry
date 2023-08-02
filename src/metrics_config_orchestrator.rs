@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 mod publisher_factory;
+mod trigger;
 mod trigger_factory;
 
 use protobuf::reflect::FileDescriptor;
@@ -19,8 +20,9 @@ use publisher_factory::{
     Publisher, PublisherFactory, PublisherFactoryContext, PublisherFactoryError,
     PublisherFactoryImpl,
 };
+use trigger::Trigger;
 use trigger_factory::{
-    Trigger, TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
+    TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
 };
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
@@ -266,9 +268,8 @@ mod tests {
     use crate::metrics_config_orchestrator::publisher_factory::{
         Publisher, PublisherFactory, PublisherFactoryError, PublisherType,
     };
-    use crate::metrics_config_orchestrator::trigger_factory::{
-        Trigger, TriggerFactory, TriggerType,
-    };
+    use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerType};
+    use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::MetricsConfigOrchestratorImpl;
 
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
@@ -352,10 +353,10 @@ mod tests {
             _context: &TriggerFactoryContext,
         ) -> Result<Trigger, TriggerFactoryError> {
             self.trigger_protos.lock().unwrap().push(trigger_proto.clone());
-            Ok(Trigger {
-                name: trigger_proto.name.clone(),
-                trigger_type: TriggerType::Periodic { interval_ms: u64::MAX },
-            })
+            Ok(Trigger::new(
+                trigger_proto.name.clone(),
+                TriggerType::Periodic { interval_ms: u64::MAX },
+            ))
         }
 
         fn validate(
