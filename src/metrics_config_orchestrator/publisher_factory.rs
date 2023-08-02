@@ -250,6 +250,7 @@ mod tests {
         descriptor::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto},
         EnumOrUnknown, MessageField,
     };
+    use sdv_ast::NodeValue;
     use sdvtelemetry_proto_rust::{
         expression::NewProtoNode,
         metrics_configuration::{
@@ -366,6 +367,10 @@ mod tests {
         let mut full_name = descriptor_proto.full_name().to_owned();
         full_name.insert(0, '.');
         full_name
+    }
+
+    fn create_node() -> Node {
+        Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
     fn create_valid_service_publisher() -> PublisherProto {
@@ -595,7 +600,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             file_descriptors,
             |context| factory.create(&publisher, context),
         )
@@ -618,7 +623,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
             |context| factory.create(&publisher, context),
         )
@@ -640,7 +645,7 @@ mod tests {
         run_using_factory_context(
             None,
             triggers,
-            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
             |context| {
                 let res = factory.create(&publisher, context).unwrap();
@@ -710,7 +715,7 @@ mod tests {
         let res = run_using_factory_context(
             None,
             Some(vec![trigger]),
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -744,7 +749,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -777,7 +782,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -819,7 +824,7 @@ mod tests {
         let res = run_using_factory_context(
             None,
             Some(vec![trigger]),
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
         )
@@ -931,7 +936,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
         )
@@ -954,7 +959,7 @@ mod tests {
         let err = run_using_factory_context(
             None,
             None,
-            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
         )
@@ -976,7 +981,7 @@ mod tests {
         run_using_factory_context(
             None,
             triggers,
-            Some(vec![Arc::new(Node::default()), Arc::new(Node::default())]),
+            Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
         )

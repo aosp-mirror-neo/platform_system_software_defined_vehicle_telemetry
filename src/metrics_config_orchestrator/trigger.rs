@@ -115,6 +115,7 @@ impl TriggerType {
 
 #[cfg(test)]
 mod tests {
+    use sdv_ast::NodeValue;
     use std::sync::Mutex;
     use tokio::time;
 
@@ -137,6 +138,10 @@ mod tests {
         fn on_callback_fired(&mut self) {
             self.fired_count += 1;
         }
+    }
+
+    fn create_node() -> Node {
+        Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
     fn create_valid_periodic_trigger() -> Trigger {
@@ -210,7 +215,7 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             TriggerType::Conditional {
                 triggers: vec![],
-                selector_expression: Arc::new(Node::default()),
+                selector_expression: Arc::new(create_node()),
             },
         );
 
