@@ -315,8 +315,8 @@ mod tests {
         publisher
     }
 
-    fn run_using_empty_factory_context<R, F: FnOnce(&PublisherFactoryContext) -> R>(
-        execute_func: F,
+    fn run_using_empty_factory_context<R>(
+        execute_func: impl FnOnce(&PublisherFactoryContext) -> R,
     ) -> R {
         run_using_factory_context(None, None, None, None, execute_func)
     }
@@ -325,16 +325,13 @@ mod tests {
     // This is needed because PublisherFactoryContext contains borrows and it's impossible to have
     // a function that creates and returns it - it can only be used in the function where it's
     // created.
-    fn run_using_factory_context<R, FE>(
+    fn run_using_factory_context<R>(
         publishers: Option<Vec<Arc<Publisher>>>,
         triggers: Option<Vec<Arc<Trigger>>>,
         nodes: Option<Vec<Arc<Node>>>,
         file_descriptors: Option<Vec<FileDescriptor>>,
-        execute_func: FE,
-    ) -> R
-    where
-        FE: FnOnce(&PublisherFactoryContext) -> R,
-    {
+        execute_func: impl FnOnce(&PublisherFactoryContext) -> R,
+    ) -> R {
         let config = MetricsConfig {
             publishers: publishers
                 .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone())),

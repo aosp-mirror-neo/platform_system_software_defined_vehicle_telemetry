@@ -33,7 +33,10 @@ impl Trigger {
     }
 
     #[allow(dead_code)]
-    pub(super) fn activate(&self, on_fired_callback: Box<dyn Fn() + Send>) -> Result<(), String> {
+    pub(super) fn activate(
+        &self,
+        on_fired_callback: impl Fn() + Send + 'static,
+    ) -> Result<(), String> {
         let mut is_active = self.is_active.lock().unwrap();
 
         if **is_active {
@@ -65,7 +68,7 @@ impl Trigger {
 impl TriggerType {
     pub(super) fn activate(
         &self,
-        on_fired_callback: Box<dyn Fn() + Send>,
+        on_fired_callback: impl Fn() + Send + 'static, // static is needed to pass callback to tokio::spawn
         weak_is_active: Weak<bool>,
     ) -> Result<(), String> {
         match self {
@@ -87,7 +90,7 @@ impl TriggerType {
     /// Periodically invokes callback until the activation Arc is freed.
     async fn call_periodically(
         interval_ms: u64,
-        on_fired_callback: Box<dyn Fn() + Send>,
+        on_fired_callback: impl Fn() + Send,
         weak_is_active: Weak<bool>,
     ) {
         let mut timer = tokio::time::interval(Duration::from_millis(interval_ms));
@@ -154,8 +157,8 @@ mod tests {
     async fn activate_already_active_fails() {
         let trigger = create_valid_periodic_trigger();
 
-        trigger.activate(Box::new(|| {})).unwrap();
-        let err = trigger.activate(Box::new(|| {})).err().unwrap();
+        trigger.activate(|| {}).unwrap();
+        let err = trigger.activate(|| {}).err().unwrap();
 
         assert!(err.contains("already active"));
     }
@@ -172,7 +175,7 @@ mod tests {
             },
         );
 
-        let err = trigger.activate(Box::new(|| {})).err().unwrap();
+        let err = trigger.activate(|| {}).err().unwrap();
 
         assert!(err.contains("not implemented"));
     }
@@ -184,7 +187,7 @@ mod tests {
         let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .activate(Box::new(move || callback_listener_clone.lock().unwrap().on_callback_fired()))
+            .activate(move || callback_listener_clone.lock().unwrap().on_callback_fired())
             .unwrap();
         trigger.deactivate().unwrap();
         // Sleep for 1.5 interval to ensure the trigger won't fire.
@@ -200,7 +203,7 @@ mod tests {
         let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .activate(Box::new(move || callback_listener_clone.lock().unwrap().on_callback_fired()))
+            .activate(move || callback_listener_clone.lock().unwrap().on_callback_fired())
             .unwrap();
         // Sleep for 2.5 interval to let trigger fire twice.
         time::sleep(Duration::from_millis(INTERVAL_MS * 5 / 2)).await;
@@ -221,7 +224,7 @@ mod tests {
             },
         );
 
-        let err = trigger.activate(Box::new(|| {})).err().unwrap();
+        let err = trigger.activate(|| {}).err().unwrap();
 
         assert!(err.contains("not implemented"));
     }
