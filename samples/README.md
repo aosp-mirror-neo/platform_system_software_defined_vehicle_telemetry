@@ -48,6 +48,13 @@ using the sdv_telemetry_service executable.
     # binder"
     ```
 
+    In case service crashes with the error `Aborted` run the following command and try again.
+    ```bash
+    setprop ro.telemetry.metric_config_store_in_mb 10
+    getprop ro.telemetry.metric_config_store_in_mb
+    # Expected "10"
+    ```
+
 4. Run client application
 
     1. Start a new terminal and run cpp client

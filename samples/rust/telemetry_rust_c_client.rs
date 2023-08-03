@@ -27,7 +27,7 @@ fn main() -> Result<(), binder::Status> {
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
     unsafe {
         info!("Connecting to service");
-        service = rust_to_c::start_telemetry_service();
+        service = rust_to_c::get_telemetry_service();
     }
 
     let mut config = MetricsConfig::new();
@@ -39,12 +39,12 @@ fn main() -> Result<(), binder::Status> {
     let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
 
     unsafe {
-        rust_to_c::addMetricsConfig(
+        rust_to_c::add_metrics_config(
             service,
             serialized_config.as_ptr() as *mut u8,
             serialized_config.len(),
         );
-        rust_to_c::removeMetricsConfig(service, config.uuid.as_ptr() as *const std::ffi::c_char);
+        rust_to_c::remove_metrics_config(service, config.uuid.as_ptr() as *const std::ffi::c_char);
         rust_to_c::stop_telemetry_service(service);
     }
 
