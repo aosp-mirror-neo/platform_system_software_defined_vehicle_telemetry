@@ -27,24 +27,23 @@ namespace android::sdv::telemetry {
         ALOGI("TelemetryService Destroyed");
     }
 
-    void TelemetryService::removeAllMetricsConfigs() {
+    void TelemetryService::remove_all_metrics_configs() {
         ALOGI("remove all metrics configs inside CPP");
         binder_service_->removeAllMetricsConfigs();
     }
 
-    void TelemetryService::removeMetricsConfig(const std::string& metricsConfigUuid) {
+    void TelemetryService::remove_metrics_config(const std::string& metricsConfigUuid) {
         ALOGI("remove metrics config inside CPP");
         binder_service_->removeMetricsConfig(metricsConfigUuid);
     }
 
-    void TelemetryService::addMetricsConfig(const std::vector<uint8_t>& metricConfig) {
+    void TelemetryService::add_metrics_config(const std::vector<uint8_t>& metricConfig) {
         ALOGI("addMetricsConfig in CPP");
         binder_service_->addMetricsConfig(metricConfig);
     }
 
-    void TelemetryService::setReportReadyListener(void* listener,
-                                void (*cbFunc)(void*, const char*, size_t))
-    {
+    void TelemetryService::set_report_ready_listener(void* listener,
+                                                     void (*cbFunc)(void*, const char*, size_t)) {
         android::sp<ReportReadyListenerImpl> mReportReadyListener(
             new ReportReadyListenerImpl(listener, cbFunc));
         android::binder::Status err = binder_service_->setReportReadyListener(mReportReadyListener);

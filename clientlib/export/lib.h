@@ -14,13 +14,13 @@ extern "C" {
 #endif
     // Opaque Pointer holding an instance of the telemetry_service defined in cpp.
     typedef struct ServiceHolder ServiceHolder;
-    ServiceHolder* start_telemetry_service();
+    ServiceHolder* get_telemetry_service();
     void stop_telemetry_service(ServiceHolder* holder);
-    void addMetricsConfig(ServiceHolder* holder, uint8_t* metrics_config, size_t size);
-    void removeMetricsConfig(ServiceHolder* holder, const char* uuid);
-    void removeAllMetricsConfigs(ServiceHolder* holder);
-    void setReportReadyListener(
-        ServiceHolder* holder, void* listener, void (*cbFunc)(void*, const char*, size_t));
+    void add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size);
+    void remove_metrics_config(ServiceHolder* holder, const char* uuid);
+    void remove_all_metrics_configs(ServiceHolder* holder);
+    void set_report_ready_listener(ServiceHolder* holder, void* listener,
+                                   void (*cbFunc)(void*, const char*, size_t));
 
 #ifdef __cplusplus
 }

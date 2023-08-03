@@ -27,7 +27,7 @@ fn main() {
     });
 
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
-    let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap();
+    let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap_or("1".to_string());
 
     let configured_size: usize = value.parse().unwrap_or(1); // Default size 1 MB
 

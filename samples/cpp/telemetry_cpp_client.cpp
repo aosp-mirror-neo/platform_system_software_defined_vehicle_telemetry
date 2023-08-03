@@ -31,8 +31,7 @@ int main() {
   ps->startThreadPool();
   ALOGI("Fetching binder telemetry service");
   // Opaque pointer holding an instance of the telemetry service
-  ServiceHolder* holder =
-        start_telemetry_service();
+  ServiceHolder* holder = get_telemetry_service();
 
   android::sdv::telemetry::MetricsConfig config;
   config.set_uuid("01bf0754-df95-46bb-bb35-522b6af66600");
@@ -49,14 +48,14 @@ int main() {
   }
 
   std::vector<uint8_t> vec(serialData.begin(), serialData.end());
-  addMetricsConfig(holder, &vec[0], vec.size());
+  add_metrics_config(holder, &vec[0], vec.size());
 
   android::sp<ReportReadyImpl> listener(new ReportReadyImpl());
   ALOGI("Setting report ready listener");
-  setReportReadyListener(
-                holder, static_cast<void*>(listener.get()), &trigger_report_ready_listener);
+  set_report_ready_listener(holder, static_cast<void*>(listener.get()),
+                            &trigger_report_ready_listener);
 
-  removeAllMetricsConfigs(holder);
+  remove_all_metrics_configs(holder);
 
   ALOGI("Releasing binder service");
   stop_telemetry_service(holder);
