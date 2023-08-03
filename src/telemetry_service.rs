@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 //! This module implements the ITelemetryService AIDL interface
-#![allow(non_snake_case)]
 
 mod collection_extension;
 mod file_io_utils;

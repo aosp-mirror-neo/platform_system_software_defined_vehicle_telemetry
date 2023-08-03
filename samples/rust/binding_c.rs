@@ -9,13 +9,13 @@ pub struct ServiceHolder {
 }
 
 extern "C" {
-    pub fn start_telemetry_service() -> *mut ServiceHolder;
+    pub fn get_telemetry_service() -> *mut ServiceHolder;
     pub fn stop_telemetry_service(holder: *mut ServiceHolder);
-    pub fn addMetricsConfig(holder: *mut ServiceHolder, metrics_config: *mut u8, size: usize);
-    pub fn removeMetricsConfig(holder: *mut ServiceHolder, uuid: *const ::std::os::raw::c_char);
-    pub fn removeAllMetricsConfigs(holder: *mut ServiceHolder);
+    pub fn add_metrics_config(holder: *mut ServiceHolder, metrics_config: *mut u8, size: usize);
+    pub fn remove_metrics_config(holder: *mut ServiceHolder, uuid: *const ::std::os::raw::c_char);
+    pub fn remove_all_metrics_configs(holder: *mut ServiceHolder);
 
-    pub fn setReportReadyListener(
+    pub fn set_report_ready_listener(
         holder: *mut ServiceHolder,
         listener: *mut ::std::os::raw::c_void,
         cbFunc: ::std::option::Option<
