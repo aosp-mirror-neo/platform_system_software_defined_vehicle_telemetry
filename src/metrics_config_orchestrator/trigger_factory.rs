@@ -10,7 +10,7 @@ use thiserror::Error;
 
 use crate::metrics_config_orchestrator::{trigger::TriggerType, MetricsConfig, Trigger};
 
-pub trait TriggerFactory {
+pub(crate) trait TriggerFactory {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
@@ -26,7 +26,7 @@ pub trait TriggerFactory {
     ) -> Result<(), TriggerFactoryError>;
 }
 
-pub struct TriggerFactoryContext<'a> {
+pub(crate) struct TriggerFactoryContext<'a> {
     pub config: &'a MetricsConfig,
     pub expression_nodes: &'a Vec<Arc<Node>>,
 }
@@ -43,10 +43,10 @@ pub enum TriggerFactoryError {
     UnknownTriggerType,
 }
 
-pub struct TriggerFactoryImpl {}
+pub(crate) struct TriggerFactoryImpl {}
 
 impl TriggerFactoryImpl {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         TriggerFactoryImpl {}
     }
 }

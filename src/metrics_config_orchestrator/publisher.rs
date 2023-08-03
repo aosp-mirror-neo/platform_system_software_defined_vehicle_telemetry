@@ -9,12 +9,14 @@ use std::sync::{Arc, Weak};
 
 use crate::metrics_config_orchestrator::Trigger;
 
-pub struct Publisher {
+#[allow(dead_code)]
+pub(crate) struct Publisher {
     pub name: String,
     pub publisher_type: PublisherType,
 }
 
-pub enum PublisherType {
+#[allow(dead_code)]
+pub(crate) enum PublisherType {
     Signal {
         signal_name: String,
     },
@@ -29,7 +31,8 @@ pub enum PublisherType {
     },
 }
 
-pub struct DeclarativeAggregation {
+#[allow(dead_code)]
+pub(crate) struct DeclarativeAggregation {
     pub field_name: String,
     pub selector_expression: Arc<Node>,
     pub aggregation_type: AggregationType,

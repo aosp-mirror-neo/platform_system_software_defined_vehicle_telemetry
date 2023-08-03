@@ -17,7 +17,7 @@ use crate::metrics_config_orchestrator::{
     MetricsConfig, Publisher,
 };
 
-pub trait PublisherFactory {
+pub(crate) trait PublisherFactory {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
@@ -34,7 +34,7 @@ pub trait PublisherFactory {
     ) -> Result<(), PublisherFactoryError>;
 }
 
-pub struct PublisherFactoryContext<'a> {
+pub(crate) struct PublisherFactoryContext<'a> {
     pub config: &'a MetricsConfig,
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub file_descriptors: &'a Vec<FileDescriptor>,
@@ -62,10 +62,10 @@ pub enum PublisherFactoryError {
     UnknownPublisherType,
 }
 
-pub struct PublisherFactoryImpl {}
+pub(crate) struct PublisherFactoryImpl {}
 
 impl PublisherFactoryImpl {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         PublisherFactoryImpl {}
     }
 }
