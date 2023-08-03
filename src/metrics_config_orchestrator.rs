@@ -74,7 +74,7 @@ pub enum MetricsConfigOrchestratorError {
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
-pub struct MetricsConfigOrchestratorImpl<
+pub(super) struct MetricsConfigOrchestratorImpl<
     NdFactory: NodeFactory = NodeFactoryImpl,
     PubFactory: PublisherFactory = PublisherFactoryImpl,
     TrigFactory: TriggerFactory = TriggerFactoryImpl,
@@ -85,13 +85,13 @@ pub struct MetricsConfigOrchestratorImpl<
     trigger_factory: TrigFactory,
 }
 
-pub struct MetricsConfig {
+pub(super) struct MetricsConfig {
     publishers: HashMap<String, Arc<Publisher>>,
     triggers: HashMap<String, Arc<Trigger>>,
 }
 
 impl MetricsConfigOrchestratorImpl {
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
             node_factory: NodeFactoryImpl::new(),
