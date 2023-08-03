@@ -162,8 +162,8 @@ mod tests {
         Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
-    fn run_using_empty_factory_context<R, F: FnOnce(&TriggerFactoryContext) -> R>(
-        execute_func: F,
+    fn run_using_empty_factory_context<R>(
+        execute_func: impl FnOnce(&TriggerFactoryContext) -> R,
     ) -> R {
         run_using_factory_context(None, None, None, execute_func)
     }
@@ -172,15 +172,12 @@ mod tests {
     // This is needed because TriggerFactoryContext contains borrows and it's impossible to have
     // a function that creates and returns it - it can only be used in the function where it's
     // created.
-    fn run_using_factory_context<R, FE>(
+    fn run_using_factory_context<R>(
         publishers: Option<Vec<Arc<Publisher>>>,
         triggers: Option<Vec<Arc<Trigger>>>,
         nodes: Option<Vec<Arc<Node>>>,
-        execute_func: FE,
-    ) -> R
-    where
-        FE: FnOnce(&TriggerFactoryContext) -> R,
-    {
+        execute_func: impl FnOnce(&TriggerFactoryContext) -> R,
+    ) -> R {
         let config = MetricsConfig {
             publishers: publishers
                 .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone())),
