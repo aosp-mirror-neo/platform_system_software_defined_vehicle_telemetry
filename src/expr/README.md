@@ -2,11 +2,21 @@
 
 ## Build Instructions
 
-Run `UNSAFE_DISABLE_HIDDENAPI_FLAGS=true m -j`
+Add `ast` to `PRODUCT_PACKAGES` in the lunch target's mk file.
 
-Push executable to device
+* For sdv_core_cf target, add the package to `device/google/sdv/sdv_core_common/sdv_core_common_packages.mk`
 
-Run `adb shell /system/bin/ast`
+Run the following commands
+
+```
+$ UNSAFE_DISABLE_HIDDENAPI_FLAGS=true m -j
+
+$ launch_cvd # start emulator
+
+$ adb root
+
+$ adb shell /system/bin/ast
+```
 
 Check logs with `adb logcat`
 

@@ -4,11 +4,12 @@
 
 mod node_value;
 
+pub use node_value::NodeValue;
+
 use log::info;
-use sdv_node_value::NodeValue;
 use sdvtelemetry_proto_rust::expression::{
-    combination_node::LogicalOperator, node::Node_type, CombinationNode as CombinationNodeProto,
-    Node as NodeProto,
+    combination_node::LogicalOperator, combination_node::Operator as OperatorProto,
+    node::Node_type as NodeTypeProto, Node as NodeProto,
 };
 use std::fmt;
 use std::sync::Arc;
@@ -21,37 +22,40 @@ pub trait NodeFactory {
     fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String>;
 }
 
-/// A wrapper around a protobuf Node.
-#[derive(Default, Clone, PartialEq)]
-pub struct Node {
-    // TODO(b/293212607): remove protobuf Node reference in rust struct
-    proto_node: NodeProto,
-    // Option<T> means the variable can either hold nothing or T. Rust
-    // variables cannot be null by default so we use Option<T>.
-    // Arc<T> means it is holding an atomic reference-counted pointer to T.
-    left: Option<Arc<Node>>,
-    right: Option<Arc<Node>>,
-}
+/// Rust representation of a protobuf Node.
+/// The enum variants have 1-1 correspondence with a protobuf Node.
+/// For detailed explanation, see expression.proto.
+#[derive(PartialEq)]
+pub enum Node {
+    /// Corresponds to ConstantLeafNode message.
+    ConstantLeaf {
+        /// Constant value.
+        value: NodeValue,
+    },
+    /// Leaf node that is the field value of a published message.
+    FieldLeaf {
+        /// Name of the publisher producing the data.
+        publisher_name: String,
 
-/// Pretty print Node's debug string, reducing clutter caused by Option<Arc<T>>.
-impl fmt::Debug for Node {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let left_string = if let Some(left_child_ref) = &self.left {
-            format!("{:#?}", left_child_ref)
-        } else {
-            "Empty".to_string()
-        };
-        let right_string = if let Some(right_child_ref) = &self.right {
-            format!("{:#?}", right_child_ref)
-        } else {
-            "Empty".to_string()
-        };
-        write!(
-            f,
-            "Node {{ proto node: {},  left: {},  right: {} }}",
-            self.proto_node, left_string, right_string
-        )
-    }
+        /// Field names indicating which value to read.
+        fields: Vec<String>,
+    },
+    /// Non-leaf variant holding a value computed from left and right children.
+    /// Protobuf Nodes use index to represent left and right child nodes, Rust Nodes
+    /// have direct references to the child nodes.
+    Combination {
+        /// Operator used to compute a value between left and right child nodes.
+        operator: OperatorProto,
+
+        /// Reference to the left child.
+        /// Option<T> means the variable can either hold nothing or T. Rust
+        /// variables cannot be null by default so we use Option<T>.
+        /// Arc<T> means it is holding an atomic reference-counted pointer to T.
+        left: Option<Arc<Node>>,
+
+        /// Reference to the right child.
+        right: Option<Arc<Node>>,
+    },
 }
 
 /// Implementation of NodeFactory trait.
@@ -81,47 +85,77 @@ impl NodeFactoryImpl {
             return Ok(initialized_node.clone());
         }
 
-        let proto_node = &proto_nodes[index];
-        // if combination node, initialize left and right children first
         // TODO(b/289295418): type check the child nodes to ensure they have compatible types
-        let rust_node = if let Some(Node_type::CombinationNode(combination_node)) =
-            &proto_node.node_type
-        {
-            // initialize left child
-            let left_child = Some(Self::initialize(
-                combination_node.left_index.ok_or(format!(
-                    "Node at index {} is invalid. All CombinationNodes must specify a left child.",
-                    index
-                ))? as usize,
-                nodes,
-                proto_nodes,
-            )?);
+        let proto_node = &proto_nodes[index];
 
-            // initialize right child as needed
-            let right_child = match combination_node.right_index {
-                Some(right_idx) => {
-                    if combination_node.has_unary_operator() {
-                        return Err(format!(
-                            "Node at index {} has unary operator but specified two children",
-                            index
-                        ));
-                    }
-                    Some(Self::initialize(right_idx as usize, nodes, proto_nodes)?)
+        // The `match` block recursively creates a Rust Node enum and assign it
+        // to the `rust_node` variable
+        let rust_node = match &proto_node.node_type {
+            Some(NodeTypeProto::ConstantLeafNode(constant_leaf)) => {
+                // base case 1: constant leaf node, simply create Node and return
+                Arc::new(Node::ConstantLeaf {
+                    value: NodeValue::from_constant_leaf_node(constant_leaf)?,
+                })
+            }
+            Some(NodeTypeProto::FieldLeafNode(field_leaf)) => {
+                if field_leaf.field_names.is_empty() {
+                    return Err(format!("Node at index {} has empty fields", index));
                 }
-                None => {
-                    if !combination_node.has_unary_operator() {
-                        return Err(format!(
-                            "Node at index {} has binary operator but did not specify right child",
-                            index
-                        ));
+                // base case 2: field leaf node, simply create Node and return
+                Arc::new(Node::FieldLeaf {
+                    publisher_name: field_leaf.publisher_name.clone(),
+                    fields: field_leaf.field_names.clone(),
+                })
+            }
+            Some(NodeTypeProto::CombinationNode(combination_node)) => {
+                // before recursion, ensure combination node specified an operator
+                let op = combination_node
+                    .operator
+                    .as_ref()
+                    .ok_or(format!("Node at index {} did not specify operator", index))?;
+
+                // recursively initialize left child
+                let left_child = Some(Self::initialize(
+                    combination_node.left_index.ok_or(format!(
+                        "Node at index {} is invalid. All CombinationNodes must specify a left child.",
+                        index
+                    ))? as usize,
+                    nodes,
+                    proto_nodes,
+                )?);
+
+                // recursively initialize right child as needed
+                let right_child = match combination_node.right_index {
+                    Some(right_idx) => {
+                        if op.is_unary_operator() {
+                            return Err(format!(
+                                "Node at index {} has unary operator but specified two children",
+                                index
+                            ));
+                        }
+                        // recurse on right child
+                        Some(Self::initialize(right_idx as usize, nodes, proto_nodes)?)
                     }
-                    None
-                }
-            };
-            Arc::new(Node { proto_node: proto_node.clone(), left: left_child, right: right_child })
-        } else {
-            // leaf node, no left and right children
-            Arc::new(Node { proto_node: proto_node.clone(), left: None, right: None })
+                    None => {
+                        if !op.is_unary_operator() {
+                            return Err(format!(
+                                "Node at index {} has binary operator but did not specify right child",
+                                index
+                            ));
+                        }
+                        None
+                    }
+                };
+                // create Node of Combination variant for the protobuf node at `index`
+                Arc::new(Node::Combination {
+                    operator: op.clone(),
+                    left: left_child,
+                    right: right_child,
+                })
+            }
+            _ => {
+                return Err(format!("Node at index {} did not specify a node_type", index));
+            }
         };
 
         // cloning Arc<Node> clones the reference, not the underlying Node
@@ -157,72 +191,104 @@ impl Node {
         &self,
         message_provider: &F,
     ) -> Result<NodeValue, String> {
-        // Base case of recursion: node is a leaf node, return value
-        match &self.proto_node.node_type {
-            Some(Node_type::ConstantLeafNode(constant_leaf_node)) => {
-                return Ok(NodeValue::from_constant_leaf_node(constant_leaf_node));
+        match &self {
+            Node::ConstantLeaf { value } => {
+                // Base case of recursion: node is a leaf node, return value
+                Ok(value.clone())
             }
-            Some(Node_type::FieldLeafNode(field_leaf_node)) => {
-                return NodeValue::from_field_leaf_node(field_leaf_node, message_provider);
+            Node::FieldLeaf { publisher_name, fields } => {
+                // Base case of recursion: node is a leaf node, return value
+                let msg = message_provider(publisher_name);
+                NodeValue::extract_field_value(msg, fields)
             }
-            _ => {
-                // Node is a not a leaf node, will recursively evaluate its children
+            Node::Combination { operator, left, right } => {
+                // evaluate left branch recursively
+                let left_val =
+                    match left {
+                        Some(left) => left.evaluate(message_provider),
+                        None => Err("Incorrect Node! Every non-leaf Node should have a left child"
+                            .to_string()),
+                    }?; // `?` returns early if error
+                info!("left val = {:?}", left_val);
+
+                // evaluate right branch recursively
+                let right_val = match right {
+                    Some(right) => right.evaluate(message_provider),
+                    None => {
+                        if operator.is_unary_operator() {
+                            return Ok(NodeValue::None);
+                        }
+                        Err("Incorrect AST, right child should always be specified for nodes with binary operators.".to_string())
+                    }
+                }?; // `?` returns early if error
+                info!("right val = {:?}", right_val);
+
+                // If unary operator, then operates on self.
+                // If binary operator, then [left] <operator> [right].
+                left_val.operate(operator, &right_val)
             }
-        }
-
-        let proto_combination_node = self.proto_node.combination_node();
-
-        // evaluate left branch recursively
-        let left_val = match &self.left {
-            Some(left) => left.evaluate(message_provider),
-            None => Err("Incorrect Node! Every non-leaf Node should have a left child".to_string()),
-        }?; // `?` returns early if error
-        info!("left val = {:?}", left_val);
-
-        // evaluate right branch recursively
-        let right_val = match &self.right {
-            Some(right) => right.evaluate(message_provider),
-            None => {
-                if proto_combination_node.has_unary_operator() {
-                    return Ok(NodeValue::None);
-                }
-                return Err("Incorrect AST, right child should always be specified for nodes with binary operators.".to_string());
-            }
-        }?; // `?` returns early if error
-        info!("right val = {:?}", right_val);
-
-        // If unary operator, then operates on self.
-        // If binary operator, then [left] <operator> [right].
-        if proto_combination_node.has_logical_operator() {
-            left_val.handle_logical(&proto_combination_node.logical_operator(), &right_val)
-        } else if proto_combination_node.has_arithmetic_operator() {
-            left_val.handle_arithmetic(&proto_combination_node.arithmetic_operator(), &right_val)
-        } else {
-            left_val.handle_relational(&proto_combination_node.relational_operator(), &right_val)
         }
     }
 }
 
-trait CombinationNodeExtension {
-    fn has_unary_operator(&self) -> bool;
+/// Pretty print Node's debug string, reducing clutter caused by Option<Arc<T>>.
+impl fmt::Debug for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self {
+            Node::ConstantLeaf { value } => {
+                write!(f, "Constant Leaf Node {{ value: {:?} }}", value)
+            }
+            Node::FieldLeaf { publisher_name, fields } => write!(
+                f,
+                "Field Leaf Node {{ publisher_name: {}, fields: {:?} }}",
+                publisher_name, fields
+            ),
+            Node::Combination { operator, left, right } => {
+                let left_string = if let Some(left_child_ref) = left {
+                    format!("{:#?}", left_child_ref)
+                } else {
+                    "Empty".to_string()
+                };
+                let right_string = if let Some(right_child_ref) = right {
+                    format!("{:#?}", right_child_ref)
+                } else {
+                    "Empty".to_string()
+                };
+                write!(
+                    f,
+                    "Combination Node {{ operator: {:?},  left: {},  right: {} }}",
+                    operator, left_string, right_string
+                )
+            }
+        }
+    }
 }
 
-impl CombinationNodeExtension for CombinationNodeProto {
-    /// Helper function to check if protobuf CombinationNode has unary operator.
-    fn has_unary_operator(&self) -> bool {
-        self.has_logical_operator() && self.logical_operator() == LogicalOperator::NOT
+trait OperatorProtoExtension {
+    fn is_unary_operator(&self) -> bool;
+}
+
+impl OperatorProtoExtension for OperatorProto {
+    /// Helper function to check if operator is unary.
+    fn is_unary_operator(&self) -> bool {
+        if let OperatorProto::LogicalOperator(op) = self {
+            return op.enum_value_or_default() == LogicalOperator::NOT;
+        }
+        false
     }
 }
 
 /// Per go/sdv-rust-testing, unit tests are to be written in the same file.
 #[cfg(test)]
 mod tests {
-    use super::{NodeFactory, NodeFactoryImpl};
+    use super::{Node, NodeFactory, NodeFactoryImpl};
+    use crate::NodeValue;
     use lazy_static::lazy_static;
-    use sdv_node_value::NodeValue;
     use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
-        combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
+        combination_node::{
+            ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+        },
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
     use std::sync::Arc;
@@ -286,27 +352,43 @@ mod tests {
     #[test]
     fn test_create_nodes_ok() -> Result<(), String> {
         // setup
+        let op = LogicalOperator::AND;
         let node_factory = NodeFactoryImpl::new();
-        let all_proto_nodes = create_true_false_branch(LogicalOperator::AND);
+        let all_proto_nodes = create_true_false_branch(op);
 
         // action
         let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // assert 1-1 correspondence between rust node and protobuf node
-        for (i, rust_node) in nodes.iter().enumerate() {
-            assert_eq!(rust_node.proto_node, all_proto_nodes[i]);
-            if rust_node.proto_node.has_combination_node() {
-                assert!(Arc::ptr_eq(
-                    rust_node.left.as_ref().unwrap(),
-                    &nodes[rust_node.proto_node.combination_node().left_index.unwrap() as usize]
-                ));
-                assert!(Arc::ptr_eq(
-                    rust_node.right.as_ref().unwrap(),
-                    &nodes[rust_node.proto_node.combination_node().right_index.unwrap() as usize]
-                ));
-            } else {
-                assert!(rust_node.left.is_none());
-                assert!(rust_node.right.is_none());
+        for (rust_node, proto_node) in nodes.iter().zip(all_proto_nodes) {
+            match rust_node.as_ref() {
+                Node::ConstantLeaf { value } => {
+                    if let NodeValue::Bool(value) = value {
+                        assert_eq!(*value, proto_node.constant_leaf_node().bool_value());
+                    } else {
+                        return Err(format!(
+                            "Input Nodes contain only boolean constants, \
+                                    output Node {:?} is a non-boolean constant",
+                            value
+                        ));
+                    }
+                }
+                Node::Combination { operator, left, right } => {
+                    assert_eq!(*operator, OperatorProto::LogicalOperator(op.into()));
+                    assert!(Arc::ptr_eq(
+                        left.as_ref().unwrap(),
+                        &nodes[proto_node.combination_node().left_index.unwrap() as usize]
+                    ));
+                    assert!(Arc::ptr_eq(
+                        right.as_ref().unwrap(),
+                        &nodes[proto_node.combination_node().right_index.unwrap() as usize]
+                    ));
+                }
+                _ => {
+                    return Err("Output Nodes are expected to contain ConstantLeaf and \
+                                Combination enum variants only"
+                        .to_string())
+                }
             }
         }
         Ok(())
@@ -602,11 +684,11 @@ mod tests {
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
-            NodeValue::Double(100.0), // index 0 = field value of 100
-            NodeValue::Int32(2),      // index 1 = constant value of 2
-            NodeValue::Double(50.0),  // index 2 = 100 / 2 = 50
-            NodeValue::Int64(80),     // index 3 = field value of 80
-            NodeValue::Bool(true),    // index 4 = 50 < 80 = true
+            NodeValue::Float(100.0), // index 0 = field value of 100
+            NodeValue::Int32(2),     // index 1 = constant value of 2
+            NodeValue::Double(50.0), // index 2 = 100 / 2 = 50
+            NodeValue::Int32(80),    // index 3 = field value of 80
+            NodeValue::Bool(true),   // index 4 = 50 < 80 = true
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
