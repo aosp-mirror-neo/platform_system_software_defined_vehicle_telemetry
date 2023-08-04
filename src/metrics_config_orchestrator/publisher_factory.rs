@@ -77,9 +77,12 @@ impl PublisherFactoryImpl {
         message_type_name: &str,
         file_descriptors: &[FileDescriptor],
     ) -> Result<MessageDescriptor, PublisherFactoryError> {
+        // Add a leading dot because this is what message_by_full_name expects.
+        let mut full_type_name = message_type_name.to_owned();
+        full_type_name.insert(0, '.');
         file_descriptors
             .iter()
-            .find_map(|descriptor| descriptor.message_by_full_name(message_type_name))
+            .find_map(|descriptor| descriptor.message_by_full_name(&full_type_name))
             .ok_or_else(|| PublisherFactoryError::UnknownMessageType {
                 message_type: message_type_name.to_owned(),
             })
@@ -355,15 +358,9 @@ mod tests {
         declarative_aggregations: Vec<DeclarativeAggregationProto>,
     ) -> &'a mut AggregationPublisherProto {
         let aggregation_proto = publisher.mut_aggregation_publisher();
-        aggregation_proto.message_type_name = to_full_name(message_descriptor);
+        aggregation_proto.message_type_name = message_descriptor.full_name().to_owned();
         aggregation_proto.declarative_aggregations = declarative_aggregations;
         aggregation_proto
-    }
-
-    fn to_full_name(descriptor_proto: &MessageDescriptor) -> String {
-        let mut full_name = descriptor_proto.full_name().to_owned();
-        full_name.insert(0, '.');
-        full_name
     }
 
     fn create_node() -> Node {
