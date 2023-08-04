@@ -44,6 +44,7 @@ fn main() {
     let mut right_node = NodeProto::new();
     let mut root_node = NodeProto::new();
     let mut value_node = NodeProto::new();
+    let mut message_node = NodeProto::new();
 
     let mut field_leaf = FieldLeafNode::new();
     field_leaf.publisher_name = "publisher_name".to_string();
@@ -62,10 +63,12 @@ fn main() {
 
     let mut field_leaf = FieldLeafNode::new();
     field_leaf.publisher_name = "publisher_name".to_string();
+    message_node.set_field_leaf_node(field_leaf.clone()); // protobuf message
+
     field_leaf.field_names.push("repeated_doubles".to_string());
     value_node.set_field_leaf_node(field_leaf); // list = [3.14, 6.28, 2.718]
 
-    let all_nodes = vec![left_node, right_node, root_node, value_node];
+    let all_nodes = vec![left_node, right_node, root_node, value_node, message_node];
 
     let node_factory = NodeFactoryImpl::new();
     match node_factory.create_nodes(&all_nodes) {

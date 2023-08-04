@@ -98,9 +98,6 @@ impl NodeFactoryImpl {
                 })
             }
             Some(NodeTypeProto::FieldLeafNode(field_leaf)) => {
-                if field_leaf.field_names.is_empty() {
-                    return Err(format!("Node at index {} has empty fields", index));
-                }
                 // base case 2: field leaf node, simply create Node and return
                 Arc::new(Node::FieldLeaf {
                     publisher_name: field_leaf.publisher_name.clone(),
@@ -199,7 +196,7 @@ impl Node {
             Node::FieldLeaf { publisher_name, fields } => {
                 // Base case of recursion: node is a leaf node, return value
                 let msg = message_provider(publisher_name);
-                NodeValue::extract_field_value(msg, fields)
+                NodeValue::extract_value(msg, fields)
             }
             Node::Combination { operator, left, right } => {
                 // evaluate left branch recursively
