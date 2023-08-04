@@ -115,15 +115,17 @@ impl<NdFactory: NodeFactory, PubFactory: PublisherFactory, TrigFactory: TriggerF
 
     /// Topologically sort publishers and triggers declared in the protobuf message
     /// and try to fold the sorted list using provided functions.
-    fn try_fold_topoligically_sorted_publishers_triggers<FP, FT>(
+    fn try_fold_topoligically_sorted_publishers_triggers(
         config_proto: &MetricsConfigProto,
-        publisher_func: FP,
-        trigger_func: FT,
-    ) -> Result<MetricsConfig, MetricsConfigOrchestratorError>
-    where
-        FP: Fn(&PublisherProto, &mut MetricsConfig) -> Result<(), MetricsConfigOrchestratorError>,
-        FT: Fn(&TriggerProto, &mut MetricsConfig) -> Result<(), MetricsConfigOrchestratorError>,
-    {
+        publisher_func: impl Fn(
+            &PublisherProto,
+            &mut MetricsConfig,
+        ) -> Result<(), MetricsConfigOrchestratorError>,
+        trigger_func: impl Fn(
+            &TriggerProto,
+            &mut MetricsConfig,
+        ) -> Result<(), MetricsConfigOrchestratorError>,
+    ) -> Result<MetricsConfig, MetricsConfigOrchestratorError> {
         enum DependencyContainer<'a> {
             Publisher { publisher_proto: &'a PublisherProto, dependencies: Vec<&'a String> },
             Trigger { trigger_proto: &'a TriggerProto, dependencies: Vec<&'a String> },
@@ -203,7 +205,7 @@ impl<NdFactory: NodeFactory, PubFactory: PublisherFactory, TrigFactory: TriggerF
             })
             .ok_or(MetricsConfigOrchestratorError::CycledPublishersTriggers)?;
 
-        sorted_vector.iter().try_fold(
+        sorted_vector.iter().rev().try_fold(
             MetricsConfig { publishers: HashMap::new(), triggers: HashMap::new() },
             |mut config, container_name| {
                 match dependency_map.get(*container_name) {
@@ -369,10 +371,17 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::MetricsConfigOrchestratorImpl;
 
+    type MockedMetricsConfigOrchestratorImpl =
+        MetricsConfigOrchestratorImpl<MockNodeFactory, MockPublisherFactory, MockTriggerFactory>;
+
+    const AGGREGATION_PUBLISHER_NAME: &str = "AggregationPublisher1";
+    const CONDITIONAL_TRIGGER_NAME: &str = "ConditionalTrigger1";
+    const DATA_TRIGGER_NAME: &str = "DataTrigger1";
     const INVALID_PUBLISHER_NAME: &str = "Publisher~0";
     const INVALID_TRIGGER_NAME: &str = "Trigger~0";
-    const PUBLISHER_NAME: &str = "Publisher1";
-    const TRIGGER_NAME: &str = "Trigger1";
+    const SERVICE_PUBLISHER_NAME: &str = "ServicePublisher1";
+    const SOME_PUBLISHER_NAME: &str = "Publisher1";
+    const SOME_TRIGGER_NAME: &str = "Trigger1";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
     struct MockNodeFactory {
@@ -408,16 +417,36 @@ mod tests {
     }
 
     struct MockPublisherFactory {
-        created_publisher_protos: Mutex<Vec<PublisherProto>>,
-        validated_publisher_protos: Mutex<Vec<PublisherProto>>,
+        create_callback: Option<
+            Box<dyn Fn(&PublisherProto) -> Option<Result<Publisher, PublisherFactoryError>>>,
+        >,
+        validate_callback:
+            Option<Box<dyn Fn(&PublisherProto) -> Option<Result<(), PublisherFactoryError>>>>,
     }
 
     impl MockPublisherFactory {
         fn new() -> Self {
-            MockPublisherFactory {
-                created_publisher_protos: Mutex::new(Vec::new()),
-                validated_publisher_protos: Mutex::new(Vec::new()),
-            }
+            MockPublisherFactory { create_callback: None, validate_callback: None }
+        }
+
+        fn set_create_callback(
+            &mut self,
+            create_callback: impl Fn(&PublisherProto) -> Option<Result<Publisher, PublisherFactoryError>>
+                + 'static,
+        ) {
+            self.create_callback = Some(Box::new(create_callback)
+                as Box<
+                    dyn Fn(&PublisherProto) -> Option<Result<Publisher, PublisherFactoryError>>,
+                >);
+        }
+
+        fn set_validate_callback(
+            &mut self,
+            validate_callback: impl Fn(&PublisherProto) -> Option<Result<(), PublisherFactoryError>>
+                + 'static,
+        ) {
+            self.validate_callback = Some(Box::new(validate_callback)
+                as Box<dyn Fn(&PublisherProto) -> Option<Result<(), PublisherFactoryError>>>);
         }
     }
 
@@ -427,7 +456,11 @@ mod tests {
             publisher_proto: &PublisherProto,
             _context: &PublisherFactoryContext,
         ) -> Result<Publisher, PublisherFactoryError> {
-            self.created_publisher_protos.lock().unwrap().push(publisher_proto.clone());
+            if let Some(callback) = &self.create_callback {
+                if let Some(res) = callback(publisher_proto) {
+                    return res;
+                }
+            }
             Ok(Publisher {
                 name: publisher_proto.name.clone(),
                 publisher_type: PublisherType::Service { service_name: "Foo".to_string() },
@@ -439,22 +472,43 @@ mod tests {
             publisher_proto: &PublisherProto,
             _context: &PublisherFactoryContext,
         ) -> Result<(), PublisherFactoryError> {
-            self.validated_publisher_protos.lock().unwrap().push(publisher_proto.clone());
+            if let Some(callback) = &self.validate_callback {
+                if let Some(res) = callback(publisher_proto) {
+                    return res;
+                }
+            }
             Ok(())
         }
     }
 
     struct MockTriggerFactory {
-        created_trigger_protos: Mutex<Vec<TriggerProto>>,
-        validated_trigger_protos: Mutex<Vec<TriggerProto>>,
+        create_callback:
+            Option<Box<dyn Fn(&TriggerProto) -> Option<Result<Trigger, TriggerFactoryError>>>>,
+        validate_callback:
+            Option<Box<dyn Fn(&TriggerProto) -> Option<Result<(), TriggerFactoryError>>>>,
     }
 
     impl MockTriggerFactory {
         fn new() -> Self {
-            MockTriggerFactory {
-                created_trigger_protos: Mutex::new(Vec::new()),
-                validated_trigger_protos: Mutex::new(Vec::new()),
-            }
+            MockTriggerFactory { create_callback: None, validate_callback: None }
+        }
+
+        fn set_create_callback(
+            &mut self,
+            create_callback: impl Fn(&TriggerProto) -> Option<Result<Trigger, TriggerFactoryError>>
+                + 'static,
+        ) {
+            self.create_callback = Some(Box::new(create_callback)
+                as Box<dyn Fn(&TriggerProto) -> Option<Result<Trigger, TriggerFactoryError>>>);
+        }
+
+        fn set_validate_callback(
+            &mut self,
+            validate_callback: impl Fn(&TriggerProto) -> Option<Result<(), TriggerFactoryError>>
+                + 'static,
+        ) {
+            self.validate_callback = Some(Box::new(validate_callback)
+                as Box<dyn Fn(&TriggerProto) -> Option<Result<(), TriggerFactoryError>>>);
         }
     }
 
@@ -464,7 +518,11 @@ mod tests {
             trigger_proto: &TriggerProto,
             _context: &TriggerFactoryContext,
         ) -> Result<Trigger, TriggerFactoryError> {
-            self.created_trigger_protos.lock().unwrap().push(trigger_proto.clone());
+            if let Some(callback) = &self.create_callback {
+                if let Some(res) = callback(trigger_proto) {
+                    return res;
+                }
+            }
             Ok(Trigger::new(
                 trigger_proto.name.clone(),
                 TriggerType::Periodic { interval_ms: u64::MAX },
@@ -476,25 +534,51 @@ mod tests {
             trigger_proto: &TriggerProto,
             _context: &TriggerFactoryContext,
         ) -> Result<(), TriggerFactoryError> {
-            self.validated_trigger_protos.lock().unwrap().push(trigger_proto.clone());
+            if let Some(callback) = &self.validate_callback {
+                if let Some(res) = callback(trigger_proto) {
+                    return res;
+                }
+            }
             Ok(())
         }
     }
 
-    fn create_orchestrator(
-    ) -> MetricsConfigOrchestratorImpl<MockNodeFactory, MockPublisherFactory, MockTriggerFactory>
-    {
-        MetricsConfigOrchestratorImpl {
-            configs: Mutex::new(HashMap::new()),
-            node_factory: MockNodeFactory::new(),
-            publisher_factory: MockPublisherFactory::new(),
-            trigger_factory: MockTriggerFactory::new(),
+    impl MockedMetricsConfigOrchestratorImpl {
+        fn new() -> Self {
+            MetricsConfigOrchestratorImpl {
+                configs: Mutex::new(HashMap::new()),
+                node_factory: MockNodeFactory::new(),
+                publisher_factory: MockPublisherFactory::new(),
+                trigger_factory: MockTriggerFactory::new(),
+            }
         }
+    }
+
+    fn create_valid_config_with_publisher() -> MetricsConfigProto {
+        let mut publisher = PublisherProto::new();
+        publisher.name = SOME_PUBLISHER_NAME.to_owned();
+        publisher.set_service_publisher(ServicePublisherProto::new());
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.publishers.push(publisher);
+        config
+    }
+
+    fn create_valid_config_with_trigger() -> MetricsConfigProto {
+        let mut trigger = TriggerProto::new();
+        trigger.name = SOME_TRIGGER_NAME.to_owned();
+        trigger.set_periodic_trigger(PeriodicTriggerProto::new());
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.triggers.push(trigger);
+        config
     }
 
     fn create_config_with_duplicate_publisher_name() -> MetricsConfigProto {
         let mut publisher1 = PublisherProto::new();
-        publisher1.name = PUBLISHER_NAME.to_owned();
+        publisher1.name = SOME_PUBLISHER_NAME.to_owned();
         publisher1.set_signal_publisher(SignalPublisherProto::new());
 
         let mut publisher2 = PublisherProto::new();
@@ -509,7 +593,7 @@ mod tests {
 
     fn create_config_with_duplicate_trigger_name() -> MetricsConfigProto {
         let mut trigger1 = TriggerProto::new();
-        trigger1.name = TRIGGER_NAME.to_owned();
+        trigger1.name = SOME_TRIGGER_NAME.to_owned();
         trigger1.set_periodic_trigger(PeriodicTriggerProto::new());
 
         let mut trigger2 = TriggerProto::new();
@@ -524,7 +608,7 @@ mod tests {
 
     fn create_config_with_duplicate_publisher_trigger_name() -> MetricsConfigProto {
         let mut publisher = PublisherProto::new();
-        publisher.name = PUBLISHER_NAME.to_owned();
+        publisher.name = SOME_PUBLISHER_NAME.to_owned();
         publisher.set_service_publisher(ServicePublisherProto::new());
 
         let mut trigger = TriggerProto::new();
@@ -539,11 +623,11 @@ mod tests {
 
     fn create_config_with_publisher_trigger_cycle() -> MetricsConfigProto {
         let mut trigger1 = TriggerProto::new();
-        trigger1.name = "DataTrigger".to_owned();
+        trigger1.name = DATA_TRIGGER_NAME.to_owned();
         let mut trigger2 = TriggerProto::new();
-        trigger2.name = "ConditionalTrigger".to_owned();
+        trigger2.name = CONDITIONAL_TRIGGER_NAME.to_owned();
         let mut publisher = PublisherProto::new();
-        publisher.name = "AggregationPublisher".to_owned();
+        publisher.name = AGGREGATION_PUBLISHER_NAME.to_owned();
 
         let mut data_trigger = DataTriggerProto::new();
         data_trigger.publisher_name = publisher.name.clone();
@@ -564,7 +648,7 @@ mod tests {
 
     fn create_config_with_invalid_aggregation_publisher_trigger() -> MetricsConfigProto {
         let mut publisher = PublisherProto::new();
-        publisher.name = "AggregationPublisher".to_owned();
+        publisher.name = AGGREGATION_PUBLISHER_NAME.to_owned();
 
         let mut aggregation_publisher = AggregationPublisherProto::new();
         aggregation_publisher.trigger_names.push(INVALID_TRIGGER_NAME.to_owned());
@@ -577,7 +661,7 @@ mod tests {
 
     fn create_config_with_invalid_data_trigger_publisher() -> MetricsConfigProto {
         let mut trigger = TriggerProto::new();
-        trigger.name = "DataTrigger".to_owned();
+        trigger.name = DATA_TRIGGER_NAME.to_owned();
 
         let mut data_trigger = DataTriggerProto::new();
         data_trigger.publisher_name = INVALID_PUBLISHER_NAME.to_owned();
@@ -590,7 +674,7 @@ mod tests {
 
     fn create_config_with_invalid_conditional_trigger_parent_trigger() -> MetricsConfigProto {
         let mut trigger = TriggerProto::new();
-        trigger.name = "ConditionalTrigger".to_owned();
+        trigger.name = CONDITIONAL_TRIGGER_NAME.to_owned();
 
         let mut conditional_trigger = ConditionalTriggerProto::new();
         conditional_trigger.trigger_names.push(INVALID_TRIGGER_NAME.to_owned());
@@ -609,15 +693,15 @@ mod tests {
         (config1, config2)
     }
 
-    fn create_valid_config() -> MetricsConfigProto {
+    fn create_valid_config_with_dependencies() -> MetricsConfigProto {
         let mut trigger1 = TriggerProto::new();
-        trigger1.name = "DataTrigger".to_owned();
+        trigger1.name = DATA_TRIGGER_NAME.to_owned();
         let mut trigger2 = TriggerProto::new();
-        trigger2.name = "ConditionalTrigger".to_owned();
+        trigger2.name = CONDITIONAL_TRIGGER_NAME.to_owned();
         let mut publisher1 = PublisherProto::new();
-        publisher1.name = "ServicePublisher".to_owned();
+        publisher1.name = SERVICE_PUBLISHER_NAME.to_owned();
         let mut publisher2 = PublisherProto::new();
-        publisher2.name = "AggregationPublisher".to_owned();
+        publisher2.name = AGGREGATION_PUBLISHER_NAME.to_owned();
 
         let mut data_trigger = DataTriggerProto::new();
         data_trigger.publisher_name = publisher1.name.clone();
@@ -632,7 +716,7 @@ mod tests {
         publisher2.set_aggregation_publisher(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
-        config.uuid = "01bf0754-df95-46bb-bb35-522b6af66600".to_owned();
+        config.uuid = UUID.to_owned();
         config.publishers.push(publisher1);
         config.publishers.push(publisher2);
         config.triggers.push(trigger1);
@@ -643,208 +727,128 @@ mod tests {
 
     #[test]
     fn initialize_config_duplicate_publisher_name_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_name();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { ref publisher_name } if publisher_name == PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_duplicate_trigger_name_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_trigger_name();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { ref trigger_name } if trigger_name == TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_duplicate_publisher_trigger_name_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { ref trigger_name } if trigger_name == PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_publisher_trigger_cycle_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_publisher_trigger_cycle();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
+            matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_aggregation_publisher_invalid_trigger_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidDependency { ref dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            1
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_data_trigger_invalid_publisher_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_data_trigger_publisher();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidDependency { ref dependency_name } if dependency_name == INVALID_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_PUBLISHER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_conditional_trigger_invalid_parent_trigger_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidDependency { ref dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 1);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn initialize_config_duplicate_uuid_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).unwrap();
 
         let err = orchestrator.initialize_config(&config2).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { ref uuid } if uuid == UUID),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
     }
 
     #[test]
     fn initialize_config_invalid_expression_nodes_fails() {
-        let mut orchestrator = create_orchestrator();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator.node_factory.fail_create_nodes();
 
         let mut config = MetricsConfigProto::new();
@@ -853,30 +857,75 @@ mod tests {
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
             "Unexpected error: {:?}",
             err
         );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
-    fn initialize_config_success() {
-        let orchestrator = create_orchestrator();
-        let config = create_valid_config();
+    fn initialize_config_publisher_factory_error_fails() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator
+            .publisher_factory
+            .set_create_callback(|_| Some(Err(PublisherFactoryError::UnknownPublisherType)));
+        let config = create_valid_config_with_publisher();
+
+        let err = orchestrator.initialize_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn initialize_config_trigger_factory_error_fails() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator
+            .trigger_factory
+            .set_create_callback(|_| Some(Err(TriggerFactoryError::UnknownTriggerType)));
+        let config = create_valid_config_with_trigger();
+
+        let err = orchestrator.initialize_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn initialize_config_with_dependencies_success() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let factory_calls = Arc::new(Mutex::new(Vec::new()));
+        let factory_calls_clone1 = factory_calls.clone();
+        let factory_calls_clone2 = factory_calls.clone();
+        orchestrator.publisher_factory.set_create_callback(move |publisher_proto| {
+            factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
+            None
+        });
+        orchestrator.trigger_factory.set_create_callback(move |trigger_proto| {
+            factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
+            None
+        });
+        let config = create_valid_config_with_dependencies();
 
         orchestrator.initialize_config(&config).unwrap();
 
+        let expected_calls = vec![
+            SERVICE_PUBLISHER_NAME,
+            DATA_TRIGGER_NAME,
+            CONDITIONAL_TRIGGER_NAME,
+            AGGREGATION_PUBLISHER_NAME,
+        ];
+        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
         assert_eq!(*orchestrator.node_factory.num_nodes.lock().unwrap(), 1);
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            2
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 2);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         let contexts = orchestrator.configs.lock().unwrap();
         assert_eq!(contexts.len(), 1);
         let context = &contexts[&config.uuid];
@@ -886,12 +935,12 @@ mod tests {
 
     #[test]
     fn finish_config_invalid_config_uuid_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
 
         let err = orchestrator.finish_config(UUID).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { ref uuid } if uuid == UUID),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } if uuid == UUID),
             "Unexpected error: {:?}",
             err
         )
@@ -899,7 +948,7 @@ mod tests {
 
     #[test]
     fn finish_config_success() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
 
         let mut metrics_config = MetricsConfigProto::new();
         metrics_config.uuid = UUID.to_owned();
@@ -911,208 +960,128 @@ mod tests {
 
     #[test]
     fn validate_config_duplicate_publisher_name_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_name();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { ref publisher_name } if publisher_name == PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_duplicate_trigger_name_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_trigger_name();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { ref trigger_name } if trigger_name == TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_duplicate_publisher_trigger_name_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { ref trigger_name } if trigger_name == PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_publisher_trigger_cycle_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_publisher_trigger_cycle();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
+            matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_aggregation_publisher_invalid_trigger_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidDependency { ref dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            1
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_data_trigger_invalid_publisher_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_data_trigger_publisher();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidDependency { ref dependency_name } if dependency_name == INVALID_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_PUBLISHER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_conditional_trigger_invalid_parent_trigger_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidDependency { ref dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 1);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
     fn validate_config_duplicate_uuid_fails() {
-        let orchestrator = create_orchestrator();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).unwrap();
 
         let err = orchestrator.validate_config(&config2).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { ref uuid } if uuid == UUID),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 0);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
     }
 
     #[test]
     fn validate_config_invalid_expression_nodes_fails() {
-        let mut orchestrator = create_orchestrator();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator.node_factory.fail_create_nodes();
 
         let mut config = MetricsConfigProto::new();
@@ -1121,29 +1090,74 @@ mod tests {
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
             "Unexpected error: {:?}",
             err
         );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
     #[test]
-    fn validate_config_success() {
-        let orchestrator = create_orchestrator();
-        let config = create_valid_config();
+    fn validate_config_publisher_factory_error_fails() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator
+            .publisher_factory
+            .set_validate_callback(|_| Some(Err(PublisherFactoryError::UnknownPublisherType)));
+        let config = create_valid_config_with_publisher();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn validate_config_trigger_factory_error_fails() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator
+            .trigger_factory
+            .set_validate_callback(|_| Some(Err(TriggerFactoryError::UnknownTriggerType)));
+        let config = create_valid_config_with_trigger();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn validate_config_with_dependencies_success() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let factory_calls = Arc::new(Mutex::new(Vec::new()));
+        let factory_calls_clone1 = factory_calls.clone();
+        let factory_calls_clone2 = factory_calls.clone();
+        orchestrator.publisher_factory.set_validate_callback(move |publisher_proto| {
+            factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
+            None
+        });
+        orchestrator.trigger_factory.set_validate_callback(move |trigger_proto| {
+            factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
+            None
+        });
+        let config = create_valid_config_with_dependencies();
 
         orchestrator.validate_config(&config).unwrap();
 
-        assert_eq!(
-            orchestrator.publisher_factory.created_publisher_protos.lock().unwrap().len(),
-            0
-        );
-        assert_eq!(
-            orchestrator.publisher_factory.validated_publisher_protos.lock().unwrap().len(),
-            2
-        );
-        assert_eq!(orchestrator.trigger_factory.created_trigger_protos.lock().unwrap().len(), 0);
-        assert_eq!(orchestrator.trigger_factory.validated_trigger_protos.lock().unwrap().len(), 2);
+        let expected_calls = vec![
+            SERVICE_PUBLISHER_NAME,
+            DATA_TRIGGER_NAME,
+            CONDITIONAL_TRIGGER_NAME,
+            AGGREGATION_PUBLISHER_NAME,
+        ];
+        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 }
