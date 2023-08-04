@@ -10,14 +10,22 @@ enum TestEnum {
 }
 
 message TestMessage {
+  // Singular fields
   int32 int_field = 1;
   float float_field = 2;
   string string_field = 3;
   TestEnum enum_field = 4;
   TestNestedMessage message_field = 5;
+
+  // Repeated fields
+  repeated bool repeated_bools = 6;
+  repeated int64 repeated_i64s = 7;
+  repeated double repeated_doubles = 8;
+  repeated TestEnum repeated_enums = 9;
+  repeated TestNestedMessage repeated_messages = 10;
 }
 
 message TestNestedMessage {
   bool bool_field = 1;
-  repeated int32 repeated_int_fields = 2;
+  repeated int32 repeated_i32s = 2;
 }

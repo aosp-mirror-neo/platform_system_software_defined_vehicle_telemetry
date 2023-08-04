@@ -4,7 +4,9 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-use protobuf::reflect::{ReflectFieldRef, ReflectValueRef};
+use protobuf::reflect::{
+    ReflectFieldRef, ReflectRepeatedRef, ReflectValueRef, RuntimeType as ProtobufRuntimeType,
+};
 use sdvtelemetry_proto_rust::expression::{
     combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -37,6 +39,21 @@ pub enum NodeValue {
 
     /// A double node value.
     Double(f64),
+
+    /// Repeated boolean values.
+    BoolList(Vec<bool>),
+
+    /// Repeated int32 values.
+    Int32List(Vec<i32>),
+
+    /// Repeated int64 values.
+    Int64List(Vec<i64>),
+
+    /// Repeated float values.
+    FloatList(Vec<f32>),
+
+    /// Repeated double values.
+    DoubleList(Vec<f64>),
 }
 
 /// Check if two floating point values are approximately equal.
@@ -57,6 +74,16 @@ impl PartialEq for NodeValue {
                 approximately_equal(*v1 as f64, *v2 as f64)
             }
             (NodeValue::Double(v1), NodeValue::Double(v2)) => approximately_equal(*v1, *v2),
+            (NodeValue::BoolList(v1), NodeValue::BoolList(v2)) => *v1 == *v2,
+            (NodeValue::Int32List(v1), NodeValue::Int32List(v2)) => *v1 == *v2,
+            (NodeValue::Int64List(v1), NodeValue::Int64List(v2)) => *v1 == *v2,
+            (NodeValue::FloatList(v1), NodeValue::FloatList(v2)) => {
+                v1.len() == v2.len()
+                    && v1.iter().zip(v2).all(|(a, b)| approximately_equal(*a as f64, *b as f64))
+            }
+            (NodeValue::DoubleList(v1), NodeValue::DoubleList(v2)) => {
+                v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| approximately_equal(*a, *b))
+            }
             _ => false,
         }
     }
@@ -103,6 +130,73 @@ impl NodeValue {
             _ => Err(format!("Operator {:?} not recognized.", op)),
         }
     }
+
+    /// Reads a field value from a protobuf message using the reflection.
+    pub fn extract_field_value(
+        msg: &dyn protobuf::MessageDyn,
+        fields: &[String],
+    ) -> Result<NodeValue, String> {
+        let msg_descriptor = msg.descriptor_dyn();
+        let field_name = fields
+            .get(0)
+            .ok_or("FieldLeafNodes should provide at least one field name".to_string())?;
+        let field_descriptor = msg_descriptor.field_by_name(field_name).ok_or(format!(
+            "No field descriptor exists for field {} in message {}. Typo in field name?",
+            field_name,
+            msg_descriptor.name()
+        ))?;
+        let field_value = field_descriptor.get_reflect(msg);
+
+        // Base case for recursion: one field is provided, simply read the value
+        if fields.len() == 1 {
+            return match &field_value {
+                // `optional` or singular protobuf field
+                ReflectFieldRef::Optional(singular_field) => {
+                    let field_value = singular_field.value().ok_or(format!(
+                        "No value exists for field {} in message {}",
+                        field_name,
+                        msg_descriptor.name()
+                    ))?;
+                    // convert reflection value into a NodeValue and return
+                    Self::from_singular_field_value(field_value)
+                }
+                // `repeated` protobuf field
+                ReflectFieldRef::Repeated(repeated_field) => {
+                    // convert reflection value into a NodeValue and return
+                    Self::from_repeated_field(repeated_field)
+                }
+                _ => Err("Map field is not supported".to_string()),
+            };
+        }
+
+        // If fields length > 1, get nested field values iff the value is a single protobuf message,
+        // otherwise return error
+        if let ReflectFieldRef::Optional(singular_field) = field_value {
+            let nested_value = singular_field.value().ok_or(format!(
+                "No value exists for field {} in message {}",
+                field_name,
+                msg_descriptor.name()
+            ))?;
+            if let ReflectValueRef::Message(msg) = nested_value {
+                // recurse to read from nested messages
+                Self::extract_field_value(&(*msg), &fields[1..])
+            } else {
+                Err(format!(
+                    "Get nested field value failed: a non-terminal field {} \
+                            is not a protobuf message",
+                    field_name
+                ))
+            }
+        } else {
+            Err(format!(
+                "Get nested field value failed: a non-terminal field {} \
+                        is either repeated or a map",
+                field_name
+            ))
+        }
+    }
+
+    // private functions and methods below
 
     /// Handle logical operations.
     fn handle_logical(&self, op: &LogicalOperator, other: &NodeValue) -> Result<NodeValue, String> {
@@ -197,73 +291,142 @@ impl NodeValue {
         }?))
     }
 
-    /// Reads a field value from a protobuf message using the reflection.
-    pub fn extract_field_value(
-        msg: &dyn protobuf::MessageDyn,
-        fields: &[String],
-    ) -> Result<NodeValue, String> {
-        let msg_descriptor = msg.descriptor_dyn();
-        let field_name = fields
-            .get(0)
-            .ok_or("FieldLeafNodes should provide at least one field name".to_string())?;
-        let field_descriptor = msg_descriptor.field_by_name(field_name).ok_or(format!(
-            "No field descriptor exists for field {} in message {}. Typo in field name?",
-            field_name,
-            msg_descriptor.name()
-        ))?;
-        let field_value = field_descriptor.get_reflect(msg);
-
-        // Base case for recursion: one field is provided, simply read the value
-        if fields.len() == 1 {
-            return Ok(match field_value {
-                ReflectFieldRef::Optional(singular_field) => {
-                    let field_value = singular_field.value().ok_or(format!(
-                        "No value exists for field {} in message {}",
-                        field_name,
-                        msg_descriptor.name()
-                    ))?;
-                    match field_value {
-                        ReflectValueRef::U32(v) => NodeValue::Int64(v as i64),
-                        ReflectValueRef::U64(v) => NodeValue::Int64(v as i64),
-                        ReflectValueRef::I32(v) => NodeValue::Int32(v),
-                        ReflectValueRef::I64(v) => NodeValue::Int64(v),
-                        ReflectValueRef::F32(v) => NodeValue::Float(v),
-                        ReflectValueRef::F64(v) => NodeValue::Double(v),
-                        ReflectValueRef::Bool(v) => NodeValue::Bool(v),
-                        ReflectValueRef::Enum(_, v) => NodeValue::Int32(v),
-                        _ => {
-                            return Err("FieldLeafNode attempts to extract bytes, string, or \
-                                       protobuf message values, which is not supported"
-                                .to_string())
-                        }
-                    }
-                }
-                _ => return Err("not implemented yet".to_string()),
-            });
-        }
-
-        // If fields length > 1, read field from nested messages
-        if let ReflectFieldRef::Optional(singular_field) = field_value {
-            let field_value = singular_field.value().ok_or(format!(
-                "No value exists for field {} in message {}",
-                field_name,
-                msg_descriptor.name()
-            ))?;
-            if let ReflectValueRef::Message(msg) = field_value {
-                Self::extract_field_value(&(*msg), &fields[1..])
-            } else {
-                Err("FieldLeafNode attempts to extract nested field value, but a \
-                    non-terminal field is not a protobuf message"
+    /// Converts a protobuf reflection on a singular field into a NodeValue.
+    fn from_singular_field_value(field_value: ReflectValueRef<'_>) -> Result<NodeValue, String> {
+        Ok(match field_value {
+            ReflectValueRef::U32(v) => NodeValue::Int64(v as i64),
+            ReflectValueRef::U64(v) => NodeValue::Int64(v as i64),
+            ReflectValueRef::I32(v) => NodeValue::Int32(v),
+            ReflectValueRef::I64(v) => NodeValue::Int64(v),
+            ReflectValueRef::F32(v) => NodeValue::Float(v),
+            ReflectValueRef::F64(v) => NodeValue::Double(v),
+            ReflectValueRef::Bool(v) => NodeValue::Bool(v),
+            ReflectValueRef::Enum(_, v) => NodeValue::Int32(v),
+            _ => {
+                return Err("The following types are not supported in an optional field: \
+                            bytes, string, or protobuf message"
                     .to_string())
             }
-        } else {
-            Err("FieldLeafNode attempts to extract nested field values, but a \
-                non-terminal field is either repeated or a map"
-                .to_string())
-        }
+        })
     }
 
-    // private functions and methods below
+    /// Converts a protobuf reflection on a repeated field into a NodeValue.
+    fn from_repeated_field(repeated_field: &ReflectRepeatedRef<'_>) -> Result<NodeValue, String> {
+        // depending on the field type, create the correct list type
+        // `repeated int32` = NodeValue::Int32List etc.
+        Ok(match repeated_field.element_type() {
+            ProtobufRuntimeType::I32 => {
+                NodeValue::Int32List(Self::refl_to_vec(
+                    repeated_field,
+                    // closure that unwraps an i32 value from a value reflection
+                    |val: ReflectValueRef<'_>| {
+                        val.to_i32().ok_or(format!(
+                            "Repeated field {:?} type expected to be i32",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::I64 => {
+                NodeValue::Int64List(Self::refl_to_vec(
+                    repeated_field,
+                    // unwraps an i64 value from a value reflection or error
+                    |val: ReflectValueRef<'_>| {
+                        val.to_i64().ok_or(format!(
+                            "Repeated field {:?} type expected to be i64",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::U32 => {
+                NodeValue::Int64List(Self::refl_to_vec(
+                    repeated_field,
+                    |val: ReflectValueRef<'_>| {
+                        // map Option<u32> into Option<i64> and convert it to a Result
+                        val.to_u32().map(|x| x as i64).ok_or(format!(
+                            "Repeated field {:?} type expected to be u32",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::U64 => {
+                NodeValue::Int64List(Self::refl_to_vec(
+                    repeated_field,
+                    |val: ReflectValueRef<'_>| {
+                        // map Option<u64> into Option<i64> and convert it to a Result
+                        val.to_u64().map(|x| x as i64).ok_or(format!(
+                            "Repeated field {:?} type expected to be u64",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::F32 => {
+                NodeValue::FloatList(Self::refl_to_vec(
+                    repeated_field,
+                    // closure that unwraps f32 value from a single value reflection
+                    |val: ReflectValueRef<'_>| {
+                        val.to_f32().ok_or(format!(
+                            "Repeated field {:?} type expected to be f32",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::F64 => {
+                NodeValue::DoubleList(Self::refl_to_vec(
+                    repeated_field,
+                    // unwraps a f64 value from a value reflection or error
+                    |val: ReflectValueRef<'_>| {
+                        val.to_f64().ok_or(format!(
+                            "Repeated field {:?} type expected to be f64",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::Bool => {
+                NodeValue::BoolList(Self::refl_to_vec(
+                    repeated_field,
+                    // unwraps a bool value from a value reflection or error
+                    |val: ReflectValueRef<'_>| {
+                        val.to_bool().ok_or(format!(
+                            "Repeated field {:?} type expected to be bool",
+                            repeated_field
+                        ))
+                    },
+                )?)
+            }
+            ProtobufRuntimeType::Enum(_) => NodeValue::Int32List(Self::refl_to_vec(
+                repeated_field,
+                // unwraps an enum as i32 from a value reflection or error
+                |val: ReflectValueRef<'_>| {
+                    val.to_enum_value().ok_or(format!(
+                        "Repeated field {:?} type expected to be enum",
+                        repeated_field
+                    ))
+                },
+            )?),
+            _ => {
+                return Err("Getting repeated strings, messages, and bytes\
+                                        are not supported"
+                    .to_string());
+            }
+        })
+    }
+
+    /// Converts a protobuf reflection of a repeated field into a vector.
+    /// For example, a `repeated int32` field will become `Vec<i32>`, or error if
+    /// the `transform_func` returned an error.
+    fn refl_to_vec<T>(
+        repeated_field: &ReflectRepeatedRef,
+        transform_func: impl Fn(ReflectValueRef) -> Result<T, String>,
+    ) -> Result<Vec<T>, String> {
+        // apply `transform_func` to each element in the repeated_field
+        repeated_field.into_iter().map(transform_func).collect()
+    }
 
     /// Check if node holds a boolean-compatible value.
     fn is_bool(&self) -> bool {
@@ -395,16 +558,27 @@ mod tests {
             OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into());
         static ref TEST_MESSAGE: TestMessage = {
             let mut test_message = TestMessage::new();
+            // initialize singular fields
             test_message.int_field = 80;
             test_message.float_field = 100.0;
             test_message.string_field = "Hello world".to_string();
             test_message.enum_field = TestEnum::SOME.into();
 
+            // initialize nested field
             let mut test_nested_message = TestNestedMessage::new();
             test_nested_message.bool_field = true;
-            test_nested_message.repeated_int_fields.push(1);
-            test_nested_message.repeated_int_fields.push(2);
-            test_message.message_field = protobuf::MessageField::some(test_nested_message);
+            test_nested_message.repeated_i32s = vec![1, 2];
+            test_message.message_field = protobuf::MessageField::some(test_nested_message.clone());
+
+            // initialize repeated fields
+            test_message.repeated_bools = vec![true, true, false, true];
+            test_message.repeated_i64s = vec![3, 4, 5];
+            test_message.repeated_doubles = vec![
+                std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
+            test_message.repeated_enums = vec![
+                TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
+            test_message.repeated_messages = vec![
+                test_nested_message.clone(), test_nested_message];
 
             test_message
         };
@@ -488,12 +662,67 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_field_value_nested_field_ok() {
+    fn test_extract_field_value_nested_singular_field_ok() {
         let field_names = ["message_field".to_string(), "bool_field".to_string()];
 
         assert_eq!(
             NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
             Ok(NodeValue::Bool(true))
+        );
+    }
+
+    #[test]
+    fn test_extract_field_value_repeated_bool_field_ok() {
+        let msg = &*TEST_MESSAGE;
+        let field_names = ["repeated_bools".to_string()];
+
+        assert_eq!(
+            NodeValue::extract_field_value(msg, &field_names),
+            Ok(NodeValue::BoolList(msg.repeated_bools.clone()))
+        );
+    }
+
+    #[test]
+    fn test_extract_field_value_repeated_int_field_ok() {
+        let msg = &*TEST_MESSAGE;
+        let field_names = ["repeated_i64s".to_string()];
+
+        assert_eq!(
+            NodeValue::extract_field_value(msg, &field_names),
+            Ok(NodeValue::Int64List(msg.repeated_i64s.clone()))
+        );
+    }
+
+    #[test]
+    fn test_extract_field_value_repeated_double_field_ok() {
+        let msg = &*TEST_MESSAGE;
+        let field_names = ["repeated_doubles".to_string()];
+
+        assert_eq!(
+            NodeValue::extract_field_value(msg, &field_names),
+            Ok(NodeValue::DoubleList(msg.repeated_doubles.clone()))
+        );
+    }
+
+    #[test]
+    fn test_extract_field_value_repeated_enum_field_ok() {
+        let msg = &*TEST_MESSAGE;
+        let field_names = ["repeated_enums".to_string()];
+
+        assert_eq!(
+            NodeValue::extract_field_value(msg, &field_names),
+            Ok(NodeValue::Int32List(msg.repeated_enums.iter().map(|x| x.value()).collect()))
+        );
+    }
+
+    #[test]
+    fn test_extract_field_value_nested_repeated_field_ok() {
+        let msg = &*TEST_MESSAGE;
+        let field_names = ["message_field".to_string(), "repeated_i32s".to_string()];
+
+        assert_eq!(
+            NodeValue::extract_field_value(msg, &field_names),
+            Ok(NodeValue::Int32List(msg.message_field.repeated_i32s.clone()))
         );
     }
 
@@ -512,8 +741,8 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_field_value_repeated_field_should_err() {
-        let field_names = ["message_field".to_string(), "repeated_int_fields".to_string()];
+    fn test_extract_field_value_repeated_message_field_should_err() {
+        let field_names = ["repeated_messages".to_string()];
 
         assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
     }

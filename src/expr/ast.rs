@@ -310,8 +310,7 @@ mod tests {
 
             let mut test_nested_message = TestNestedMessage::new();
             test_nested_message.bool_field = true;
-            test_nested_message.repeated_int_fields.push(1);
-            test_nested_message.repeated_int_fields.push(2);
+            test_nested_message.repeated_i32s = vec![1, 2];
             test_message.message_field = protobuf::MessageField::some(test_nested_message);
 
             test_message
