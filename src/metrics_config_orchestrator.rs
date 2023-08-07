@@ -58,11 +58,11 @@ pub enum MetricsConfigOrchestratorError {
     InvalidDependency { dependency_name: String },
     #[error("Duplicate metrics config identifier: {uuid}")]
     DuplicateMetricsConfigUuid { uuid: String },
-    #[error("Invalid definition for publisher {publisher_name}")]
+    #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
     InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
-    #[error("Invalid definition for trigger {trigger_name}")]
+    #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
-    #[error("Invalid descriptor protos")]
+    #[error("Invalid descriptor protos: {error}")]
     InvalidDescriptorProtos {
         #[from]
         error: protobuf::Error,
