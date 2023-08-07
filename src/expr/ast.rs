@@ -313,6 +313,9 @@ mod tests {
             test_nested_message.repeated_i32s = vec![1, 2];
             test_message.message_field = protobuf::MessageField::some(test_nested_message);
 
+            test_message.repeated_doubles =
+                vec![std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
+
             test_message
         };
     }
@@ -407,7 +410,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_nodes_handles_missing_right_child() {
+    fn test_create_nodes_unary_operator_missing_right_child_ok() {
         // setup
         let node_factory = NodeFactoryImpl::new();
         let mut leaf_true = NodeProto::new();
@@ -426,17 +429,35 @@ mod tests {
         combination_node.set_logical_operator(LogicalOperator::NOT);
         root_node.set_combination_node(combination_node.clone());
 
-        let all_proto_nodes = vec![leaf_true.clone(), root_node.clone()];
+        let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
         let nodes = node_factory.create_nodes(&all_proto_nodes);
 
-        // assert ok because unary operator
+        // assert
         assert!(nodes.is_ok());
+    }
 
-        // if binary operator and right child is missing
+    #[test]
+    fn test_create_nodes_binary_operator_missing_right_child_errors() {
+        // setup
+        let node_factory = NodeFactoryImpl::new();
+        let mut leaf_true = NodeProto::new();
+        let mut root_node = NodeProto::new();
+
+        let mut constant_leaf = ConstantLeafNode::new();
+        constant_leaf.set_bool_value(true);
+        leaf_true.set_constant_leaf_node(constant_leaf.clone());
+
+        //            index 1 (AND)
+        //          /              \
+        //    index 0              no right child
+        //    TRUE
+        let mut combination_node = CombinationNode::new();
+        combination_node.left_index = Some(0);
         combination_node.set_logical_operator(LogicalOperator::AND);
-        root_node.set_combination_node(combination_node);
+        root_node.set_combination_node(combination_node.clone());
+
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
@@ -467,30 +488,23 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_and_or_ok() -> Result<(), String> {
+    fn test_evaluate_logical_operator_ok() -> Result<(), String> {
         let node_factory = NodeFactoryImpl::new();
         // setup this tree:
-        //            index 3 (AND)
+        //            index 3 (XOR)
         //          /              \
         //    index 0              index 2 (output of function `create_true_false_branch`)
         //    TRUE                  OR
         //                       /        \
         //               index 0 (T)      index 1 (F)
-        // index 4 (AND), left child = index 1 (FALSE), right child = index 2
         let mut all_proto_nodes = create_true_false_branch(LogicalOperator::OR);
-        let mut root_node = NodeProto::new();
-        let mut combination_node = CombinationNode::new();
-        combination_node.left_index = Some(0); // TRUE
-        combination_node.right_index = Some(2); // TRUE || FALSE
-                                                // operator = AND, combination node is T && (T || F)
-        combination_node.set_logical_operator(LogicalOperator::AND);
-        root_node.set_combination_node(combination_node.clone());
-        all_proto_nodes.push(root_node.clone());
-
-        combination_node.left_index = Some(1); // FALSE
-                                               // combination node is  F && (T || F)
-        root_node.set_combination_node(combination_node.clone());
-        all_proto_nodes.push(root_node.clone());
+        let mut node_index_3 = NodeProto::new();
+        let mut xor_node = CombinationNode::new();
+        xor_node.left_index = Some(0); // True
+        xor_node.right_index = Some(2); // True || False
+        xor_node.set_logical_operator(LogicalOperator::XOR);
+        node_index_3.set_combination_node(xor_node.clone());
+        all_proto_nodes.push(node_index_3.clone());
 
         let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
@@ -499,8 +513,7 @@ mod tests {
             NodeValue::Bool(true),  // index 0 = constant value of T
             NodeValue::Bool(false), // index 1 = constant value of F
             NodeValue::Bool(true),  // index 2 = T || F = T
-            NodeValue::Bool(true),  // index 3 = T && (T || F) = T
-            NodeValue::Bool(false), // index 4 = F && (T || F)  = F
+            NodeValue::Bool(false), // index 3 = F = index 0 XOR index 2
         ];
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
@@ -511,7 +524,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_arithmetic_ok() -> Result<(), String> {
+    fn test_evaluate_arithmetic_operator_ok() -> Result<(), String> {
         let node_factory = NodeFactoryImpl::new();
         // setup this tree: 5 / 2 * 5^2
         //            index 4 (MULTIPLY)
@@ -563,6 +576,68 @@ mod tests {
             NodeValue::Double(2.5),  // index 2 = 5 / 2 = 2.5
             NodeValue::Int64(25),    // index 3 = 5^2 = 25
             NodeValue::Double(62.5), // index 4 = 2.5 * 25 = 62.5
+        ];
+
+        // assert that evaluated_result[i] == expected_result[i]  for all index i
+        for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_evaluate_relational_operator_ok() -> Result<(), String> {
+        let node_factory = NodeFactoryImpl::new();
+        // setup this tree which uses the protobuf message initialized in the lazy_static block
+        //                             index 4 (EQ)
+        //                           /              \
+        //                      index 2                 index 3
+        //                      CONTAINS                  true
+        //               /                  \
+        //          index 0                index 1
+        // TestMessage.repeated_doubles       Pi
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut node_2 = NodeProto::new();
+        let mut node_3 = NodeProto::new();
+        let mut node_4 = NodeProto::new();
+
+        let mut leaf_doubles = FieldLeafNode::new();
+        leaf_doubles.publisher_name = "publisher_name".to_string();
+        leaf_doubles.field_names.push("repeated_doubles".to_string());
+        node_0.set_field_leaf_node(leaf_doubles);
+
+        let mut constant_pi = ConstantLeafNode::new();
+        constant_pi.set_float_value(std::f32::consts::PI);
+        node_1.set_constant_leaf_node(constant_pi);
+
+        let mut combination_contains = CombinationNode::new();
+        combination_contains.set_relational_operator(RelationalOperator::CONTAINS);
+        combination_contains.left_index = Some(0);
+        combination_contains.right_index = Some(1);
+        node_2.set_combination_node(combination_contains);
+
+        let mut constant_true = ConstantLeafNode::new();
+        constant_true.set_bool_value(true);
+        node_3.set_constant_leaf_node(constant_true);
+
+        let mut combination_eq = CombinationNode::new();
+        combination_eq.set_relational_operator(RelationalOperator::EQ);
+        combination_eq.left_index = Some(2);
+        combination_eq.right_index = Some(3);
+        node_4.set_combination_node(combination_eq);
+
+        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
+
+        // we will evaluate every node in `nodes`, and we expect these results:
+        let expected_results = vec![
+            // index 0 = [Pi, Tau, e]
+            NodeValue::DoubleList(TEST_MESSAGE.repeated_doubles.clone()),
+            NodeValue::Float(std::f32::consts::PI), // index 1 = constant value of Pi
+            NodeValue::Bool(true),                  // index 2 = true because list contains Pi
+            NodeValue::Bool(true),                  // index 3 = constant of true
+            NodeValue::Bool(true),                  // index 4 = true because index 2 == index 3
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i

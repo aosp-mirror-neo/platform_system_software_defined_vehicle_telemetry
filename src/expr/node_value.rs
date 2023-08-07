@@ -200,14 +200,15 @@ impl NodeValue {
 
     /// Handle logical operations.
     fn handle_logical(&self, op: &LogicalOperator, other: &NodeValue) -> Result<NodeValue, String> {
-        if !self.is_bool() || !other.is_bool() {
+        // right operand can be None because operator may be unary
+        if !self.is_bool() || (!other.is_bool() && *other != NodeValue::None) {
             return Err("Logical operators must have boolean operands".to_string());
         }
         Ok(NodeValue::Bool(match op {
-            LogicalOperator::AND => self.get_bool() && other.get_bool(),
-            LogicalOperator::OR => self.get_bool() || other.get_bool(),
-            LogicalOperator::XOR => self.get_bool() != other.get_bool(),
-            LogicalOperator::NOT => !self.get_bool(),
+            LogicalOperator::AND => self.get_bool()? && other.get_bool()?,
+            LogicalOperator::OR => self.get_bool()? || other.get_bool()?,
+            LogicalOperator::XOR => self.get_bool()? != other.get_bool()?,
+            LogicalOperator::NOT => !self.get_bool()?,
         }))
     }
 
@@ -287,7 +288,12 @@ impl NodeValue {
             RelationalOperator::LT_OR_EQ => {
                 self.apply_numeric(other, |a, b| a <= b, |a, b| a <= b || approximately_equal(a, b))
             }
-            _ => Err("Other relational operators are not implemented yet".to_string()),
+            RelationalOperator::CONTAINS => self.contains(other),
+            RelationalOperator::DOES_NOT_CONTAIN => {
+                // negate the boolean in a Result<bool, String>
+                self.contains(other).map(|x| !x)
+            }
+            RelationalOperator::ALL_EQ => self.all_equals(other),
         }?))
     }
 
@@ -410,8 +416,8 @@ impl NodeValue {
                 },
             )?),
             _ => {
-                return Err("Getting repeated strings, messages, and bytes\
-                                        are not supported"
+                return Err("Getting repeated strings, messages, and bytes \
+                            are not supported"
                     .to_string());
             }
         })
@@ -428,17 +434,89 @@ impl NodeValue {
         repeated_field.into_iter().map(transform_func).collect()
     }
 
-    /// Check if node holds a boolean-compatible value.
-    fn is_bool(&self) -> bool {
-        matches!(self, NodeValue::Bool(_) | NodeValue::None)
+    /// Check if list contains some element.
+    /// Returns error if `self` is not a list value or `element` is not a compatible type.
+    fn contains(&self, element: &NodeValue) -> Result<bool, String> {
+        let err_msg = format!(
+            "contains() called on incompatible types, left operand = {:?}, \
+                    right operand = {:?}. Ensure left operand is a list and \
+                    right operand is a scalar of compatible type to the list value",
+            self, element
+        );
+        Ok(match self {
+            NodeValue::BoolList(v) => v.contains(&element.get_bool_with_msg(err_msg.clone())?),
+            NodeValue::Int32List(v) => {
+                let target_value = element.get_int_with_msg(err_msg.clone())? as i32;
+                v.contains(&target_value)
+            }
+            NodeValue::Int64List(v) => v.contains(&element.get_int_with_msg(err_msg.clone())?),
+            NodeValue::FloatList(v) => {
+                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                v.iter().any(|x| approximately_equal(*x as f64, target_value))
+            }
+            NodeValue::DoubleList(v) => {
+                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                v.iter().any(|x| approximately_equal(*x, target_value))
+            }
+            _ => return Err(err_msg),
+        })
     }
 
-    /// Returns the bool value or false by default.
-    fn get_bool(&self) -> bool {
+    /// Check if all list items are equal to some element.
+    /// Returns errors if `self` is not a list value or `element` is not a compatible type.
+    fn all_equals(&self, element: &NodeValue) -> Result<bool, String> {
+        let err_msg = format!(
+            "all_equals() called on incompatible types, left operand = {:?}, \
+                    right operand = {:?}. Ensure left operand is a list and \
+                    right operand is a scalar of compatible type to the list value",
+            self, element
+        );
+        Ok(match self {
+            NodeValue::BoolList(v) => {
+                let target_value = element.get_bool_with_msg(err_msg.clone())?;
+                Self::all_equal_to(v, target_value)
+            }
+            NodeValue::Int32List(v) => {
+                let target_value = element.get_int_with_msg(err_msg.clone())? as i32;
+                Self::all_equal_to(v, target_value)
+            }
+            NodeValue::Int64List(v) => {
+                let target_value = element.get_int_with_msg(err_msg.clone())?;
+                Self::all_equal_to(v, target_value)
+            }
+            NodeValue::FloatList(v) => {
+                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                v.iter().all(|x| approximately_equal(*x as f64, target_value))
+            }
+            NodeValue::DoubleList(v) => {
+                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                v.iter().all(|x| approximately_equal(*x, target_value))
+            }
+            _ => return Err(err_msg),
+        })
+    }
+
+    /// Check if all vector elements are equal to target_value.
+    fn all_equal_to<T: PartialEq>(v: &[T], target_value: T) -> bool {
+        v.iter().all(|x| *x == target_value)
+    }
+
+    /// Check if node holds a boolean value.
+    fn is_bool(&self) -> bool {
+        matches!(self, NodeValue::Bool(_))
+    }
+
+    /// Returns the bool value or error if NodeValue is not a boolean.
+    fn get_bool(&self) -> Result<bool, String> {
+        self.get_bool_with_msg(format!("get_bool() invoked on non-boolean NodeValue: {:?}", self))
+    }
+
+    /// Returns the bool value or a custom error message if NodeValue is not a bool.
+    fn get_bool_with_msg(&self, err_msg: String) -> Result<bool, String> {
         if let NodeValue::Bool(val) = self {
-            return *val;
+            return Ok(*val);
         }
-        false
+        Err(err_msg)
     }
 
     /// Check if node holds a numeric value.
@@ -454,23 +532,36 @@ impl NodeValue {
         matches!(self, NodeValue::Int32(_) | NodeValue::Int64(_))
     }
 
-    /// Returns the int value or error if NodeValue is not numeric.
+    /// Returns the int value or error if NodeValue is not an int.
     fn get_int(&self) -> Result<i64, String> {
+        self.get_int_with_msg(format!("get_int() invoked on non-int NodeValue: {:?}", self))
+    }
+
+    /// Returns the int value or a custom error message if NodeValue is not an int.
+    fn get_int_with_msg(&self, err_msg: String) -> Result<i64, String> {
         Ok(match self {
             NodeValue::Int32(val) => *val as i64,
             NodeValue::Int64(val) => *val,
-            _ => return Err(format!("get_int() invoked on non-int NodeValue: {:?}", self)),
+            _ => return Err(err_msg),
         })
     }
 
     /// Returns the double value or error if NodeValue is not numeric.
     fn get_double(&self) -> Result<f64, String> {
+        self.get_double_with_msg(format!(
+            "get_double() invoked on non-numeric NodeValue: {:?}",
+            self
+        ))
+    }
+
+    /// Returns the double value or a custom error message if NodeValue is not numeric.
+    fn get_double_with_msg(&self, err_msg: String) -> Result<f64, String> {
         Ok(match self {
             NodeValue::Int32(val) => *val as f64,
             NodeValue::Int64(val) => *val as f64,
             NodeValue::Float(val) => *val as f64,
             NodeValue::Double(val) => *val,
-            _ => return Err(format!("get_double() invoked on non-numeric NodeValue: {:?}", self)),
+            _ => return Err(err_msg),
         })
     }
 
@@ -556,9 +647,15 @@ mod tests {
             OperatorProto::RelationalOperator(RelationalOperator::LT.into());
         static ref OP_LT_OR_EQ: OperatorProto =
             OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into());
+        static ref OP_CONTAINS: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into());
+        static ref OP_DOES_NOT_CONTAIN: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::DOES_NOT_CONTAIN.into());
+        static ref OP_ALL_EQ: OperatorProto =
+            OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into());
         static ref TEST_MESSAGE: TestMessage = {
             let mut test_message = TestMessage::new();
-            // initialize singular fields
+            // initialize scalar (optional) fields
             test_message.int_field = 80;
             test_message.float_field = 100.0;
             test_message.string_field = "Hello world".to_string();
@@ -1006,5 +1103,169 @@ mod tests {
         assert_eq!(two.operate(&OP_LT_OR_EQ, &five), Ok(NodeValue::Bool(true)));
         assert_eq!(five.operate(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(false)));
         assert!(five.operate(&OP_LT_OR_EQ, &true_val).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_contains_errs_if_left_operand_not_a_list() {
+        let two = NodeValue::Int32(2);
+
+        assert!(two.operate(&OP_CONTAINS, &two).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_contains_errs_if_operands_have_incompatible_types() {
+        let bool_list = NodeValue::BoolList(vec![true, true, false]);
+        let five = NodeValue::Float(5.5);
+
+        assert!(bool_list.operate(&OP_CONTAINS, &five).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_contains_bool_type_ok() {
+        let bool_list = NodeValue::BoolList(vec![true, true, true]);
+        let true_val = NodeValue::Bool(true);
+        let false_val = NodeValue::Bool(false);
+
+        assert_eq!(bool_list.operate(&OP_CONTAINS, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(bool_list.operate(&OP_CONTAINS, &false_val), Ok(NodeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_operate_relational_contains_int_type_ok() {
+        let int_list = NodeValue::Int32List(vec![3, 30, 300]);
+        let zero = NodeValue::Int32(0);
+        let three = NodeValue::Int32(3);
+        let thirty = NodeValue::Int64(30);
+        // not int
+        let three_hundred = NodeValue::Double(300.0);
+
+        assert_eq!(int_list.operate(&OP_CONTAINS, &zero), Ok(NodeValue::Bool(false)));
+        assert_eq!(int_list.operate(&OP_CONTAINS, &three), Ok(NodeValue::Bool(true)));
+        assert_eq!(int_list.operate(&OP_CONTAINS, &thirty), Ok(NodeValue::Bool(true)));
+        assert!(int_list.operate(&OP_CONTAINS, &three_hundred).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_contains_float_type_ok() {
+        let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
+        let point_five = NodeValue::Float(0.5);
+        // f64 PI, not f32 PI
+        let pi = NodeValue::Double(std::f64::consts::PI);
+        // not float but is a numeric type
+        let ten = NodeValue::Int32(10);
+        let thirty = NodeValue::Float(30.0);
+
+        assert_eq!(float_list.operate(&OP_CONTAINS, &point_five), Ok(NodeValue::Bool(true)));
+        assert_eq!(float_list.operate(&OP_CONTAINS, &pi), Ok(NodeValue::Bool(true)));
+        assert_eq!(float_list.operate(&OP_CONTAINS, &ten), Ok(NodeValue::Bool(true)));
+        assert_eq!(float_list.operate(&OP_CONTAINS, &thirty), Ok(NodeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_operate_relational_does_not_contain_errs_if_left_operand_not_a_list() {
+        let two = NodeValue::Int32(2);
+
+        assert!(two.operate(&OP_DOES_NOT_CONTAIN, &two).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_does_not_contain_errs_if_operands_have_incompatible_types() {
+        let bool_list = NodeValue::BoolList(vec![true, true, false]);
+        let five = NodeValue::Float(5.5);
+
+        assert!(bool_list.operate(&OP_DOES_NOT_CONTAIN, &five).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_does_not_contain_bool_type_ok() {
+        let bool_list = NodeValue::BoolList(vec![true, true, true]);
+        let true_val = NodeValue::Bool(true);
+        let false_val = NodeValue::Bool(false);
+
+        assert_eq!(bool_list.operate(&OP_DOES_NOT_CONTAIN, &true_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(bool_list.operate(&OP_DOES_NOT_CONTAIN, &false_val), Ok(NodeValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_operate_relational_does_not_contain_int_type_ok() {
+        let int_list = NodeValue::Int32List(vec![3, 30, 300]);
+        let zero = NodeValue::Int32(0);
+        let three = NodeValue::Int32(3);
+        let thirty = NodeValue::Int64(30);
+        // not int
+        let three_hundred = NodeValue::Double(300.0);
+
+        assert_eq!(int_list.operate(&OP_DOES_NOT_CONTAIN, &zero), Ok(NodeValue::Bool(true)));
+        assert_eq!(int_list.operate(&OP_DOES_NOT_CONTAIN, &three), Ok(NodeValue::Bool(false)));
+        assert_eq!(int_list.operate(&OP_DOES_NOT_CONTAIN, &thirty), Ok(NodeValue::Bool(false)));
+        assert!(int_list.operate(&OP_DOES_NOT_CONTAIN, &three_hundred).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_does_not_contain_float_type_ok() {
+        let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
+        let point_five = NodeValue::Float(0.5);
+        // f64 PI, not f32 PI
+        let pi = NodeValue::Double(std::f64::consts::PI);
+        // not float but is a numeric type
+        let ten = NodeValue::Int32(10);
+        let thirty = NodeValue::Float(30.0);
+
+        assert_eq!(
+            float_list.operate(&OP_DOES_NOT_CONTAIN, &point_five),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(float_list.operate(&OP_DOES_NOT_CONTAIN, &pi), Ok(NodeValue::Bool(false)));
+        assert_eq!(float_list.operate(&OP_DOES_NOT_CONTAIN, &ten), Ok(NodeValue::Bool(false)));
+        assert_eq!(float_list.operate(&OP_DOES_NOT_CONTAIN, &thirty), Ok(NodeValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_operate_relational_all_eq_errs_if_left_operand_not_a_list() {
+        let two = NodeValue::Int32(2);
+
+        assert!(two.operate(&OP_ALL_EQ, &two).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_all_eq_errs_if_operands_have_incompatible_types() {
+        let bool_list = NodeValue::BoolList(vec![true, true, false]);
+        let five = NodeValue::Float(5.5);
+
+        assert!(bool_list.operate(&OP_ALL_EQ, &five).is_err());
+    }
+
+    #[test]
+    fn test_operate_relational_all_eq_bool_type_ok() {
+        let bool_list_1 = NodeValue::BoolList(vec![true, true, true]);
+        let bool_list_2 = NodeValue::BoolList(vec![true, false, false]);
+        let true_val = NodeValue::Bool(true);
+        let false_val = NodeValue::Bool(false);
+
+        assert_eq!(bool_list_1.operate(&OP_ALL_EQ, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(bool_list_1.operate(&OP_ALL_EQ, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(bool_list_2.operate(&OP_ALL_EQ, &true_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(bool_list_2.operate(&OP_ALL_EQ, &false_val), Ok(NodeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_operate_relational_all_eq_int_type_ok() {
+        let int_list_1 = NodeValue::Int64List(vec![3, 30, 300]);
+        let int_list_2 = NodeValue::Int64List(vec![0, 0]);
+        let zero = NodeValue::Int32(0);
+
+        assert_eq!(int_list_1.operate(&OP_ALL_EQ, &zero), Ok(NodeValue::Bool(false)));
+        assert_eq!(int_list_2.operate(&OP_ALL_EQ, &zero), Ok(NodeValue::Bool(true)));
+    }
+
+    #[test]
+    fn test_operate_relational_all_eq_float_type_ok() {
+        let float_list_1 = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
+        let float_list_2 = NodeValue::FloatList(vec![0.5, 0.5]);
+
+        let point_five = NodeValue::Double(0.5);
+
+        assert_eq!(float_list_1.operate(&OP_ALL_EQ, &point_five), Ok(NodeValue::Bool(false)));
+        assert_eq!(float_list_2.operate(&OP_ALL_EQ, &point_five), Ok(NodeValue::Bool(true)));
     }
 }
