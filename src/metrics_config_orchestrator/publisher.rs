@@ -5,9 +5,9 @@ use sdv_ast::Node;
 use sdvtelemetry_proto_rust::{
     expression::NewProtoNode, metrics_configuration::declarative_aggregation::AggregationType,
 };
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 
-use crate::metrics_config_orchestrator::Trigger;
+use crate::metrics_config_orchestrator::trigger::TriggerImpl;
 
 #[allow(dead_code)]
 pub(crate) struct Publisher {
@@ -24,7 +24,7 @@ pub(crate) enum PublisherType {
         service_name: String,
     },
     Aggregation {
-        triggers: Vec<Weak<Trigger>>,
+        triggers: Vec<Arc<TriggerImpl>>,
         message_descriptor: MessageDescriptor,
         reset_on_get: bool,
         declarative_aggregations: Vec<DeclarativeAggregation>,
