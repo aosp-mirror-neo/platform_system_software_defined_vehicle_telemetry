@@ -40,6 +40,9 @@ pub enum NodeValue {
     /// A double node value.
     Double(f64),
 
+    /// A protobuf message value.
+    Message(Box<dyn protobuf::MessageDyn>),
+
     /// Repeated boolean values.
     BoolList(Vec<bool>),
 
@@ -131,15 +134,30 @@ impl NodeValue {
         }
     }
 
+    /// Gets a NodeValue from a protobuf message and its fields.
+    pub fn extract_value(
+        msg: &dyn protobuf::MessageDyn,
+        fields: &[String],
+    ) -> Result<NodeValue, String> {
+        // if no field names, return the message itself as the NodeValue
+        if fields.is_empty() {
+            return Ok(NodeValue::Message(msg.clone_box()));
+        }
+        // recursively gets the field value from field names
+        Self::extract_field_value(msg, fields)
+    }
+
+    // private functions and methods below
+
     /// Reads a field value from a protobuf message using the reflection.
-    pub fn extract_field_value(
+    fn extract_field_value(
         msg: &dyn protobuf::MessageDyn,
         fields: &[String],
     ) -> Result<NodeValue, String> {
         let msg_descriptor = msg.descriptor_dyn();
         let field_name = fields
             .get(0)
-            .ok_or("FieldLeafNodes should provide at least one field name".to_string())?;
+            .ok_or("Getting field value requires at least one field name".to_string())?;
         let field_descriptor = msg_descriptor.field_by_name(field_name).ok_or(format!(
             "No field descriptor exists for field {} in message {}. Typo in field name?",
             field_name,
@@ -195,8 +213,6 @@ impl NodeValue {
             ))
         }
     }
-
-    // private functions and methods below
 
     /// Handle logical operations.
     fn handle_logical(&self, op: &LogicalOperator, other: &NodeValue) -> Result<NodeValue, String> {
@@ -308,6 +324,7 @@ impl NodeValue {
             ReflectValueRef::F64(v) => NodeValue::Double(v),
             ReflectValueRef::Bool(v) => NodeValue::Bool(v),
             ReflectValueRef::Enum(_, v) => NodeValue::Int32(v),
+            ReflectValueRef::Message(v) => NodeValue::Message(v.clone_box()),
             _ => {
                 return Err("The following types are not supported in an optional field: \
                             bytes, string, or protobuf message"
@@ -605,6 +622,7 @@ mod tests {
 
     use super::NodeValue;
     use lazy_static::lazy_static;
+    use protobuf::Message;
     use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{
@@ -724,131 +742,169 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_field_value_no_field_names_should_err() {
-        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &[]).is_err());
+    fn test_extract_value_no_field_names_ok() -> Result<(), String> {
+        // setup
+        let msg = &*TEST_MESSAGE;
+        let expected_msg_bytes =
+            msg.write_to_bytes().map_err(|_| "Failed to serialize TestMessage".to_string())?;
+
+        // action
+        let node_value = NodeValue::extract_value(msg, &[])?;
+
+        // assert
+        if let NodeValue::Message(node_msg) = node_value {
+            let bytes = node_msg
+                .write_to_bytes_dyn()
+                .map_err(|_| "Failed to serialize NodeValue's protobuf message".to_string())?;
+            assert_eq!(bytes, expected_msg_bytes);
+        } else {
+            return Err(format!("Expect Message variant of NodeValue, got {:?}", node_value));
+        }
+        Ok(())
     }
 
     #[test]
-    fn test_extract_field_value_int_field_ok() {
+    fn test_extract_value_int_field_ok() {
         let field_names = ["int_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
+            NodeValue::extract_value(&*TEST_MESSAGE, &field_names),
             Ok(NodeValue::Int32(80))
         );
     }
 
     #[test]
-    fn test_extract_field_value_float_field_ok() {
+    fn test_extract_value_float_field_ok() {
         let field_names = ["float_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
+            NodeValue::extract_value(&*TEST_MESSAGE, &field_names),
             Ok(NodeValue::Float(100.0))
         );
     }
 
     #[test]
-    fn test_extract_field_value_enum_field_ok() {
+    fn test_extract_value_enum_field_ok() {
         let field_names = ["enum_field".to_string()];
 
-        assert_eq!(
-            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
-            Ok(NodeValue::Int32(1))
-        );
+        assert_eq!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names), Ok(NodeValue::Int32(1)));
     }
 
     #[test]
-    fn test_extract_field_value_nested_singular_field_ok() {
+    fn test_extract_field_value_message_field_ok() -> Result<(), String> {
+        let msg = &*TEST_MESSAGE;
+        let field_names = ["message_field".to_string()];
+        let expected_msg_bytes = msg
+            .message_field
+            .write_to_bytes()
+            .map_err(|_| "Failed to serialize TestNestedMessage".to_string())?;
+
+        // action
+        let node_value = NodeValue::extract_value(msg, &field_names)?;
+
+        // assert
+        if let NodeValue::Message(node_msg) = node_value {
+            let bytes = node_msg
+                .write_to_bytes_dyn()
+                .map_err(|_| "Failed to serialize NodeValue's protobuf message".to_string())?;
+            assert_eq!(bytes, expected_msg_bytes);
+        } else {
+            return Err(format!("Expect Message variant of NodeValue, got {:?}", node_value));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_value_nested_singular_field_ok() {
         let field_names = ["message_field".to_string(), "bool_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names),
+            NodeValue::extract_value(&*TEST_MESSAGE, &field_names),
             Ok(NodeValue::Bool(true))
         );
     }
 
     #[test]
-    fn test_extract_field_value_repeated_bool_field_ok() {
+    fn test_extract_value_repeated_bool_field_ok() {
         let msg = &*TEST_MESSAGE;
         let field_names = ["repeated_bools".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(msg, &field_names),
+            NodeValue::extract_value(msg, &field_names),
             Ok(NodeValue::BoolList(msg.repeated_bools.clone()))
         );
     }
 
     #[test]
-    fn test_extract_field_value_repeated_int_field_ok() {
+    fn test_extract_value_repeated_int_field_ok() {
         let msg = &*TEST_MESSAGE;
         let field_names = ["repeated_i64s".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(msg, &field_names),
+            NodeValue::extract_value(msg, &field_names),
             Ok(NodeValue::Int64List(msg.repeated_i64s.clone()))
         );
     }
 
     #[test]
-    fn test_extract_field_value_repeated_double_field_ok() {
+    fn test_extract_value_repeated_double_field_ok() {
         let msg = &*TEST_MESSAGE;
         let field_names = ["repeated_doubles".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(msg, &field_names),
+            NodeValue::extract_value(msg, &field_names),
             Ok(NodeValue::DoubleList(msg.repeated_doubles.clone()))
         );
     }
 
     #[test]
-    fn test_extract_field_value_repeated_enum_field_ok() {
+    fn test_extract_value_repeated_enum_field_ok() {
         let msg = &*TEST_MESSAGE;
         let field_names = ["repeated_enums".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(msg, &field_names),
+            NodeValue::extract_value(msg, &field_names),
             Ok(NodeValue::Int32List(msg.repeated_enums.iter().map(|x| x.value()).collect()))
         );
     }
 
     #[test]
-    fn test_extract_field_value_nested_repeated_field_ok() {
+    fn test_extract_value_nested_repeated_field_ok() {
         let msg = &*TEST_MESSAGE;
         let field_names = ["message_field".to_string(), "repeated_i32s".to_string()];
 
         assert_eq!(
-            NodeValue::extract_field_value(msg, &field_names),
+            NodeValue::extract_value(msg, &field_names),
             Ok(NodeValue::Int32List(msg.message_field.repeated_i32s.clone()))
         );
     }
 
     #[test]
-    fn test_extract_field_value_string_field_should_err() {
+    fn test_extract_value_string_field_should_err() {
         let field_names = ["string_field".to_string()];
 
-        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
-    fn test_extract_field_value_message_field_should_err() {
-        let field_names = ["message_field".to_string()];
-
-        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
-    }
-
-    #[test]
-    fn test_extract_field_value_repeated_message_field_should_err() {
+    fn test_extract_value_repeated_message_field_should_err() {
         let field_names = ["repeated_messages".to_string()];
 
-        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
-    fn test_extract_field_value_nonexistent_field_should_err() {
+    fn test_extract_value_repeated_message_as_intermediate_field_name_should_err() {
+        let field_names = ["repeated_messages".to_string(), "bool_field".to_string()];
+
+        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
+    }
+
+    #[test]
+    fn test_extract_value_nonexistent_field_should_err() {
         let field_names = ["foo".to_string()];
 
-        assert!(NodeValue::extract_field_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
     }
 
     #[test]
