@@ -22,6 +22,11 @@ pub async fn remove_file(file_path: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
+pub async fn rename_file(from_path: &PathBuf, to_path: &PathBuf) -> io::Result<()> {
+    tokio::fs::rename(from_path, to_path).await?;
+    Ok(())
+}
+
 pub async fn create_dir(dir_path: &PathBuf) -> io::Result<()> {
     tokio::fs::create_dir_all(dir_path).await?;
     Ok(())

@@ -29,10 +29,12 @@ public:
     TelemetryService();
     virtual ~TelemetryService();
 
+    void activate_metrics_config(const std::string& metricsConfigUuid);
+    void deactivate_metrics_config(const std::string& metricsConfigUuid);
+    void add_metrics_config(const std::vector<uint8_t>& metricConfig);
     void remove_all_metrics_configs();
     void remove_metrics_config(const std::string& metricsConfigUuid);
-    void add_metrics_config(const std::vector<uint8_t>& metricConfig);
-    void set_report_ready_listener(void* listener, void (*cbFunc)(void*, const char*, size_t));
+    void set_report_ready_listener(void* listener, void (*cbFunc)(void*, const char*));
 
 private:
     // holds a reference to the binder service
