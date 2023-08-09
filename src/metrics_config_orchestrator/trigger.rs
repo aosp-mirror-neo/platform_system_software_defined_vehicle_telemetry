@@ -10,7 +10,7 @@ use std::{
 use tokio::time::Duration;
 
 use crate::collection_extension::HashMapExtension;
-use crate::metrics_config_orchestrator::Publisher;
+use crate::metrics_config_orchestrator::PublisherImpl;
 
 pub(crate) trait Trigger {
     /// Subscribe to trigger fire events.
@@ -51,7 +51,7 @@ pub(crate) struct TriggerImpl {
 
 #[allow(dead_code)]
 pub(crate) enum TriggerType {
-    Data { publisher: Arc<Publisher> },
+    Data { publisher: Arc<PublisherImpl> },
     Periodic { interval_ms: u64 },
     Conditional { triggers: Vec<Arc<TriggerImpl>>, selector_expression: Arc<Node> },
 }
@@ -245,7 +245,7 @@ mod tests {
         let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Data {
-                publisher: Arc::new(Publisher {
+                publisher: Arc::new(PublisherImpl {
                     name: "Publisher".to_owned(),
                     publisher_type: PublisherType::Signal { signal_name: "Signal".to_owned() },
                 }),
