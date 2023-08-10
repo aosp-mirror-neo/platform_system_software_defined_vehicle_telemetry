@@ -461,18 +461,18 @@ impl NodeValue {
             self, element
         );
         Ok(match self {
-            NodeValue::BoolList(v) => v.contains(&element.get_bool_with_msg(err_msg.clone())?),
+            NodeValue::BoolList(v) => v.contains(&element.get_bool_with_msg(err_msg)?),
             NodeValue::Int32List(v) => {
-                let target_value = element.get_int_with_msg(err_msg.clone())? as i32;
+                let target_value = element.get_int_with_msg(err_msg)? as i32;
                 v.contains(&target_value)
             }
-            NodeValue::Int64List(v) => v.contains(&element.get_int_with_msg(err_msg.clone())?),
+            NodeValue::Int64List(v) => v.contains(&element.get_int_with_msg(err_msg)?),
             NodeValue::FloatList(v) => {
-                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                let target_value = element.get_double_with_msg(err_msg)?;
                 v.iter().any(|x| approximately_equal(*x as f64, target_value))
             }
             NodeValue::DoubleList(v) => {
-                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                let target_value = element.get_double_with_msg(err_msg)?;
                 v.iter().any(|x| approximately_equal(*x, target_value))
             }
             _ => return Err(err_msg),
@@ -490,23 +490,23 @@ impl NodeValue {
         );
         Ok(match self {
             NodeValue::BoolList(v) => {
-                let target_value = element.get_bool_with_msg(err_msg.clone())?;
+                let target_value = element.get_bool_with_msg(err_msg)?;
                 Self::all_equal_to(v, target_value)
             }
             NodeValue::Int32List(v) => {
-                let target_value = element.get_int_with_msg(err_msg.clone())? as i32;
+                let target_value = element.get_int_with_msg(err_msg)? as i32;
                 Self::all_equal_to(v, target_value)
             }
             NodeValue::Int64List(v) => {
-                let target_value = element.get_int_with_msg(err_msg.clone())?;
+                let target_value = element.get_int_with_msg(err_msg)?;
                 Self::all_equal_to(v, target_value)
             }
             NodeValue::FloatList(v) => {
-                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                let target_value = element.get_double_with_msg(err_msg)?;
                 v.iter().all(|x| approximately_equal(*x as f64, target_value))
             }
             NodeValue::DoubleList(v) => {
-                let target_value = element.get_double_with_msg(err_msg.clone())?;
+                let target_value = element.get_double_with_msg(err_msg)?;
                 v.iter().all(|x| approximately_equal(*x, target_value))
             }
             _ => return Err(err_msg),
