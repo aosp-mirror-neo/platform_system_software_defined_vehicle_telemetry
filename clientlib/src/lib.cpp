@@ -24,10 +24,16 @@ void add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t s
     service->add_metrics_config(vec);
 }
 
-void remove_all_metrics_configs(ServiceHolder* holder) {
+void activate_metrics_config(ServiceHolder* holder, const char* config_uuid) {
     android::sdv::telemetry::TelemetryService* service =
-                reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->remove_all_metrics_configs();
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    service->activate_metrics_config(config_uuid);
+}
+
+void deactivate_metrics_config(ServiceHolder* holder, const char* config_uuid) {
+    android::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    service->deactivate_metrics_config(config_uuid);
 }
 
 void remove_metrics_config(ServiceHolder* holder, const char* config_uuid) {
@@ -36,8 +42,14 @@ void remove_metrics_config(ServiceHolder* holder, const char* config_uuid) {
     service->remove_metrics_config(std::string(config_uuid));
 }
 
+void remove_all_metrics_configs(ServiceHolder* holder) {
+    android::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    service->remove_all_metrics_configs();
+}
+
 void set_report_ready_listener(ServiceHolder* holder, void* listener,
-                               void (*cbFunc)(void*, const char*, size_t)) {
+                               void (*cbFunc)(void*, const char*)) {
     android::sdv::telemetry::TelemetryService* service =
                 reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
     service->set_report_ready_listener(listener, cbFunc);

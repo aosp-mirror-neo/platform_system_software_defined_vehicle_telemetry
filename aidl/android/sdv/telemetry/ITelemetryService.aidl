@@ -17,6 +17,18 @@ interface ITelemetryService {
     void addMetricsConfig(in byte[] metricsConfig);
 
     /**
+     * Activates a MetricsConfig based on uuid. This will also create objects
+     * related to the MetricsConfig.
+     */
+    void activateMetricsConfig(in @utf8InCpp String metricsConfigUuid);
+
+    /**
+     * Deactivates a MetricsConfig based on uuid. This will also destroy objects
+     * related to the MetricsConfig.
+     */
+    void deactivateMetricsConfig(in @utf8InCpp String metricsConfigUuid);
+
+    /**
      * Removes a MetricsConfig based on uuid. This will also remove outputs produced by the
      * MetricsConfig.
      */

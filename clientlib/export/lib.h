@@ -17,10 +17,12 @@ extern "C" {
     ServiceHolder* get_telemetry_service();
     void stop_telemetry_service(ServiceHolder* holder);
     void add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size);
+    void activate_metrics_config(ServiceHolder* holder, const char* uuid);
+    void deactivate_metrics_config(ServiceHolder* holder, const char* uuid);
     void remove_metrics_config(ServiceHolder* holder, const char* uuid);
     void remove_all_metrics_configs(ServiceHolder* holder);
     void set_report_ready_listener(ServiceHolder* holder, void* listener,
-                                   void (*cbFunc)(void*, const char*, size_t));
+                                   void (*cbFunc)(void*, const char*));
 
 #ifdef __cplusplus
 }

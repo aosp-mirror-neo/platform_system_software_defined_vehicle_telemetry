@@ -8,8 +8,7 @@ namespace android::sdv::telemetry {
 class ReportReadyListenerImpl :
       public android::sdv::telemetry::BnTelemetryReportReadyListener {
 public:
-
-    ReportReadyListenerImpl(void *cb, void (*cbFunc)(void*, const char*, size_t));
+    ReportReadyListenerImpl(void* cb, void (*cbFunc)(void*, const char*));
     ~ReportReadyListenerImpl();
     android::binder::Status onReady(const std::string& metricConfigUuid) override;
 
@@ -21,7 +20,7 @@ private:
     // Client will have its own implementation of CB interface which will be stored
     // as void* pointer in telemetry_service.h. The void* cb will be cast back to the
     // CB interfce by the client in the CB function.
-    void (*cbFuncPtr)(void*, const char*, size_t);
+    void (*cbFuncPtr)(void*, const char*);
 };
 
 }
