@@ -17,10 +17,12 @@
 
 #include <vector>
 
+const char* UUID = "01bf0754-df95-46bb-bb35-522b6af66600";
+
 // Callback function triggered by the telemetry service. Pointer to this function
 // is passed to the telemetry service.
-void trigger_report_ready_listener(void* listener, const char* data, size_t len) {
-    std::string str(data, len);
+void trigger_report_ready_listener(void* listener, const char* data) {
+    std::string str(data);
     auto reportReadListener = static_cast<IReportReadyListener*>(listener);
     reportReadListener->onReady(str);
 }
@@ -34,7 +36,7 @@ int main() {
   ServiceHolder* holder = get_telemetry_service();
 
   android::sdv::telemetry::MetricsConfig config;
-  config.set_uuid("01bf0754-df95-46bb-bb35-522b6af66600");
+  config.set_uuid(UUID);
   config.set_version(2);
   config.set_script("Sample Script");
 
@@ -49,12 +51,14 @@ int main() {
 
   std::vector<uint8_t> vec(serialData.begin(), serialData.end());
   add_metrics_config(holder, &vec[0], vec.size());
+  activate_metrics_config(holder, UUID);
 
   android::sp<ReportReadyImpl> listener(new ReportReadyImpl());
   ALOGI("Setting report ready listener");
   set_report_ready_listener(holder, static_cast<void*>(listener.get()),
                             &trigger_report_ready_listener);
 
+  deactivate_metrics_config(holder, UUID);
   remove_all_metrics_configs(holder);
 
   ALOGI("Releasing binder service");

@@ -12,6 +12,11 @@ extern "C" {
     pub fn get_telemetry_service() -> *mut ServiceHolder;
     pub fn stop_telemetry_service(holder: *mut ServiceHolder);
     pub fn add_metrics_config(holder: *mut ServiceHolder, metrics_config: *mut u8, size: usize);
+    pub fn activate_metrics_config(holder: *mut ServiceHolder, uuid: *const ::std::os::raw::c_char);
+    pub fn deactivate_metrics_config(
+        holder: *mut ServiceHolder,
+        uuid: *const ::std::os::raw::c_char,
+    );
     pub fn remove_metrics_config(holder: *mut ServiceHolder, uuid: *const ::std::os::raw::c_char);
     pub fn remove_all_metrics_configs(holder: *mut ServiceHolder);
 

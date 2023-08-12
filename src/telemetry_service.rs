@@ -25,11 +25,12 @@ use std::marker::{Send, Sync};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
+use metrics_config_orchestrator::{MetricsConfigOrchestratorError, MetricsConfigOrchestratorImpl};
 
 pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 
-static DATA_DIR: &str = "telemetry";
+static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
+static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
 
 // stores the size of all the metric configs persisted in memory
 static PERSISTED_METRICS_TOTAL_SIZE: AtomicUsize = AtomicUsize::new(0);
@@ -47,12 +48,13 @@ pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
 
 /// This struct is defined to implement ITelemetryService AIDL interface.
 pub struct SdvTelemetryService {
-    data_dir: String,
+    active_data_dir: String,
+    inactive_data_dir: String,
     max_persistent_config_size: usize,
     /// Instance of Metrics Configuration Orchestrator.
-    pub metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
+    metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
     /// Hashmap to store the metricsConfigs's size passed by the client.
-    pub metrics_configs_store: Arc<Mutex<HashMap<String, usize>>>,
+    metrics_configs_store: Arc<Mutex<HashMap<String, usize>>>,
 }
 
 impl Interface for SdvTelemetryService {}
@@ -60,21 +62,30 @@ impl Interface for SdvTelemetryService {}
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
     pub async fn new(root_path: &str, config_store_size: usize) -> Option<Self> {
-        let mut data_dir = DATA_DIR.to_string();
-        if !root_path.is_empty() {
-            data_dir = format!("{}/{}", root_path, DATA_DIR);
-        }
+        let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
+            (
+                format!("{}/{}", root_path, ACTIVE_CONFIG_DATA_DIR),
+                format!("{}/{}", root_path, INACTIVE_CONFIG_DATA_DIR),
+            )
+        } else {
+            (ACTIVE_CONFIG_DATA_DIR.to_owned(), INACTIVE_CONFIG_DATA_DIR.to_owned())
+        };
 
-        let dir_path = Path::new(&data_dir);
+        let active_dir_path = Path::new(&active_data_dir);
+        let inactive_dir_path = Path::new(&inactive_data_dir);
 
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
         let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new());
 
-        let mut configs_loaded = 0;
+        let mut num_active_configs = 0;
+        let mut num_inactive_configs = 0;
 
-        if dir_path.is_dir() {
+        if active_dir_path.is_dir() {
+            // Needed to get the size of all files
+            let mut total_size = 0;
+
             // Read the contents of each file in the directory into a byte array
-            for entry_result in fs::read_dir(dir_path).unwrap() {
+            for entry_result in fs::read_dir(active_dir_path).unwrap() {
                 let entry = entry_result.unwrap();
                 let path = entry.path();
                 if path.is_file() {
@@ -87,18 +98,17 @@ impl SdvTelemetryService {
                     };
 
                     // bytes now contains the contents of the file
-
                     let config: MetricsConfig =
                         protobuf::Message::parse_from_bytes(&bytes).unwrap();
-                    let uuid = config.uuid.clone();
+                    let uuid = &config.uuid;
 
                     // Validates and initializes metrics config
                     match config_orchestrator.initialize_config(&config) {
                         Ok(()) => {
                             let mut metric_config_map = configs_store.lock().unwrap();
-                            metric_config_map.insert(uuid, bytes.len());
-                            configs_loaded += 1;
-                            PERSISTED_METRICS_TOTAL_SIZE.fetch_add(bytes.len(), Ordering::SeqCst);
+                            metric_config_map.insert(uuid.clone(), bytes.len());
+                            num_active_configs += 1;
+                            total_size += bytes.len();
                         }
                         Err(e) => {
                             error!("Error {} in loading {} Config", e, uuid);
@@ -109,11 +119,49 @@ impl SdvTelemetryService {
                     }
                 }
             }
+
+            PERSISTED_METRICS_TOTAL_SIZE.fetch_add(total_size, Ordering::SeqCst);
         } else {
-            match file_io_utils::create_dir(&dir_path.to_path_buf()).await {
+            match file_io_utils::create_dir(&active_dir_path.to_path_buf()).await {
                 Ok(_) => {
                     // Success, directory was created or already exists
-                    info!("telemetry directory created");
+                    info!("active config telemetry directory created");
+                }
+                Err(e) => {
+                    error!("An error occurred in creating directory: {}", e);
+                    return None;
+                }
+            };
+        }
+
+        if inactive_dir_path.is_dir() {
+            // Needed to get the size of all files
+            let mut total_size = 0;
+            for entry in fs::read_dir(inactive_dir_path).unwrap() {
+                let entry = entry.unwrap();
+                let metadata = entry.metadata().unwrap();
+
+                // Check if it's a file
+                if metadata.is_file() {
+                    let file_name = entry.file_name();
+                    let mut metric_config_map = configs_store.lock().unwrap();
+                    metric_config_map
+                        .insert(file_name.into_string().unwrap(), metadata.len() as usize);
+                    total_size += metadata.len();
+                    num_inactive_configs += 1;
+                } else {
+                    // remove corrupt inactive config
+                    file_io_utils::remove_file(&entry.path()).await.unwrap_or_else(|e| {
+                        error!("An error occurred in removing corrupt config: {}", e)
+                    });
+                }
+            }
+            PERSISTED_METRICS_TOTAL_SIZE.fetch_add(total_size as usize, Ordering::SeqCst);
+        } else {
+            match file_io_utils::create_dir(&inactive_dir_path.to_path_buf()).await {
+                Ok(_) => {
+                    // Success, directory was created or already exists
+                    info!("inactive config telemetry directory created");
                 }
                 Err(e) => {
                     error!("An error occurred in creating directory: {}", e);
@@ -123,12 +171,14 @@ impl SdvTelemetryService {
         }
 
         info!(
-            "Telemetry service initialized with {:} configs occupying {} memory",
-            configs_loaded,
+            "Telemetry service initialized with {:} active configs and {:} inactive configs occupying {} memory",
+            num_active_configs,
+            num_inactive_configs,
             PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
         );
         Some(SdvTelemetryService {
-            data_dir,
+            active_data_dir,
+            inactive_data_dir,
             max_persistent_config_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
@@ -149,7 +199,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             return to_binder_result(Err("Memory limit exceeded"));
         }
 
-        let res = self.metrics_config_orchestrator.initialize_config(&config);
+        let res = self.metrics_config_orchestrator.validate_config(&config);
 
         // Validates and initializes metrics config
         if res.is_err() {
@@ -158,7 +208,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         }
 
         let bytes = metrics_config.to_vec();
-        let path = PathBuf::from(self.data_dir.clone() + "/" + &config.uuid.clone());
+        let path = PathBuf::from(self.inactive_data_dir.clone() + "/" + &config.uuid);
 
         if let Err(e) = file_io_utils::write_to_file(&path, &bytes).await {
             error!("An error occurred while writing to file: {}", e);
@@ -182,14 +232,66 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 
-    async fn removeMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
-        info!("removeMetricsConfig: {}", metrics_config_uuid);
+    async fn activateMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
+        info!("activateMetricsConfig: {:?} \n", metrics_config_uuid);
+        let path = PathBuf::from(self.inactive_data_dir.clone() + "/" + metrics_config_uuid);
+        if path.is_file() {
+            let bytes = match file_io_utils::read_from_file(&path).await {
+                Ok(data) => data,
+                Err(e) => {
+                    error!("An error occurred while trying to read file: {}", e);
+                    return to_binder_result(Err(e));
+                }
+            };
+
+            // bytes now contains the contents of the file
+            let config: MetricsConfig = protobuf::Message::parse_from_bytes(&bytes).unwrap();
+            let uuid = &config.uuid;
+
+            // Initializes metrics config
+            match self.metrics_config_orchestrator.initialize_config(&config) {
+                Ok(()) => {
+                    let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
+                    file_io_utils::rename_file(&path, &new_path)
+                        .await
+                        .unwrap_or_else(|e| error!("An error occurred in renaming config: {}", e));
+                }
+                Err(e) => {
+                    error!("Error {} in initializing {} Config", e, uuid);
+                    file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
+                        error!("An error occurred in removing corrupt config: {}", e)
+                    });
+                    return to_binder_result(Err(e));
+                }
+            }
+        } else {
+            return to_binder_result(Err("Config not found"));
+        }
+
+        Ok(())
+    }
+
+    async fn deactivateMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
+        info!("deactivateMetricsConfig: {}", metrics_config_uuid);
+
         let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
         if res.is_err() {
             info!("Invalid Metric Config UUID");
             return to_binder_result(res);
         }
 
+        let old_path = PathBuf::from(self.active_data_dir.clone() + "/" + metrics_config_uuid);
+        let new_path = PathBuf::from(self.inactive_data_dir.clone() + "/" + metrics_config_uuid);
+
+        file_io_utils::rename_file(&old_path, &new_path)
+            .await
+            .unwrap_or_else(|e| error!("An error occurred in renaming config: {}", e));
+
+        Ok(())
+    }
+
+    async fn removeMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
+        info!("removeMetricsConfig: {}", metrics_config_uuid);
         let uuid = String::from(metrics_config_uuid);
         let config_size = {
             let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
@@ -202,7 +304,28 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             }
         };
 
-        let path = PathBuf::from(self.data_dir.clone() + "/" + &uuid);
+        let active_config = {
+            let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
+            if let Err(err) = res {
+                if let MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } = err {
+                    info!("UUID {} doesn't exist", uuid);
+                    false
+                } else {
+                    error!("Error in finishing Metric Config");
+                    return to_binder_result(Err(err));
+                }
+            } else {
+                true
+            }
+        };
+
+        let path = {
+            if active_config {
+                PathBuf::from(self.active_data_dir.clone() + "/" + &uuid)
+            } else {
+                PathBuf::from(self.inactive_data_dir.clone() + "/" + &uuid)
+            }
+        };
 
         if let Err(e) = file_io_utils::remove_file(&path).await {
             error!("An error occurred in removing file: {}", e);
@@ -216,22 +339,44 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn removeAllMetricsConfigs(&self) -> BinderResult<()> {
         info!("removeAllMetricsConfigs");
 
-        // remove all configs from directory
-        for entry in fs::read_dir(self.data_dir.clone()).unwrap() {
+        // remove all configs from active directory
+        for entry in fs::read_dir(self.active_data_dir.clone()).unwrap() {
             file_io_utils::remove_file(&entry.unwrap().path())
                 .await
-                .unwrap_or_else(|e| error!("An error occurred in removing corrupt config: {}", e));
+                .unwrap_or_else(|e| error!("An error occurred in removing active config: {}", e));
+        }
+
+        // remove all configs from inactive directory
+        for entry in fs::read_dir(self.inactive_data_dir.clone()).unwrap() {
+            file_io_utils::remove_file(&entry.unwrap().path())
+                .await
+                .unwrap_or_else(|e| error!("An error occurred in removing inactive config: {}", e));
         }
 
         let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
         for uuid in metric_config_map.keys() {
             let res = self.metrics_config_orchestrator.finish_config(uuid);
-            if res.is_err() {
-                info!("Error in removing config {:?}", res);
+            if let Err(err) = res {
+                if let MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } = err {
+                    info!("UUID {} doesn't exist or is not active", uuid);
+                } else {
+                    error!("Error in finishing Metric Config {:?}", err);
+                }
             }
         }
+
         metric_config_map.clear();
+
         PERSISTED_METRICS_TOTAL_SIZE.store(0, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn setReportReadyListener(
+        &self,
+        listener: &Strong<dyn ITelemetryReportReadyListener>,
+    ) -> BinderResult<()> {
+        info!("setReportReadyListener");
+        let _ = listener.onReady("Received CB from Telemetry Binder service");
         Ok(())
     }
 
@@ -253,15 +398,6 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 
-    async fn setReportReadyListener(
-        &self,
-        listener: &Strong<dyn ITelemetryReportReadyListener>,
-    ) -> BinderResult<()> {
-        info!("setReportReadyListener");
-        let _ = listener.onReady("Received CB from Telemetry Binder service");
-        Ok(())
-    }
-
     async fn clearReportReadyListener(&self) -> BinderResult<()> {
         info!("clearReportReadyListener");
         Ok(())
@@ -274,22 +410,100 @@ mod tests {
     use super::*;
     use binder::ParcelFileDescriptor;
     use protobuf::Message;
+    use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
+
+    struct MockMetricsConfigOrchestratorImpl {
+        num_initialize_config_calls: Arc<Mutex<i32>>,
+        num_finish_config_calls: Arc<Mutex<i32>>,
+        num_validate_config_calls: Arc<Mutex<i32>>,
+    }
+
+    impl MockMetricsConfigOrchestratorImpl {
+        fn new(
+            num_initialize_config_calls: Arc<Mutex<i32>>,
+            num_finish_config_calls: Arc<Mutex<i32>>,
+            num_validate_config_calls: Arc<Mutex<i32>>,
+        ) -> Self {
+            MockMetricsConfigOrchestratorImpl {
+                num_initialize_config_calls,
+                num_finish_config_calls,
+                num_validate_config_calls,
+            }
+        }
+    }
+
+    impl MetricsConfigOrchestrator for MockMetricsConfigOrchestratorImpl {
+        fn initialize_config(
+            &self,
+            _: &MetricsConfigProto,
+        ) -> Result<(), MetricsConfigOrchestratorError> {
+            let mut num_calls = self.num_initialize_config_calls.lock().unwrap();
+            *num_calls += 1;
+            Ok(())
+        }
+
+        fn finish_config(&self, _: &str) -> Result<(), MetricsConfigOrchestratorError> {
+            let mut num_calls = self.num_finish_config_calls.lock().unwrap();
+            *num_calls += 1;
+            Ok(())
+        }
+
+        fn validate_config(
+            &self,
+            _: &MetricsConfigProto,
+        ) -> Result<(), MetricsConfigOrchestratorError> {
+            let mut num_calls = self.num_validate_config_calls.lock().unwrap();
+            *num_calls += 1;
+            Ok(())
+        }
+    }
+
     struct TestEnvironment {
         dir_path: String,
-        service: Box<dyn ITelemetryServiceAsyncServer>,
+        service: SdvTelemetryService,
+        num_initialize_config_calls: Arc<Mutex<i32>>,
+        num_finish_config_calls: Arc<Mutex<i32>>,
+        num_validate_config_calls: Arc<Mutex<i32>>,
     }
 
     impl TestEnvironment {
         // Test setup
         async fn new(dir_path: String) -> TestEnvironment {
-            let service: Box<dyn ITelemetryServiceAsyncServer> = Box::new(
+            let num_initialize_config_calls = Arc::new(Mutex::new(0));
+            let num_finish_config_calls = Arc::new(Mutex::new(0));
+            let num_validate_config_calls = Arc::new(Mutex::new(0));
+
+            let mut service =
                 SdvTelemetryService::new(dir_path.as_str(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB)
                     .await
-                    .unwrap(),
-            );
-            TestEnvironment { dir_path, service }
+                    .unwrap();
+            service.metrics_config_orchestrator = Box::new(MockMetricsConfigOrchestratorImpl::new(
+                num_initialize_config_calls.clone(),
+                num_finish_config_calls.clone(),
+                num_validate_config_calls.clone(),
+            ));
+
+            TestEnvironment {
+                dir_path,
+                service,
+                num_initialize_config_calls: num_initialize_config_calls.clone(),
+                num_finish_config_calls: num_finish_config_calls.clone(),
+                num_validate_config_calls: num_validate_config_calls.clone(),
+            }
+        }
+
+        pub fn get_num_initialize_config_calls(&self) -> i32 {
+            *self.num_initialize_config_calls.lock().unwrap()
+        }
+
+        pub fn get_num_finish_config_calls(&self) -> i32 {
+            *self.num_finish_config_calls.lock().unwrap()
+        }
+
+        pub fn get_num_validate_config_calls(&self) -> i32 {
+            *self.num_validate_config_calls.lock().unwrap()
         }
     }
 
@@ -342,7 +556,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
-        let file_path = PathBuf::from(format!("{}/{}/{}", ROOT_PATH, DATA_DIR, UUID));
+        let file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID));
 
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let mut config = MetricsConfig::new();
@@ -356,6 +571,62 @@ mod tests {
         let result = test_environment.service.addMetricsConfig(serialized_config).await;
         assert!(result.is_ok());
         assert!(file_path.is_file());
+        assert_eq!(1, test_environment.get_num_validate_config_calls());
+    }
+
+    #[tokio::test]
+    async fn activate_metrics_config() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "activate_metrics_config";
+        let old_file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID));
+        let new_file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID));
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        let mut config = MetricsConfig::new();
+        config.uuid = UUID.to_owned();
+        test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+        assert!(old_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_validate_config_calls());
+
+        let result = test_environment.service.activateMetricsConfig(UUID).await;
+        assert!(result.is_ok());
+        assert!(new_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_initialize_config_calls());
+    }
+
+    #[tokio::test]
+    async fn deactivate_metrics_config() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "deactivate_metrics_config";
+        let old_file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID));
+        let new_file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID));
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        let mut config = MetricsConfig::new();
+        config.uuid = UUID.to_owned();
+        test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+        assert!(old_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_validate_config_calls());
+
+        let result = test_environment.service.activateMetricsConfig(UUID).await;
+        assert!(result.is_ok());
+        assert!(new_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_initialize_config_calls());
+
+        let result = test_environment.service.deactivateMetricsConfig(UUID).await;
+        assert!(result.is_ok());
+        assert!(old_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_finish_config_calls());
     }
 
     #[tokio::test]
@@ -365,30 +636,85 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
-        let file_path = PathBuf::from(format!("{}/{}/{}", ROOT_PATH, DATA_DIR, UUID));
+        let old_file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID));
+        let new_file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID));
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let mut config = MetricsConfig::new();
         config.uuid = UUID.to_owned();
         test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
-        assert!(file_path.is_file());
+        assert!(old_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_validate_config_calls());
+
+        let result = test_environment.service.activateMetricsConfig(UUID).await;
+        assert!(result.is_ok());
+        assert!(new_file_path.is_file());
+        assert_eq!(1, test_environment.get_num_initialize_config_calls());
 
         let result = test_environment.service.removeMetricsConfig(UUID).await;
+        assert_eq!(1, test_environment.get_num_finish_config_calls());
         assert!(result.is_ok());
-        assert!(!file_path.is_file());
+        assert!(!old_file_path.is_file());
+        assert!(!new_file_path.is_file());
     }
 
     #[tokio::test]
     async fn remove_all_metrics_configs() {
+        const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+        const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_all_metrics_configs";
-        let dir_path_buf = PathBuf::from(format!("{}/{}", ROOT_PATH, DATA_DIR));
+        let inactive_dir_path =
+            PathBuf::from(format!("{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR));
+        let active_dir_path = PathBuf::from(format!("{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR));
+
+        let old_file_path1 =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID1));
+        let new_file_path1 =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID1));
+        let old_file_path2 =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID2));
+        let new_file_path2 =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID2));
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
+        let mut config1 = MetricsConfig::new();
+        let mut config2 = MetricsConfig::new();
+        config1.uuid = UUID1.to_owned();
+        config2.uuid = UUID2.to_owned();
+
+        // Add configs
+        test_environment
+            .service
+            .addMetricsConfig(&config1.write_to_bytes().unwrap())
+            .await
+            .unwrap();
+        test_environment
+            .service
+            .addMetricsConfig(&config2.write_to_bytes().unwrap())
+            .await
+            .unwrap();
+        assert!(old_file_path1.is_file());
+        assert!(old_file_path2.is_file());
+        assert_eq!(2, test_environment.get_num_validate_config_calls());
+
+        // Activate configs
+        test_environment.service.activateMetricsConfig(UUID1).await.unwrap();
+        test_environment.service.activateMetricsConfig(UUID2).await.unwrap();
+        assert!(new_file_path1.is_file());
+        assert!(new_file_path2.is_file());
+        assert_eq!(2, test_environment.get_num_initialize_config_calls());
+
+        // Remove all configs
         let result = test_environment.service.removeAllMetricsConfigs().await;
         assert!(result.is_ok());
-        assert_eq!(dir_path_buf.read_dir().unwrap().count(), 0); // check if directory is empty
+        assert_eq!(active_dir_path.read_dir().unwrap().count(), 0); // check if directory is empty
+        assert_eq!(inactive_dir_path.read_dir().unwrap().count(), 0); // check if directory is empty
+        assert_eq!(2, test_environment.get_num_finish_config_calls());
     }
 
     #[tokio::test]
