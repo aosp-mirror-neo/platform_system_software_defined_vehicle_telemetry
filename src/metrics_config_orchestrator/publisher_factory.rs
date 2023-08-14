@@ -14,15 +14,16 @@ use thiserror::Error;
 use crate::collection_extension::HashMapExtension;
 use crate::metrics_config_orchestrator::{
     publisher::{DeclarativeAggregation, PublisherType},
-    MetricsConfig, Publisher,
+    trigger::TriggerImpl,
+    Publisher, Trigger,
 };
 
-pub(crate) trait PublisherFactory {
+pub(crate) trait PublisherFactory<Trig: Trigger = TriggerImpl> {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
         publisher_proto: &PublisherProto,
-        context: &PublisherFactoryContext,
+        context: &PublisherFactoryContext<Trig>,
     ) -> Result<Publisher, PublisherFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a publisher
@@ -30,14 +31,14 @@ pub(crate) trait PublisherFactory {
     fn validate(
         &self,
         publisher_proto: &PublisherProto,
-        context: &PublisherFactoryContext,
+        context: &PublisherFactoryContext<Trig>,
     ) -> Result<(), PublisherFactoryError>;
 }
 
-pub(crate) struct PublisherFactoryContext<'a> {
-    pub config: &'a MetricsConfig,
+pub(crate) struct PublisherFactoryContext<'a, Trig: Trigger = TriggerImpl> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub file_descriptors: &'a Vec<FileDescriptor>,
+    pub triggers: &'a HashMap<String, Arc<Trig>>,
 }
 
 #[derive(Error, Debug)]
@@ -107,7 +108,7 @@ impl PublisherFactoryImpl {
             triggers: aggregation_publisher_proto
                 .trigger_names
                 .iter()
-                .map(|trigger_name| Arc::downgrade(&context.config.triggers[trigger_name]))
+                .map(|trigger_name| context.triggers[trigger_name].clone())
                 .collect(),
             message_descriptor: descriptor,
             reset_on_get: aggregation_publisher_proto.reset_on_get,
@@ -171,7 +172,7 @@ impl PublisherFactoryImpl {
                     (None, None)
                 };
 
-                acc.try_insert_value(
+                match acc.try_insert_value(
                     &declarative_aggregation_proto.field_name,
                     DeclarativeAggregation {
                         field_name: declarative_aggregation_proto.field_name.clone(),
@@ -180,15 +181,12 @@ impl PublisherFactoryImpl {
                         seed_expression,
                         aggregation_expression,
                     },
-                )
-                .map_or_else(
-                    |()| {
-                        Err(PublisherFactoryError::DuplicateFieldName {
-                            field_name: declarative_aggregation_proto.field_name.clone(),
-                        })
-                    },
-                    |()| Ok(acc),
-                )
+                ) {
+                    Ok(_) => Ok(acc),
+                    Err(()) => Err(PublisherFactoryError::DuplicateFieldName {
+                        field_name: declarative_aggregation_proto.field_name.clone(),
+                    }),
+                }
             })?
             .into_values()
             .collect())
@@ -265,7 +263,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::{trigger::TriggerType, Trigger};
+    use crate::metrics_config_orchestrator::trigger::{TriggerImpl, TriggerType};
 
     const FIELD_NAME: &str = "field";
     const FIELD_NAME2: &str = "field2";
@@ -321,7 +319,7 @@ mod tests {
     fn run_using_empty_factory_context<R>(
         execute_func: impl FnOnce(&PublisherFactoryContext) -> R,
     ) -> R {
-        run_using_factory_context(None, None, None, None, execute_func)
+        run_using_factory_context(None, None, None, execute_func)
     }
 
     // Creates a PublisherFactoryContext with passed data and uses it to call `execute_func`.
@@ -329,25 +327,19 @@ mod tests {
     // a function that creates and returns it - it can only be used in the function where it's
     // created.
     fn run_using_factory_context<R>(
-        publishers: Option<Vec<Arc<Publisher>>>,
-        triggers: Option<Vec<Arc<Trigger>>>,
+        triggers: Option<Vec<Arc<TriggerImpl>>>,
         nodes: Option<Vec<Arc<Node>>>,
         file_descriptors: Option<Vec<FileDescriptor>>,
         execute_func: impl FnOnce(&PublisherFactoryContext) -> R,
     ) -> R {
-        let config = MetricsConfig {
-            publishers: publishers
-                .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone())),
-            triggers: triggers.map_or(HashMap::new(), |val| {
-                val.into_hash_map(|publisher| publisher.name.clone())
-            }),
-        };
         let expression_nodes = nodes.unwrap_or_default();
         let file_descriptors = file_descriptors.unwrap_or_default();
+        let triggers = triggers
+            .map_or(HashMap::new(), |val| val.into_hash_map(|publisher| publisher.name.clone()));
         let context = PublisherFactoryContext {
-            config: &config,
             expression_nodes: &expression_nodes,
             file_descriptors: &file_descriptors,
+            triggers: &triggers,
         };
         execute_func(&context)
     }
@@ -432,8 +424,7 @@ mod tests {
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let mut declarative_proto = create_declarative_aggregation(FIELD_NAME, Some(0), None);
-        declarative_proto.aggregation_type =
-            EnumOrUnknown::<AggregationType>::from_i32(UNKNOWN_AGGREGATION_TYPE);
+        declarative_proto.aggregation_type = EnumOrUnknown::from_i32(UNKNOWN_AGGREGATION_TYPE);
         set_aggregation_publisher(
             &mut publisher,
             &file_descriptor.messages().next().unwrap(),
@@ -459,7 +450,7 @@ mod tests {
     }
 
     fn create_valid_aggregation_publisher(
-    ) -> (PublisherProto, Option<Vec<FileDescriptor>>, Option<Vec<Arc<Trigger>>>) {
+    ) -> (PublisherProto, Option<Vec<FileDescriptor>>, Option<Vec<Arc<TriggerImpl>>>) {
         let file_descriptor = create_file_descriptor(&[FIELD_NAME, FIELD_NAME2]);
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let declarative_proto1 =
@@ -474,7 +465,7 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = Arc::new(Trigger::new(
+        let trigger = Arc::new(TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: INTERVAL_MS },
         ));
@@ -535,7 +526,7 @@ mod tests {
         let factory = create_factory();
         let (publisher, file_descriptors) = create_aggregation_publisher_with_invalid_field_name();
 
-        let err = run_using_factory_context(None, None, None, file_descriptors, |context| {
+        let err = run_using_factory_context(None, None, file_descriptors, |context| {
             factory.create(&publisher, context)
         })
         .err()
@@ -553,7 +544,7 @@ mod tests {
         let factory = create_factory();
         let (publisher, file_descriptors) = create_aggregation_publisher_with_missing_node_index();
 
-        let err = run_using_factory_context(None, None, None, file_descriptors, |context| {
+        let err = run_using_factory_context(None, None, file_descriptors, |context| {
             factory.create(&publisher, context)
         })
         .err()
@@ -572,7 +563,7 @@ mod tests {
         let (publisher, file_descriptors) =
             create_aggregation_publisher_with_incorrect_node_index();
 
-        let err = run_using_factory_context(None, None, None, file_descriptors, |context| {
+        let err = run_using_factory_context(None, None, file_descriptors, |context| {
             factory.create(&publisher, context)
         })
         .err()
@@ -592,7 +583,6 @@ mod tests {
             create_aggregation_publisher_with_unknown_aggregation_type();
 
         let err = run_using_factory_context(
-            None,
             None,
             Some(vec![Arc::new(create_node())]),
             file_descriptors,
@@ -616,7 +606,6 @@ mod tests {
 
         let err = run_using_factory_context(
             None,
-            None,
             Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
             |context| factory.create(&publisher, context),
@@ -636,52 +625,41 @@ mod tests {
         let factory = create_factory();
         let (publisher, file_descriptors, triggers) = create_valid_aggregation_publisher();
 
-        run_using_factory_context(
-            None,
-            triggers,
+        let res = run_using_factory_context(
+            triggers.clone(),
             Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
-            |context| {
-                let res = factory.create(&publisher, context).unwrap();
-                assert_eq!(res.name, PUBLISHER_NAME);
-                if let PublisherType::Aggregation {
-                    triggers,
-                    message_descriptor,
-                    reset_on_get,
-                    declarative_aggregations,
-                } = res.publisher_type
-                {
-                    assert_eq!(triggers.len(), 1);
-                    let trigger = triggers.first().unwrap().upgrade().unwrap();
-                    assert_eq!(trigger.name, TRIGGER_NAME);
-                    assert!(matches!(
-                        trigger.trigger_type,
-                        TriggerType::Periodic { interval_ms: INTERVAL_MS }
-                    ));
-                    assert_eq!(
-                        message_descriptor.full_name(),
-                        "android.sdv.telemetry.tests.TestMessage"
-                    );
-                    assert!(reset_on_get);
-                    assert_eq!(declarative_aggregations.len(), 2);
-                    for aggregation in declarative_aggregations {
-                        match aggregation.field_name.as_str() {
-                            FIELD_NAME => assert!(matches!(
-                                aggregation.aggregation_type,
-                                AggregationType::COUNT
-                            )),
-                            FIELD_NAME2 => assert!(matches!(
-                                aggregation.aggregation_type,
-                                AggregationType::VECTOR
-                            )),
-                            name => panic!("Unexpected field with name {}", name),
-                        }
+            |context| factory.create(&publisher, context),
+        )
+        .unwrap();
+
+        assert_eq!(res.name, PUBLISHER_NAME);
+        if let PublisherType::Aggregation {
+            triggers: res_triggers,
+            message_descriptor,
+            reset_on_get,
+            declarative_aggregations,
+        } = res.publisher_type
+        {
+            assert_eq!(res_triggers.len(), 1);
+            assert!(Arc::ptr_eq(&res_triggers[0], &triggers.unwrap()[0]));
+            assert_eq!(message_descriptor.full_name(), "android.sdv.telemetry.tests.TestMessage");
+            assert!(reset_on_get);
+            assert_eq!(declarative_aggregations.len(), 2);
+            for aggregation in declarative_aggregations {
+                match aggregation.field_name.as_str() {
+                    FIELD_NAME => {
+                        assert!(matches!(aggregation.aggregation_type, AggregationType::COUNT))
                     }
-                } else {
-                    panic!("Unexpected publisher type");
+                    FIELD_NAME2 => {
+                        assert!(matches!(aggregation.aggregation_type, AggregationType::VECTOR))
+                    }
+                    name => panic!("Unexpected field with name {}", name),
                 }
-            },
-        );
+            }
+        } else {
+            panic!("Unexpected publisher type");
+        }
     }
 
     #[test]
@@ -702,13 +680,12 @@ mod tests {
         );
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
 
-        let trigger = Arc::new(Trigger::new(
+        let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        ));
+        );
         let res = run_using_factory_context(
-            None,
-            Some(vec![trigger]),
+            Some(vec![Arc::new(trigger)]),
             Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
@@ -742,7 +719,6 @@ mod tests {
 
         let err = run_using_factory_context(
             None,
-            None,
             Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
@@ -774,7 +750,6 @@ mod tests {
         );
 
         let err = run_using_factory_context(
-            None,
             None,
             Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
@@ -811,13 +786,12 @@ mod tests {
         );
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
 
-        let trigger = Arc::new(Trigger::new(
+        let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        ));
+        );
         let res = run_using_factory_context(
-            None,
-            Some(vec![trigger]),
+            Some(vec![Arc::new(trigger)]),
             Some(vec![Arc::new(create_node())]),
             Some(vec![file_descriptor]),
             |context| factory.create(&publisher, context),
@@ -871,7 +845,7 @@ mod tests {
         let factory = create_factory();
         let (publisher, file_descriptors) = create_aggregation_publisher_with_invalid_field_name();
 
-        let err = run_using_factory_context(None, None, None, file_descriptors, |context| {
+        let err = run_using_factory_context(None, None, file_descriptors, |context| {
             factory.validate(&publisher, context)
         })
         .err()
@@ -889,7 +863,7 @@ mod tests {
         let factory = create_factory();
         let (publisher, file_descriptors) = create_aggregation_publisher_with_missing_node_index();
 
-        let err = run_using_factory_context(None, None, None, file_descriptors, |context| {
+        let err = run_using_factory_context(None, None, file_descriptors, |context| {
             factory.validate(&publisher, context)
         })
         .err()
@@ -908,7 +882,7 @@ mod tests {
         let (publisher, file_descriptors) =
             create_aggregation_publisher_with_incorrect_node_index();
 
-        let err = run_using_factory_context(None, None, None, file_descriptors, |context| {
+        let err = run_using_factory_context(None, None, file_descriptors, |context| {
             factory.validate(&publisher, context)
         })
         .err()
@@ -928,7 +902,6 @@ mod tests {
             create_aggregation_publisher_with_unknown_aggregation_type();
 
         let err = run_using_factory_context(
-            None,
             None,
             Some(vec![Arc::new(create_node())]),
             file_descriptors,
@@ -952,7 +925,6 @@ mod tests {
 
         let err = run_using_factory_context(
             None,
-            None,
             Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
             |context| factory.validate(&publisher, context),
@@ -973,7 +945,6 @@ mod tests {
         let (publisher, file_descriptors, triggers) = create_valid_aggregation_publisher();
 
         run_using_factory_context(
-            None,
             triggers,
             Some(vec![Arc::new(create_node()), Arc::new(create_node())]),
             file_descriptors,
