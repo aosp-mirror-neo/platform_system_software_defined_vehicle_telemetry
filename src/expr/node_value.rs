@@ -108,27 +108,39 @@ impl NodeValue {
     }
 
     /// Performs operations using the operator.
-    /// If unary operator, then operates on self.
-    /// If binary operator, then [self] <operator> [other].
-    pub fn operate(&self, op: &OperatorProto, other: &NodeValue) -> Result<NodeValue, String> {
+    /// This call will short-circuit and skip evaluating the right branch if the
+    /// left operand uniquely determines the result.
+    ///
+    /// # Arguments:
+    ///
+    /// * `&self` - The left operand.
+    /// * `op` - The operator.
+    ///          If unary operator, then operates on self.
+    ///          If binary operator, then [self] <operator> [right].
+    /// * `get_right_operand` - The function that provides the right operand when called.
+    pub fn operate(
+        &self,
+        op: &OperatorProto,
+        get_right_operand: impl FnOnce() -> Result<NodeValue, String>,
+    ) -> Result<NodeValue, String> {
         match op {
             OperatorProto::ArithmeticOperator(op) => self.handle_arithmetic(
                 &op.enum_value().map_err(|i| {
                     format!("Arithmetic operator with enum value {} not recognized", i)
                 })?,
-                other,
+                &get_right_operand()?,
             ),
             OperatorProto::LogicalOperator(op) => self.handle_logical(
                 &op.enum_value().map_err(|i| {
                     format!("Logical operator with enum value {} not recognized", i)
                 })?,
-                other,
+                get_right_operand,
             ),
             OperatorProto::RelationalOperator(op) => self.handle_relational(
                 &op.enum_value().map_err(|i| {
                     format!("Relational operator with enum value {} not recognized", i)
                 })?,
-                other,
+                &get_right_operand()?,
             ),
             _ => Err(format!("Operator {:?} not recognized.", op)),
         }
@@ -215,15 +227,32 @@ impl NodeValue {
     }
 
     /// Handle logical operations.
-    fn handle_logical(&self, op: &LogicalOperator, other: &NodeValue) -> Result<NodeValue, String> {
-        // right operand can be None because operator may be unary
-        if !self.is_bool() || (!other.is_bool() && *other != NodeValue::None) {
-            return Err("Logical operators must have boolean operands".to_string());
+    fn handle_logical(
+        &self,
+        op: &LogicalOperator,
+        get_right_operand: impl FnOnce() -> Result<NodeValue, String>,
+    ) -> Result<NodeValue, String> {
+        let get_err_msg = || "Logical operator requires boolean operands".to_string();
+        // right operand is checked after get_right_operand() is called
+        if !self.is_bool() {
+            return Err(get_err_msg());
         }
         Ok(NodeValue::Bool(match op {
-            LogicalOperator::AND => self.get_bool()? && other.get_bool()?,
-            LogicalOperator::OR => self.get_bool()? || other.get_bool()?,
-            LogicalOperator::XOR => self.get_bool()? != other.get_bool()?,
+            LogicalOperator::AND => {
+                if !(self.get_bool()?) {
+                    return Ok(self.clone());
+                }
+                self.get_bool()? && get_right_operand()?.get_bool_with_msg(get_err_msg())?
+            }
+            LogicalOperator::OR => {
+                if self.get_bool()? {
+                    return Ok(self.clone());
+                }
+                self.get_bool()? || get_right_operand()?.get_bool_with_msg(get_err_msg())?
+            }
+            LogicalOperator::XOR => {
+                self.get_bool()? != get_right_operand()?.get_bool_with_msg(get_err_msg())?
+            }
             LogicalOperator::NOT => !self.get_bool()?,
         }))
     }
@@ -630,6 +659,7 @@ mod tests {
         },
         ConstantLeafNode,
     };
+    use std::sync::Mutex;
 
     // Static variables within the tests module scope that are reused across tests.
     lazy_static! {
@@ -697,6 +727,10 @@ mod tests {
 
             test_message
         };
+    }
+
+    fn provide(value: &NodeValue) -> Result<NodeValue, String> {
+        Ok(value.clone())
     }
 
     #[test]
@@ -912,8 +946,8 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
-        assert!(true_val.operate(&OP_AND, &int_val).is_err());
-        assert!(int_val.operate(&OP_AND, &true_val).is_err());
+        assert!(true_val.operate(&OP_AND, || provide(&int_val)).is_err());
+        assert!(int_val.operate(&OP_AND, || provide(&true_val)).is_err());
     }
 
     #[test]
@@ -922,11 +956,45 @@ mod tests {
         let false_val = NodeValue::Bool(false);
 
         // true && true = true
-        assert_eq!(true_val.operate(&OP_AND, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_AND, || provide(&true_val)), Ok(NodeValue::Bool(true)));
         // true && false = false
-        assert_eq!(true_val.operate(&OP_AND, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(true_val.operate(&OP_AND, || provide(&false_val)), Ok(NodeValue::Bool(false)));
         // false && false = false
-        assert_eq!(false_val.operate(&OP_AND, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(false_val.operate(&OP_AND, || provide(&false_val)), Ok(NodeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_operate_logical_and_short_circuits() {
+        let false_val = NodeValue::Bool(false);
+        let num_calls = Mutex::new(0);
+        let right_operand_provider = || {
+            *num_calls.lock().unwrap() += 1;
+            provide(&false_val)
+        };
+
+        let res = false_val.operate(&OP_AND, right_operand_provider);
+
+        // false && anything = false
+        assert_eq!(res, Ok(NodeValue::Bool(false)));
+        // should not compute right operand because of short circuiting
+        assert_eq!(*num_calls.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_operate_logical_and_short_circuiting_attempted() {
+        let true_val = NodeValue::Bool(true);
+        let num_calls = Mutex::new(0);
+        let right_operand_provider = || {
+            *num_calls.lock().unwrap() += 1;
+            provide(&true_val)
+        };
+
+        // true && [right_operand] = [right_operand]
+        let res = true_val.operate(&OP_AND, right_operand_provider);
+
+        assert_eq!(res, Ok(NodeValue::Bool(true)));
+        // should compute right operand because left operand does not uniquely determine result
+        assert_eq!(*num_calls.lock().unwrap(), 1);
     }
 
     #[test]
@@ -935,11 +1003,45 @@ mod tests {
         let false_val = NodeValue::Bool(false);
 
         // true || true = true
-        assert_eq!(true_val.operate(&OP_OR, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_OR, || provide(&true_val)), Ok(NodeValue::Bool(true)));
         // true || false = true
-        assert_eq!(true_val.operate(&OP_OR, &false_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_OR, || provide(&false_val)), Ok(NodeValue::Bool(true)));
         // false || false = false
-        assert_eq!(false_val.operate(&OP_OR, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(false_val.operate(&OP_OR, || provide(&false_val)), Ok(NodeValue::Bool(false)));
+    }
+
+    #[test]
+    fn test_operate_logical_or_short_circuits() {
+        let true_val = NodeValue::Bool(true);
+        let num_calls = Mutex::new(0);
+        let right_operand_provider = || {
+            *num_calls.lock().unwrap() += 1;
+            provide(&true_val)
+        };
+
+        let res = true_val.operate(&OP_OR, right_operand_provider);
+
+        // true || anything = true
+        assert_eq!(res, Ok(NodeValue::Bool(true)));
+        // should not compute right operand because of short circuiting
+        assert_eq!(*num_calls.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_operate_logical_or_short_circuiting_attempted() {
+        let false_val = NodeValue::Bool(false);
+        let num_calls = Mutex::new(0);
+        let right_operand_provider = || {
+            *num_calls.lock().unwrap() += 1;
+            provide(&false_val)
+        };
+
+        // false || [right_operand] = [right_operand]
+        let res = false_val.operate(&OP_OR, right_operand_provider);
+
+        assert_eq!(res, Ok(NodeValue::Bool(false)));
+        // should compute right operand because left operand does not uniquely determine result
+        assert_eq!(*num_calls.lock().unwrap(), 1);
     }
 
     #[test]
@@ -948,11 +1050,11 @@ mod tests {
         let false_val = NodeValue::Bool(false);
 
         // true XOR true = false
-        assert_eq!(true_val.operate(&OP_XOR, &true_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(true_val.operate(&OP_XOR, || provide(&true_val)), Ok(NodeValue::Bool(false)));
         // true XOR false = true
-        assert_eq!(true_val.operate(&OP_XOR, &false_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(true_val.operate(&OP_XOR, || provide(&false_val)), Ok(NodeValue::Bool(true)));
         // false XOR false = false
-        assert_eq!(false_val.operate(&OP_XOR, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(false_val.operate(&OP_XOR, || provide(&false_val)), Ok(NodeValue::Bool(false)));
     }
 
     #[test]
@@ -961,9 +1063,9 @@ mod tests {
         let false_val = NodeValue::Bool(false);
 
         // !true = false
-        assert_eq!(true_val.operate(&OP_NOT, &NodeValue::None), Ok(NodeValue::Bool(false)));
+        assert_eq!(true_val.operate(&OP_NOT, || Ok(NodeValue::None)), Ok(NodeValue::Bool(false)));
         // !false = true
-        assert_eq!(false_val.operate(&OP_NOT, &NodeValue::None), Ok(NodeValue::Bool(true)));
+        assert_eq!(false_val.operate(&OP_NOT, || Ok(NodeValue::None)), Ok(NodeValue::Bool(true)));
     }
 
     #[test]
@@ -971,8 +1073,8 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
-        assert!(true_val.operate(&OP_ADD, &int_val).is_err());
-        assert!(int_val.operate(&OP_ADD, &true_val).is_err());
+        assert!(true_val.operate(&OP_ADD, || provide(&int_val)).is_err());
+        assert!(int_val.operate(&OP_ADD, || provide(&true_val)).is_err());
     }
 
     #[test]
@@ -981,7 +1083,7 @@ mod tests {
         let twenty = NodeValue::Int32(20);
 
         // 5 + 20 = 25
-        assert_eq!(five.operate(&OP_ADD, &twenty), Ok(NodeValue::Int64(25)));
+        assert_eq!(five.operate(&OP_ADD, || provide(&twenty)), Ok(NodeValue::Int64(25)));
     }
 
     #[test]
@@ -990,7 +1092,7 @@ mod tests {
         let twenty = NodeValue::Double(20.1);
 
         // 5.2 + 20.1 = 25.3
-        assert_eq!(five.operate(&OP_ADD, &twenty), Ok(NodeValue::Double(25.3)));
+        assert_eq!(five.operate(&OP_ADD, || provide(&twenty)), Ok(NodeValue::Double(25.3)));
     }
 
     #[test]
@@ -999,7 +1101,7 @@ mod tests {
         let twenty = NodeValue::Int32(20);
 
         // 5 - 20 = -15
-        assert_eq!(five.operate(&OP_SUBTRACT, &twenty), Ok(NodeValue::Int64(-15)));
+        assert_eq!(five.operate(&OP_SUBTRACT, || provide(&twenty)), Ok(NodeValue::Int64(-15)));
     }
 
     #[test]
@@ -1008,7 +1110,7 @@ mod tests {
         let twenty = NodeValue::Double(20.1);
 
         // 5.2 - 20.1 = -14.9
-        assert_eq!(five.operate(&OP_SUBTRACT, &twenty), Ok(NodeValue::Double(-14.9)));
+        assert_eq!(five.operate(&OP_SUBTRACT, || provide(&twenty)), Ok(NodeValue::Double(-14.9)));
     }
 
     #[test]
@@ -1017,7 +1119,7 @@ mod tests {
         let point_five = NodeValue::Float(0.5);
 
         // 5 * 0.5 = 2.5
-        assert_eq!(five.operate(&OP_MULTIPLY, &point_five), Ok(NodeValue::Double(2.5)));
+        assert_eq!(five.operate(&OP_MULTIPLY, || provide(&point_five)), Ok(NodeValue::Double(2.5)));
     }
 
     #[test]
@@ -1025,7 +1127,7 @@ mod tests {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
-        assert!(five.operate(&OP_DIVIDE, &zero).is_err());
+        assert!(five.operate(&OP_DIVIDE, || provide(&zero)).is_err());
     }
 
     #[test]
@@ -1034,7 +1136,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         // 5 / 2 = 2.5
-        assert_eq!(five.operate(&OP_DIVIDE, &two), Ok(NodeValue::Double(2.5)));
+        assert_eq!(five.operate(&OP_DIVIDE, || provide(&two)), Ok(NodeValue::Double(2.5)));
     }
 
     #[test]
@@ -1042,7 +1144,7 @@ mod tests {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
-        assert!(five.operate(&OP_MODULUS, &zero).is_err());
+        assert!(five.operate(&OP_MODULUS, || provide(&zero)).is_err());
     }
 
     #[test]
@@ -1051,7 +1153,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         // 5 % 2 = 1
-        assert_eq!(five.operate(&OP_MODULUS, &two), Ok(NodeValue::Int64(1)));
+        assert_eq!(five.operate(&OP_MODULUS, || provide(&two)), Ok(NodeValue::Int64(1)));
     }
 
     #[test]
@@ -1060,7 +1162,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         // both operands must be integers
-        assert!(five.operate(&OP_MODULUS, &two).is_err());
+        assert!(five.operate(&OP_MODULUS, || provide(&two)).is_err());
     }
 
     #[test]
@@ -1068,7 +1170,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         // 2^2 = 4
-        assert_eq!(two.operate(&OP_POWER, &two), Ok(NodeValue::Int64(4)));
+        assert_eq!(two.operate(&OP_POWER, || provide(&two)), Ok(NodeValue::Int64(4)));
     }
 
     #[test]
@@ -1078,7 +1180,7 @@ mod tests {
         let two_point_five = NodeValue::Double(val);
 
         assert_eq!(
-            two_point_five.operate(&OP_POWER, &two_point_five),
+            two_point_five.operate(&OP_POWER, || provide(&two_point_five)),
             Ok(NodeValue::Double(expected))
         );
     }
@@ -1092,12 +1194,12 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.operate(&OP_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_EQ, &two_i64), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_EQ, &two_f32), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_EQ, &two_f64), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_EQ, &five), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.operate(&OP_EQ, &true_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_EQ, || provide(&two)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, || provide(&two_i64)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, || provide(&two_f32)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, || provide(&two_f64)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_EQ, || provide(&five)), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_EQ, || provide(&true_val)), Ok(NodeValue::Bool(false)));
     }
 
     #[test]
@@ -1107,10 +1209,10 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.operate(&OP_NOT_EQ, &two), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.operate(&OP_NOT_EQ, &two_f32), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.operate(&OP_NOT_EQ, &five), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_NOT_EQ, &true_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&two)), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&two_f32)), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&five)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&true_val)), Ok(NodeValue::Bool(true)));
     }
 
     #[test]
@@ -1119,10 +1221,10 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.operate(&OP_GT, &two), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.operate(&OP_GT, &five), Ok(NodeValue::Bool(false)));
-        assert_eq!(five.operate(&OP_GT, &two), Ok(NodeValue::Bool(true)));
-        assert!(five.operate(&OP_GT, &true_val).is_err());
+        assert_eq!(two.operate(&OP_GT, || provide(&two)), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_GT, || provide(&five)), Ok(NodeValue::Bool(false)));
+        assert_eq!(five.operate(&OP_GT, || provide(&two)), Ok(NodeValue::Bool(true)));
+        assert!(five.operate(&OP_GT, || provide(&true_val)).is_err());
     }
 
     #[test]
@@ -1131,10 +1233,10 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.operate(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_GT_OR_EQ, &five), Ok(NodeValue::Bool(false)));
-        assert_eq!(five.operate(&OP_GT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert!(five.operate(&OP_GT_OR_EQ, &true_val).is_err());
+        assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&two)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&five)), Ok(NodeValue::Bool(false)));
+        assert_eq!(five.operate(&OP_GT_OR_EQ, || provide(&two)), Ok(NodeValue::Bool(true)));
+        assert!(five.operate(&OP_GT_OR_EQ, || provide(&true_val)).is_err());
     }
 
     #[test]
@@ -1143,10 +1245,10 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.operate(&OP_LT, &two), Ok(NodeValue::Bool(false)));
-        assert_eq!(two.operate(&OP_LT, &five), Ok(NodeValue::Bool(true)));
-        assert_eq!(five.operate(&OP_LT, &two), Ok(NodeValue::Bool(false)));
-        assert!(five.operate(&OP_LT, &true_val).is_err());
+        assert_eq!(two.operate(&OP_LT, || provide(&two)), Ok(NodeValue::Bool(false)));
+        assert_eq!(two.operate(&OP_LT, || provide(&five)), Ok(NodeValue::Bool(true)));
+        assert_eq!(five.operate(&OP_LT, || provide(&two)), Ok(NodeValue::Bool(false)));
+        assert!(five.operate(&OP_LT, || provide(&true_val)).is_err());
     }
 
     #[test]
@@ -1155,17 +1257,17 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(two.operate(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(true)));
-        assert_eq!(two.operate(&OP_LT_OR_EQ, &five), Ok(NodeValue::Bool(true)));
-        assert_eq!(five.operate(&OP_LT_OR_EQ, &two), Ok(NodeValue::Bool(false)));
-        assert!(five.operate(&OP_LT_OR_EQ, &true_val).is_err());
+        assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&two)), Ok(NodeValue::Bool(true)));
+        assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&five)), Ok(NodeValue::Bool(true)));
+        assert_eq!(five.operate(&OP_LT_OR_EQ, || provide(&two)), Ok(NodeValue::Bool(false)));
+        assert!(five.operate(&OP_LT_OR_EQ, || provide(&true_val)).is_err());
     }
 
     #[test]
     fn test_operate_relational_contains_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
-        assert!(two.operate(&OP_CONTAINS, &two).is_err());
+        assert!(two.operate(&OP_CONTAINS, || provide(&two)).is_err());
     }
 
     #[test]
@@ -1173,7 +1275,7 @@ mod tests {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
-        assert!(bool_list.operate(&OP_CONTAINS, &five).is_err());
+        assert!(bool_list.operate(&OP_CONTAINS, || provide(&five)).is_err());
     }
 
     #[test]
@@ -1182,8 +1284,14 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(bool_list.operate(&OP_CONTAINS, &true_val), Ok(NodeValue::Bool(true)));
-        assert_eq!(bool_list.operate(&OP_CONTAINS, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(
+            bool_list.operate(&OP_CONTAINS, || provide(&true_val)),
+            Ok(NodeValue::Bool(true))
+        );
+        assert_eq!(
+            bool_list.operate(&OP_CONTAINS, || provide(&false_val)),
+            Ok(NodeValue::Bool(false))
+        );
     }
 
     #[test]
@@ -1195,10 +1303,10 @@ mod tests {
         // not int
         let three_hundred = NodeValue::Double(300.0);
 
-        assert_eq!(int_list.operate(&OP_CONTAINS, &zero), Ok(NodeValue::Bool(false)));
-        assert_eq!(int_list.operate(&OP_CONTAINS, &three), Ok(NodeValue::Bool(true)));
-        assert_eq!(int_list.operate(&OP_CONTAINS, &thirty), Ok(NodeValue::Bool(true)));
-        assert!(int_list.operate(&OP_CONTAINS, &three_hundred).is_err());
+        assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&zero)), Ok(NodeValue::Bool(false)));
+        assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&three)), Ok(NodeValue::Bool(true)));
+        assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&thirty)), Ok(NodeValue::Bool(true)));
+        assert!(int_list.operate(&OP_CONTAINS, || provide(&three_hundred)).is_err());
     }
 
     #[test]
@@ -1211,17 +1319,23 @@ mod tests {
         let ten = NodeValue::Int32(10);
         let thirty = NodeValue::Float(30.0);
 
-        assert_eq!(float_list.operate(&OP_CONTAINS, &point_five), Ok(NodeValue::Bool(true)));
-        assert_eq!(float_list.operate(&OP_CONTAINS, &pi), Ok(NodeValue::Bool(true)));
-        assert_eq!(float_list.operate(&OP_CONTAINS, &ten), Ok(NodeValue::Bool(true)));
-        assert_eq!(float_list.operate(&OP_CONTAINS, &thirty), Ok(NodeValue::Bool(false)));
+        assert_eq!(
+            float_list.operate(&OP_CONTAINS, || provide(&point_five)),
+            Ok(NodeValue::Bool(true))
+        );
+        assert_eq!(float_list.operate(&OP_CONTAINS, || provide(&pi)), Ok(NodeValue::Bool(true)));
+        assert_eq!(float_list.operate(&OP_CONTAINS, || provide(&ten)), Ok(NodeValue::Bool(true)));
+        assert_eq!(
+            float_list.operate(&OP_CONTAINS, || provide(&thirty)),
+            Ok(NodeValue::Bool(false))
+        );
     }
 
     #[test]
     fn test_operate_relational_does_not_contain_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
-        assert!(two.operate(&OP_DOES_NOT_CONTAIN, &two).is_err());
+        assert!(two.operate(&OP_DOES_NOT_CONTAIN, || provide(&two)).is_err());
     }
 
     #[test]
@@ -1229,7 +1343,7 @@ mod tests {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
-        assert!(bool_list.operate(&OP_DOES_NOT_CONTAIN, &five).is_err());
+        assert!(bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&five)).is_err());
     }
 
     #[test]
@@ -1238,8 +1352,14 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(bool_list.operate(&OP_DOES_NOT_CONTAIN, &true_val), Ok(NodeValue::Bool(false)));
-        assert_eq!(bool_list.operate(&OP_DOES_NOT_CONTAIN, &false_val), Ok(NodeValue::Bool(true)));
+        assert_eq!(
+            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&true_val)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&false_val)),
+            Ok(NodeValue::Bool(true))
+        );
     }
 
     #[test]
@@ -1251,10 +1371,19 @@ mod tests {
         // not int
         let three_hundred = NodeValue::Double(300.0);
 
-        assert_eq!(int_list.operate(&OP_DOES_NOT_CONTAIN, &zero), Ok(NodeValue::Bool(true)));
-        assert_eq!(int_list.operate(&OP_DOES_NOT_CONTAIN, &three), Ok(NodeValue::Bool(false)));
-        assert_eq!(int_list.operate(&OP_DOES_NOT_CONTAIN, &thirty), Ok(NodeValue::Bool(false)));
-        assert!(int_list.operate(&OP_DOES_NOT_CONTAIN, &three_hundred).is_err());
+        assert_eq!(
+            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&zero)),
+            Ok(NodeValue::Bool(true))
+        );
+        assert_eq!(
+            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&three)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&thirty)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert!(int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&three_hundred)).is_err());
     }
 
     #[test]
@@ -1268,19 +1397,28 @@ mod tests {
         let thirty = NodeValue::Float(30.0);
 
         assert_eq!(
-            float_list.operate(&OP_DOES_NOT_CONTAIN, &point_five),
+            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&point_five)),
             Ok(NodeValue::Bool(false))
         );
-        assert_eq!(float_list.operate(&OP_DOES_NOT_CONTAIN, &pi), Ok(NodeValue::Bool(false)));
-        assert_eq!(float_list.operate(&OP_DOES_NOT_CONTAIN, &ten), Ok(NodeValue::Bool(false)));
-        assert_eq!(float_list.operate(&OP_DOES_NOT_CONTAIN, &thirty), Ok(NodeValue::Bool(true)));
+        assert_eq!(
+            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&pi)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&ten)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&thirty)),
+            Ok(NodeValue::Bool(true))
+        );
     }
 
     #[test]
     fn test_operate_relational_all_eq_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
-        assert!(two.operate(&OP_ALL_EQ, &two).is_err());
+        assert!(two.operate(&OP_ALL_EQ, || provide(&two)).is_err());
     }
 
     #[test]
@@ -1288,7 +1426,7 @@ mod tests {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
-        assert!(bool_list.operate(&OP_ALL_EQ, &five).is_err());
+        assert!(bool_list.operate(&OP_ALL_EQ, || provide(&five)).is_err());
     }
 
     #[test]
@@ -1298,10 +1436,22 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(bool_list_1.operate(&OP_ALL_EQ, &true_val), Ok(NodeValue::Bool(true)));
-        assert_eq!(bool_list_1.operate(&OP_ALL_EQ, &false_val), Ok(NodeValue::Bool(false)));
-        assert_eq!(bool_list_2.operate(&OP_ALL_EQ, &true_val), Ok(NodeValue::Bool(false)));
-        assert_eq!(bool_list_2.operate(&OP_ALL_EQ, &false_val), Ok(NodeValue::Bool(false)));
+        assert_eq!(
+            bool_list_1.operate(&OP_ALL_EQ, || provide(&true_val)),
+            Ok(NodeValue::Bool(true))
+        );
+        assert_eq!(
+            bool_list_1.operate(&OP_ALL_EQ, || provide(&false_val)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            bool_list_2.operate(&OP_ALL_EQ, || provide(&true_val)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            bool_list_2.operate(&OP_ALL_EQ, || provide(&false_val)),
+            Ok(NodeValue::Bool(false))
+        );
     }
 
     #[test]
@@ -1310,8 +1460,8 @@ mod tests {
         let int_list_2 = NodeValue::Int64List(vec![0, 0]);
         let zero = NodeValue::Int32(0);
 
-        assert_eq!(int_list_1.operate(&OP_ALL_EQ, &zero), Ok(NodeValue::Bool(false)));
-        assert_eq!(int_list_2.operate(&OP_ALL_EQ, &zero), Ok(NodeValue::Bool(true)));
+        assert_eq!(int_list_1.operate(&OP_ALL_EQ, || provide(&zero)), Ok(NodeValue::Bool(false)));
+        assert_eq!(int_list_2.operate(&OP_ALL_EQ, || provide(&zero)), Ok(NodeValue::Bool(true)));
     }
 
     #[test]
@@ -1321,7 +1471,13 @@ mod tests {
 
         let point_five = NodeValue::Double(0.5);
 
-        assert_eq!(float_list_1.operate(&OP_ALL_EQ, &point_five), Ok(NodeValue::Bool(false)));
-        assert_eq!(float_list_2.operate(&OP_ALL_EQ, &point_five), Ok(NodeValue::Bool(true)));
+        assert_eq!(
+            float_list_1.operate(&OP_ALL_EQ, || provide(&point_five)),
+            Ok(NodeValue::Bool(false))
+        );
+        assert_eq!(
+            float_list_2.operate(&OP_ALL_EQ, || provide(&point_five)),
+            Ok(NodeValue::Bool(true))
+        );
     }
 }
