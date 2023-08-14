@@ -20,7 +20,7 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use publisher::Publisher;
+use publisher::{Publisher, PublisherImpl};
 use publisher_factory::{
     PublisherFactory, PublisherFactoryContext, PublisherFactoryError, PublisherFactoryImpl,
 };
@@ -80,20 +80,20 @@ pub enum MetricsConfigOrchestratorError {
 /// Struct for default implementation of MetricsConfigOrchestrator.
 pub(super) struct MetricsConfigOrchestratorImpl<
     NdFactory: NodeFactory = NodeFactoryImpl,
-    PubFactory: PublisherFactory<Trig> = PublisherFactoryImpl,
+    Pub: Publisher = PublisherImpl,
+    PubFactory: PublisherFactory<Pub, Trig> = PublisherFactoryImpl,
     Trig: Trigger = TriggerImpl,
-    TrigFactory: TriggerFactory<Trig> = TriggerFactoryImpl,
+    TrigFactory: TriggerFactory<Pub, Trig> = TriggerFactoryImpl,
 > {
-    configs: Mutex<HashMap<String, Arc<MetricsConfig<Trig>>>>,
+    configs: Mutex<HashMap<String, Arc<MetricsConfig<Pub, Trig>>>>,
     node_factory: NdFactory,
     publisher_factory: PubFactory,
     trigger_factory: TrigFactory,
 }
 
-#[allow(dead_code)]
-pub(super) struct MetricsConfig<Trig: Trigger = TriggerImpl> {
+pub(super) struct MetricsConfig<Pub: Publisher = PublisherImpl, Trig: Trigger = TriggerImpl> {
     uuid: String,
-    publishers: HashMap<String, Arc<Publisher>>,
+    publishers: HashMap<String, Arc<Pub>>,
     start_trigger: Option<Arc<Trig>>,
     end_trigger: Option<Arc<Trig>>,
     finish_trigger: Option<Arc<Trig>>,
@@ -110,13 +110,14 @@ impl MetricsConfigOrchestratorImpl {
     }
 }
 
-impl<NdFactory, PubFactory, Trig, TrigFactory>
-    MetricsConfigOrchestratorImpl<NdFactory, PubFactory, Trig, TrigFactory>
+impl<NdFactory, Pub, PubFactory, Trig, TrigFactory>
+    MetricsConfigOrchestratorImpl<NdFactory, Pub, PubFactory, Trig, TrigFactory>
 where
     NdFactory: NodeFactory,
-    PubFactory: PublisherFactory<Trig>,
+    Pub: Publisher + Send + Sync + 'static,
+    PubFactory: PublisherFactory<Pub, Trig>,
     Trig: Trigger + Send + Sync + 'static,
-    TrigFactory: TriggerFactory<Trig>,
+    TrigFactory: TriggerFactory<Pub, Trig>,
 {
     fn create_expression_nodes(
         &self,
@@ -133,16 +134,16 @@ where
         config_proto: &MetricsConfigProto,
         publisher_func: impl Fn(
             &PublisherProto,
-            &mut HashMap<String, Arc<Publisher>>,
+            &mut HashMap<String, Arc<Pub>>,
             &HashMap<String, Arc<Trig>>,
         ) -> Result<(), MetricsConfigOrchestratorError>,
         trigger_func: impl Fn(
             &TriggerProto,
-            &HashMap<String, Arc<Publisher>>,
+            &HashMap<String, Arc<Pub>>,
             &mut HashMap<String, Arc<Trig>>,
         ) -> Result<(), MetricsConfigOrchestratorError>,
     ) -> Result<
-        (HashMap<String, Arc<Publisher>>, HashMap<String, Arc<Trig>>),
+        (HashMap<String, Arc<Pub>>, HashMap<String, Arc<Trig>>),
         MetricsConfigOrchestratorError,
     > {
         enum DependencyContainer<'a> {
@@ -251,7 +252,7 @@ where
         )?))
     }
 
-    fn on_start_trigger_fired(config: &Arc<MetricsConfig<Trig>>) {
+    fn on_start_trigger_fired(config: &Arc<MetricsConfig<Pub, Trig>>) {
         if let Some(start_trigger) = &config.start_trigger {
             if let Err(err) = start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart) {
                 error!(
@@ -260,6 +261,16 @@ where
                     config.uuid, err
                 );
                 return;
+            }
+        }
+
+        for publisher in config.publishers.values() {
+            if let Err(err) = publisher.activate() {
+                error!(
+                    "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
+                        The publisher won't notify about new messages and any attempts to get its data will fail.",
+                    publisher.get_name(), config.uuid, err
+                );
             }
         }
 
@@ -294,12 +305,12 @@ where
         }
     }
 
-    fn on_end_trigger_fired(_config: &Arc<MetricsConfig<Trig>>) {
+    fn on_end_trigger_fired(_config: &Arc<MetricsConfig<Pub, Trig>>) {
         // TODO(b/289386420): implement end trigger handling logic.
         warn!("End trigger handling logic is not implemented. Data collection won't end.");
     }
 
-    fn on_finish_trigger_fired(_config: &Arc<MetricsConfig<Trig>>) {
+    fn on_finish_trigger_fired(_config: &Arc<MetricsConfig<Pub, Trig>>) {
         // TODO(b/294616843): implement finish trigger handling logic.
         warn!("Finish trigger handling logic is not implemented. Data collection won't finish.");
     }
@@ -307,11 +318,12 @@ where
 
 impl<
         NdFactory: NodeFactory + Sync,
-        PubFactory: PublisherFactory<Trig> + Sync,
+        Pub: Publisher + Send + Sync + 'static,
+        PubFactory: PublisherFactory<Pub, Trig> + Sync,
         Trig: Trigger + Sync + Send + 'static,
-        TrigFactory: TriggerFactory<Trig> + Sync,
+        TrigFactory: TriggerFactory<Pub, Trig> + Sync,
     > MetricsConfigOrchestrator
-    for MetricsConfigOrchestratorImpl<NdFactory, PubFactory, Trig, TrigFactory>
+    for MetricsConfigOrchestratorImpl<NdFactory, Pub, PubFactory, Trig, TrigFactory>
 {
     fn initialize_config(
         &self,
@@ -487,7 +499,6 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::metrics_config_orchestrator::publisher::PublisherType;
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
@@ -496,6 +507,7 @@ mod tests {
 
     type MockedMetricsConfigOrchestratorImpl = MetricsConfigOrchestratorImpl<
         MockNodeFactory,
+        MockPublisher,
         MockPublisherFactory,
         MockTrigger,
         MockTriggerFactory,
@@ -543,16 +555,51 @@ mod tests {
         }
     }
 
+    struct MockPublisher {
+        name: String,
+
+        activate_callback: Option<Arc<Box<dyn Fn(&str) + Send + Sync>>>,
+    }
+
+    impl MockPublisher {
+        fn new(name: &str) -> Self {
+            MockPublisher { name: name.to_owned(), activate_callback: None }
+        }
+    }
+
+    impl Publisher for MockPublisher {
+        fn get_name(&self) -> &str {
+            &self.name
+        }
+
+        fn activate(&self) -> Result<(), String> {
+            if let Some(callback) = &self.activate_callback {
+                callback(&self.name);
+            }
+
+            Ok(())
+        }
+
+        fn deactivate(&self) -> Result<(), String> {
+            Ok(())
+        }
+    }
+
     struct MockPublisherFactory {
         create_callback:
             Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync>>,
         validate_callback:
             Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync>>,
+        activate_callback: Option<Arc<Box<dyn Fn(&str) + Send + Sync>>>,
     }
 
     impl MockPublisherFactory {
         fn new() -> Self {
-            MockPublisherFactory { create_callback: None, validate_callback: None }
+            MockPublisherFactory {
+                create_callback: None,
+                validate_callback: None,
+                activate_callback: None,
+            }
         }
 
         fn set_create_callback(
@@ -568,23 +615,27 @@ mod tests {
         ) {
             self.validate_callback = Some(Box::new(callback));
         }
+
+        fn set_activate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
+            self.activate_callback = Some(Arc::new(Box::new(callback)));
+        }
     }
 
-    impl PublisherFactory<MockTrigger> for MockPublisherFactory {
+    impl PublisherFactory<MockPublisher, MockTrigger> for MockPublisherFactory {
         fn create(
             &self,
             publisher_proto: &PublisherProto,
             _: &PublisherFactoryContext<MockTrigger>,
-        ) -> Result<Publisher, PublisherFactoryError> {
+        ) -> Result<MockPublisher, PublisherFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(publisher_proto) {
                     return Err(res);
                 }
             }
-            Ok(Publisher {
-                name: publisher_proto.name.clone(),
-                publisher_type: PublisherType::Service { service_name: "Foo".to_string() },
-            })
+
+            let mut publisher = MockPublisher::new(&publisher_proto.name);
+            publisher.activate_callback = self.activate_callback.clone();
+            Ok(publisher)
         }
 
         fn validate(
@@ -692,11 +743,11 @@ mod tests {
         }
     }
 
-    impl TriggerFactory<MockTrigger> for MockTriggerFactory {
+    impl TriggerFactory<MockPublisher, MockTrigger> for MockTriggerFactory {
         fn create(
             &self,
             trigger_proto: &TriggerProto,
-            _: &TriggerFactoryContext<MockTrigger>,
+            _: &TriggerFactoryContext<MockPublisher, MockTrigger>,
         ) -> Result<MockTrigger, TriggerFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(trigger_proto) {
@@ -713,7 +764,7 @@ mod tests {
         fn validate(
             &self,
             trigger_proto: &TriggerProto,
-            _: &TriggerFactoryContext<MockTrigger>,
+            _: &TriggerFactoryContext<MockPublisher, MockTrigger>,
         ) -> Result<(), TriggerFactoryError> {
             if let Some(callback) = &self.validate_callback {
                 if let Some(res) = callback(trigger_proto) {
@@ -1163,16 +1214,23 @@ mod tests {
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
+
         let factory_calls_clone1 = factory_calls.clone();
-        let factory_calls_clone2 = factory_calls.clone();
         orchestrator.trigger_factory.set_subscribe_callback(move |name, fire_trigger_func| {
             factory_calls_clone1.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()));
             fire_trigger_func();
             None
         });
+
+        let factory_calls_clone2 = factory_calls.clone();
         orchestrator.trigger_factory.set_unsubscribe_callback(move |name| {
             factory_calls_clone2.lock().unwrap().push((DEACTIVATE.to_owned(), name.to_owned()));
             None
+        });
+
+        let factory_calls_clone3 = factory_calls.clone();
+        orchestrator.publisher_factory.set_activate_callback(move |name| {
+            factory_calls_clone3.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
         });
 
         let mut start_trigger = TriggerProto::new();
@@ -1181,6 +1239,8 @@ mod tests {
         end_trigger.name = END_TRIGGER_NAME.to_owned();
         let mut finish_trigger = TriggerProto::new();
         finish_trigger.name = FINISH_TRIGGER_NAME.to_owned();
+        let mut publisher = PublisherProto::new();
+        publisher.name = SOME_PUBLISHER_NAME.to_owned();
 
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
@@ -1190,12 +1250,14 @@ mod tests {
         config.triggers.push(start_trigger);
         config.triggers.push(end_trigger);
         config.triggers.push(finish_trigger);
+        config.publishers.push(publisher);
 
         orchestrator.initialize_config(&config).unwrap();
 
         let expected_calls = vec![
             (ACTIVATE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (DEACTIVATE.to_owned(), START_TRIGGER_NAME.to_owned()),
+            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
             (ACTIVATE.to_owned(), END_TRIGGER_NAME.to_owned()),
             (ACTIVATE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
         ];
