@@ -14,17 +14,16 @@ use thiserror::Error;
 use crate::collection_extension::HashMapExtension;
 use crate::metrics_config_orchestrator::{
     publisher::{DeclarativeAggregation, PublisherType},
-    trigger::TriggerImpl,
-    Publisher, Trigger,
+    Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
 
-pub(crate) trait PublisherFactory<Trig: Trigger = TriggerImpl> {
+pub(crate) trait PublisherFactory<Pub: Publisher = PublisherImpl, Trig: Trigger = TriggerImpl> {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryContext<Trig>,
-    ) -> Result<Publisher, PublisherFactoryError>;
+    ) -> Result<Pub, PublisherFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a publisher
     /// encapsulated object.
@@ -198,8 +197,8 @@ impl PublisherFactory for PublisherFactoryImpl {
         &self,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryContext,
-    ) -> Result<Publisher, PublisherFactoryError> {
-        Ok(Publisher {
+    ) -> Result<PublisherImpl, PublisherFactoryError> {
+        Ok(PublisherImpl {
             name: publisher_proto.name.clone(),
             publisher_type: {
                 match &publisher_proto.publisher_type {
@@ -263,7 +262,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::trigger::{TriggerImpl, TriggerType};
+    use crate::metrics_config_orchestrator::trigger::TriggerType;
 
     const FIELD_NAME: &str = "field";
     const FIELD_NAME2: &str = "field2";

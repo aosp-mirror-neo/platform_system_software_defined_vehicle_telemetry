@@ -9,29 +9,32 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
 use crate::metrics_config_orchestrator::{
-    trigger::{TriggerImpl, TriggerType},
-    Publisher, Trigger,
+    trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
 
-pub(crate) trait TriggerFactory<Trig: Trigger = TriggerImpl> {
+pub(crate) trait TriggerFactory<Pub: Publisher = PublisherImpl, Trig: Trigger = TriggerImpl> {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext<Trig>,
+        context: &TriggerFactoryContext<Pub, Trig>,
     ) -> Result<Trig, TriggerFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a trigger encapsulated object.
     fn validate(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext<Trig>,
+        context: &TriggerFactoryContext<Pub, Trig>,
     ) -> Result<(), TriggerFactoryError>;
 }
 
-pub(crate) struct TriggerFactoryContext<'a, Trig: Trigger = TriggerImpl> {
+pub(crate) struct TriggerFactoryContext<
+    'a,
+    Pub: Publisher = PublisherImpl,
+    Trig: Trigger = TriggerImpl,
+> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
-    pub publishers: &'a HashMap<String, Arc<Publisher>>,
+    pub publishers: &'a HashMap<String, Arc<Pub>>,
     pub triggers: &'a HashMap<String, Arc<Trig>>,
 }
 
@@ -77,7 +80,7 @@ impl TriggerFactoryImpl {
     }
 }
 
-impl TriggerFactory<TriggerImpl> for TriggerFactoryImpl {
+impl TriggerFactory for TriggerFactoryImpl {
     fn create(
         &self,
         trigger_proto: &TriggerProto,
@@ -141,7 +144,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::{publisher::PublisherType, Publisher};
+    use crate::metrics_config_orchestrator::publisher::PublisherType;
 
     const INTERVAL: u64 = u64::MAX;
     const NODE_INDEX: u32 = 42;
@@ -175,7 +178,7 @@ mod tests {
     // a function that creates and returns it - it can only be used in the function where it's
     // created.
     fn run_using_factory_context<R>(
-        publishers: Option<Vec<Arc<Publisher>>>,
+        publishers: Option<Vec<Arc<PublisherImpl>>>,
         triggers: Option<Vec<Arc<TriggerImpl>>>,
         nodes: Option<Vec<Arc<Node>>>,
         execute_func: impl FnOnce(&TriggerFactoryContext) -> R,
@@ -193,12 +196,12 @@ mod tests {
         execute_func(&context)
     }
 
-    fn create_valid_data_trigger() -> (TriggerProto, Option<Vec<Arc<Publisher>>>) {
+    fn create_valid_data_trigger() -> (TriggerProto, Option<Vec<Arc<PublisherImpl>>>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let data_trigger = trigger.mut_data_trigger();
         data_trigger.publisher_name = PUBLISHER_NAME.to_owned();
 
-        let publisher = Arc::new(Publisher {
+        let publisher = Arc::new(PublisherImpl {
             name: PUBLISHER_NAME.to_owned(),
             publisher_type: PublisherType::Signal { signal_name: SIGNAL_NAME.to_owned() },
         });

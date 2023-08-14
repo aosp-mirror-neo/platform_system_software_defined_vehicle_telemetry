@@ -7,10 +7,16 @@ use sdvtelemetry_proto_rust::{
 };
 use std::sync::Arc;
 
-use crate::metrics_config_orchestrator::trigger::TriggerImpl;
+use crate::metrics_config_orchestrator::TriggerImpl;
+
+pub(crate) trait Publisher {
+    fn get_name(&self) -> &str;
+    fn activate(&self) -> Result<(), String>;
+    fn deactivate(&self) -> Result<(), String>;
+}
 
 #[allow(dead_code)]
-pub(crate) struct Publisher {
+pub(crate) struct PublisherImpl {
     pub name: String,
     pub publisher_type: PublisherType,
 }
@@ -41,14 +47,16 @@ pub(crate) struct DeclarativeAggregation {
     pub aggregation_expression: Option<NewProtoNode>,
 }
 
-impl Publisher {
-    #[allow(dead_code)]
+impl Publisher for PublisherImpl {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
     fn activate(&self) -> Result<(), String> {
         Ok(())
     }
 
-    #[allow(dead_code)]
-    fn dectivate(&self) -> Result<(), String> {
+    fn deactivate(&self) -> Result<(), String> {
         Ok(())
     }
 }
