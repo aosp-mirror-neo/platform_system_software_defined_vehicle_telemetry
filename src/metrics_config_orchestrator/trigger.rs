@@ -2,64 +2,132 @@
 
 use sdv_ast::Node;
 use std::{
-    marker::Send,
+    collections::HashMap,
+    fmt,
+    marker::{Send, Sync},
     sync::{Arc, Mutex, Weak},
 };
 use tokio::time::Duration;
 
+use crate::collection_extension::HashMapExtension;
 use crate::metrics_config_orchestrator::Publisher;
 
+pub(crate) trait Trigger {
+    /// Subscribe to trigger fire events.
+    /// First subscription activates the trigger.
+    fn subscribe(
+        &self,
+        subscriber: &TriggerSubscriber,
+        on_fired_callback: impl Fn() + Send + Sync + 'static,
+    ) -> Result<(), String>;
+
+    /// Unsubscribe from trigger fire events.
+    /// Last unsubscription deactivates the trigger.
+    fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String>;
+}
+
 #[allow(dead_code)]
-pub(crate) struct Trigger {
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub(crate) enum TriggerSubscriber {
+    AggregationPublisher { name: String },
+    MetricsConfigStart,
+    MetricsConfigEnd,
+    MetricsConfigFinish,
+    PeriodicTrigger { name: String },
+}
+
+#[allow(dead_code)]
+pub(crate) struct TriggerImpl {
     pub name: String,
     pub trigger_type: TriggerType,
 
-    // Specifies whether the trigger is active.
-    // Each activation creates a new Arc and spawns a new thread that finishes when the Arc is freed.
-    // Deactivation creates a new Arc and frees the previous Arc, finishing the related thread.
-    is_active: Mutex<Arc<bool>>,
+    // The map of functions that need to be called when the trigger fires.
+    // The first subscription to TriggerImpl activates underlying trigger type, passing a weak reference
+    // to the map. Underlying trigger type must stop firing when the reference becomes invalid.
+    // Last unsubscription of TriggerImpl creates a new Arc and frees the previous Arc,
+    // making weak reference invalid.
+    callback_map: Mutex<Arc<Mutex<HashMap<TriggerSubscriber, Arc<Box<dyn Fn() + Send + Sync>>>>>>,
 }
 
 #[allow(dead_code)]
 pub(crate) enum TriggerType {
-    Data { publisher: Weak<Publisher> },
+    Data { publisher: Arc<Publisher> },
     Periodic { interval_ms: u64 },
-    Conditional { triggers: Vec<Weak<Trigger>>, selector_expression: Arc<Node> },
+    Conditional { triggers: Vec<Arc<TriggerImpl>>, selector_expression: Arc<Node> },
 }
 
-impl Trigger {
-    pub(super) fn new(name: String, trigger_type: TriggerType) -> Self {
-        Trigger { name, trigger_type, is_active: Mutex::new(Arc::new(false)) }
-    }
-
-    #[allow(dead_code)]
-    pub(super) fn activate(
-        &self,
-        on_fired_callback: impl Fn() + Send + 'static,
-    ) -> Result<(), String> {
-        let mut is_active = self.is_active.lock().unwrap();
-
-        if **is_active {
-            return Err("The trigger is already active".to_owned());
+impl fmt::Display for TriggerSubscriber {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TriggerSubscriber::AggregationPublisher { name } => {
+                write!(f, "Aggregation Publisher {}", name)
+            }
+            TriggerSubscriber::PeriodicTrigger { name } => write!(f, "Periodic Trigger {}", name),
+            TriggerSubscriber::MetricsConfigStart => write!(f, "Metrics Config Start"),
+            TriggerSubscriber::MetricsConfigEnd => write!(f, "Metrics Config End"),
+            TriggerSubscriber::MetricsConfigFinish => write!(f, "Metrics Config Finish"),
         }
+    }
+}
 
-        // Create a new Arc and a weak reference to it to monitor when it is replaced and freed.
-        *is_active = Arc::new(true);
-        self.trigger_type.activate(on_fired_callback, Arc::downgrade(&is_active))?;
+impl TriggerImpl {
+    pub(super) fn new(name: String, trigger_type: TriggerType) -> Self {
+        TriggerImpl {
+            name,
+            trigger_type,
+            callback_map: Mutex::new(Arc::new(Mutex::new(HashMap::new()))),
+        }
+    }
+}
+
+impl Trigger for TriggerImpl {
+    fn subscribe(
+        &self,
+        subscriber: &TriggerSubscriber,
+        on_fired_callback: impl Fn() + Send + Sync + 'static,
+    ) -> Result<(), String> {
+        let maybe_callbacks_reference = {
+            let callbacks_container = self.callback_map.lock().unwrap();
+            let mut callbacks = callbacks_container.lock().unwrap();
+            if callbacks
+                .try_insert_value(subscriber.clone(), Arc::new(Box::new(on_fired_callback)))
+                .is_err()
+            {
+                return Err(format!("Subscriber {} is already subscribed to the trigger. Duplicate subscriptions are not allowed.", subscriber));
+            }
+
+            // Return a weak reference to the list if this is the first subscription.
+            if callbacks.len() == 1 {
+                Some(Arc::downgrade(&callbacks_container))
+            } else {
+                None
+            }
+        };
+
+        if let Some(callbacks_reference) = maybe_callbacks_reference {
+            // If a weak reference was returned, this is the first subscription and underlying
+            // trigger type needs to be activated.
+            self.trigger_type.activate(callbacks_reference)?;
+        }
 
         Ok(())
     }
 
-    #[allow(dead_code)]
-    pub(super) fn deactivate(&self) -> Result<(), String> {
-        let mut is_active = self.is_active.lock().unwrap();
+    fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String> {
+        let mut callbacks_container = self.callback_map.lock().unwrap();
+        let is_last_unsubscription = {
+            let mut callbacks = callbacks_container.lock().unwrap();
+            if callbacks.remove(subscriber).is_none() {
+                return Err(format!("Subscriber {} wasn't subscribed to the trigger", subscriber));
+            }
 
-        if !**is_active {
-            return Err("The trigger is not active".to_owned());
+            callbacks.is_empty()
+        };
+
+        if is_last_unsubscription {
+            // Replace the Arc, freeing the previous one. This will deactivate underlying trigger type.
+            *callbacks_container = Arc::new(Mutex::new(HashMap::new()));
         }
-
-        // Replace the Arc, freeing the previous one. This will finish the related thread.
-        *is_active = Arc::new(false);
 
         Ok(())
     }
@@ -68,18 +136,17 @@ impl Trigger {
 impl TriggerType {
     pub(super) fn activate(
         &self,
-        on_fired_callback: impl Fn() + Send + 'static, // static is needed to pass callback to tokio::spawn
-        weak_is_active: Weak<bool>,
+        callbacks_reference: Weak<
+            Mutex<HashMap<TriggerSubscriber, Arc<Box<dyn Fn() + Send + Sync>>>>,
+        >,
     ) -> Result<(), String> {
         match self {
             TriggerType::Data { .. } => {
                 return Err("Activation of Data triggers is not implemented".to_owned())
             }
-            TriggerType::Periodic { interval_ms } => tokio::spawn(Self::call_periodically(
-                *interval_ms,
-                on_fired_callback,
-                weak_is_active,
-            )),
+            TriggerType::Periodic { interval_ms } => {
+                tokio::spawn(Self::call_periodically(*interval_ms, callbacks_reference));
+            }
             TriggerType::Conditional { .. } => {
                 return Err("Activation of Conditional triggers is not implemented".to_owned())
             }
@@ -87,11 +154,12 @@ impl TriggerType {
         Ok(())
     }
 
-    /// Periodically invokes callback until the activation Arc is freed.
+    /// Periodically invokes callbacks until the weak reference is no longer valid.
     async fn call_periodically(
         interval_ms: u64,
-        on_fired_callback: impl Fn() + Send,
-        weak_is_active: Weak<bool>,
+        callbacks_reference: Weak<
+            Mutex<HashMap<TriggerSubscriber, Arc<Box<dyn Fn() + Send + Sync>>>>,
+        >,
     ) {
         let mut timer = tokio::time::interval(Duration::from_millis(interval_ms));
 
@@ -100,20 +168,26 @@ impl TriggerType {
 
         loop {
             // Verify that trigger hasn't been deactivated and the Arc hasn't been freed.
-            if weak_is_active.upgrade().is_none() {
+            if callbacks_reference.upgrade().is_none() {
                 return;
             }
 
             // Sleep until next interval tick.
             timer.tick().await;
 
-            // Verify that the Arc hasn't been freed during sleep.
-            if weak_is_active.upgrade().is_none() {
-                return;
-            }
+            // Try to retrieve callbacks from the weak reference.
+            let callbacks = {
+                if let Some(callbacks) = callbacks_reference.upgrade() {
+                    callbacks.lock().unwrap().values().cloned().collect::<Vec<_>>()
+                } else {
+                    return;
+                }
+            };
 
             // Fire the trigger.
-            on_fired_callback();
+            for callback in callbacks {
+                callback();
+            }
         }
     }
 }
@@ -149,47 +223,52 @@ mod tests {
         Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
-    fn create_valid_periodic_trigger() -> Trigger {
-        Trigger::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval_ms: INTERVAL_MS })
+    fn create_valid_periodic_trigger() -> TriggerImpl {
+        TriggerImpl::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval_ms: INTERVAL_MS },
+        )
     }
 
     #[tokio::test]
-    async fn activate_already_active_fails() {
+    async fn subscribe_already_subscribed_fails() {
         let trigger = create_valid_periodic_trigger();
 
-        trigger.activate(|| {}).unwrap();
-        let err = trigger.activate(|| {}).err().unwrap();
+        trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).unwrap();
+        let err = trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).err().unwrap();
 
-        assert!(err.contains("already active"));
+        assert!(err.contains("already subscribed"));
     }
 
     #[test]
-    fn activate_data_trigger_fails_not_implemented() {
-        let trigger = Trigger::new(
+    fn subscribe_to_data_trigger_fails_not_implemented() {
+        let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Data {
-                publisher: Arc::downgrade(&Arc::new(Publisher {
+                publisher: Arc::new(Publisher {
                     name: "Publisher".to_owned(),
                     publisher_type: PublisherType::Signal { signal_name: "Signal".to_owned() },
-                })),
+                }),
             },
         );
 
-        let err = trigger.activate(|| {}).err().unwrap();
+        let err = trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).err().unwrap();
 
         assert!(err.contains("not implemented"));
     }
 
     #[tokio::test]
-    async fn activate_periodic_immediate_deactivate_doesnt_fire() {
+    async fn subscribe_to_periodic_trigger_immediately_unsubscribe_doesnt_fire() {
         let trigger = create_valid_periodic_trigger();
         let callback_listener = Arc::new(Mutex::new(CallbackListener::new()));
         let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .activate(move || callback_listener_clone.lock().unwrap().on_callback_fired())
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
+                callback_listener_clone.lock().unwrap().on_callback_fired()
+            })
             .unwrap();
-        trigger.deactivate().unwrap();
+        trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).unwrap();
         // Sleep for 1.5 interval to ensure the trigger won't fire.
         time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
 
@@ -197,26 +276,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activate_periodic_trigger_fires_twice() {
+    async fn subscribe_to_periodic_trigger_fires_twice() {
         let trigger = create_valid_periodic_trigger();
         let callback_listener = Arc::new(Mutex::new(CallbackListener::new()));
         let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .activate(move || callback_listener_clone.lock().unwrap().on_callback_fired())
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
+                callback_listener_clone.lock().unwrap().on_callback_fired()
+            })
             .unwrap();
         // Sleep for 2.5 interval to let trigger fire twice.
         time::sleep(Duration::from_millis(INTERVAL_MS * 5 / 2)).await;
-        trigger.deactivate().unwrap();
+        trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).unwrap();
         // Sleep for 1.5 interval to ensure the trigger won't fire.
         time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
 
         assert_eq!(callback_listener.lock().unwrap().fired_count, 2);
     }
 
+    #[tokio::test]
+    async fn subscribe_to_periodic_trigger_multiple_subscriptions_no_duplicate_fires() {
+        let trigger = create_valid_periodic_trigger();
+        let callback_listener = Arc::new(Mutex::new(CallbackListener::new()));
+        let callback_listener_clone1 = callback_listener.clone();
+        let callback_listener_clone2 = callback_listener.clone();
+        let callback_listener_clone3 = callback_listener.clone();
+
+        trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
+                callback_listener_clone1.lock().unwrap().on_callback_fired()
+            })
+            .unwrap();
+        trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigEnd, move || {
+                callback_listener_clone2.lock().unwrap().on_callback_fired()
+            })
+            .unwrap();
+        trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigFinish, move || {
+                callback_listener_clone3.lock().unwrap().on_callback_fired()
+            })
+            .unwrap();
+        // Sleep for 1.5 interval to let trigger fire once.
+        time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
+
+        assert_eq!(callback_listener.lock().unwrap().fired_count, 3);
+    }
+
     #[test]
-    fn activate_conditional_trigger_fails_not_implemented() {
-        let trigger = Trigger::new(
+    fn subscribe_to_conditional_trigger_fails_not_implemented() {
+        let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Conditional {
                 triggers: vec![],
@@ -224,17 +334,17 @@ mod tests {
             },
         );
 
-        let err = trigger.activate(|| {}).err().unwrap();
+        let err = trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).err().unwrap();
 
         assert!(err.contains("not implemented"));
     }
 
     #[test]
-    fn deactivate_already_inactive_fails() {
+    fn unsubscribe_not_subscribed_fails() {
         let trigger = create_valid_periodic_trigger();
 
-        let err = trigger.deactivate().err().unwrap();
+        let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).err().unwrap();
 
-        assert!(err.contains("is not active"));
+        assert!(err.contains("wasn't subscribed"));
     }
 }
