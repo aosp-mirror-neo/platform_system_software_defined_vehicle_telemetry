@@ -8,9 +8,10 @@ mod trigger;
 mod trigger_factory;
 
 use log::{error, warn};
-use protobuf::{reflect::FileDescriptor, MessageDyn};
+use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
 use sdv_ast::{
-    MessageProvider, MessageProviderError, Node, NodeError, NodeFactory, NodeFactoryImpl, NodeValue,
+    DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError, Node,
+    NodeError, NodeFactory, NodeFactoryContext, NodeFactoryImpl, NodeValue,
 };
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
@@ -170,6 +171,19 @@ where
     }
 }
 
+struct DescriptorProviderImpl {}
+
+impl DescriptorProvider for DescriptorProviderImpl {
+    fn get_descriptor(
+        &self,
+        _publisher_name: &str,
+    ) -> Result<protobuf::reflect::MessageDescriptor, DescriptorProviderError> {
+        // service publisher publishing mocked data of Int32Value message
+        let msg = Int32Value::new();
+        Ok(msg.descriptor_dyn())
+    }
+}
+
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
@@ -217,10 +231,10 @@ where
     fn create_expression_nodes(
         &self,
         config_proto: &MetricsConfigProto,
-        message_provider: &Arc<dyn MessageProvider>,
+        context: &NodeFactoryContext,
     ) -> Result<Vec<Arc<Node>>, MetricsConfigOrchestratorError> {
         self.node_factory
-            .create_nodes(&config_proto.expression_nodes, message_provider)
+            .create_nodes(&config_proto.expression_nodes, context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
     }
 
@@ -464,10 +478,11 @@ where
                 finish_trigger: None,
             })),
         });
-        let expression_nodes = self.create_expression_nodes(
-            config_proto,
-            &(message_provider.clone() as Arc<dyn MessageProvider>),
-        )?;
+        let node_factory_context = NodeFactoryContext {
+            message_provider: Some(message_provider.clone()),
+            descriptor_provider: Box::new(DescriptorProviderImpl {}),
+        };
+        let expression_nodes = self.create_expression_nodes(config_proto, &node_factory_context)?;
 
         // Iterate over topologically sorted vector of publishers and triggers and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
@@ -611,9 +626,13 @@ where
             }
         }
 
+        let node_factory_context = NodeFactoryContext {
+            message_provider: None,
+            descriptor_provider: Box::new(DescriptorProviderImpl {}),
+        };
         // Validate expression nodes to ensure they are set up correctly.
         self.node_factory
-            .validate(&config_proto.expression_nodes)
+            .validate(&config_proto.expression_nodes, &node_factory_context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
         // Create a vector of empty nodes for validation purposes.
@@ -789,7 +808,11 @@ mod tests {
     }
 
     impl NodeFactory for MockNodeFactory {
-        fn validate(&self, _proto_nodes: &[NodeProto]) -> Result<(), NodeError> {
+        fn validate(
+            &self,
+            _proto_nodes: &[NodeProto],
+            _context: &NodeFactoryContext,
+        ) -> Result<(), NodeError> {
             if self.fail_validate {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
@@ -799,14 +822,17 @@ mod tests {
         fn create_nodes(
             &self,
             proto_nodes: &[NodeProto],
-            message_provider: &Arc<dyn MessageProvider>,
+            context: &NodeFactoryContext,
         ) -> Result<Vec<Arc<Node>>, NodeError> {
             if self.fail_create_nodes {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
 
             *self.num_nodes.lock().unwrap() = proto_nodes.len();
-            self.message_providers.lock().unwrap().push(message_provider.clone());
+            self.message_providers
+                .lock()
+                .unwrap()
+                .push(context.message_provider.as_ref().unwrap().clone());
 
             let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
             Ok(vec![empty_node; proto_nodes.len()])

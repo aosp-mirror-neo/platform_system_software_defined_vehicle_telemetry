@@ -6,7 +6,10 @@
 use lazy_static::lazy_static;
 use log::info;
 use protobuf::MessageDyn;
-use sdv_ast::{MessageProvider, MessageProviderError, NodeFactory, NodeFactoryImpl};
+use sdv_ast::{
+    DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError,
+    NodeFactory, NodeFactoryContext, NodeFactoryImpl,
+};
 use sdv_telem_expr_parser::Parser;
 use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdvtelemetry_proto_rust::expression::{
@@ -40,6 +43,17 @@ impl MessageProvider for MessageProviderImpl {
         _publisher_name: &str,
     ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
         Ok(Some(Box::new((*TEST_MESSAGE).clone())))
+    }
+}
+
+struct DescriptorProviderImpl {}
+
+impl DescriptorProvider for DescriptorProviderImpl {
+    fn get_descriptor(
+        &self,
+        _publisher_name: &str,
+    ) -> Result<protobuf::reflect::MessageDescriptor, DescriptorProviderError> {
+        Ok(TEST_MESSAGE.descriptor_dyn())
     }
 }
 
@@ -79,8 +93,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let all_nodes = vec![left_node, right_node, root_node, value_node, message_node];
 
     let node_factory = NodeFactoryImpl {};
-    let message_provider = Arc::new(MessageProviderImpl {}) as Arc<dyn MessageProvider>;
-    match node_factory.create_nodes(&all_nodes, &message_provider) {
+    let node_factory_context = NodeFactoryContext {
+        message_provider: Some(Arc::new(MessageProviderImpl {})),
+        descriptor_provider: Box::new(DescriptorProviderImpl {}),
+    };
+    match node_factory.create_nodes(&all_nodes, &node_factory_context) {
         Ok(rust_nodes) => {
             info!("All converted nodes = {:#?}", rust_nodes);
             for (i, node_ref) in rust_nodes.iter().enumerate() {
@@ -115,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     parse_and_store("30**2 < 100");
     parse_and_store("5 / 2 - 5 % 2");
 
-    match node_factory.create_nodes(parser.get_nodes(), &message_provider) {
+    match node_factory.create_nodes(parser.get_nodes(), &node_factory_context) {
         Ok(rust_nodes) => {
             for (idx, expr) in idx_to_expr.iter() {
                 let root_node = &rust_nodes[*idx as usize];
