@@ -9,6 +9,7 @@ extern crate protobuf;
 use crate::binding_c as rust_to_c;
 use log::{info, Level};
 use protobuf::Message;
+use std::ffi::CString;
 
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 
@@ -23,10 +24,11 @@ fn main() -> Result<(), binder::Status> {
 
     let service;
 
+    info!("Connecting to service");
     // Unsafe block needed to be able to call C API functions
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
+    // SAFETY: This function is always safe to call.
     unsafe {
-        info!("Connecting to service");
         service = rust_to_c::get_telemetry_service();
     }
 
@@ -38,21 +40,21 @@ fn main() -> Result<(), binder::Status> {
     info!("Serializing metric config");
     let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
 
+    let uuid_cstring = CString::new(config.uuid).unwrap();
+    // SAFETY: The service is valid because it comes from `get_telemetry_service` above.
+    // `add_metrics_config` doesn't actually mutate `serialized_config` despite taking a mutable
+    // pointer to it, and doesn't retain it after it returns. The string we pass to
+    // `activate_metrics_config`, `deactivate_metrics_config` and `remove_metrics_config` is a valid
+    // nul-terminated C string because it comes from a `CString`.
     unsafe {
         rust_to_c::add_metrics_config(
             service,
             serialized_config.as_ptr() as *mut u8,
             serialized_config.len(),
         );
-        rust_to_c::activate_metrics_config(
-            service,
-            config.uuid.as_ptr() as *const std::ffi::c_char,
-        );
-        rust_to_c::deactivate_metrics_config(
-            service,
-            config.uuid.as_ptr() as *const std::ffi::c_char,
-        );
-        rust_to_c::remove_metrics_config(service, config.uuid.as_ptr() as *const std::ffi::c_char);
+        rust_to_c::activate_metrics_config(service, uuid_cstring.as_ptr());
+        rust_to_c::deactivate_metrics_config(service, uuid_cstring.as_ptr());
+        rust_to_c::remove_metrics_config(service, uuid_cstring.as_ptr());
         rust_to_c::stop_telemetry_service(service);
     }
 
