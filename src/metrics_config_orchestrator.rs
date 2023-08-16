@@ -443,6 +443,11 @@ impl<
             }
         }
 
+        // Validate expression nodes to ensure they are set up correctly.
+        self.node_factory.validate(&config_proto.expression_nodes).map_err(|error_detail| {
+            MetricsConfigOrchestratorError::InvalidExpressionNodes { error_detail }
+        })?;
+
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
@@ -525,12 +530,22 @@ mod tests {
 
     struct MockNodeFactory {
         fail_create_nodes: bool,
+        fail_validate: bool,
         num_nodes: Mutex<usize>,
     }
 
     impl MockNodeFactory {
         fn new() -> Self {
-            MockNodeFactory { fail_create_nodes: false, num_nodes: Mutex::new(0) }
+            MockNodeFactory {
+                fail_create_nodes: false,
+                fail_validate: false,
+                num_nodes: Mutex::new(0),
+            }
+        }
+
+        /// Cause `validate` method to return an error.
+        fn fail_validate(&mut self) {
+            self.fail_validate = true;
         }
 
         /// Cause `create_nodes` method to return an error.
@@ -540,6 +555,13 @@ mod tests {
     }
 
     impl NodeFactory for MockNodeFactory {
+        fn validate(&self, _: &[NodeProto]) -> Result<(), String> {
+            if self.fail_validate {
+                return Err("Simulated failure".to_string());
+            }
+            Ok(())
+        }
+
         fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String> {
             if self.fail_create_nodes {
                 return Err("Simulated failure".to_string());
@@ -1287,6 +1309,21 @@ mod tests {
         orchestrator.initialize_config(&metrics_config).unwrap();
 
         assert!(orchestrator.finish_config(UUID).is_ok());
+    }
+
+    #[test]
+    fn validate_config_with_invalid_expression_nodes_fails() {
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator.node_factory.fail_validate();
+        let config = create_valid_config_with_dependencies();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
