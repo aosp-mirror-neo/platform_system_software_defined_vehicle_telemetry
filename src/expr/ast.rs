@@ -6,7 +6,6 @@ mod node_value;
 
 pub use node_value::NodeValue;
 
-use log::info;
 use sdvtelemetry_proto_rust::expression::{
     combination_node::LogicalOperator, combination_node::Operator as OperatorProto,
     node::Node_type as NodeTypeProto, Node as NodeProto,
@@ -257,23 +256,21 @@ impl Node {
                         None => Err("Incorrect Node! Every non-leaf Node should have a left child"
                             .to_string()),
                     }?; // `?` returns early if error
-                info!("left val = {:?}", left_val);
-
-                // evaluate right branch recursively
-                let right_val = match right {
-                    Some(right) => right.evaluate(message_provider),
-                    None => {
-                        if operator.is_unary_operator() {
-                            return Ok(NodeValue::None);
-                        }
-                        Err("Incorrect AST, right child should always be specified for nodes with binary operators.".to_string())
-                    }
-                }?; // `?` returns early if error
-                info!("right val = {:?}", right_val);
 
                 // If unary operator, then operates on self.
-                // If binary operator, then [left] <operator> [right].
-                left_val.operate(operator, &right_val)
+                // If binary operator, then [left] <operator> [right]
+                // The function short-circuits if possible. The closure provides right operand.
+                left_val.operate(operator, || {
+                    match right {
+                        Some(right) => right.evaluate(message_provider),
+                        None => {
+                            if operator.is_unary_operator() {
+                                return Ok(NodeValue::None);
+                            }
+                            Err("Incorrect AST, right child should always be specified for nodes with binary operators.".to_string())
+                        }
+                    }
+                })
             }
         }
     }
