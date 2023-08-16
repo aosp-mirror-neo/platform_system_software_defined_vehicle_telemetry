@@ -4,6 +4,7 @@ package android.sdv.telemetry;
 
 import android.sdv.telemetry.ITelemetryReportListener;
 import android.sdv.telemetry.ITelemetryReportReadyListener;
+import android.sdv.telemetry.ITelemetryStatusListener;
 
 /**
  * Internal binder interface for telemetry service.
@@ -57,7 +58,17 @@ interface ITelemetryService {
     void setReportReadyListener(in ITelemetryReportReadyListener listener);
 
     /**
+     * Registers a callback for receiving status codes for API calls.
+     */
+    void setStatusListener(in ITelemetryStatusListener listener);
+
+    /**
      * Clears listener to stop receiving notifications when a report or telemetry error is ready.
      */
     void clearReportReadyListener();
+
+    /**
+     * Clears listener to stop receiving status codes.
+     */
+    void clearStatusListener();
 }

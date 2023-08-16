@@ -23,6 +23,7 @@ extern "C" {
     void remove_all_metrics_configs(ServiceHolder* holder);
     void set_report_ready_listener(ServiceHolder* holder, void* listener,
                                    void (*cbFunc)(void*, const char*));
+    void set_status_listener(ServiceHolder* holder, void (*cbFunc)(int, const char*));
 
 #ifdef __cplusplus
 }

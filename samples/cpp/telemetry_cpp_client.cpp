@@ -27,6 +27,12 @@ void trigger_report_ready_listener(void* listener, const char* data) {
     reportReadListener->onReady(str);
 }
 
+// Callback function triggered by the telemetry service. Pointer to this function
+// is passed to the telemetry service.
+void trigger_status_listener(int status_code, const char* message) {
+    ALOGI("receiving status from service. Status: %d, Message: %s", status_code, message);
+}
+
 int main() {
 
   android::sp<android::ProcessState> ps(android::ProcessState::self());
@@ -34,6 +40,8 @@ int main() {
   ALOGI("Fetching binder telemetry service");
   // Opaque pointer holding an instance of the telemetry service
   ServiceHolder* holder = get_telemetry_service();
+
+  set_status_listener(holder, &trigger_status_listener);
 
   android::sdv::telemetry::MetricsConfig config;
   config.set_uuid(UUID);
