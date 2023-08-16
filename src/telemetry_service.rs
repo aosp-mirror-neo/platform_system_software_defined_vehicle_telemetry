@@ -32,9 +32,6 @@ pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
 
-// stores the size of all the metric configs persisted in memory
-static PERSISTED_METRICS_TOTAL_SIZE: AtomicUsize = AtomicUsize::new(0);
-
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
 /// preserving the content as far as possible.
 /// Also log the error if there is one.
@@ -50,7 +47,8 @@ pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
 pub struct SdvTelemetryService {
     active_data_dir: String,
     inactive_data_dir: String,
-    max_persistent_config_size: usize,
+    cur_persistent_config_store_size: AtomicUsize,
+    max_persistent_config_store_size: usize,
     /// Instance of Metrics Configuration Orchestrator.
     metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
     /// Hashmap to store the metricsConfigs's size passed by the client.
@@ -79,11 +77,10 @@ impl SdvTelemetryService {
 
         let mut num_active_configs = 0;
         let mut num_inactive_configs = 0;
+        // Needed to get the size of all files
+        let mut total_size = 0;
 
         if active_dir_path.is_dir() {
-            // Needed to get the size of all files
-            let mut total_size = 0;
-
             // Read the contents of each file in the directory into a byte array
             for entry_result in fs::read_dir(active_dir_path).unwrap() {
                 let entry = entry_result.unwrap();
@@ -119,8 +116,6 @@ impl SdvTelemetryService {
                     }
                 }
             }
-
-            PERSISTED_METRICS_TOTAL_SIZE.fetch_add(total_size, Ordering::SeqCst);
         } else {
             match file_io_utils::create_dir(&active_dir_path.to_path_buf()).await {
                 Ok(_) => {
@@ -136,7 +131,6 @@ impl SdvTelemetryService {
 
         if inactive_dir_path.is_dir() {
             // Needed to get the size of all files
-            let mut total_size = 0;
             for entry in fs::read_dir(inactive_dir_path).unwrap() {
                 let entry = entry.unwrap();
                 let metadata = entry.metadata().unwrap();
@@ -147,7 +141,7 @@ impl SdvTelemetryService {
                     let mut metric_config_map = configs_store.lock().unwrap();
                     metric_config_map
                         .insert(file_name.into_string().unwrap(), metadata.len() as usize);
-                    total_size += metadata.len();
+                    total_size += metadata.len() as usize;
                     num_inactive_configs += 1;
                 } else {
                     // remove corrupt inactive config
@@ -156,7 +150,6 @@ impl SdvTelemetryService {
                     });
                 }
             }
-            PERSISTED_METRICS_TOTAL_SIZE.fetch_add(total_size as usize, Ordering::SeqCst);
         } else {
             match file_io_utils::create_dir(&inactive_dir_path.to_path_buf()).await {
                 Ok(_) => {
@@ -174,12 +167,13 @@ impl SdvTelemetryService {
             "Telemetry service initialized with {:} active configs and {:} inactive configs occupying {} memory",
             num_active_configs,
             num_inactive_configs,
-            PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
+            total_size
         );
         Some(SdvTelemetryService {
             active_data_dir,
             inactive_data_dir,
-            max_persistent_config_size: config_store_size,
+            cur_persistent_config_store_size: AtomicUsize::new(total_size),
+            max_persistent_config_store_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
         })
@@ -192,8 +186,8 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config).unwrap();
         info!("addMetricsConfig: {:?} of size: {}\n", config, metrics_config.len());
 
-        if metrics_config.len() + PERSISTED_METRICS_TOTAL_SIZE.load(Ordering::SeqCst)
-            > self.max_persistent_config_size
+        if metrics_config.len() + self.cur_persistent_config_store_size.load(Ordering::SeqCst)
+            > self.max_persistent_config_store_size
         {
             error!("Memory limit exceeded");
             return to_binder_result(Err("Memory limit exceeded"));
@@ -222,12 +216,12 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
         // Storing the size of the metrics configs in metric_config_map to allow easy access
-        // during remove metrics API call. PERSISTED_METRICS_TOTAL_SIZE needs to be
+        // during remove metrics API call. self.cur_persistent_config_store_size needs to be
         // updated during each API call that modifies active metrics configs.
         // Alternate to metric_config_map would be read the file size from memory which constitutes
         // an IO operation and is inefficient.
         metric_config_map.insert(config.uuid.clone(), bytes.len());
-        PERSISTED_METRICS_TOTAL_SIZE.fetch_add(bytes.len(), Ordering::SeqCst);
+        self.cur_persistent_config_store_size.fetch_add(bytes.len(), Ordering::SeqCst);
 
         Ok(())
     }
@@ -332,7 +326,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             return to_binder_result(Err("Could not remove config from memory"));
         }
 
-        PERSISTED_METRICS_TOTAL_SIZE.fetch_sub(config_size, Ordering::SeqCst);
+        self.cur_persistent_config_store_size.fetch_sub(config_size, Ordering::SeqCst);
         Ok(())
     }
 
@@ -367,7 +361,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         metric_config_map.clear();
 
-        PERSISTED_METRICS_TOTAL_SIZE.store(0, Ordering::SeqCst);
+        self.cur_persistent_config_store_size.store(0, Ordering::SeqCst);
         Ok(())
     }
 
