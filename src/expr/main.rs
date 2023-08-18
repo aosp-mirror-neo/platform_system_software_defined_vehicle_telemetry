@@ -29,14 +29,8 @@ fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
     &*TEST_MESSAGE
 }
 
-fn main() {
-    sdv_log::init_logger(LOG_TAG).unwrap_or_else(|error| match &error {
-        sdv_log::LoggerError::AlreadyInitializedError(_) => {
-            // Only inform error, not panic
-            info!("{}", error)
-        }
-        _ => panic!("{}", error),
-    });
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    sdv_log::init_logger(LOG_TAG)?;
 
     info!("Telemetry AST");
 
@@ -82,4 +76,6 @@ fn main() {
             info!("{}", e);
         }
     }
+
+    Ok(())
 }

@@ -17,14 +17,8 @@ static METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.telemetry.metric_config_sto
 static LOG_TAG: &str = "SdvTelemetryService";
 static ROOT_DIR: &str = "/data/local/tmp";
 
-fn main() {
-    sdv_log::init_logger(LOG_TAG).unwrap_or_else(|error| match &error {
-        sdv_log::LoggerError::AlreadyInitializedError(_) => {
-            // Only inform error, not panic
-            info!("{}", error)
-        }
-        _ => panic!("{}", error),
-    });
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    sdv_log::init_logger(LOG_TAG)?;
 
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
     let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap_or("1".to_string());
@@ -39,7 +33,7 @@ fn main() {
             Some(telemetry_service) => telemetry_service,
             None => {
                 error!("Error in initialization telemetry service. Aborting.");
-                return;
+                return Err("Error in initialization telemetry service. Aborting.".into());
             }
         };
 
@@ -55,5 +49,7 @@ fn main() {
 
     binder::ProcessState::start_thread_pool();
     // Does not return - spawn or perform any work you mean to do before this call.
-    binder::ProcessState::join_thread_pool()
+    binder::ProcessState::join_thread_pool();
+
+    Ok(())
 }
