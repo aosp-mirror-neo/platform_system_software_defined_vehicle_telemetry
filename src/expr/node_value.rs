@@ -181,15 +181,10 @@ impl NodeValue {
         if fields.len() == 1 {
             return match &field_value {
                 // `optional` or singular protobuf field
-                ReflectFieldRef::Optional(singular_field) => {
-                    let field_value = singular_field.value().ok_or(format!(
-                        "No value exists for field {} in message {}",
-                        field_name,
-                        msg_descriptor.name()
-                    ))?;
-                    // convert reflection value into a NodeValue and return
-                    Self::from_singular_field_value(field_value)
-                }
+                ReflectFieldRef::Optional(singular_field) => match singular_field.value() {
+                    Some(field_value) => Self::from_singular_field_value(field_value),
+                    None => Ok(NodeValue::None),
+                },
                 // `repeated` protobuf field
                 ReflectFieldRef::Repeated(repeated_field) => {
                     // convert reflection value into a NodeValue and return
@@ -202,20 +197,20 @@ impl NodeValue {
         // If fields length > 1, get nested field values iff the value is a single protobuf message,
         // otherwise return error
         if let ReflectFieldRef::Optional(singular_field) = field_value {
-            let nested_value = singular_field.value().ok_or(format!(
-                "No value exists for field {} in message {}",
-                field_name,
-                msg_descriptor.name()
-            ))?;
-            if let ReflectValueRef::Message(msg) = nested_value {
-                // recurse to read from nested messages
-                Self::extract_field_value(&(*msg), &fields[1..])
-            } else {
-                Err(format!(
-                    "Get nested field value failed: a non-terminal field {} \
+            match singular_field.value() {
+                Some(nested_value) => {
+                    if let ReflectValueRef::Message(msg) = nested_value {
+                        // recurse to read from nested messages
+                        Self::extract_field_value(&(*msg), &fields[1..])
+                    } else {
+                        Err(format!(
+                            "Get nested field value failed: a non-terminal field {} \
                             is not a protobuf message",
-                    field_name
-                ))
+                            field_name
+                        ))
+                    }
+                }
+                None => Ok(NodeValue::None),
             }
         } else {
             Err(format!(
@@ -798,6 +793,14 @@ mod tests {
     }
 
     #[test]
+    fn test_extract_value_field_not_set_ok() {
+        let msg = Box::new(TestMessage::new());
+        let field_names = ["int_field".to_string()];
+
+        assert_eq!(NodeValue::extract_value(msg, &field_names), Ok(NodeValue::None));
+    }
+
+    #[test]
     fn test_extract_value_int_field_ok() {
         let field_names = ["int_field".to_string()];
 
@@ -849,6 +852,14 @@ mod tests {
             return Err(format!("Expect Message variant of NodeValue, got {:?}", node_value));
         }
         Ok(())
+    }
+
+    #[test]
+    fn test_extract_value_nested_field_not_set_ok() {
+        let msg = Box::new(TestMessage::new());
+        let field_names = ["message_field".to_string(), "int_field".to_string()];
+
+        assert_eq!(NodeValue::extract_value(msg, &field_names), Ok(NodeValue::None));
     }
 
     #[test]
