@@ -35,7 +35,7 @@ pub(crate) trait PublisherFactory<Pub: Publisher = PublisherImpl, Trig: Trigger 
 }
 
 pub(crate) struct PublisherFactoryContext<'a, Trig: Trigger = TriggerImpl> {
-    pub expression_nodes: &'a Vec<Arc<Node>>,
+    pub expression_nodes: &'a Vec<Option<Arc<Node>>>,
     pub file_descriptors: &'a Vec<FileDescriptor>,
     pub triggers: &'a HashMap<String, Arc<Trig>>,
 }
@@ -48,8 +48,6 @@ pub enum PublisherFactoryError {
     InvalidFieldName { field_name: String },
     #[error("Required field node_index is not set in declarative aggregation {field_name}")]
     MissingNodeIndex { field_name: String },
-    #[error("Incorrect node index {node_index} in declarative aggregation {field_name}")]
-    IncorrectNodeIndex { node_index: u32, field_name: String },
     #[error("Unknown aggregation type {aggregation_type} in declarative aggregation {field_name}")]
     UnknownAggregationType { aggregation_type: i32, field_name: String },
     #[error("Seed expression is not set in custom declarative aggregation {field_name}")]
@@ -121,7 +119,7 @@ impl PublisherFactoryImpl {
         &self,
         declarative_aggregation_protos: &[DeclarativeAggregationProto],
         descriptor: &MessageDescriptor,
-        expression_nodes: &[Arc<Node>],
+        expression_nodes: &[Option<Arc<Node>>],
     ) -> Result<Vec<DeclarativeAggregation>, PublisherFactoryError> {
         Ok(declarative_aggregation_protos
             .iter()
@@ -135,13 +133,8 @@ impl PublisherFactoryImpl {
                     PublisherFactoryError::MissingNodeIndex {
                         field_name: declarative_aggregation_proto.field_name.clone(),
                     },
-                )?;
-                let selector_expression = expression_nodes
-                    .get(selector_node_index as usize)
-                    .ok_or(PublisherFactoryError::IncorrectNodeIndex {
-                        node_index: selector_node_index,
-                        field_name: declarative_aggregation_proto.field_name.clone(),
-                    })?;
+                )? as usize;
+                let selector_expression = expression_nodes[selector_node_index].as_ref().unwrap();
                 let aggregation_type = declarative_aggregation_proto
                     .aggregation_type
                     .enum_value()
@@ -266,7 +259,6 @@ mod tests {
 
     const FIELD_NAME: &str = "field";
     const FIELD_NAME2: &str = "field2";
-    const INCORRECT_NODE_INDEX: u32 = 42;
     const INTERVAL_MS: u64 = 42;
     const MESSAGE_TYPE: &str = "messagetype";
     const PUBLISHER_NAME: &str = "publisher";
@@ -331,10 +323,11 @@ mod tests {
         file_descriptors: Option<Vec<FileDescriptor>>,
         execute_func: impl FnOnce(&PublisherFactoryContext) -> R,
     ) -> R {
-        let expression_nodes = nodes.unwrap_or_default();
+        let expression_nodes =
+            nodes.map_or_else(Vec::new, |val| val.into_iter().map(Some).collect());
         let file_descriptors = file_descriptors.unwrap_or_default();
         let triggers = triggers
-            .map_or(HashMap::new(), |val| val.into_hash_map(|publisher| publisher.name.clone()));
+            .map_or_else(HashMap::new, |val| val.into_hash_map(|publisher| publisher.name.clone()));
         let context = PublisherFactoryContext {
             expression_nodes: &expression_nodes,
             file_descriptors: &file_descriptors,
@@ -396,20 +389,6 @@ mod tests {
         let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let declarative_proto = create_declarative_aggregation(FIELD_NAME, None, None);
-        set_aggregation_publisher(
-            &mut publisher,
-            &file_descriptor.messages().next().unwrap(),
-            vec![declarative_proto],
-        );
-        (publisher, Some(vec![file_descriptor]))
-    }
-
-    fn create_aggregation_publisher_with_incorrect_node_index(
-    ) -> (PublisherProto, Option<Vec<FileDescriptor>>) {
-        let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
-        let mut publisher = create_publisher(PUBLISHER_NAME);
-        let declarative_proto =
-            create_declarative_aggregation(FIELD_NAME, Some(INCORRECT_NODE_INDEX), None);
         set_aggregation_publisher(
             &mut publisher,
             &file_descriptor.messages().next().unwrap(),
@@ -551,25 +530,6 @@ mod tests {
 
         assert!(
             matches!(err, PublisherFactoryError::MissingNodeIndex { ref field_name } if field_name == FIELD_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_aggregation_publisher_declarative_aggregation_incorrect_node_index_fails() {
-        let factory = create_factory();
-        let (publisher, file_descriptors) =
-            create_aggregation_publisher_with_incorrect_node_index();
-
-        let err = run_using_factory_context(None, None, file_descriptors, |context| {
-            factory.create(&publisher, context)
-        })
-        .err()
-        .unwrap();
-
-        assert!(
-            matches!(err, PublisherFactoryError::IncorrectNodeIndex { node_index:INCORRECT_NODE_INDEX, ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );
@@ -870,25 +830,6 @@ mod tests {
 
         assert!(
             matches!(err, PublisherFactoryError::MissingNodeIndex { ref field_name } if field_name == FIELD_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_aggregation_publisher_declarative_aggregation_incorrect_node_index_fails() {
-        let factory = create_factory();
-        let (publisher, file_descriptors) =
-            create_aggregation_publisher_with_incorrect_node_index();
-
-        let err = run_using_factory_context(None, None, file_descriptors, |context| {
-            factory.validate(&publisher, context)
-        })
-        .err()
-        .unwrap();
-
-        assert!(
-            matches!(err, PublisherFactoryError::IncorrectNodeIndex { node_index:INCORRECT_NODE_INDEX, ref field_name } if field_name == FIELD_NAME),
             "Unexpected error: {:?}",
             err
         );

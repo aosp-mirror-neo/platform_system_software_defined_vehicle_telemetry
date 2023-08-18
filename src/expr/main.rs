@@ -5,12 +5,14 @@
 
 use lazy_static::lazy_static;
 use log::info;
-use sdv_ast::{NodeFactory, NodeFactoryImpl};
+use protobuf::MessageDyn;
+use sdv_ast::{Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use sdv_telem_expr_test_proto::test_message::TestMessage;
 use sdvtelemetry_proto_rust::expression::{
     combination_node::ArithmeticOperator, CombinationNode, ConstantLeafNode, FieldLeafNode,
     Node as NodeProto,
 };
+use std::sync::Arc;
 
 static LOG_TAG: &str = "Ast";
 
@@ -24,9 +26,27 @@ lazy_static! {
     };
 }
 
-/// This function is an argument to `Node#evaluate()`.
-fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
-    &*TEST_MESSAGE
+struct NodeFactoryContextImpl {
+    nodes: Vec<Arc<Node>>,
+}
+
+impl NodeFactoryContextImpl {
+    fn new() -> Self {
+        NodeFactoryContextImpl { nodes: Vec::new() }
+    }
+}
+
+impl NodeFactoryContext for NodeFactoryContextImpl {
+    fn create_message_provider(
+        &self,
+        _: &str,
+    ) -> Box<dyn Fn() -> Box<dyn MessageDyn> + Send + Sync> {
+        Box::new(|| Box::new((*TEST_MESSAGE).clone()))
+    }
+
+    fn get_node(&self, index: usize) -> &Arc<Node> {
+        &self.nodes[index]
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -64,17 +84,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let all_nodes = vec![left_node, right_node, root_node, value_node, message_node];
 
-    let node_factory = NodeFactoryImpl::new();
-    match node_factory.create_nodes(&all_nodes) {
-        Ok(rust_nodes) => {
-            info!("All converted nodes = {:#?}", rust_nodes);
-            for (i, node_ref) in rust_nodes.iter().enumerate() {
-                info!("index {} result = {:?}", i, node_ref.evaluate(&provide_test_message));
+    let node_factory = NodeFactoryImpl {};
+    let mut context = NodeFactoryContextImpl::new();
+
+    let mut rust_nodes = Vec::new();
+    for proto_node in all_nodes {
+        match node_factory.create(&proto_node, &context).map(Arc::new) {
+            Ok(rust_node) => {
+                context.nodes.push(rust_node.clone());
+                rust_nodes.push(rust_node);
+            }
+            Err(e) => {
+                info!("{}", e);
+                return Ok(());
             }
         }
-        Err(e) => {
-            info!("{}", e);
-        }
+    }
+
+    info!("All converted nodes = {:#?}", rust_nodes);
+    for (i, node_ref) in rust_nodes.iter().enumerate() {
+        info!("index {} result = {:?}", i, node_ref.evaluate());
     }
 
     Ok(())
