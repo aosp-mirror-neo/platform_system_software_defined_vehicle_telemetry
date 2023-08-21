@@ -46,7 +46,7 @@ pub(crate) struct TriggerImpl {
     // to the map. Underlying trigger type must stop firing when the reference becomes invalid.
     // Last unsubscription of TriggerImpl creates a new Arc and frees the previous Arc,
     // making weak reference invalid.
-    callback_map: Mutex<Arc<Mutex<HashMap<TriggerSubscriber, Arc<Box<dyn Fn() + Send + Sync>>>>>>,
+    callback_map: Mutex<Arc<Mutex<HashMap<TriggerSubscriber, Arc<dyn Fn() + Send + Sync>>>>>,
 }
 
 #[allow(dead_code)]
@@ -89,9 +89,7 @@ impl Trigger for TriggerImpl {
         let maybe_callbacks_reference = {
             let callbacks_container = self.callback_map.lock().unwrap();
             let mut callbacks = callbacks_container.lock().unwrap();
-            if callbacks
-                .try_insert_value(subscriber.clone(), Arc::new(Box::new(on_fired_callback)))
-                .is_err()
+            if callbacks.try_insert_value(subscriber.clone(), Arc::new(on_fired_callback)).is_err()
             {
                 return Err(format!("Subscriber {} is already subscribed to the trigger. Duplicate subscriptions are not allowed.", subscriber));
             }
@@ -136,9 +134,7 @@ impl Trigger for TriggerImpl {
 impl TriggerType {
     pub(super) fn activate(
         &self,
-        callbacks_reference: Weak<
-            Mutex<HashMap<TriggerSubscriber, Arc<Box<dyn Fn() + Send + Sync>>>>,
-        >,
+        callbacks_reference: Weak<Mutex<HashMap<TriggerSubscriber, Arc<dyn Fn() + Send + Sync>>>>,
     ) -> Result<(), String> {
         match self {
             TriggerType::Data { .. } => {
@@ -157,9 +153,7 @@ impl TriggerType {
     /// Periodically invokes callbacks until the weak reference is no longer valid.
     async fn call_periodically(
         interval_ms: u64,
-        callbacks_reference: Weak<
-            Mutex<HashMap<TriggerSubscriber, Arc<Box<dyn Fn() + Send + Sync>>>>,
-        >,
+        callbacks_reference: Weak<Mutex<HashMap<TriggerSubscriber, Arc<dyn Fn() + Send + Sync>>>>,
     ) {
         let mut timer = tokio::time::interval(Duration::from_millis(interval_ms));
 
