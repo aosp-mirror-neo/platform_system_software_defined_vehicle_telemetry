@@ -5,12 +5,14 @@
 
 use lazy_static::lazy_static;
 use log::info;
-use sdv_ast::{NodeFactory, NodeFactoryImpl};
+use protobuf::MessageDyn;
+use sdv_ast::{MessageProvider, MessageProviderError, NodeFactory, NodeFactoryImpl};
 use sdv_telem_expr_test_proto::test_message::TestMessage;
 use sdvtelemetry_proto_rust::expression::{
     combination_node::ArithmeticOperator, CombinationNode, ConstantLeafNode, FieldLeafNode,
     Node as NodeProto,
 };
+use std::sync::Arc;
 
 static LOG_TAG: &str = "Ast";
 
@@ -24,9 +26,15 @@ lazy_static! {
     };
 }
 
-/// This function is an argument to `Node#evaluate()`.
-fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
-    &*TEST_MESSAGE
+struct MessageProviderImpl {}
+
+impl MessageProvider for MessageProviderImpl {
+    fn get_message(
+        &self,
+        _publisher_name: &str,
+    ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+        Ok(Some(Box::new((*TEST_MESSAGE).clone())))
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -64,12 +72,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let all_nodes = vec![left_node, right_node, root_node, value_node, message_node];
 
-    let node_factory = NodeFactoryImpl::new();
-    match node_factory.create_nodes(&all_nodes) {
+    let node_factory = NodeFactoryImpl {};
+    let message_provider = Arc::new(MessageProviderImpl {}) as Arc<dyn MessageProvider>;
+    match node_factory.create_nodes(&all_nodes, &message_provider) {
         Ok(rust_nodes) => {
             info!("All converted nodes = {:#?}", rust_nodes);
             for (i, node_ref) in rust_nodes.iter().enumerate() {
-                info!("index {} result = {:?}", i, node_ref.evaluate(&provide_test_message));
+                info!("index {} result = {:?}", i, node_ref.evaluate());
             }
         }
         Err(e) => {

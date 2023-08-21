@@ -34,10 +34,10 @@ pub(crate) trait PublisherFactory<Pub: Publisher = PublisherImpl, Trig: Trigger 
     ) -> Result<(), PublisherFactoryError>;
 }
 
-pub(crate) struct PublisherFactoryContext<'a, Trig: Trigger = TriggerImpl> {
+pub(crate) struct PublisherFactoryContext<'a, TTrigger: Trigger = TriggerImpl> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub file_descriptors: &'a Vec<FileDescriptor>,
-    pub triggers: &'a HashMap<String, Arc<Trig>>,
+    pub triggers: &'a HashMap<String, Arc<TTrigger>>,
 }
 
 #[derive(Error, Debug)]
