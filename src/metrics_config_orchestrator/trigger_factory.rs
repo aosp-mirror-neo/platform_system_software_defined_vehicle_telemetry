@@ -33,7 +33,7 @@ pub(crate) struct TriggerFactoryContext<
     Pub: Publisher = PublisherImpl,
     Trig: Trigger = TriggerImpl,
 > {
-    pub expression_nodes: &'a Vec<Option<Arc<Node>>>,
+    pub expression_nodes: &'a Vec<Arc<Node>>,
     pub publishers: &'a HashMap<String, Arc<Pub>>,
     pub triggers: &'a HashMap<String, Arc<Trig>>,
 }
@@ -44,6 +44,8 @@ pub enum TriggerFactoryError {
     NoParentTriggers,
     #[error("Required field selector_node_index is not set for conditional trigger")]
     MissingNodeIndex,
+    #[error("Incorrect conditional trigger node index {node_index}")]
+    IncorrectNodeIndex { node_index: u32 },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
 }
@@ -59,13 +61,14 @@ impl TriggerFactoryImpl {
 impl TriggerFactoryImpl {
     fn get_conditional_trigger_expression<'a>(
         conditional_trigger_proto: &'a ConditionalTriggerProto,
-        nodes: &'a [Option<Arc<Node>>],
+        nodes: &'a [Arc<Node>],
     ) -> Result<&'a Arc<Node>, TriggerFactoryError> {
         let selector_node_index = conditional_trigger_proto
             .selector_node_index
-            .ok_or(TriggerFactoryError::MissingNodeIndex)?
-            as usize;
-        Ok(nodes[selector_node_index].as_ref().unwrap())
+            .ok_or(TriggerFactoryError::MissingNodeIndex)?;
+        nodes
+            .get(selector_node_index as usize)
+            .ok_or(TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index })
     }
 
     fn verify_not_empty(names: &[String]) -> Result<(), TriggerFactoryError> {
@@ -144,6 +147,7 @@ mod tests {
     use crate::metrics_config_orchestrator::publisher::PublisherType;
 
     const INTERVAL: u64 = u64::MAX;
+    const NODE_INDEX: u32 = 42;
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const SIGNAL_NAME: &str = "signal";
@@ -179,12 +183,11 @@ mod tests {
         nodes: Option<Vec<Arc<Node>>>,
         execute_func: impl FnOnce(&TriggerFactoryContext) -> R,
     ) -> R {
-        let expression_nodes =
-            nodes.map_or_else(Vec::new, |val| val.into_iter().map(Some).collect());
+        let expression_nodes = nodes.unwrap_or_default();
         let publishers = publishers
-            .map_or_else(HashMap::new, |val| val.into_hash_map(|publisher| publisher.name.clone()));
+            .map_or(HashMap::new(), |val| val.into_hash_map(|publisher| publisher.name.clone()));
         let triggers = triggers
-            .map_or_else(HashMap::new, |val| val.into_hash_map(|trigger| trigger.name.clone()));
+            .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
         let context = TriggerFactoryContext {
             expression_nodes: &expression_nodes,
             publishers: &publishers,
@@ -237,6 +240,14 @@ mod tests {
         ));
 
         (trigger, Some(vec![parent_trigger]))
+    }
+
+    fn create_conditional_trigger_with_incorrect_node_index() -> TriggerProto {
+        let mut trigger = new_trigger(TRIGGER_NAME);
+        let conditional_trigger = trigger.mut_conditional_trigger();
+        conditional_trigger.selector_node_index = Some(NODE_INDEX);
+        conditional_trigger.trigger_names.push(String::default());
+        trigger
     }
 
     #[test]
@@ -300,6 +311,22 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::MissingNodeIndex),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_conditional_trigger_incorrect_node_index_fails() {
+        let factory = create_factory();
+        let trigger = create_conditional_trigger_with_incorrect_node_index();
+
+        let err = run_using_empty_factory_context(|context| factory.create(&trigger, context))
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
             "Unexpected error: {:?}",
             err
         );
@@ -378,6 +405,22 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::MissingNodeIndex),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_conditional_trigger_incorrect_node_index_fails() {
+        let factory = create_factory();
+        let trigger = create_conditional_trigger_with_incorrect_node_index();
+
+        let err = run_using_empty_factory_context(|context| factory.validate(&trigger, context))
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
             "Unexpected error: {:?}",
             err
         );

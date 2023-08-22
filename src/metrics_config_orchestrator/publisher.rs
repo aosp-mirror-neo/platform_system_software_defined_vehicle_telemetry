@@ -1,6 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use protobuf::reflect::MessageDescriptor;
 use sdv_ast::Node;
 use sdvtelemetry_proto_rust::{
     expression::NewProtoNode, metrics_configuration::declarative_aggregation::AggregationType,
@@ -11,8 +11,6 @@ use crate::metrics_config_orchestrator::TriggerImpl;
 
 pub(crate) trait Publisher {
     fn get_name(&self) -> &str;
-    fn get_latest_message(&self) -> Box<dyn MessageDyn>;
-
     fn activate(&self) -> Result<(), String>;
     fn deactivate(&self) -> Result<(), String>;
 }
@@ -52,10 +50,6 @@ pub(crate) struct DeclarativeAggregation {
 impl Publisher for PublisherImpl {
     fn get_name(&self) -> &str {
         &self.name
-    }
-
-    fn get_latest_message(&self) -> Box<dyn MessageDyn> {
-        Box::new(sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig::new())
     }
 
     fn activate(&self) -> Result<(), String> {
