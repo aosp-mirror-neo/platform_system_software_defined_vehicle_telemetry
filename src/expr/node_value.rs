@@ -722,6 +722,7 @@ mod tests {
 
             test_message
         };
+        static ref EMPTY_TEST_MESSAGE: TestMessage = TestMessage::new();
     }
 
     fn provide(value: &NodeValue) -> Result<NodeValue, String> {
@@ -794,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_extract_value_field_not_set_ok() {
-        let msg = Box::new(TestMessage::new());
+        let msg = &*EMPTY_TEST_MESSAGE;
         let field_names = ["int_field".to_string()];
 
         assert_eq!(NodeValue::extract_value(msg, &field_names), Ok(NodeValue::None));
@@ -853,7 +854,7 @@ mod tests {
 
     #[test]
     fn test_extract_value_nested_field_not_set_ok() {
-        let msg = Box::new(TestMessage::new());
+        let msg = &*EMPTY_TEST_MESSAGE;
         let field_names = ["message_field".to_string(), "int_field".to_string()];
 
         assert_eq!(NodeValue::extract_value(msg, &field_names), Ok(NodeValue::None));
