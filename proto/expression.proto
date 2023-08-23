@@ -30,18 +30,23 @@ message ConstantLeafNode {
   }
 }
 
-// Leaf node holding the value of 1 field from a protobuf message.
+// Leaf node holding some value from a protobuf message.
 // The selected field value must be a built-in type or a list of built-in types.
-// It cannot be another protobuf message.
+// It cannot be a map, a string, or a repeated field of protobuf messages.
 message FieldLeafNode {
   // Identify the source of the protobuf message.
   // The name of the publisher defined in the Metrics Configuration that
-  // in turn (through ServicePublisher) could reference a taxo topic.
+  // in turn (through ServicePublisher) could reference a topic.
   string publisher_name = 1;
 
-  // Repeated field_names to get field value from nested messages.
-  // If getting the value MsgA.a, the field_names = ["a"].
-  // If getting the value MsgA.b.c.d, the field_names = ["b", "c", "d"].
+  // Select value from a message using field_names.
+  // If a field is unset, none will be returned to the selector.
+  // If an operation is done on an unset field, an error will be returned to
+  // the selector.
+  // Example usage:
+  // * If getting the published message itself, leave field_names empty.
+  // * If getting the value MsgA.a, the field_names = ["a"].
+  // * If getting the value MsgA.b.c.d, the field_names = ["b", "c", "d"].
   repeated string field_names = 2;
 }
 
@@ -85,7 +90,7 @@ message CombinationNode {
     SUBTRACT = 1;
     MULTIPLY = 2;
     DIVIDE = 3;
-    // Both operands must be integer types.
+    // Modulus operator requires both operands to be integer types.
     MODULUS = 4;
     POWER = 5;
   }
@@ -97,12 +102,11 @@ message CombinationNode {
   }
 
   // Required.
-  // Left index should always be specified and be set to a valid value.
   // Index of the left child Node in the repeated list of `expression_nodes`
   // in MetricsConfig.
   // Most operators are binary and form this relationship:
   //   [left child] <operator> [right child]
-  // The optional annotation is ton verify that the left_index is set, not some
+  // The optional annotation is to verify that the left_index is set, not some
   // default value of 0. The left_index should always be specified.
   optional uint32 left_index = 4;
 
