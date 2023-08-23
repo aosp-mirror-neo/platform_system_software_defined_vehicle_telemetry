@@ -6,8 +6,10 @@ mod trigger;
 mod trigger_factory;
 
 use log::{error, warn};
-use protobuf::reflect::FileDescriptor;
-use sdv_ast::{Node, NodeFactory, NodeFactoryImpl};
+use protobuf::{reflect::FileDescriptor, MessageDyn};
+use sdv_ast::{
+    MessageProvider, MessageProviderError, Node, NodeFactory, NodeFactoryImpl, NodeValue,
+};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, Publisher as PublisherProto, Trigger as TriggerProto,
@@ -15,7 +17,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::{
     collections::HashMap,
     marker::Sync,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, RwLock},
 };
 use thiserror::Error;
 
@@ -28,6 +30,9 @@ use trigger::{Trigger, TriggerImpl, TriggerSubscriber};
 use trigger_factory::{
     TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
 };
+
+const PUBLISHER: &str = "publisher";
+const TRIGGER: &str = "trigger";
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 pub trait MetricsConfigOrchestrator {
@@ -57,7 +62,7 @@ pub enum MetricsConfigOrchestratorError {
     #[error("Cycle detected in the publisher and trigger dependency graph")]
     CycledPublishersTriggers,
     #[error("Invalid dependency: {dependency_name} doesn't exist")]
-    InvalidDependency { dependency_name: String },
+    InvalidDependency { dependency_type: String, dependency_name: String },
     #[error("Duplicate metrics config identifier: {uuid}")]
     DuplicateMetricsConfigUuid { uuid: String },
     #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
@@ -91,12 +96,35 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     trigger_factory: TrigFactory,
 }
 
-pub(super) struct MetricsConfig<Pub: Publisher = PublisherImpl, Trig: Trigger = TriggerImpl> {
+pub(super) struct MetricsConfig<
+    TPublisher: Publisher = PublisherImpl,
+    TTrigger: Trigger = TriggerImpl,
+> {
     uuid: String,
-    publishers: HashMap<String, Arc<Pub>>,
-    start_trigger: Option<Arc<Trig>>,
-    end_trigger: Option<Arc<Trig>>,
-    finish_trigger: Option<Arc<Trig>>,
+    publishers: HashMap<String, Arc<TPublisher>>,
+    start_trigger: Option<Arc<TTrigger>>,
+    end_trigger: Option<Arc<TTrigger>>,
+    finish_trigger: Option<Arc<TTrigger>>,
+}
+
+struct MessageProviderImpl<TPublisher: Publisher = PublisherImpl, TTrigger: Trigger = TriggerImpl> {
+    metrics_config: RwLock<Arc<MetricsConfig<TPublisher, TTrigger>>>,
+}
+
+impl<TPublisher, TTrigger> MessageProvider for MessageProviderImpl<TPublisher, TTrigger>
+where
+    TPublisher: Publisher + Send + Sync,
+    TTrigger: Trigger + Send + Sync,
+{
+    fn get_message(
+        &self,
+        publisher_name: &str,
+    ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+        self.metrics_config.read().unwrap().publishers.get(publisher_name).map_or_else(
+            || Err(MessageProviderError::InvalidPublisherName),
+            |publisher| Ok(publisher.get_latest_message()),
+        )
+    }
 }
 
 impl MetricsConfigOrchestratorImpl {
@@ -110,22 +138,29 @@ impl MetricsConfigOrchestratorImpl {
     }
 }
 
-impl<NdFactory, Pub, PubFactory, Trig, TrigFactory>
-    MetricsConfigOrchestratorImpl<NdFactory, Pub, PubFactory, Trig, TrigFactory>
+impl<TNodeFactory, TPublisher, TPublisherFactory, TTrigger, TTriggerFactory>
+    MetricsConfigOrchestratorImpl<
+        TNodeFactory,
+        TPublisher,
+        TPublisherFactory,
+        TTrigger,
+        TTriggerFactory,
+    >
 where
-    NdFactory: NodeFactory,
-    Pub: Publisher + Send + Sync + 'static,
-    PubFactory: PublisherFactory<Pub, Trig>,
-    Trig: Trigger + Send + Sync + 'static,
-    TrigFactory: TriggerFactory<Pub, Trig>,
+    TNodeFactory: NodeFactory,
+    TPublisher: Publisher + Send + Sync + 'static,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger>,
+    TTrigger: Trigger + Send + Sync + 'static,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger>,
 {
     fn create_expression_nodes(
         &self,
         config_proto: &MetricsConfigProto,
+        message_provider: &Arc<dyn MessageProvider>,
     ) -> Result<Vec<Arc<Node>>, MetricsConfigOrchestratorError> {
-        self.node_factory.create_nodes(&config_proto.expression_nodes).map_err(|error_detail| {
-            MetricsConfigOrchestratorError::InvalidExpressionNodes { error_detail }
-        })
+        self.node_factory.create_nodes(&config_proto.expression_nodes, message_provider).map_err(
+            |error_detail| MetricsConfigOrchestratorError::InvalidExpressionNodes { error_detail },
+        )
     }
 
     /// Topologically sort publishers and triggers declared in the protobuf message
@@ -134,39 +169,42 @@ where
         config_proto: &MetricsConfigProto,
         publisher_func: impl Fn(
             &PublisherProto,
-            &mut HashMap<String, Arc<Pub>>,
-            &HashMap<String, Arc<Trig>>,
+            &mut HashMap<String, Arc<TPublisher>>,
+            &HashMap<String, Arc<TTrigger>>,
         ) -> Result<(), MetricsConfigOrchestratorError>,
         trigger_func: impl Fn(
             &TriggerProto,
-            &HashMap<String, Arc<Pub>>,
-            &mut HashMap<String, Arc<Trig>>,
+            &HashMap<String, Arc<TPublisher>>,
+            &mut HashMap<String, Arc<TTrigger>>,
         ) -> Result<(), MetricsConfigOrchestratorError>,
     ) -> Result<
-        (HashMap<String, Arc<Pub>>, HashMap<String, Arc<Trig>>),
+        (HashMap<String, Arc<TPublisher>>, HashMap<String, Arc<TTrigger>>),
         MetricsConfigOrchestratorError,
     > {
         enum DependencyContainer<'a> {
-            Publisher { publisher_proto: &'a PublisherProto, dependencies: Vec<&'a String> },
-            Trigger { trigger_proto: &'a TriggerProto, dependencies: Vec<&'a String> },
+            Publisher { publisher_proto: &'a PublisherProto },
+            Trigger { trigger_proto: &'a TriggerProto },
         }
 
         // Build dependency map for topological sorting.
         let dependency_map = config_proto.publishers.iter().try_fold(
             HashMap::new(),
             |mut acc, publisher_proto| match acc.try_insert_value(
-                &publisher_proto.name,
-                DependencyContainer::Publisher {
-                    publisher_proto,
-                    dependencies: if let Some(PublisherTypeProto::AggregationPublisher(
-                        aggregation_publisher,
-                    )) = &publisher_proto.publisher_type
+                (PUBLISHER, publisher_proto.name.as_str()),
+                (
+                    DependencyContainer::Publisher { publisher_proto },
+                    if let Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) =
+                        &publisher_proto.publisher_type
                     {
-                        aggregation_publisher.trigger_names.iter().collect()
+                        aggregation_publisher
+                            .trigger_names
+                            .iter()
+                            .map(|name| (TRIGGER, name.as_str()))
+                            .collect()
                     } else {
                         vec![]
                     },
-                },
+                ),
             ) {
                 Ok(_) => Ok(acc),
                 Err(()) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
@@ -177,30 +215,30 @@ where
 
         let dependency_map =
             config_proto.triggers.iter().try_fold(dependency_map, |mut acc, trigger_proto| {
+                let publisher_key = (PUBLISHER, trigger_proto.name.as_str());
+                if acc.contains_key(&publisher_key) {
+                    return Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
+                        trigger_name: trigger_proto.name.clone(),
+                    });
+                }
                 match acc.try_insert_value(
-                    &trigger_proto.name,
-                    DependencyContainer::Trigger {
-                        trigger_proto,
-                        dependencies: match &trigger_proto.trigger_type {
+                    (TRIGGER, trigger_proto.name.as_str()),
+                    (
+                        DependencyContainer::Trigger { trigger_proto },
+                        match &trigger_proto.trigger_type {
                             Some(TriggerTypeProto::DataTrigger(data_trigger)) => {
-                                if let Some(DependencyContainer::Publisher { .. }) =
-                                    acc.get(&data_trigger.publisher_name)
-                                {
-                                    vec![&data_trigger.publisher_name]
-                                } else {
-                                    return Err(
-                                        MetricsConfigOrchestratorError::InvalidDependency {
-                                            dependency_name: data_trigger.publisher_name.clone(),
-                                        },
-                                    );
-                                }
+                                vec![(PUBLISHER, data_trigger.publisher_name.as_str())]
                             }
                             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
-                                conditional_trigger.trigger_names.iter().collect()
+                                conditional_trigger
+                                    .trigger_names
+                                    .iter()
+                                    .map(|name| (TRIGGER, name.as_str()))
+                                    .collect()
                             }
                             _ => vec![],
                         },
-                    },
+                    ),
                 ) {
                     Ok(_) => Ok(acc),
                     Err(()) => Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
@@ -211,27 +249,28 @@ where
 
         // Retrieve topologically sorted vector of keys.
         let sorted_vector = dependency_map
-            .to_topological_sorted_vec(|dependency| match dependency {
-                DependencyContainer::Trigger { dependencies, .. } => dependencies,
-                DependencyContainer::Publisher { dependencies, .. } => dependencies,
-            })
+            .to_topological_sorted_vec(|(_, dependencies)| dependencies)
             .ok_or(MetricsConfigOrchestratorError::CycledPublishersTriggers)?;
 
         // Create publishers and triggers in the topologically sorted order to make sure
         // the dependencies are created before those that reference them.
         sorted_vector.iter().rev().try_fold(
             (HashMap::new(), HashMap::new()),
-            |(mut publishers, mut triggers), container_name| {
-                match dependency_map.get(*container_name) {
-                    Some(DependencyContainer::Publisher { publisher_proto, .. }) => {
+            |(mut publishers, mut triggers), container_key| {
+                match dependency_map.get(container_key) {
+                    Some((DependencyContainer::Publisher { publisher_proto, .. }, _)) => {
                         publisher_func(publisher_proto, &mut publishers, &triggers)
                     }
-                    Some(DependencyContainer::Trigger { trigger_proto, .. }) => {
+                    Some((DependencyContainer::Trigger { trigger_proto, .. }, _)) => {
                         trigger_func(trigger_proto, &publishers, &mut triggers)
                     }
-                    None => Err(MetricsConfigOrchestratorError::InvalidDependency {
-                        dependency_name: container_name.to_string(),
-                    }),
+                    None => {
+                        let (container_type, name) = container_key;
+                        Err(MetricsConfigOrchestratorError::InvalidDependency {
+                            dependency_type: container_type.to_string(),
+                            dependency_name: name.to_string(),
+                        })
+                    }
                 }?;
                 Ok((publishers, triggers))
             },
@@ -239,20 +278,21 @@ where
     }
 
     fn maybe_get_trigger<'a>(
-        triggers: &'a HashMap<String, Arc<Trig>>,
+        triggers: &'a HashMap<String, Arc<TTrigger>>,
         trigger_name: &str,
-    ) -> Result<Option<&'a Arc<Trig>>, MetricsConfigOrchestratorError> {
+    ) -> Result<Option<&'a Arc<TTrigger>>, MetricsConfigOrchestratorError> {
         if trigger_name.is_empty() {
             return Ok(None);
         }
         Ok(Some(triggers.get(trigger_name).ok_or(
             MetricsConfigOrchestratorError::InvalidDependency {
+                dependency_type: TRIGGER.to_owned(),
                 dependency_name: trigger_name.to_owned(),
             },
         )?))
     }
 
-    fn on_start_trigger_fired(config: &Arc<MetricsConfig<Pub, Trig>>) {
+    fn on_start_trigger_fired(config: &Arc<MetricsConfig<TPublisher, TTrigger>>) {
         if let Some(start_trigger) = &config.start_trigger {
             if let Err(err) = start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart) {
                 error!(
@@ -305,35 +345,57 @@ where
         }
     }
 
-    fn on_end_trigger_fired(_config: &Arc<MetricsConfig<Pub, Trig>>) {
+    fn on_end_trigger_fired(_config: &Arc<MetricsConfig<TPublisher, TTrigger>>) {
         // TODO(b/289386420): implement end trigger handling logic.
         warn!("End trigger handling logic is not implemented. Data collection won't end.");
     }
 
-    fn on_finish_trigger_fired(_config: &Arc<MetricsConfig<Pub, Trig>>) {
+    fn on_finish_trigger_fired(_config: &Arc<MetricsConfig<TPublisher, TTrigger>>) {
         // TODO(b/294616843): implement finish trigger handling logic.
         warn!("Finish trigger handling logic is not implemented. Data collection won't finish.");
     }
 }
 
-impl<
-        NdFactory: NodeFactory + Sync,
-        Pub: Publisher + Send + Sync + 'static,
-        PubFactory: PublisherFactory<Pub, Trig> + Sync,
-        Trig: Trigger + Sync + Send + 'static,
-        TrigFactory: TriggerFactory<Pub, Trig> + Sync,
-    > MetricsConfigOrchestrator
-    for MetricsConfigOrchestratorImpl<NdFactory, Pub, PubFactory, Trig, TrigFactory>
+impl<TNodeFactory, TPublisher, TPublisherFactory, TTrigger, TTriggerFactory>
+    MetricsConfigOrchestrator
+    for MetricsConfigOrchestratorImpl<
+        TNodeFactory,
+        TPublisher,
+        TPublisherFactory,
+        TTrigger,
+        TTriggerFactory,
+    >
+where
+    TNodeFactory: NodeFactory + Sync,
+    TPublisher: Publisher + Send + Sync + 'static,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Sync,
+    TTrigger: Trigger + Sync + Send + 'static,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Sync,
+    MessageProviderImpl<TPublisher, TTrigger>: MessageProvider,
 {
     fn initialize_config(
         &self,
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
+        // Create expression nodes.
+        let message_provider = Arc::new(MessageProviderImpl {
+            metrics_config: RwLock::new(Arc::new(MetricsConfig {
+                uuid: String::default(),
+                publishers: HashMap::new(),
+                start_trigger: None,
+                end_trigger: None,
+                finish_trigger: None,
+            })),
+        });
+        let expression_nodes = self.create_expression_nodes(
+            config_proto,
+            &(message_provider.clone() as Arc<dyn MessageProvider>),
+        )?;
+
         // Iterate over topologically sorted vector of publishers and triggers and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
-        let expression_nodes = self.create_expression_nodes(config_proto)?;
 
         let (publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
@@ -405,6 +467,11 @@ impl<
             }
         };
 
+        // Set real MetricsConfig in MessageProvider so that Publishers are discoverable by Nodes.
+        {
+            *message_provider.metrics_config.write().unwrap() = config.clone();
+        }
+
         // Activate start trigger, if set.
         if let Some(start_trigger) = &config.start_trigger {
             let config_clone = config.clone();
@@ -448,10 +515,13 @@ impl<
             MetricsConfigOrchestratorError::InvalidExpressionNodes { error_detail }
         })?;
 
+        // Create a vector of empty nodes for validation purposes.
+        let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
+        let expression_nodes = vec![empty_node; config_proto.expression_nodes.len()];
+
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
-        let expression_nodes = self.create_expression_nodes(config_proto)?;
 
         Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
@@ -491,6 +561,7 @@ impl<
 
 #[cfg(test)]
 mod tests {
+    use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_ast::{Node, NodeValue};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
@@ -532,6 +603,7 @@ mod tests {
         fail_create_nodes: bool,
         fail_validate: bool,
         num_nodes: Mutex<usize>,
+        message_providers: Mutex<Vec<Arc<dyn MessageProvider>>>,
     }
 
     impl MockNodeFactory {
@@ -540,6 +612,7 @@ mod tests {
                 fail_create_nodes: false,
                 fail_validate: false,
                 num_nodes: Mutex::new(0),
+                message_providers: Mutex::new(vec![]),
             }
         }
 
@@ -555,43 +628,49 @@ mod tests {
     }
 
     impl NodeFactory for MockNodeFactory {
-        fn validate(&self, _: &[NodeProto]) -> Result<(), String> {
+        fn validate(&self, _proto_nodes: &[NodeProto]) -> Result<(), String> {
             if self.fail_validate {
                 return Err("Simulated failure".to_string());
             }
             Ok(())
         }
 
-        fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String> {
+        fn create_nodes(
+            &self,
+            proto_nodes: &[NodeProto],
+            message_provider: &Arc<dyn MessageProvider>,
+        ) -> Result<Vec<Arc<Node>>, String> {
             if self.fail_create_nodes {
                 return Err("Simulated failure".to_string());
             }
+
             *self.num_nodes.lock().unwrap() = proto_nodes.len();
-            Ok({
-                let mut v = Vec::with_capacity(proto_nodes.len());
-                (0..proto_nodes.len()).for_each(|_| {
-                    v.push(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(false) }))
-                });
-                v
-            })
+            self.message_providers.lock().unwrap().push(message_provider.clone());
+
+            let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
+            Ok(vec![empty_node; proto_nodes.len()])
         }
     }
 
     struct MockPublisher {
         name: String,
-
-        activate_callback: Option<Arc<Box<dyn Fn(&str) + Send + Sync>>>,
+        latest_message: Option<Box<dyn MessageDyn>>,
+        activate_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
     }
 
     impl MockPublisher {
-        fn new(name: &str) -> Self {
-            MockPublisher { name: name.to_owned(), activate_callback: None }
+        fn new(name: &str, latest_message: Option<Box<dyn MessageDyn>>) -> Self {
+            MockPublisher { name: name.to_owned(), latest_message, activate_callback: None }
         }
     }
 
     impl Publisher for MockPublisher {
         fn get_name(&self) -> &str {
             &self.name
+        }
+
+        fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
+            self.latest_message.clone()
         }
 
         fn activate(&self) -> Result<(), String> {
@@ -612,7 +691,8 @@ mod tests {
             Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync>>,
         validate_callback:
             Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync>>,
-        activate_callback: Option<Arc<Box<dyn Fn(&str) + Send + Sync>>>,
+        activate_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+        latest_messages: HashMap<String, Box<dyn MessageDyn>>,
     }
 
     impl MockPublisherFactory {
@@ -621,6 +701,7 @@ mod tests {
                 create_callback: None,
                 validate_callback: None,
                 activate_callback: None,
+                latest_messages: HashMap::new(),
             }
         }
 
@@ -655,7 +736,8 @@ mod tests {
                 }
             }
 
-            let mut publisher = MockPublisher::new(&publisher_proto.name);
+            let latest_message = self.latest_messages.get(&publisher_proto.name);
+            let mut publisher = MockPublisher::new(&publisher_proto.name, latest_message.cloned());
             publisher.activate_callback = self.activate_callback.clone();
             Ok(publisher)
         }
@@ -678,8 +760,8 @@ mod tests {
         name: String,
 
         subscribe_callback:
-            Option<Arc<Box<dyn Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync>>>,
-        unsubscribe_callback: Option<Arc<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>>,
+            Option<Arc<dyn Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync>>,
+        unsubscribe_callback: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
     }
 
     impl MockTrigger {
@@ -722,8 +804,8 @@ mod tests {
         create_callback: Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync>>,
         validate_callback: Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync>>,
         subscribe_callback:
-            Option<Arc<Box<dyn Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync>>>,
-        unsubscribe_callback: Option<Arc<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>>,
+            Option<Arc<dyn Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync>>,
+        unsubscribe_callback: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
     }
 
     impl MockTriggerFactory {
@@ -754,14 +836,14 @@ mod tests {
             &mut self,
             callback: impl Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync + 'static,
         ) {
-            self.subscribe_callback = Some(Arc::new(Box::new(callback)));
+            self.subscribe_callback = Some(Arc::new(callback));
         }
 
         fn set_unsubscribe_callback(
             &mut self,
             callback: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
         ) {
-            self.unsubscribe_callback = Some(Arc::new(Box::new(callback)));
+            self.unsubscribe_callback = Some(Arc::new(callback));
         }
     }
 
@@ -876,6 +958,9 @@ mod tests {
     }
 
     fn create_config_with_publisher_trigger_cycle() -> MetricsConfigProto {
+        // The cycle is:
+        // DataTrigger <- ConditionalTrigger <- AggregationPublisher
+        //       L_______________________________________^
         let mut trigger1 = TriggerProto::new();
         trigger1.name = DATA_TRIGGER_NAME.to_owned();
         let mut trigger2 = TriggerProto::new();
@@ -1047,7 +1132,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
             "Unexpected error: {:?}",
             err
         );
@@ -1062,7 +1147,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
             "Unexpected error: {:?}",
             err
         );
@@ -1077,7 +1162,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
             "Unexpected error: {:?}",
             err
         );
@@ -1156,6 +1241,11 @@ mod tests {
 
     #[test]
     fn initialize_config_with_dependencies_success() {
+        let mut value1 = Box::new(Int32Value::new());
+        value1.value = 101;
+        let mut value2 = Box::new(Int32Value::new());
+        value2.value = 10101;
+
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
         let factory_calls_clone1 = factory_calls.clone();
@@ -1164,6 +1254,14 @@ mod tests {
             factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
             None
         });
+        orchestrator
+            .publisher_factory
+            .latest_messages
+            .insert(SERVICE_PUBLISHER_NAME.to_owned(), value1.clone());
+        orchestrator
+            .publisher_factory
+            .latest_messages
+            .insert(AGGREGATION_PUBLISHER_NAME.to_owned(), value2.clone());
         orchestrator.trigger_factory.set_create_callback(move |trigger_proto| {
             factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
             None
@@ -1180,6 +1278,16 @@ mod tests {
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
         assert_eq!(*orchestrator.node_factory.num_nodes.lock().unwrap(), 1);
+        let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
+        assert_eq!(message_providers.len(), 1);
+        assert_eq!(
+            &message_providers[0].get_message(SERVICE_PUBLISHER_NAME).unwrap().unwrap(),
+            &(value1 as Box<dyn MessageDyn>)
+        );
+        assert_eq!(
+            &message_providers[0].get_message(AGGREGATION_PUBLISHER_NAME).unwrap().unwrap(),
+            &(value2 as Box<dyn MessageDyn>)
+        );
         let contexts = orchestrator.configs.lock().unwrap();
         assert_eq!(contexts.len(), 1);
         let context = &contexts[&config.uuid];
@@ -1197,7 +1305,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == SOME_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
             "Unexpected error: {:?}",
             err
         );
@@ -1394,7 +1502,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
             "Unexpected error: {:?}",
             err
         );
@@ -1409,7 +1517,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
             "Unexpected error: {:?}",
             err
         );
@@ -1424,7 +1532,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name } if dependency_name == INVALID_TRIGGER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
             "Unexpected error: {:?}",
             err
         );
@@ -1450,7 +1558,7 @@ mod tests {
     #[test]
     fn validate_config_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.node_factory.fail_create_nodes();
+        orchestrator.node_factory.fail_validate();
 
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());

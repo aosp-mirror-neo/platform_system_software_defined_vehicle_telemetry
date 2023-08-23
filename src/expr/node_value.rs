@@ -148,15 +148,15 @@ impl NodeValue {
 
     /// Gets a NodeValue from a protobuf message and its fields.
     pub fn extract_value(
-        msg: &dyn protobuf::MessageDyn,
+        msg: Box<dyn protobuf::MessageDyn>,
         fields: &[String],
     ) -> Result<NodeValue, String> {
         // if no field names, return the message itself as the NodeValue
         if fields.is_empty() {
-            return Ok(NodeValue::Message(msg.clone_box()));
+            return Ok(NodeValue::Message(msg));
         }
         // recursively gets the field value from field names
-        Self::extract_field_value(msg, fields)
+        Self::extract_field_value(msg.as_ref(), fields)
     }
 
     // private functions and methods below
@@ -774,12 +774,12 @@ mod tests {
     #[test]
     fn test_extract_value_no_field_names_ok() -> Result<(), String> {
         // setup
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let expected_msg_bytes =
             msg.write_to_bytes().map_err(|_| "Failed to serialize TestMessage".to_string())?;
 
         // action
-        let node_value = NodeValue::extract_value(msg, &[])?;
+        let node_value = NodeValue::extract_value(Box::new(msg), &[])?;
 
         // assert
         if let NodeValue::Message(node_msg) = node_value {
@@ -795,10 +795,12 @@ mod tests {
 
     #[test]
     fn test_extract_value_field_not_set_ok() {
-        let msg = &*EMPTY_TEST_MESSAGE;
         let field_names = ["int_field".to_string()];
 
-        assert_eq!(NodeValue::extract_value(msg, &field_names), Ok(NodeValue::None));
+        assert_eq!(
+            NodeValue::extract_value(Box::new(EMPTY_TEST_MESSAGE.clone()), &field_names),
+            Ok(NodeValue::None)
+        );
     }
 
     #[test]
@@ -806,7 +808,7 @@ mod tests {
         let field_names = ["int_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_value(&*TEST_MESSAGE, &field_names),
+            NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names),
             Ok(NodeValue::Int32(80))
         );
     }
@@ -816,7 +818,7 @@ mod tests {
         let field_names = ["float_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_value(&*TEST_MESSAGE, &field_names),
+            NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names),
             Ok(NodeValue::Float(100.0))
         );
     }
@@ -825,12 +827,15 @@ mod tests {
     fn test_extract_value_enum_field_ok() {
         let field_names = ["enum_field".to_string()];
 
-        assert_eq!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names), Ok(NodeValue::Int32(1)));
+        assert_eq!(
+            NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names),
+            Ok(NodeValue::Int32(1))
+        );
     }
 
     #[test]
     fn test_extract_field_value_message_field_ok() -> Result<(), String> {
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let field_names = ["message_field".to_string()];
         let expected_msg_bytes = msg
             .message_field
@@ -838,7 +843,7 @@ mod tests {
             .map_err(|_| "Failed to serialize TestNestedMessage".to_string())?;
 
         // action
-        let node_value = NodeValue::extract_value(msg, &field_names)?;
+        let node_value = NodeValue::extract_value(Box::new(msg), &field_names)?;
 
         // assert
         if let NodeValue::Message(node_msg) = node_value {
@@ -854,10 +859,12 @@ mod tests {
 
     #[test]
     fn test_extract_value_nested_field_not_set_ok() {
-        let msg = &*EMPTY_TEST_MESSAGE;
         let field_names = ["message_field".to_string(), "int_field".to_string()];
 
-        assert_eq!(NodeValue::extract_value(msg, &field_names), Ok(NodeValue::None));
+        assert_eq!(
+            NodeValue::extract_value(Box::new(EMPTY_TEST_MESSAGE.clone()), &field_names),
+            Ok(NodeValue::None)
+        );
     }
 
     #[test]
@@ -865,63 +872,68 @@ mod tests {
         let field_names = ["message_field".to_string(), "bool_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_value(&*TEST_MESSAGE, &field_names),
+            NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names),
             Ok(NodeValue::Bool(true))
         );
     }
 
     #[test]
     fn test_extract_value_repeated_bool_field_ok() {
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let field_names = ["repeated_bools".to_string()];
+        let repeated_bools = msg.repeated_bools.clone();
 
         assert_eq!(
-            NodeValue::extract_value(msg, &field_names),
-            Ok(NodeValue::BoolList(msg.repeated_bools.clone()))
+            NodeValue::extract_value(Box::new(msg), &field_names),
+            Ok(NodeValue::BoolList(repeated_bools))
         );
     }
 
     #[test]
     fn test_extract_value_repeated_int_field_ok() {
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let field_names = ["repeated_i64s".to_string()];
+        let repeated_i64s = msg.repeated_i64s.clone();
 
         assert_eq!(
-            NodeValue::extract_value(msg, &field_names),
-            Ok(NodeValue::Int64List(msg.repeated_i64s.clone()))
+            NodeValue::extract_value(Box::new(msg), &field_names),
+            Ok(NodeValue::Int64List(repeated_i64s))
         );
     }
 
     #[test]
     fn test_extract_value_repeated_double_field_ok() {
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let field_names = ["repeated_doubles".to_string()];
+        let repeated_doubles = msg.repeated_doubles.clone();
 
         assert_eq!(
-            NodeValue::extract_value(msg, &field_names),
-            Ok(NodeValue::DoubleList(msg.repeated_doubles.clone()))
+            NodeValue::extract_value(Box::new(msg), &field_names),
+            Ok(NodeValue::DoubleList(repeated_doubles))
         );
     }
 
     #[test]
     fn test_extract_value_repeated_enum_field_ok() {
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let field_names = ["repeated_enums".to_string()];
+        let repeated_i32s = msg.repeated_enums.iter().map(|x| x.value()).collect();
 
         assert_eq!(
-            NodeValue::extract_value(msg, &field_names),
-            Ok(NodeValue::Int32List(msg.repeated_enums.iter().map(|x| x.value()).collect()))
+            NodeValue::extract_value(Box::new(msg), &field_names),
+            Ok(NodeValue::Int32List(repeated_i32s))
         );
     }
 
     #[test]
     fn test_extract_value_nested_repeated_field_ok() {
-        let msg = &*TEST_MESSAGE;
+        let msg = (*TEST_MESSAGE).clone();
         let field_names = ["message_field".to_string(), "repeated_i32s".to_string()];
+        let repeated_i32s = msg.message_field.repeated_i32s.clone();
 
         assert_eq!(
-            NodeValue::extract_value(msg, &field_names),
-            Ok(NodeValue::Int32List(msg.message_field.repeated_i32s.clone()))
+            NodeValue::extract_value(Box::new(msg), &field_names),
+            Ok(NodeValue::Int32List(repeated_i32s))
         );
     }
 
@@ -929,28 +941,28 @@ mod tests {
     fn test_extract_value_string_field_should_err() {
         let field_names = ["string_field".to_string()];
 
-        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names).is_err());
     }
 
     #[test]
     fn test_extract_value_repeated_message_field_should_err() {
         let field_names = ["repeated_messages".to_string()];
 
-        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names).is_err());
     }
 
     #[test]
     fn test_extract_value_repeated_message_as_intermediate_field_name_should_err() {
         let field_names = ["repeated_messages".to_string(), "bool_field".to_string()];
 
-        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names).is_err());
     }
 
     #[test]
     fn test_extract_value_nonexistent_field_should_err() {
         let field_names = ["foo".to_string()];
 
-        assert!(NodeValue::extract_value(&*TEST_MESSAGE, &field_names).is_err());
+        assert!(NodeValue::extract_value(Box::new((*TEST_MESSAGE).clone()), &field_names).is_err());
     }
 
     #[test]

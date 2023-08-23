@@ -6,6 +6,7 @@ rust_defaults {
         "liblogger",
         "libsdv_log_rust",
         "libsdvtelemetry_proto_rust",
+        "libthiserror",
         "libprotobuf",
     ],
 }
