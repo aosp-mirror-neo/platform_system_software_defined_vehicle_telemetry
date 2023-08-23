@@ -6,49 +6,29 @@ mod node_value;
 
 pub use node_value::NodeValue;
 
-use protobuf::MessageDyn;
 use sdvtelemetry_proto_rust::expression::{
     combination_node::LogicalOperator, combination_node::Operator as OperatorProto,
-    node::Node_type as NodeTypeProto, CombinationNode as CombinationNodeProto, Node as NodeProto,
+    node::Node_type as NodeTypeProto, Node as NodeProto,
 };
-use std::{
-    fmt,
-    marker::{Send, Sync},
-    sync::Arc,
-};
-
-const UNKNOWN_NODE_TYPE_MSG: &str = "Node did not specify a node_type";
+use std::fmt;
+use std::sync::Arc;
 
 /// Creates rust nodes from protobuf expression nodes.
 pub trait NodeFactory {
-    /// Creates rust Node from protobuf Node.
+    /// Validate the expression nodes to ensure they do not contain cyclic dependencies
+    /// and all indices are valid.
+    fn validate(&self, proto_nodes: &[NodeProto]) -> Result<(), String>;
+
+    /// Creates rust Nodes from protobuf Nodes.
     /// Protobuf nodes use indices to represent left and right children.
     /// Rust nodes have a pointer to the actual children instead of an index.
-    fn create(
-        &self,
-        proto_node: &NodeProto,
-        context: &dyn NodeFactoryContext,
-    ) -> Result<Node, String>;
-
-    /// Validate the expression node to ensure it's possible to create a Rust node from it.
-    fn validate(&self, proto_node: &NodeProto) -> Result<(), String>;
-}
-
-/// Provides context of the creation operation.
-pub trait NodeFactoryContext {
-    /// Creates a function that provides the latest message of the specified publisher.
-    fn create_message_provider(
-        &self,
-        publisher_name: &str,
-    ) -> Box<dyn Fn() -> Box<dyn MessageDyn> + Send + Sync>;
-
-    /// Returns rust Node at a given index.
-    fn get_node(&self, index: usize) -> &Arc<Node>;
+    fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String>;
 }
 
 /// Rust representation of a protobuf Node.
 /// The enum variants have 1-1 correspondence with a protobuf Node.
 /// For detailed explanation, see expression.proto.
+#[derive(PartialEq)]
 pub enum Node {
     /// Corresponds to ConstantLeafNode message.
     ConstantLeaf {
@@ -62,9 +42,6 @@ pub enum Node {
 
         /// Field names indicating which value to read.
         fields: Vec<String>,
-
-        /// Function that returns the latest published message.
-        message_provider: Box<dyn Fn() -> Box<dyn MessageDyn> + Send + Sync>,
     },
     /// Non-leaf variant holding a value computed from left and right children.
     /// Protobuf Nodes use index to represent left and right child nodes, Rust Nodes
@@ -85,88 +62,197 @@ pub enum Node {
 }
 
 /// Implementation of NodeFactory trait.
+#[derive(Default)]
 pub struct NodeFactoryImpl {}
 
-impl NodeFactory for NodeFactoryImpl {
-    fn create(
-        &self,
-        proto_node: &NodeProto,
-        context: &dyn NodeFactoryContext,
-    ) -> Result<Node, String> {
-        // The `match` block creates a Rust Node enum and returns it.
-        // TODO(b/289295418): type check the child nodes to ensure they have compatible types
-        Ok(match &proto_node.node_type {
-            Some(NodeTypeProto::ConstantLeafNode(constant_leaf)) => {
-                // base case 1: constant leaf node, simply create Node and return
-                Node::ConstantLeaf { value: NodeValue::from_constant_leaf_node(constant_leaf)? }
-            }
-            Some(NodeTypeProto::FieldLeafNode(field_leaf)) => {
-                // base case 2: field leaf node, simply create Node and return
-                Node::FieldLeaf {
-                    publisher_name: field_leaf.publisher_name.clone(),
-                    fields: field_leaf.field_names.clone(),
-                    message_provider: context.create_message_provider(&field_leaf.publisher_name),
-                }
-            }
-            Some(NodeTypeProto::CombinationNode(combination_node)) => {
-                // ensure combination node specified an operator
-                let op = combination_node.get_operator()?;
+/// Used for cycle detection in the expression nodes.
+#[derive(Clone, PartialEq)]
+enum VisitStatus {
+    NotVisited,
+    Visiting,
+    Visited,
+}
 
-                // retrieve child nodes using indices. they must already exist
-                let (left_idx, right_idx) = combination_node.get_child_indices(op)?;
-                let left_child = context.get_node(left_idx).clone();
-                let right_child = right_idx.map(|i| context.get_node(i).clone());
-
-                // create Node of Combination variant for the protobuf node
-                Node::Combination {
-                    operator: op.clone(),
-                    left: Some(left_child),
-                    right: right_child,
-                }
-            }
-            _ => {
-                return Err(UNKNOWN_NODE_TYPE_MSG.to_owned());
-            }
-        })
+impl NodeFactoryImpl {
+    /// Constructor.
+    pub fn new() -> Self {
+        NodeFactoryImpl {}
     }
 
-    fn validate(&self, proto_node: &NodeProto) -> Result<(), String> {
-        match &proto_node.node_type {
-            Some(NodeTypeProto::ConstantLeafNode(_)) | Some(NodeTypeProto::FieldLeafNode(_)) => {
-                Ok(())
-            }
-            Some(NodeTypeProto::CombinationNode(combination_node)) => {
-                // ensure combination node specified an operator
-                let op = combination_node.get_operator()?;
+    /// Vists the node at `index` using pre-order traversal.
+    /// Ensures that the node specifies valid indices for child nodes, and its
+    /// children do not contain cyclic dependencies.
+    ///
+    /// If the `nodes` argument is non-empty, in addition to validation,
+    /// this function will also create the corresponding Rust Node and put it
+    /// in the `nodes` vector at the given `index`.
+    ///
+    /// TODO(b/289295418): type check the child nodes to ensure they have compatible types
+    fn visit(
+        index: usize,
+        proto_nodes: &[NodeProto],
+        visit_status: &mut Vec<VisitStatus>,
+        nodes: &mut Vec<Option<Arc<Node>>>,
+    ) -> Result<Option<Arc<Node>>, String> {
+        // get visit status and return error if index out of boound
+        let status = visit_status.get(index).ok_or(format!(
+            "Index {} out of bound. Expression nods have size {}, double check that \
+                all child nodes have valid indices",
+            index,
+            proto_nodes.len()
+        ))?; // `?` returns early if error
 
-                // verify required indices are present
-                combination_node.get_child_indices(op)?;
-
-                Ok(())
+        // detect cycles using visit status, and visit the node
+        match status {
+            VisitStatus::Visiting => {
+                Err(format!("Cycle detected at expression node index {}", index))
             }
-            _ => Err(UNKNOWN_NODE_TYPE_MSG.to_owned()),
+            VisitStatus::Visited => {
+                if nodes.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(nodes[index].clone())
+                }
+            }
+            VisitStatus::NotVisited => {
+                // mark index as "visiting", if visit() comes back to this index, there is a cycle
+                visit_status[index] = VisitStatus::Visiting;
+
+                // match on the node type and capture value returned by match block
+                let rust_node = match &proto_nodes[index].node_type {
+                    // base case 1: constant leaf node, can return from match block immediately
+                    Some(NodeTypeProto::ConstantLeafNode(constant_leaf)) => {
+                        Self::maybe_create_node(nodes, index, || {
+                            Ok(Arc::new(Node::ConstantLeaf {
+                                value: NodeValue::from_constant_leaf_node(constant_leaf)?,
+                            }))
+                        })?
+                    }
+                    // base case 2: field leaf node, can return from match block immediately
+                    Some(NodeTypeProto::FieldLeafNode(field_leaf)) => {
+                        Self::maybe_create_node(nodes, index, || {
+                            Ok(Arc::new(Node::FieldLeaf {
+                                publisher_name: field_leaf.publisher_name.clone(),
+                                fields: field_leaf.field_names.clone(),
+                            }))
+                        })?
+                    }
+                    // recursive case: visit left, right, self
+                    Some(NodeTypeProto::CombinationNode(combination_node)) => {
+                        let op = combination_node
+                            .operator
+                            .as_ref()
+                            .ok_or(format!("Node at index {} did not specify operator", index))?;
+                        // before recursion, check if operator type requires a right child
+                        op.check_right_child(&combination_node.right_index, index)?;
+
+                        // visit left child
+                        let left_child_index = combination_node
+                            .left_index
+                            .ok_or(format!("Node at index {} did not specify left child.", index))?
+                            as usize;
+                        let left = Self::visit(left_child_index, proto_nodes, visit_status, nodes)?;
+
+                        // visit right child if right child is specified
+                        let right = if let Some(right_idx) = combination_node.right_index {
+                            Self::visit(right_idx as usize, proto_nodes, visit_status, nodes)?
+                        } else {
+                            None
+                        };
+
+                        // visit self
+                        Self::maybe_create_node(nodes, index, move || {
+                            Ok(Arc::new(Node::Combination { operator: op.clone(), left, right }))
+                        })?
+                    } // match arm `Some(CombinationNode)`
+                    _ => {
+                        return Err(format!("Node at index {} did not specify a node_type", index))
+                    }
+                };
+
+                // mark index as visited and return Ok
+                visit_status[index] = VisitStatus::Visited;
+                Ok(rust_node)
+            } // match arm `VisitStatus::NotVisited`
+        } // `match` block
+    }
+
+    /// If the `nodes` vector is non-empty, it will call the `create_node_func` to create
+    /// a Rust Node, put the node into the vector at the `index`, and return that node.
+    /// Otherwise it will return a success status containing nothing.
+    fn maybe_create_node(
+        nodes: &mut Vec<Option<Arc<Node>>>,
+        index: usize,
+        create_node_func: impl FnOnce() -> Result<Arc<Node>, String>,
+    ) -> Result<Option<Arc<Node>>, String> {
+        if nodes.is_empty() {
+            return Ok(None);
         }
+        if index >= nodes.len() {
+            return Err(format!(
+                "maybe_create_node() called on invalid index {} on a vector of size {}",
+                index,
+                nodes.len()
+            ));
+        }
+        nodes[index] = Some(create_node_func()?);
+        Ok(nodes[index].clone())
+    }
+}
+
+impl NodeFactory for NodeFactoryImpl {
+    fn validate(&self, proto_nodes: &[NodeProto]) -> Result<(), String> {
+        let n = proto_nodes.len();
+        let mut visit_status = vec![VisitStatus::NotVisited; n];
+        for i in 0..n {
+            Self::visit(i, proto_nodes, &mut visit_status, &mut vec![])?;
+        }
+        Ok(())
+    }
+
+    fn create_nodes(&self, proto_nodes: &[NodeProto]) -> Result<Vec<Arc<Node>>, String> {
+        let n = proto_nodes.len();
+        let mut visit_status = vec![VisitStatus::NotVisited; n];
+        let mut rust_nodes: Vec<Option<Arc<Node>>> = vec![None; n];
+
+        for i in 0..n {
+            Self::visit(i, proto_nodes, &mut visit_status, &mut rust_nodes)?;
+        }
+        // flatten Vec<Option<T>> into Vec<T>, ignoring None values.
+        let nodes: Vec<Arc<Node>> = rust_nodes.into_iter().flatten().collect();
+        if nodes.len() != n {
+            return Err(format!(
+                "failed to initialize expression nodes, \
+                expected {} nodes, but initialized {} nodes",
+                n,
+                nodes.len()
+            ));
+        }
+        Ok(nodes)
     }
 }
 
 impl Node {
-    /// Evaluate AST recursively.
-    pub fn evaluate(&self) -> Result<NodeValue, String> {
+    /// Evaluate AST recursively with messages from the "message_provider".
+    pub fn evaluate<F: Fn(&str) -> &dyn protobuf::MessageDyn>(
+        &self,
+        message_provider: &F,
+    ) -> Result<NodeValue, String> {
         match &self {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
                 Ok(value.clone())
             }
-            Node::FieldLeaf { message_provider, fields, .. } => {
+            Node::FieldLeaf { publisher_name, fields } => {
                 // Base case of recursion: node is a leaf node, return value
-                let msg = message_provider();
+                let msg = message_provider(publisher_name);
                 NodeValue::extract_value(msg, fields)
             }
             Node::Combination { operator, left, right } => {
                 // evaluate left branch recursively
                 let left_val =
                     match left {
-                        Some(left) => left.evaluate(),
+                        Some(left) => left.evaluate(message_provider),
                         None => Err("Incorrect Node! Every non-leaf Node should have a left child"
                             .to_string()),
                     }?; // `?` returns early if error
@@ -176,7 +262,7 @@ impl Node {
                 // The function short-circuits if possible. The closure provides right operand.
                 left_val.operate(operator, || {
                     match right {
-                        Some(right) => right.evaluate(),
+                        Some(right) => right.evaluate(message_provider),
                         None => {
                             if operator.is_unary_operator() {
                                 return Ok(NodeValue::None);
@@ -197,7 +283,7 @@ impl fmt::Debug for Node {
             Node::ConstantLeaf { value } => {
                 write!(f, "Constant Leaf Node {{ value: {:?} }}", value)
             }
-            Node::FieldLeaf { publisher_name, fields, .. } => write!(
+            Node::FieldLeaf { publisher_name, fields } => write!(
                 f,
                 "Field Leaf Node {{ publisher_name: {}, fields: {:?} }}",
                 publisher_name, fields
@@ -228,7 +314,7 @@ trait OperatorProtoExtension {
     fn is_unary_operator(&self) -> bool;
 
     /// Helper function to check if operator requires a right child.
-    fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), String>;
+    fn check_right_child(&self, right_index: &Option<u32>, index: usize) -> Result<(), String>;
 }
 
 impl OperatorProtoExtension for OperatorProto {
@@ -239,43 +325,26 @@ impl OperatorProtoExtension for OperatorProto {
         false
     }
 
-    fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), String> {
+    fn check_right_child(&self, right_index: &Option<u32>, index: usize) -> Result<(), String> {
         let unary_op = self.is_unary_operator();
         let has_right_child = right_index.is_some();
         if unary_op && has_right_child {
-            Err("Node has unary operator but specified two children".to_owned())
+            Err(format!("Node at index {} has unary operator but specified two children", index))
         } else if !unary_op && !has_right_child {
-            Err("Node at has binary operator but did not specify right child".to_owned())
+            Err(format!(
+                "Node at index {} has binary operator but did not specify right child",
+                index
+            ))
         } else {
             Ok(())
         }
     }
 }
 
-trait CombinationNodeProtoExtension {
-    fn get_child_indices(&self, op: &OperatorProto) -> Result<(usize, Option<usize>), String>;
-
-    fn get_operator(&self) -> Result<&OperatorProto, String>;
-}
-
-impl CombinationNodeProtoExtension for CombinationNodeProto {
-    fn get_child_indices(&self, op: &OperatorProto) -> Result<(usize, Option<usize>), String> {
-        let left_idx =
-            self.left_index.ok_or_else(|| "Node did not specify left child.".to_owned())? as usize;
-        // check if operator type requires a right child
-        op.check_right_child(&self.right_index)?;
-        Ok((left_idx, self.right_index.map(|idx| idx as usize)))
-    }
-
-    fn get_operator(&self) -> Result<&OperatorProto, String> {
-        self.operator.as_ref().ok_or_else(|| "Node did not specify operator".to_owned())
-    }
-}
-
 /// Per go/sdv-rust-testing, unit tests are to be written in the same file.
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{Node, NodeFactory, NodeFactoryImpl};
     use crate::NodeValue;
     use lazy_static::lazy_static;
     use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
@@ -314,52 +383,9 @@ mod tests {
         };
     }
 
-    struct MockNodeFactoryContext {
-        nodes: Vec<Arc<Node>>,
-    }
-
-    impl MockNodeFactoryContext {
-        fn new() -> Self {
-            MockNodeFactoryContext { nodes: Vec::new() }
-        }
-    }
-
-    impl NodeFactoryContext for MockNodeFactoryContext {
-        fn create_message_provider(
-            &self,
-            _: &str,
-        ) -> Box<dyn Fn() -> Box<dyn MessageDyn> + Send + Sync> {
-            Box::new(|| Box::new((*TEST_MESSAGE).clone()))
-        }
-
-        fn get_node(&self, index: usize) -> &Arc<Node> {
-            &self.nodes[index]
-        }
-    }
-
-    fn create_nodes(
-        node_factory: &NodeFactoryImpl,
-        proto_nodes: &[NodeProto],
-        context: &mut MockNodeFactoryContext,
-    ) -> Result<Vec<Arc<Node>>, String> {
-        proto_nodes
-            .iter()
-            .map(|proto_node| {
-                let node = Arc::new(node_factory.create(proto_node, context)?);
-                context.nodes.push(node.clone());
-                Ok(node)
-            })
-            .collect()
-    }
-
-    fn validate_nodes(
-        node_factory: &NodeFactoryImpl,
-        proto_nodes: &[NodeProto],
-    ) -> Result<(), String> {
-        for proto_node in proto_nodes {
-            node_factory.validate(proto_node)?;
-        }
-        Ok(())
+    /// This function is an argument to `Node#evaluate()`.
+    fn provide_test_message(_publisher_name: &str) -> &dyn protobuf::MessageDyn {
+        &*TEST_MESSAGE
     }
 
     /// Helper function that returns this tree:
@@ -389,14 +415,71 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_child_is_self_fails() {
+        // setup node_0 whose child is itself
+        let mut node_0 = NodeProto::new();
+        let mut combination_node = CombinationNode::new();
+        combination_node.set_logical_operator(LogicalOperator::NOT);
+        combination_node.left_index = Some(0);
+        node_0.set_combination_node(combination_node);
+        let all_proto_nodes = vec![node_0];
+        let node_factory = NodeFactoryImpl::new();
+
+        // action
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+
+        // assert
+        assert!(err_msg.starts_with("Cycle detected"), "Unexpected error: {:?}", err_msg);
+    }
+
+    #[test]
+    fn test_validate_cyclic_dependency_fails() {
+        // setup node_0 depends on node_1 and node_1 depends on node_0
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut combination_node = CombinationNode::new();
+        combination_node.set_logical_operator(LogicalOperator::NOT);
+        combination_node.left_index = Some(1);
+        node_0.set_combination_node(combination_node.clone());
+        combination_node.left_index = Some(0);
+        node_1.set_combination_node(combination_node);
+        let all_proto_nodes = vec![node_0, node_1];
+        let node_factory = NodeFactoryImpl::new();
+
+        // action
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+
+        // assert
+        assert!(err_msg.starts_with("Cycle detected"), "Unexpected error: {:?}", err_msg);
+    }
+
+    #[test]
+    fn test_validate_child_node_index_out_of_bound_fails() {
+        // setup node_0 whose child is at index 42
+        let mut node_0 = NodeProto::new();
+        let mut combination_node = CombinationNode::new();
+        combination_node.set_logical_operator(LogicalOperator::NOT);
+        combination_node.left_index = Some(42);
+        node_0.set_combination_node(combination_node);
+        let all_proto_nodes = vec![node_0];
+        let node_factory = NodeFactoryImpl::new();
+
+        // action
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+
+        // assert
+        assert!(err_msg.contains("out of bound"), "Unexpected error: {:?}", err_msg);
+    }
+
+    #[test]
     fn test_validate_combination_node_did_not_specify_operator_fails() {
         let mut node_0 = NodeProto::new();
         node_0.set_combination_node(CombinationNode::new());
         let all_proto_nodes = vec![node_0];
-        let node_factory = NodeFactoryImpl {};
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = validate_nodes(&node_factory, &all_proto_nodes).err().unwrap();
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
         assert!(err_msg.contains("did not specify operator"), "Unexpected error: {:?}", err_msg);
@@ -410,10 +493,10 @@ mod tests {
         combination_node.right_index = Some(0);
         node_0.set_combination_node(combination_node);
         let all_proto_nodes = vec![node_0];
-        let node_factory = NodeFactoryImpl {};
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = validate_nodes(&node_factory, &all_proto_nodes).err().unwrap();
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
         assert!(err_msg.contains("did not specify left child"), "Unexpected error: {:?}", err_msg);
@@ -433,10 +516,10 @@ mod tests {
         node_1.set_combination_node(combination_node);
 
         let all_proto_nodes = vec![node_0, node_1];
-        let node_factory = NodeFactoryImpl {};
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = validate_nodes(&node_factory, &all_proto_nodes).err().unwrap();
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
         assert!(err_msg.contains("did not specify right child"), "Unexpected error: {:?}", err_msg);
@@ -446,10 +529,10 @@ mod tests {
     fn test_validate_unary_operator_with_two_children_fails() {
         // setup - root node has 2 child nodes but unary operator (NOT)
         let all_proto_nodes = create_true_false_branch(LogicalOperator::NOT);
-        let node_factory = NodeFactoryImpl {};
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = validate_nodes(&node_factory, &all_proto_nodes).err().unwrap();
+        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
         assert!(
@@ -462,7 +545,7 @@ mod tests {
     #[test]
     fn test_validate_unary_operator_no_right_child_ok() {
         // setup
-        let node_factory = NodeFactoryImpl {};
+        let node_factory = NodeFactoryImpl::new();
         let mut leaf_true = NodeProto::new();
         let mut root_node = NodeProto::new();
 
@@ -482,7 +565,7 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let nodes = validate_nodes(&node_factory, &all_proto_nodes);
+        let nodes = node_factory.validate(&all_proto_nodes);
 
         // assert
         assert!(nodes.is_ok());
@@ -492,10 +575,10 @@ mod tests {
     fn test_validate_ok() {
         // setup - root node has 2 child nodes
         let all_proto_nodes = create_true_false_branch(LogicalOperator::AND);
-        let node_factory = NodeFactoryImpl {};
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let res = validate_nodes(&node_factory, &all_proto_nodes);
+        let res = node_factory.validate(&all_proto_nodes);
 
         // assert
         assert!(res.is_ok());
@@ -505,12 +588,11 @@ mod tests {
     fn test_create_nodes_ok() -> Result<(), String> {
         // setup
         let op = LogicalOperator::AND;
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         let all_proto_nodes = create_true_false_branch(op);
 
         // action
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // assert 1-1 correspondence between rust node and protobuf node
         for (rust_node, proto_node) in nodes.iter().zip(all_proto_nodes) {
@@ -551,11 +633,10 @@ mod tests {
     fn test_create_nodes_unary_operator_cannot_have_two_children() {
         // setup - root node has 2 child nodes but unary operator (NOT)
         let all_proto_nodes = create_true_false_branch(LogicalOperator::NOT);
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
 
         // action
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context);
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
 
         // assert
         assert!(nodes.is_err());
@@ -564,8 +645,7 @@ mod tests {
     #[test]
     fn test_create_nodes_unary_operator_missing_right_child_ok() {
         // setup
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         let mut leaf_true = NodeProto::new();
         let mut root_node = NodeProto::new();
 
@@ -585,7 +665,7 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context);
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
 
         // assert
         assert!(nodes.is_ok());
@@ -594,8 +674,7 @@ mod tests {
     #[test]
     fn test_create_nodes_binary_operator_missing_right_child_errors() {
         // setup
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         let mut leaf_true = NodeProto::new();
         let mut root_node = NodeProto::new();
 
@@ -615,16 +694,56 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context);
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
 
         // assert error because binary operator needs 2 children
         assert!(nodes.is_err());
     }
 
     #[test]
+    fn test_create_nodes_handles_index_out_bound() {
+        // setup root node with children at index 10 and 20 (out of bound)
+        let node_factory = NodeFactoryImpl::new();
+        let mut proto_node = NodeProto::new();
+        let mut combination_node = CombinationNode::new();
+        combination_node.left_index = Some(10);
+        combination_node.right_index = Some(20);
+        combination_node.set_logical_operator(LogicalOperator::AND);
+        proto_node.set_combination_node(combination_node);
+
+        let all_proto_nodes = vec![proto_node];
+
+        // action
+        let nodes = node_factory.create_nodes(&all_proto_nodes);
+
+        // assert
+        assert!(nodes.is_err());
+    }
+
+    #[test]
+    fn test_create_nodes_cyclic_dependency_fails() {
+        // setup node_0 depends on node_1 and node_1 depends on node_0
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut combination_node = CombinationNode::new();
+        combination_node.set_logical_operator(LogicalOperator::NOT);
+        combination_node.left_index = Some(1);
+        node_0.set_combination_node(combination_node.clone());
+        combination_node.left_index = Some(0);
+        node_1.set_combination_node(combination_node);
+        let all_proto_nodes = vec![node_0, node_1];
+        let node_factory = NodeFactoryImpl::new();
+
+        // action
+        let err_msg = node_factory.create_nodes(&all_proto_nodes).err().unwrap();
+
+        // assert
+        assert!(err_msg.starts_with("Cycle detected"), "Unexpected error: {:?}", err_msg);
+    }
+
+    #[test]
     fn test_evaluate_logical_operator_ok() -> Result<(), String> {
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree:
         //            index 3 (XOR)
         //          /              \
@@ -641,7 +760,7 @@ mod tests {
         node_index_3.set_combination_node(xor_node.clone());
         all_proto_nodes.push(node_index_3.clone());
 
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
@@ -653,15 +772,14 @@ mod tests {
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_arithmetic_operator_ok() -> Result<(), String> {
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree: 5 / 2 * 5^2
         //            index 4 (MULTIPLY)
         //          /              \
@@ -703,7 +821,7 @@ mod tests {
         node_4.set_combination_node(combination_multiply);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
@@ -716,15 +834,14 @@ mod tests {
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_relational_operator_ok() -> Result<(), String> {
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree which uses the protobuf message initialized in the lazy_static block
         //                             index 4 (EQ)
         //                           /              \
@@ -765,7 +882,7 @@ mod tests {
         node_4.set_combination_node(combination_eq);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
@@ -779,15 +896,14 @@ mod tests {
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_mixed_operators() -> Result<(), String> {
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         // setup tree containing all 3 types of operators
         //                       index 4 (&&)
         //                    /               \
@@ -830,7 +946,7 @@ mod tests {
         node_4.set_combination_node(and_node);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
@@ -843,15 +959,14 @@ mod tests {
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_mixed_leaf_node_types() -> Result<(), String> {
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         // setup this tree which uses the protobuf message initialized in the lazy_static block
         //                           index 4 (<)
         //                       /               \
@@ -893,7 +1008,7 @@ mod tests {
         node_4.set_combination_node(combination_less_than);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
@@ -906,15 +1021,14 @@ mod tests {
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&provide_test_message)?, *expected_val_ref);
         }
         Ok(())
     }
 
     #[test]
     fn test_evaluate_incompatible_types_should_fail() -> Result<(), String> {
-        let node_factory = NodeFactoryImpl {};
-        let mut context = MockNodeFactoryContext::new();
+        let node_factory = NodeFactoryImpl::new();
         let mut node_0 = NodeProto::new();
         let mut node_1 = NodeProto::new();
 
@@ -929,10 +1043,10 @@ mod tests {
         node_1.set_combination_node(lt_node);
 
         let all_proto_nodes = vec![node_0, node_1];
-        let nodes = create_nodes(&node_factory, &all_proto_nodes, &mut context)?;
+        let nodes = node_factory.create_nodes(&all_proto_nodes)?;
 
         // Index 1 expr is "True < True"
-        let result = nodes[1].evaluate();
+        let result = nodes[1].evaluate(&provide_test_message);
 
         // True cannot be less than True
         assert!(result.is_err());
