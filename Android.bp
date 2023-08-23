@@ -24,6 +24,7 @@ rust_defaults {
         "liblogger",
         "libbinder_rs",
         "libbinder_tokio_rs",
+        "librand",
         "libtokio",
         "libthiserror",
         "android.sdv.telemetry-rust",

@@ -38,8 +38,8 @@ pub(crate) enum TriggerSubscriber {
 
 #[allow(dead_code)]
 pub(crate) struct TriggerImpl {
-    pub name: String,
-    pub trigger_type: TriggerType,
+    pub(super) name: String,
+    pub(super) trigger_type: TriggerType,
 
     // The map of functions that need to be called when the trigger fires.
     // The first subscription to TriggerImpl activates underlying trigger type, passing a weak reference
@@ -239,10 +239,10 @@ mod tests {
         let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Data {
-                publisher: Arc::new(PublisherImpl {
-                    name: "Publisher".to_owned(),
-                    publisher_type: PublisherType::Signal { signal_name: "Signal".to_owned() },
-                }),
+                publisher: Arc::new(PublisherImpl::new(
+                    "Publisher".to_owned(),
+                    PublisherType::Signal { signal_name: "Signal".to_owned() },
+                )),
             },
         );
 
