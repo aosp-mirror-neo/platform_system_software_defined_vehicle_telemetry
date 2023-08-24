@@ -1,0 +1,29 @@
+rust_library {
+    name: "libsdv_telem_expr_parser",
+    crate_name: "sdv_telem_expr_parser",
+    defaults: ["sdv_ast_defaults"],
+    srcs: [
+        "text_parser.rs",
+    ],
+    rustlibs: [
+        "liblog_rust",
+        "liblogger",
+        "libsdv_log_rust",
+    ],
+}
+
+rust_test_host {
+    name: "sdv_telem_expr_parser_unit_tests",
+    defaults: ["sdv_ast_defaults"],
+    srcs: [
+        "text_parser.rs",
+    ],
+    rustlibs: [
+        "libsdv_telem_expr_parser",
+    ],
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    auto_gen_config: true,
+}
