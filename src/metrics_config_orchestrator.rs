@@ -14,17 +14,18 @@ use sdv_ast::{
 };
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
-    MetricsConfig as MetricsConfigProto, Publisher as PublisherProto, Trigger as TriggerProto,
+    MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
+    Trigger as TriggerProto,
 };
 use std::{
     collections::HashMap,
-    marker::Sync,
+    marker::{PhantomData, Sync},
     sync::{Arc, Mutex, RwLock},
 };
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
-use metrics_report_generator::MetricsReportGenerator;
+use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
     MetricsReportGeneratorFactory, MetricsReportGeneratorFactoryCreateContext,
     MetricsReportGeneratorFactoryError, MetricsReportGeneratorFactoryImpl,
@@ -97,39 +98,64 @@ pub enum MetricsConfigOrchestratorError {
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
 pub(super) struct MetricsConfigOrchestratorImpl<
-    TMetricsReportGeneratorFactory: MetricsReportGeneratorFactory<TTrigger> = MetricsReportGeneratorFactoryImpl,
-    TNodeFactory: NodeFactory = NodeFactoryImpl,
-    TPublisher: Publisher = PublisherImpl,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> = PublisherFactoryImpl,
-    TTrigger: Trigger = TriggerImpl,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> = TriggerFactoryImpl,
-> {
-    configs: Mutex<HashMap<String, Arc<MetricsConfig<TPublisher, TTrigger>>>>,
+    TMetricsReportGenerator = MetricsReportGeneratorImpl,
+    TMetricsReportGeneratorFactory = MetricsReportGeneratorFactoryImpl,
+    TNodeFactory = NodeFactoryImpl,
+    TPublisher = PublisherImpl,
+    TPublisherFactory = PublisherFactoryImpl,
+    TTrigger = TriggerImpl,
+    TTriggerFactory = TriggerFactoryImpl,
+> where
+    TMetricsReportGenerator: MetricsReportGenerator,
+    TMetricsReportGeneratorFactory:
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger>,
+    TNodeFactory: NodeFactory,
+    TPublisher: Publisher,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger>,
+    TTrigger: Trigger,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger>,
+{
+    configs:
+        Mutex<HashMap<String, Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>>,
     node_factory: TNodeFactory,
     metrics_report_generator_factory: TMetricsReportGeneratorFactory,
     publisher_factory: TPublisherFactory,
     trigger_factory: TTriggerFactory,
+
+    /// The function that is called when a new Metrics Report is ready.
+    report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
+
+    /// Phantom field to be able to define bounds for TMetricsReportGenerator.
+    phantom_generator: PhantomData<TMetricsReportGenerator>,
 }
 
 #[allow(dead_code)]
 pub(super) struct MetricsConfig<
+    TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
     TPublisher: Publisher = PublisherImpl,
     TTrigger: Trigger = TriggerImpl,
 > {
     uuid: String,
-    metrics_report_generators: Vec<Arc<MetricsReportGenerator<TTrigger>>>,
+    metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
     publishers: HashMap<String, Arc<TPublisher>>,
     start_trigger: Option<Arc<TTrigger>>,
     end_trigger: Option<Arc<TTrigger>>,
     finish_trigger: Option<Arc<TTrigger>>,
 }
 
-struct MessageProviderImpl<TPublisher: Publisher = PublisherImpl, TTrigger: Trigger = TriggerImpl> {
-    metrics_config: RwLock<Arc<MetricsConfig<TPublisher, TTrigger>>>,
+struct MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
+where
+    TMetricsReportGenerator: MetricsReportGenerator,
+    TPublisher: Publisher,
+    TTrigger: Trigger,
+{
+    metrics_config: RwLock<Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>,
 }
 
-impl<TPublisher, TTrigger> MessageProvider for MessageProviderImpl<TPublisher, TTrigger>
+impl<TMetricsReportGenerator, TPublisher, TTrigger> MessageProvider
+    for MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
 where
+    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync,
     TPublisher: Publisher + Send + Sync,
     TTrigger: Trigger + Send + Sync,
 {
@@ -145,18 +171,23 @@ where
 }
 
 impl MetricsConfigOrchestratorImpl {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(
+        report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
+    ) -> Self {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl {},
             node_factory: NodeFactoryImpl::new(),
             publisher_factory: PublisherFactoryImpl::new(),
             trigger_factory: TriggerFactoryImpl::new(),
+            report_ready_callback: Arc::new(report_ready_callback),
+            phantom_generator: PhantomData,
         }
     }
 }
 
 impl<
+        TMetricsReportGenerator,
         TMetricsReportGeneratorFactory,
         TNodeFactory,
         TPublisher,
@@ -165,6 +196,7 @@ impl<
         TTriggerFactory,
     >
     MetricsConfigOrchestratorImpl<
+        TMetricsReportGenerator,
         TMetricsReportGeneratorFactory,
         TNodeFactory,
         TPublisher,
@@ -173,7 +205,9 @@ impl<
         TTriggerFactory,
     >
 where
-    TMetricsReportGeneratorFactory: MetricsReportGeneratorFactory<TTrigger>,
+    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
+    TMetricsReportGeneratorFactory:
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger>,
     TNodeFactory: NodeFactory,
     TPublisher: Publisher + Send + Sync + 'static,
     TPublisherFactory: PublisherFactory<TPublisher, TTrigger>,
@@ -319,7 +353,9 @@ where
         )?))
     }
 
-    fn on_start_trigger_fired(config: &Arc<MetricsConfig<TPublisher, TTrigger>>) {
+    fn on_start_trigger_fired(
+        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
         if let Some(start_trigger) = &config.start_trigger {
             if let Err(err) = start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart) {
                 error!(
@@ -343,11 +379,10 @@ where
 
         if let Some(end_trigger) = &config.end_trigger {
             let config_clone = config.clone();
-            if let Err(err) = end_trigger
-                .subscribe(&TriggerSubscriber::MetricsConfigEnd, move || {
-                    Self::on_end_trigger_fired(&config_clone)
-                })
-            {
+            if let Err(err) = end_trigger.subscribe(
+                &TriggerSubscriber::MetricsConfigEnd,
+                Box::new(move || Self::on_end_trigger_fired(&config_clone)),
+            ) {
                 error!(
                     "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
                      Metrics Configuration data collection will never end.",
@@ -358,11 +393,10 @@ where
 
         if let Some(finish_trigger) = &config.finish_trigger {
             let config_clone = config.clone();
-            if let Err(err) = finish_trigger
-                .subscribe(&TriggerSubscriber::MetricsConfigFinish, move || {
-                    Self::on_finish_trigger_fired(&config_clone)
-                })
-            {
+            if let Err(err) = finish_trigger.subscribe(
+                &TriggerSubscriber::MetricsConfigFinish,
+                Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
+            ) {
                 error!(
                     "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
                      Metrics Configuration data collection will never finish.",
@@ -372,18 +406,23 @@ where
         }
     }
 
-    fn on_end_trigger_fired(_config: &Arc<MetricsConfig<TPublisher, TTrigger>>) {
+    fn on_end_trigger_fired(
+        _config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
         // TODO(b/289386420): implement end trigger handling logic.
         warn!("End trigger handling logic is not implemented. Data collection won't end.");
     }
 
-    fn on_finish_trigger_fired(_config: &Arc<MetricsConfig<TPublisher, TTrigger>>) {
+    fn on_finish_trigger_fired(
+        _config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
         // TODO(b/294616843): implement finish trigger handling logic.
         warn!("Finish trigger handling logic is not implemented. Data collection won't finish.");
     }
 }
 
 impl<
+        TMetricsReportGenerator,
         TMetricsReportGeneratorFactory,
         TNodeFactory,
         TPublisher,
@@ -392,6 +431,7 @@ impl<
         TTriggerFactory,
     > MetricsConfigOrchestrator
     for MetricsConfigOrchestratorImpl<
+        TMetricsReportGenerator,
         TMetricsReportGeneratorFactory,
         TNodeFactory,
         TPublisher,
@@ -400,7 +440,9 @@ impl<
         TTriggerFactory,
     >
 where
-    TMetricsReportGeneratorFactory: MetricsReportGeneratorFactory<TTrigger>,
+    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
+    TMetricsReportGeneratorFactory:
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger>,
     TNodeFactory: NodeFactory + Sync,
     TPublisher: Publisher + Send + Sync + 'static,
     TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Sync,
@@ -477,7 +519,11 @@ where
         )?;
 
         // Create metrics report generators.
-        let context = MetricsReportGeneratorFactoryCreateContext { triggers: &triggers };
+        let context = MetricsReportGeneratorFactoryCreateContext {
+            config_proto,
+            triggers: &triggers,
+            report_ready_callback: &self.report_ready_callback,
+        };
         let metrics_report_configs = config_proto
             .metrics_report_configs
             .iter()
@@ -530,9 +576,10 @@ where
         if let Some(start_trigger) = &config.start_trigger {
             let config_clone = config.clone();
             start_trigger
-                .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
-                    Self::on_start_trigger_fired(&config_clone)
-                })
+                .subscribe(
+                    &TriggerSubscriber::MetricsConfigStart,
+                    Box::new(move || Self::on_start_trigger_fired(&config_clone)),
+                )
                 .map_err(|error| MetricsConfigOrchestratorError::UnableToActivateStartTrigger {
                     error,
                 })?;
@@ -646,10 +693,12 @@ mod tests {
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
+    use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::MetricsConfigOrchestratorImpl;
 
     type MockedMetricsConfigOrchestratorImpl = MetricsConfigOrchestratorImpl<
+        MockMetricsReportGenerator,
         MockMetricsReportGeneratorFactory,
         MockNodeFactory,
         MockPublisher,
@@ -669,6 +718,14 @@ mod tests {
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
+    struct MockMetricsReportGenerator {}
+
+    impl MetricsReportGenerator for MockMetricsReportGenerator {
+        fn activate(self: &Arc<Self>) {}
+
+        fn deactivate(&self) {}
+    }
+
     struct MockMetricsReportGeneratorFactory {
         /// When set, the factory will return this error once.
         error: Mutex<Option<MetricsReportGeneratorFactoryError>>,
@@ -680,22 +737,15 @@ mod tests {
         }
     }
 
-    impl MetricsReportGeneratorFactory<MockTrigger> for MockMetricsReportGeneratorFactory {
+    impl MetricsReportGeneratorFactory<MockMetricsReportGenerator, MockTrigger>
+        for MockMetricsReportGeneratorFactory
+    {
         fn create(
             &self,
-            config: &MetricsReportConfig,
+            _config: &MetricsReportConfig,
             _context: &MetricsReportGeneratorFactoryCreateContext<MockTrigger>,
-        ) -> Result<MetricsReportGenerator<MockTrigger>, MetricsReportGeneratorFactoryError>
-        {
-            self.error.lock().unwrap().take().map_or_else(
-                || {
-                    Ok(MetricsReportGenerator {
-                        report_incomplete: config.report_incomplete,
-                        triggers: vec![],
-                    })
-                },
-                Err,
-            )
+        ) -> Result<MockMetricsReportGenerator, MetricsReportGeneratorFactoryError> {
+            self.error.lock().unwrap().take().map_or_else(|| Ok(MockMetricsReportGenerator {}), Err)
         }
 
         fn validate(
@@ -864,55 +914,11 @@ mod tests {
         }
     }
 
-    struct MockTrigger {
-        name: String,
-
-        subscribe_callback:
-            Option<Arc<dyn Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync>>,
-        unsubscribe_callback: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
-    }
-
-    impl MockTrigger {
-        fn new(name: &str) -> Self {
-            MockTrigger {
-                name: name.to_owned(),
-                subscribe_callback: None,
-                unsubscribe_callback: None,
-            }
-        }
-    }
-
-    impl Trigger for MockTrigger {
-        fn subscribe(
-            &self,
-            _: &TriggerSubscriber,
-            on_fired_callback: impl Fn() + Send + Sync + 'static,
-        ) -> Result<(), String> {
-            if let Some(callback) = &self.subscribe_callback {
-                if let Some(error) = callback(&self.name, Box::new(on_fired_callback)) {
-                    return Err(error);
-                }
-            }
-
-            Ok(())
-        }
-
-        fn unsubscribe(&self, _: &TriggerSubscriber) -> Result<(), String> {
-            if let Some(callback) = &self.unsubscribe_callback {
-                if let Some(error) = callback(&self.name) {
-                    return Err(error);
-                }
-            }
-
-            Ok(())
-        }
-    }
-
     struct MockTriggerFactory {
         create_callback: Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync>>,
         validate_callback: Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync>>,
         subscribe_callback:
-            Option<Arc<dyn Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync>>,
+            Option<Arc<dyn Fn(&str, Box<dyn Fn() + Send + Sync>) -> Option<String> + Send + Sync>>,
         unsubscribe_callback: Option<Arc<dyn Fn(&str) -> Option<String> + Send + Sync>>,
     }
 
@@ -942,7 +948,10 @@ mod tests {
 
         fn set_subscribe_callback(
             &mut self,
-            callback: impl Fn(&str, Box<dyn Fn()>) -> Option<String> + Send + Sync + 'static,
+            callback: impl Fn(&str, Box<dyn Fn() + Send + Sync>) -> Option<String>
+                + Send
+                + Sync
+                + 'static,
         ) {
             self.subscribe_callback = Some(Arc::new(callback));
         }
@@ -967,10 +976,11 @@ mod tests {
                 }
             }
 
-            let mut trigger = MockTrigger::new(&trigger_proto.name);
-            trigger.subscribe_callback = self.subscribe_callback.clone();
-            trigger.unsubscribe_callback = self.unsubscribe_callback.clone();
-            Ok(trigger)
+            Ok(MockTrigger {
+                name: trigger_proto.name.clone(),
+                subscribe_callback: self.subscribe_callback.clone(),
+                unsubscribe_callback: self.unsubscribe_callback.clone(),
+            })
         }
 
         fn validate(
@@ -995,6 +1005,8 @@ mod tests {
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
                 trigger_factory: MockTriggerFactory::new(),
+                report_ready_callback: Arc::new(|_| {}),
+                phantom_generator: PhantomData,
             }
         }
     }

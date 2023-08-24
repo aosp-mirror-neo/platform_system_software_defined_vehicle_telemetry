@@ -13,12 +13,15 @@ use crate::collection_extension::HashMapExtension;
 use crate::metrics_config_orchestrator::PublisherImpl;
 
 pub(crate) trait Trigger {
+    /// Returns the name of the trigger.
+    fn get_name(&self) -> &str;
+
     /// Subscribe to trigger fire events.
     /// First subscription activates the trigger.
     fn subscribe(
         &self,
         subscriber: &TriggerSubscriber,
-        on_fired_callback: impl Fn() + Send + Sync + 'static,
+        on_fired_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<(), String>;
 
     /// Unsubscribe from trigger fire events.
@@ -33,6 +36,7 @@ pub(crate) enum TriggerSubscriber {
     MetricsConfigStart,
     MetricsConfigEnd,
     MetricsConfigFinish,
+    MetricsReportGenerator { name: String },
     PeriodicTrigger { name: String },
 }
 
@@ -62,10 +66,13 @@ impl fmt::Display for TriggerSubscriber {
             TriggerSubscriber::AggregationPublisher { name } => {
                 write!(f, "Aggregation Publisher {}", name)
             }
-            TriggerSubscriber::PeriodicTrigger { name } => write!(f, "Periodic Trigger {}", name),
             TriggerSubscriber::MetricsConfigStart => write!(f, "Metrics Config Start"),
             TriggerSubscriber::MetricsConfigEnd => write!(f, "Metrics Config End"),
             TriggerSubscriber::MetricsConfigFinish => write!(f, "Metrics Config Finish"),
+            TriggerSubscriber::MetricsReportGenerator { name } => {
+                write!(f, "Metrics Report Generator {}", name)
+            }
+            TriggerSubscriber::PeriodicTrigger { name } => write!(f, "Periodic Trigger {}", name),
         }
     }
 }
@@ -81,16 +88,19 @@ impl TriggerImpl {
 }
 
 impl Trigger for TriggerImpl {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
     fn subscribe(
         &self,
         subscriber: &TriggerSubscriber,
-        on_fired_callback: impl Fn() + Send + Sync + 'static,
+        on_fired_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<(), String> {
         let maybe_callbacks_reference = {
             let callbacks_container = self.callback_map.lock().unwrap();
             let mut callbacks = callbacks_container.lock().unwrap();
-            if callbacks.try_insert_value(subscriber.clone(), Arc::new(on_fired_callback)).is_err()
-            {
+            if callbacks.try_insert_value(subscriber.clone(), on_fired_callback.into()).is_err() {
                 return Err(format!("Subscriber {} is already subscribed to the trigger. Duplicate subscriptions are not allowed.", subscriber));
             }
 
@@ -187,6 +197,9 @@ impl TriggerType {
 }
 
 #[cfg(test)]
+pub(crate) mod mock;
+
+#[cfg(test)]
 mod tests {
     use sdv_ast::NodeValue;
     use std::sync::Mutex;
@@ -224,12 +237,21 @@ mod tests {
         )
     }
 
+    fn empty_fn() {}
+
+    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+        Box::new(empty_fn)
+    }
+
     #[tokio::test]
     async fn subscribe_already_subscribed_fails() {
         let trigger = create_valid_periodic_trigger();
 
-        trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).unwrap();
-        let err = trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).err().unwrap();
+        trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box()).unwrap();
+        let err = trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
+            .err()
+            .unwrap();
 
         assert!(err.contains("already subscribed"));
     }
@@ -246,7 +268,10 @@ mod tests {
             },
         );
 
-        let err = trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).err().unwrap();
+        let err = trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
+            .err()
+            .unwrap();
 
         assert!(err.contains("not implemented"));
     }
@@ -258,9 +283,10 @@ mod tests {
         let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
-                callback_listener_clone.lock().unwrap().on_callback_fired()
-            })
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.lock().unwrap().on_callback_fired()),
+            )
             .unwrap();
         trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).unwrap();
         // Sleep for 1.5 interval to ensure the trigger won't fire.
@@ -276,9 +302,10 @@ mod tests {
         let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
-                callback_listener_clone.lock().unwrap().on_callback_fired()
-            })
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.lock().unwrap().on_callback_fired()),
+            )
             .unwrap();
         // Sleep for 2.5 interval to let trigger fire twice.
         time::sleep(Duration::from_millis(INTERVAL_MS * 5 / 2)).await;
@@ -298,19 +325,22 @@ mod tests {
         let callback_listener_clone3 = callback_listener.clone();
 
         trigger
-            .subscribe(&TriggerSubscriber::MetricsConfigStart, move || {
-                callback_listener_clone1.lock().unwrap().on_callback_fired()
-            })
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone1.lock().unwrap().on_callback_fired()),
+            )
             .unwrap();
         trigger
-            .subscribe(&TriggerSubscriber::MetricsConfigEnd, move || {
-                callback_listener_clone2.lock().unwrap().on_callback_fired()
-            })
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigEnd,
+                Box::new(move || callback_listener_clone2.lock().unwrap().on_callback_fired()),
+            )
             .unwrap();
         trigger
-            .subscribe(&TriggerSubscriber::MetricsConfigFinish, move || {
-                callback_listener_clone3.lock().unwrap().on_callback_fired()
-            })
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigFinish,
+                Box::new(move || callback_listener_clone3.lock().unwrap().on_callback_fired()),
+            )
             .unwrap();
         // Sleep for 1.5 interval to let trigger fire once.
         time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
@@ -328,7 +358,10 @@ mod tests {
             },
         );
 
-        let err = trigger.subscribe(&TriggerSubscriber::MetricsConfigStart, || {}).err().unwrap();
+        let err = trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
+            .err()
+            .unwrap();
 
         assert!(err.contains("not implemented"));
     }
