@@ -10,9 +10,10 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::{
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
     ITelemetryService::ITelemetryServiceAsyncServer,
+    ITelemetryStatusListener::ITelemetryStatusListener,
 };
 
-use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Status, Strong};
+use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -22,6 +23,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::{self};
 use std::marker::{Send, Sync};
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -31,17 +33,6 @@ pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
-
-/// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
-/// preserving the content as far as possible.
-/// Also log the error if there is one.
-pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
-    result.map_err(|e| {
-        let message = format!("{:?}", e);
-        info!("Returning binder error: {}", &message);
-        Status::new_service_specific_error_str(-1, Some(message))
-    })
-}
 
 /// This struct is defined to implement ITelemetryService AIDL interface.
 pub struct SdvTelemetryService {
@@ -53,6 +44,8 @@ pub struct SdvTelemetryService {
     metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
     /// Hashmap to store the metricsConfigs's size passed by the client.
     metrics_configs_store: Arc<Mutex<HashMap<String, usize>>>,
+    /// Status Callabck to send back status to client
+    status_listener: Mutex<Option<Strong<dyn ITelemetryStatusListener>>>,
 }
 
 impl Interface for SdvTelemetryService {}
@@ -176,7 +169,28 @@ impl SdvTelemetryService {
             max_persistent_config_store_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
+            status_listener: Mutex::new(None),
         })
+    }
+
+    /// Uses the callback object set by the client to send back status codes
+    /// and error messages for API calls
+    pub fn send_status<E: Debug>(
+        &self,
+        status_code: i32,
+        result: Result<&str, E>,
+    ) -> BinderResult<()> {
+        if let Ok(callback) = self.status_listener.lock() {
+            if let Some(callback_ref) = callback.as_ref() {
+                let status_message = match result {
+                    Ok(message) => message.to_owned(),
+                    Err(e) => format!("{:?}", e),
+                };
+                //TODO: b/296147474 Create status codes to be shared with OEM client
+                let _ = callback_ref.deref().sendStatus(status_code, &status_message);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -190,7 +204,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             > self.max_persistent_config_store_size
         {
             error!("Memory limit exceeded");
-            return to_binder_result(Err("Memory limit exceeded"));
+            return self.send_status(-1, Err("Memory limit exceeded"));
         }
 
         let res = self.metrics_config_orchestrator.validate_config(&config);
@@ -198,7 +212,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         // Validates and initializes metrics config
         if res.is_err() {
             info!("Invalid Metric Config");
-            return to_binder_result(res);
+            return self.send_status(-1, Err(res));
         }
 
         let bytes = metrics_config.to_vec();
@@ -211,7 +225,8 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     error!("An error occurred in removing corrupt config: {}", e)
                 });
             }
-            return to_binder_result(Err("Metric config activated but not persisted in memory"));
+            return self
+                .send_status(-1, Err("Metric config activated but not persisted in memory"));
         }
 
         let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
@@ -223,7 +238,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         metric_config_map.insert(config.uuid.clone(), bytes.len());
         self.cur_persistent_config_store_size.fetch_add(bytes.len(), Ordering::SeqCst);
 
-        Ok(())
+        return self.send_status::<MetricsConfigOrchestratorError>(1, Ok(&config.uuid));
     }
 
     async fn activateMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
@@ -234,7 +249,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 Ok(data) => data,
                 Err(e) => {
                     error!("An error occurred while trying to read file: {}", e);
-                    return to_binder_result(Err(e));
+                    return self.send_status(-1, Err(e));
                 }
             };
 
@@ -255,14 +270,14 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
                         error!("An error occurred in removing corrupt config: {}", e)
                     });
-                    return to_binder_result(Err(e));
+                    return self.send_status(-1, Err(e));
                 }
             }
         } else {
-            return to_binder_result(Err("Config not found"));
+            return self.send_status(-1, Err("Config not found"));
         }
 
-        Ok(())
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok(metrics_config_uuid))
     }
 
     async fn deactivateMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
@@ -271,7 +286,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
         if res.is_err() {
             info!("Invalid Metric Config UUID");
-            return to_binder_result(res);
+            return self.send_status(-1, Err(res));
         }
 
         let old_path = PathBuf::from(self.active_data_dir.clone() + "/" + metrics_config_uuid);
@@ -281,7 +296,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             .await
             .unwrap_or_else(|e| error!("An error occurred in renaming config: {}", e));
 
-        Ok(())
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok(metrics_config_uuid))
     }
 
     async fn removeMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
@@ -293,7 +308,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 Some(size) => size,
                 None => {
                     error!("Config not found {:}", uuid);
-                    return to_binder_result(Err("Config not found"));
+                    return self.send_status(-1, Err("Config not found"));
                 }
             }
         };
@@ -306,7 +321,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     false
                 } else {
                     error!("Error in finishing Metric Config");
-                    return to_binder_result(Err(err));
+                    return self.send_status(-1, Err(err));
                 }
             } else {
                 true
@@ -323,11 +338,11 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         if let Err(e) = file_io_utils::remove_file(&path).await {
             error!("An error occurred in removing file: {}", e);
-            return to_binder_result(Err("Could not remove config from memory"));
+            return self.send_status(-1, Err("Could not remove config from memory"));
         }
 
         self.cur_persistent_config_store_size.fetch_sub(config_size, Ordering::SeqCst);
-        Ok(())
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok(metrics_config_uuid))
     }
 
     async fn removeAllMetricsConfigs(&self) -> BinderResult<()> {
@@ -362,7 +377,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         metric_config_map.clear();
 
         self.cur_persistent_config_store_size.store(0, Ordering::SeqCst);
-        Ok(())
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok("Ok"))
     }
 
     async fn setReportReadyListener(
@@ -371,6 +386,21 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     ) -> BinderResult<()> {
         info!("setReportReadyListener");
         let _ = listener.onReady("Received CB from Telemetry Binder service");
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok("Ok"))
+    }
+
+    async fn setStatusListener(
+        &self,
+        callback: &Strong<dyn ITelemetryStatusListener>,
+    ) -> BinderResult<()> {
+        if let Ok(mut guard) = self.status_listener.lock() {
+            if guard.is_none() {
+                *guard = Some(callback.clone());
+            } else {
+                return self.send_status(-1, Err("Status Listener already added"));
+            }
+        }
+
         Ok(())
     }
 
@@ -381,7 +411,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         listener: &Strong<(dyn ITelemetryReportListener)>,
     ) -> BinderResult<()> {
         info!("getFinishedReport: {}", metrics_config_uuid);
-        Ok(())
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok(metrics_config_uuid))
     }
 
     async fn getAllFinishedReports(
@@ -389,11 +419,20 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         _listener: &Strong<dyn ITelemetryReportListener>,
     ) -> BinderResult<()> {
         info!("getAllFinishedReports");
-        Ok(())
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok("Ok"))
     }
 
     async fn clearReportReadyListener(&self) -> BinderResult<()> {
         info!("clearReportReadyListener");
+        self.send_status::<MetricsConfigOrchestratorError>(1, Ok("Ok"))
+    }
+
+    async fn clearStatusListener(&self) -> BinderResult<()> {
+        info!("clearReportReadyListener");
+        if let Ok(mut guard) = self.status_listener.lock() {
+            *guard = None;
+        }
+
         Ok(())
     }
 }
