@@ -22,7 +22,7 @@ pub(crate) trait Publisher {
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
 
     fn activate(self: &Arc<Self>) -> Result<(), PublisherError>;
-    fn deactivate(self: &Arc<Self>) -> Result<(), PublisherError>;
+    fn deactivate(&self) -> Result<(), PublisherError>;
 }
 
 #[derive(Error, Debug)]
@@ -135,7 +135,7 @@ impl Publisher for PublisherImpl {
         Ok(())
     }
 
-    fn deactivate(self: &Arc<Self>) -> Result<(), PublisherError> {
+    fn deactivate(&self) -> Result<(), PublisherError> {
         match &self.publisher_type {
             PublisherType::Signal { .. } => {
                 return Err(PublisherError::SignalPublishersNotImplemented)
@@ -301,10 +301,10 @@ mod tests {
 
     #[test]
     fn dectivate_signal_publisher_fails_not_implemented() {
-        let publisher = Arc::new(PublisherImpl::new(
+        let publisher = PublisherImpl::new(
             PUBLISHER_NAME.to_owned(),
             PublisherType::Signal { signal_name: String::default() },
-        ));
+        );
 
         let err = publisher.deactivate().err().unwrap();
 
@@ -334,11 +334,11 @@ mod tests {
     #[test]
     fn deactivate_service_publisher_not_activated_fails() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = Arc::new(PublisherImpl::new_service_publisher(
+        let publisher = PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             service_adapter.clone(),
-        ));
+        );
 
         let err = publisher.deactivate().err().unwrap();
 
@@ -349,7 +349,7 @@ mod tests {
 
     #[test]
     fn deactivate_aggregation_fails_not_implemented() {
-        let publisher = Arc::new(PublisherImpl::new(
+        let publisher = PublisherImpl::new(
             PUBLISHER_NAME.to_owned(),
             PublisherType::Aggregation {
                 triggers: vec![],
@@ -357,7 +357,7 @@ mod tests {
                 reset_on_get: false,
                 declarative_aggregations: vec![],
             },
-        ));
+        );
 
         let err = publisher.deactivate().err().unwrap();
 
