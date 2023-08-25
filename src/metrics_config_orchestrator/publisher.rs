@@ -70,12 +70,12 @@ pub(crate) enum PublisherType {
 
 #[allow(dead_code)]
 pub(crate) struct DeclarativeAggregation {
-    pub field_name: String,
-    pub selector_expression: Arc<Node>,
-    pub aggregation_type: AggregationType,
+    pub(super) field_name: String,
+    pub(super) selector_expression: Arc<Node>,
+    pub(super) aggregation_type: AggregationType,
     // TODO(b/293213911): Create new rust type and remove reference to protobuf message
-    pub seed_expression: Option<NewProtoNode>,
-    pub aggregation_expression: Option<NewProtoNode>,
+    pub(super) seed_expression: Option<NewProtoNode>,
+    pub(super) aggregation_expression: Option<NewProtoNode>,
 }
 
 impl PublisherImpl {
