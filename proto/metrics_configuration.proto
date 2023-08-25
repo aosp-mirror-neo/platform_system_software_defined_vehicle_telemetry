@@ -256,23 +256,27 @@ message ScriptAggregation {
 // Specifies when and how data is combined into a Metrics Report to be reported
 // to the OEM application.
 message MetricsReportConfig {
+  // Required.
+  // The name of the metrics report config.
+  string name = 1;
+
   // Optional.
   // The names of the triggers that specify when the metrics report is
   // generated.
-  repeated string report_trigger_names = 1;
+  repeated string trigger_names = 2;
 
   // Optional.
   // Specifies whether to send the report using the latest published messages
   // on Telemetry Service shutdown or when the data collection is ended or
   // finished.
-  bool report_incomplete = 2;
+  bool report_incomplete = 3;
 
   // Required.
   // The expression that creates a message with metrics to report to the
   // OEM application. If a message from a publisher is not present in
   // the activation context, the context will be populated with the latest
   // published message.
-  expr.NewProtoNode selector_expression = 3;
+  expr.NewProtoNode selector_expression = 4;
 }
 
 message SamplePublisherConfig {}

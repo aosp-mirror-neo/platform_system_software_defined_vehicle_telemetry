@@ -1,5 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+mod metrics_report_generator;
+mod metrics_report_generator_factory;
 mod publisher;
 mod publisher_factory;
 mod trigger;
@@ -22,6 +24,12 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
+use metrics_report_generator::MetricsReportGenerator;
+use metrics_report_generator_factory::{
+    MetricsReportGeneratorFactory, MetricsReportGeneratorFactoryCreateContext,
+    MetricsReportGeneratorFactoryError, MetricsReportGeneratorFactoryImpl,
+    MetricsReportGeneratorFactoryValidateContext,
+};
 use publisher::{Publisher, PublisherImpl};
 use publisher_factory::{
     PublisherFactory, PublisherFactoryContext, PublisherFactoryError, PublisherFactoryImpl,
@@ -65,6 +73,11 @@ pub enum MetricsConfigOrchestratorError {
     InvalidDependency { dependency_type: String, dependency_name: String },
     #[error("Duplicate metrics config identifier: {uuid}")]
     DuplicateMetricsConfigUuid { uuid: String },
+    #[error("Invalid definition for metrics report config {report_config_name}: {factory_error}")]
+    InvalidMetricsReportConfig {
+        report_config_name: String,
+        factory_error: MetricsReportGeneratorFactoryError,
+    },
     #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
     InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
     #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
@@ -84,23 +97,27 @@ pub enum MetricsConfigOrchestratorError {
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
 pub(super) struct MetricsConfigOrchestratorImpl<
-    NdFactory: NodeFactory = NodeFactoryImpl,
-    Pub: Publisher = PublisherImpl,
-    PubFactory: PublisherFactory<Pub, Trig> = PublisherFactoryImpl,
-    Trig: Trigger = TriggerImpl,
-    TrigFactory: TriggerFactory<Pub, Trig> = TriggerFactoryImpl,
+    TMetricsReportGeneratorFactory: MetricsReportGeneratorFactory<TTrigger> = MetricsReportGeneratorFactoryImpl,
+    TNodeFactory: NodeFactory = NodeFactoryImpl,
+    TPublisher: Publisher = PublisherImpl,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> = PublisherFactoryImpl,
+    TTrigger: Trigger = TriggerImpl,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> = TriggerFactoryImpl,
 > {
-    configs: Mutex<HashMap<String, Arc<MetricsConfig<Pub, Trig>>>>,
-    node_factory: NdFactory,
-    publisher_factory: PubFactory,
-    trigger_factory: TrigFactory,
+    configs: Mutex<HashMap<String, Arc<MetricsConfig<TPublisher, TTrigger>>>>,
+    node_factory: TNodeFactory,
+    metrics_report_generator_factory: TMetricsReportGeneratorFactory,
+    publisher_factory: TPublisherFactory,
+    trigger_factory: TTriggerFactory,
 }
 
+#[allow(dead_code)]
 pub(super) struct MetricsConfig<
     TPublisher: Publisher = PublisherImpl,
     TTrigger: Trigger = TriggerImpl,
 > {
     uuid: String,
+    metrics_report_generators: Vec<Arc<MetricsReportGenerator<TTrigger>>>,
     publishers: HashMap<String, Arc<TPublisher>>,
     start_trigger: Option<Arc<TTrigger>>,
     end_trigger: Option<Arc<TTrigger>>,
@@ -131,6 +148,7 @@ impl MetricsConfigOrchestratorImpl {
     pub(super) fn new() -> Self {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
+            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl {},
             node_factory: NodeFactoryImpl::new(),
             publisher_factory: PublisherFactoryImpl::new(),
             trigger_factory: TriggerFactoryImpl::new(),
@@ -138,8 +156,16 @@ impl MetricsConfigOrchestratorImpl {
     }
 }
 
-impl<TNodeFactory, TPublisher, TPublisherFactory, TTrigger, TTriggerFactory>
+impl<
+        TMetricsReportGeneratorFactory,
+        TNodeFactory,
+        TPublisher,
+        TPublisherFactory,
+        TTrigger,
+        TTriggerFactory,
+    >
     MetricsConfigOrchestratorImpl<
+        TMetricsReportGeneratorFactory,
         TNodeFactory,
         TPublisher,
         TPublisherFactory,
@@ -147,6 +173,7 @@ impl<TNodeFactory, TPublisher, TPublisherFactory, TTrigger, TTriggerFactory>
         TTriggerFactory,
     >
 where
+    TMetricsReportGeneratorFactory: MetricsReportGeneratorFactory<TTrigger>,
     TNodeFactory: NodeFactory,
     TPublisher: Publisher + Send + Sync + 'static,
     TPublisherFactory: PublisherFactory<TPublisher, TTrigger>,
@@ -356,9 +383,16 @@ where
     }
 }
 
-impl<TNodeFactory, TPublisher, TPublisherFactory, TTrigger, TTriggerFactory>
-    MetricsConfigOrchestrator
+impl<
+        TMetricsReportGeneratorFactory,
+        TNodeFactory,
+        TPublisher,
+        TPublisherFactory,
+        TTrigger,
+        TTriggerFactory,
+    > MetricsConfigOrchestrator
     for MetricsConfigOrchestratorImpl<
+        TMetricsReportGeneratorFactory,
         TNodeFactory,
         TPublisher,
         TPublisherFactory,
@@ -366,12 +400,12 @@ impl<TNodeFactory, TPublisher, TPublisherFactory, TTrigger, TTriggerFactory>
         TTriggerFactory,
     >
 where
+    TMetricsReportGeneratorFactory: MetricsReportGeneratorFactory<TTrigger>,
     TNodeFactory: NodeFactory + Sync,
     TPublisher: Publisher + Send + Sync + 'static,
     TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Sync,
     TTrigger: Trigger + Sync + Send + 'static,
     TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Sync,
-    MessageProviderImpl<TPublisher, TTrigger>: MessageProvider,
 {
     fn initialize_config(
         &self,
@@ -381,6 +415,7 @@ where
         let message_provider = Arc::new(MessageProviderImpl {
             metrics_config: RwLock::new(Arc::new(MetricsConfig {
                 uuid: String::default(),
+                metrics_report_generators: vec![],
                 publishers: HashMap::new(),
                 start_trigger: None,
                 end_trigger: None,
@@ -441,6 +476,24 @@ where
             },
         )?;
 
+        // Create metrics report generators.
+        let context = MetricsReportGeneratorFactoryCreateContext { triggers: &triggers };
+        let metrics_report_configs = config_proto
+            .metrics_report_configs
+            .iter()
+            .map(|proto| {
+                self.metrics_report_generator_factory.create(proto, &context).map_or_else(
+                    |err| {
+                        Err(MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+                            report_config_name: proto.name.clone(),
+                            factory_error: err,
+                        })
+                    },
+                    |config| Ok(Arc::new(config)),
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
         // Create MetricsConfig.
         let start_trigger =
             Self::maybe_get_trigger(&triggers, &config_proto.start_trigger_name)?.cloned();
@@ -450,6 +503,7 @@ where
             Self::maybe_get_trigger(&triggers, &config_proto.finish_trigger_name)?.cloned();
         let config = Arc::new(MetricsConfig {
             uuid: config_proto.uuid.clone(),
+            metrics_report_generators: metrics_report_configs,
             publishers,
             start_trigger,
             end_trigger,
@@ -555,6 +609,18 @@ where
             },
         )?;
 
+        // Validate metrics report configs.
+        let context =
+            MetricsReportGeneratorFactoryValidateContext { trigger_protos: &config_proto.triggers };
+        config_proto.metrics_report_configs.iter().try_for_each(|proto| {
+            self.metrics_report_generator_factory.validate(proto, &context).map_err(|err| {
+                MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+                    report_config_name: proto.name.clone(),
+                    factory_error: err,
+                }
+            })
+        })?;
+
         Ok(())
     }
 }
@@ -567,9 +633,10 @@ mod tests {
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
-        MetricsConfig as MetricsConfigProto, PeriodicTrigger as PeriodicTriggerProto,
-        Publisher as PublisherProto, ServicePublisher as ServicePublisherProto,
-        SignalPublisher as SignalPublisherProto, Trigger as TriggerProto,
+        MetricsConfig as MetricsConfigProto, MetricsReportConfig,
+        PeriodicTrigger as PeriodicTriggerProto, Publisher as PublisherProto,
+        ServicePublisher as ServicePublisherProto, SignalPublisher as SignalPublisherProto,
+        Trigger as TriggerProto,
     };
     use std::collections::HashMap;
     use std::sync::Mutex;
@@ -583,6 +650,7 @@ mod tests {
     use crate::MetricsConfigOrchestratorImpl;
 
     type MockedMetricsConfigOrchestratorImpl = MetricsConfigOrchestratorImpl<
+        MockMetricsReportGeneratorFactory,
         MockNodeFactory,
         MockPublisher,
         MockPublisherFactory,
@@ -595,10 +663,49 @@ mod tests {
     const DATA_TRIGGER_NAME: &str = "DataTrigger1";
     const INVALID_PUBLISHER_NAME: &str = "Publisher~0";
     const INVALID_TRIGGER_NAME: &str = "Trigger~0";
+    const METRICS_REPORT_CONFIG_NAME: &str = "MetricsReportConfig1";
     const SERVICE_PUBLISHER_NAME: &str = "ServicePublisher1";
     const SOME_PUBLISHER_NAME: &str = "Publisher1";
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+    struct MockMetricsReportGeneratorFactory {
+        /// When set, the factory will return this error once.
+        error: Mutex<Option<MetricsReportGeneratorFactoryError>>,
+    }
+
+    impl MockMetricsReportGeneratorFactory {
+        fn new() -> Self {
+            MockMetricsReportGeneratorFactory { error: Mutex::new(None) }
+        }
+    }
+
+    impl MetricsReportGeneratorFactory<MockTrigger> for MockMetricsReportGeneratorFactory {
+        fn create(
+            &self,
+            config: &MetricsReportConfig,
+            _context: &MetricsReportGeneratorFactoryCreateContext<MockTrigger>,
+        ) -> Result<MetricsReportGenerator<MockTrigger>, MetricsReportGeneratorFactoryError>
+        {
+            self.error.lock().unwrap().take().map_or_else(
+                || {
+                    Ok(MetricsReportGenerator {
+                        report_incomplete: config.report_incomplete,
+                        triggers: vec![],
+                    })
+                },
+                Err,
+            )
+        }
+
+        fn validate(
+            &self,
+            _config: &MetricsReportConfig,
+            _context: &MetricsReportGeneratorFactoryValidateContext,
+        ) -> Result<(), MetricsReportGeneratorFactoryError> {
+            self.error.lock().unwrap().take().map_or_else(|| Ok(()), Err)
+        }
+    }
 
     struct MockNodeFactory {
         fail_create_nodes: bool,
@@ -884,6 +991,7 @@ mod tests {
         fn new() -> Self {
             MetricsConfigOrchestratorImpl {
                 configs: Mutex::new(HashMap::new()),
+                metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
                 trigger_factory: MockTriggerFactory::new(),
@@ -910,6 +1018,15 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
         config.triggers.push(trigger);
+        config
+    }
+
+    fn create_valid_config_with_metrics_report_config() -> MetricsConfigProto {
+        let mut report_config = MetricsReportConfig::new();
+        report_config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.metrics_report_configs.push(report_config);
         config
     }
 
@@ -1238,6 +1355,33 @@ mod tests {
             err
         );
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn initialize_config_metrics_report_config_factory_error_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        *orchestrator.metrics_report_generator_factory.error.lock().unwrap() =
+            Some(MetricsReportGeneratorFactoryError::InvalidTriggerName {
+                trigger_name: SOME_TRIGGER_NAME.to_owned(),
+            });
+        let config = create_valid_config_with_metrics_report_config();
+
+        let err = orchestrator.initialize_config(&config).err().unwrap();
+
+        if let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+            report_config_name,
+            factory_error,
+        } = err
+        {
+            assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
+            assert!(
+                matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
+                "Unexpected error: {:?}",
+                factory_error
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err);
+        }
     }
 
     #[test]
@@ -1608,6 +1752,33 @@ mod tests {
             err
         );
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn validate_config_metrics_report_config_factory_error_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        *orchestrator.metrics_report_generator_factory.error.lock().unwrap() =
+            Some(MetricsReportGeneratorFactoryError::InvalidTriggerName {
+                trigger_name: SOME_TRIGGER_NAME.to_owned(),
+            });
+        let config = create_valid_config_with_metrics_report_config();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        if let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+            report_config_name,
+            factory_error,
+        } = err
+        {
+            assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
+            assert!(
+                matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
+                "Unexpected error: {:?}",
+                factory_error
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err);
+        }
     }
 
     #[test]
