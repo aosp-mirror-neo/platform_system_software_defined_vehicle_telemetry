@@ -1,7 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use sdvtelemetry_proto_rust::metrics_configuration::{
-    MetricsReportConfig, Trigger as TriggerProto,
+    MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
+    Trigger as TriggerProto,
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -9,16 +10,22 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::metrics_config_orchestrator::{MetricsReportGenerator, Trigger, TriggerImpl};
+use crate::metrics_config_orchestrator::{
+    MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger, TriggerImpl,
+};
 
-pub(crate) trait MetricsReportGeneratorFactory<TTrigger: Trigger = TriggerImpl> {
+pub(crate) trait MetricsReportGeneratorFactory<
+    TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
+    TTrigger: Trigger = TriggerImpl,
+>
+{
     /// Returns a new metrics report generator based on the metrics report config
     /// protobuf message.
     fn create(
         &self,
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext<TTrigger>,
-    ) -> Result<MetricsReportGenerator<TTrigger>, MetricsReportGeneratorFactoryError>;
+    ) -> Result<TMetricsReportGenerator, MetricsReportGeneratorFactoryError>;
 
     /// Verifies that the metrics report config protobuf message is valid and can be used
     /// to create a metrics report generator.
@@ -30,7 +37,9 @@ pub(crate) trait MetricsReportGeneratorFactory<TTrigger: Trigger = TriggerImpl> 
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigger = TriggerImpl> {
-    pub triggers: &'a HashMap<String, Arc<TTrigger>>,
+    pub(super) config_proto: &'a MetricsConfigProto,
+    pub(super) report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
+    pub(super) triggers: &'a HashMap<String, Arc<TTrigger>>,
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
@@ -51,22 +60,28 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         &self,
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext,
-    ) -> Result<MetricsReportGenerator, MetricsReportGeneratorFactoryError> {
+    ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
         let triggers = metrics_report_config
             .trigger_names
             .iter()
             .map(|name| {
-                context.triggers.get(name).cloned().ok_or_else(|| {
-                    MetricsReportGeneratorFactoryError::InvalidTriggerName {
+                context
+                    .triggers
+                    .get(name)
+                    .map(|trigger| trigger.clone() as Arc<dyn Trigger + Send + Sync>)
+                    .ok_or_else(|| MetricsReportGeneratorFactoryError::InvalidTriggerName {
                         trigger_name: name.clone(),
-                    }
-                })
+                    })
             })
             .collect::<Result<_, _>>()?;
-        Ok(MetricsReportGenerator {
-            report_incomplete: metrics_report_config.report_incomplete,
+        Ok(MetricsReportGeneratorImpl::new(
+            metrics_report_config.name.clone(),
+            context.config_proto.uuid.clone(),
+            context.config_proto.version,
+            metrics_report_config.report_incomplete,
+            context.report_ready_callback.clone(),
             triggers,
-        })
+        ))
     }
 
     fn validate(
@@ -93,6 +108,7 @@ mod tests {
     use super::*;
     use crate::collection_extension::VecExtension;
     use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::test_utils::ptr_eq;
 
     const TRIGGER_NAME: &str = "trigger";
 
@@ -104,7 +120,7 @@ mod tests {
         fn create_using_empty_context(
             &self,
             config: &MetricsReportConfig,
-        ) -> Result<MetricsReportGenerator, MetricsReportGeneratorFactoryError> {
+        ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
             self.create_using_context(config, None)
         }
 
@@ -112,10 +128,17 @@ mod tests {
             &self,
             config: &MetricsReportConfig,
             triggers: Option<Vec<Arc<TriggerImpl>>>,
-        ) -> Result<MetricsReportGenerator, MetricsReportGeneratorFactoryError> {
+        ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
+            let config_proto = MetricsConfigProto::new();
+            let report_ready_callback =
+                Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
             let triggers = triggers
                 .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
-            let context = MetricsReportGeneratorFactoryCreateContext { triggers: &triggers };
+            let context = MetricsReportGeneratorFactoryCreateContext {
+                config_proto: &config_proto,
+                report_ready_callback: &report_ready_callback,
+                triggers: &triggers,
+            };
             self.create(config, &context)
         }
 
@@ -192,7 +215,7 @@ mod tests {
 
         assert!(res.report_incomplete);
         assert_eq!(res.triggers.len(), 1);
-        assert!(Arc::ptr_eq(&res.triggers[0], &trigger));
+        assert!(ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger + Send + Sync>)));
     }
 
     #[test]

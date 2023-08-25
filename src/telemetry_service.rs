@@ -66,7 +66,7 @@ impl SdvTelemetryService {
         let inactive_dir_path = Path::new(&inactive_data_dir);
 
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
-        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new());
+        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(|_| {}));
 
         let mut num_active_configs = 0;
         let mut num_inactive_configs = 0;
@@ -436,6 +436,9 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod test_utils;
 
 #[cfg(test)]
 mod tests {
