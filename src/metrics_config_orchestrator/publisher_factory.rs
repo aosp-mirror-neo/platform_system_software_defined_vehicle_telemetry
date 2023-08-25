@@ -48,6 +48,7 @@ pub(crate) struct PublisherFactoryContext<'a, TTrigger: Trigger = TriggerImpl> {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum PublisherFactoryError {
     #[error("Unknown message type {message_type} set for aggregation publisher")]
     UnknownMessageType { message_type: String },

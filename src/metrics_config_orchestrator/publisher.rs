@@ -26,6 +26,7 @@ pub(crate) trait Publisher {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub(crate) enum PublisherError {
     #[error("Unable to activate publisher: it's already active")]
     AlreadyActive,
