@@ -13,24 +13,31 @@ use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
 use crate::metrics_config_orchestrator::{
-    publisher::{DeclarativeAggregation, PublisherType},
+    publisher::{
+        service_adapter::{ServiceAdapter, ServiceAdapterImpl},
+        DeclarativeAggregation, PublisherType,
+    },
     Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
 
-pub(crate) trait PublisherFactory<Pub: Publisher = PublisherImpl, Trig: Trigger = TriggerImpl> {
+pub(crate) trait PublisherFactory<
+    TPublisher: Publisher = PublisherImpl,
+    TTrigger: Trigger = TriggerImpl,
+>
+{
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
         publisher_proto: &PublisherProto,
-        context: &PublisherFactoryContext<Trig>,
-    ) -> Result<Pub, PublisherFactoryError>;
+        context: &PublisherFactoryContext<TTrigger>,
+    ) -> Result<TPublisher, PublisherFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a publisher
     /// encapsulated object.
     fn validate(
         &self,
         publisher_proto: &PublisherProto,
-        context: &PublisherFactoryContext<Trig>,
+        context: &PublisherFactoryContext<TTrigger>,
     ) -> Result<(), PublisherFactoryError>;
 }
 
@@ -62,11 +69,13 @@ pub enum PublisherFactoryError {
     UnknownPublisherType,
 }
 
-pub(crate) struct PublisherFactoryImpl {}
+pub(crate) struct PublisherFactoryImpl {
+    service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+}
 
 impl PublisherFactoryImpl {
     pub(super) fn new() -> Self {
-        PublisherFactoryImpl {}
+        PublisherFactoryImpl { service_adapter: Arc::new(ServiceAdapterImpl::new()) }
     }
 }
 
@@ -198,25 +207,24 @@ impl PublisherFactory for PublisherFactoryImpl {
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryContext,
     ) -> Result<PublisherImpl, PublisherFactoryError> {
-        Ok(PublisherImpl {
-            name: publisher_proto.name.clone(),
-            publisher_type: {
-                match &publisher_proto.publisher_type {
-                    Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
-                        PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
-                    }
-                    Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
-                        PublisherType::Service {
-                            service_name: service_publisher.service_name.clone(),
-                        }
-                    }
-                    Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
-                        self.create_aggregation_publisher(aggregation_publisher, context)?
-                    }
-                    _ => return Err(PublisherFactoryError::UnknownPublisherType),
-                }
-            },
-        })
+        let name = publisher_proto.name.clone();
+        let publisher_type = match &publisher_proto.publisher_type {
+            Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
+                PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
+            }
+            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+                return Ok(PublisherImpl::new_service_publisher(
+                    name,
+                    service_publisher.service_name.clone(),
+                    self.service_adapter.clone(),
+                ));
+            }
+            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
+                self.create_aggregation_publisher(aggregation_publisher, context)?
+            }
+            _ => return Err(PublisherFactoryError::UnknownPublisherType),
+        };
+        Ok(PublisherImpl::new(name, publisher_type))
     }
 
     fn validate(
@@ -248,7 +256,7 @@ impl PublisherFactory for PublisherFactoryImpl {
 mod tests {
     use protobuf::{
         descriptor::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto},
-        EnumOrUnknown, MessageField,
+        EnumOrUnknown, MessageDyn, MessageField,
     };
     use sdv_ast::NodeValue;
     use sdvtelemetry_proto_rust::{
@@ -262,7 +270,10 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
-    use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::metrics_config_orchestrator::{
+        publisher::service_adapter::{ServiceAdapterError, ServiceSubscription},
+        trigger::TriggerType,
+    };
 
     const FIELD_NAME: &str = "field";
     const FIELD_NAME2: &str = "field2";
@@ -275,8 +286,27 @@ mod tests {
     const TRIGGER_NAME: &str = "trigger";
     const UNKNOWN_AGGREGATION_TYPE: i32 = i32::MAX;
 
+    struct MockServiceAdapter {}
+
+    impl ServiceAdapter for MockServiceAdapter {
+        fn subscribe(
+            &self,
+            _service_name: &str,
+            _new_message_callback: Box<dyn Fn(&dyn MessageDyn) + Send + Sync>,
+        ) -> ServiceSubscription {
+            panic!("The function should never be called")
+        }
+
+        fn unsubscribe(
+            &self,
+            _subscription: ServiceSubscription,
+        ) -> Result<(), ServiceAdapterError> {
+            panic!("The function should never be called")
+        }
+    }
+
     fn create_factory() -> PublisherFactoryImpl {
-        PublisherFactoryImpl {}
+        PublisherFactoryImpl { service_adapter: Arc::new(MockServiceAdapter {}) }
     }
 
     fn create_file_descriptor(field_names: &[&str]) -> FileDescriptor {
@@ -497,8 +527,11 @@ mod tests {
             run_using_empty_factory_context(|context| factory.create(&publisher, context)).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        if let PublisherType::Service { service_name } = res.publisher_type {
+        if let PublisherType::Service { service_name, service_adapter: _, service_subscription } =
+            &res.publisher_type
+        {
             assert_eq!(service_name, SERVICE_NAME);
+            assert!(service_subscription.lock().unwrap().is_none());
         } else {
             panic!("Unexpected publisher type");
         }

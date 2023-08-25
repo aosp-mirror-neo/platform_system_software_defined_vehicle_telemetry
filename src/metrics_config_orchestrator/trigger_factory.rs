@@ -201,10 +201,10 @@ mod tests {
         let data_trigger = trigger.mut_data_trigger();
         data_trigger.publisher_name = PUBLISHER_NAME.to_owned();
 
-        let publisher = Arc::new(PublisherImpl {
-            name: PUBLISHER_NAME.to_owned(),
-            publisher_type: PublisherType::Signal { signal_name: SIGNAL_NAME.to_owned() },
-        });
+        let publisher = Arc::new(PublisherImpl::new(
+            PUBLISHER_NAME.to_owned(),
+            PublisherType::Signal { signal_name: SIGNAL_NAME.to_owned() },
+        ));
 
         (trigger, Some(vec![publisher]))
     }

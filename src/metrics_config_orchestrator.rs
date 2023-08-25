@@ -561,7 +561,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use protobuf::well_known_types::wrappers::Int32Value;
+    use protobuf::{well_known_types::wrappers::Int32Value, MessageDyn};
     use sdv_ast::{Node, NodeValue};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
@@ -575,6 +575,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::metrics_config_orchestrator::publisher::PublisherError;
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
@@ -673,7 +674,7 @@ mod tests {
             self.latest_message.clone()
         }
 
-        fn activate(&self) -> Result<(), String> {
+        fn activate(self: &Arc<Self>) -> Result<(), PublisherError> {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);
             }
@@ -681,7 +682,7 @@ mod tests {
             Ok(())
         }
 
-        fn deactivate(&self) -> Result<(), String> {
+        fn deactivate(self: &Arc<Self>) -> Result<(), PublisherError> {
             Ok(())
         }
     }
