@@ -441,7 +441,12 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 mod tests {
     extern crate protobuf;
     use super::*;
-    use binder::ParcelFileDescriptor;
+    use android_sdv_telemetry::aidl::android::sdv::telemetry::{
+        ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
+        ITelemetryStatusListener::BnTelemetryStatusListener,
+    };
+
+    use binder::{BinderFeatures, ParcelFileDescriptor};
     use protobuf::Message;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
 
@@ -571,15 +576,52 @@ mod tests {
     }
 
     /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
-    struct TelemetryReportReadyListener;
+    struct MockTelemetryReportReadyListener;
 
-    impl Interface for TelemetryReportReadyListener {}
+    impl Interface for MockTelemetryReportReadyListener {}
 
-    impl ITelemetryReportReadyListener for TelemetryReportReadyListener {
+    impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
         fn onReady(&self, _metrics_config_name: &str) -> BinderResult<()> {
             info!("onResult");
             Ok(())
         }
+    }
+
+    /// This struct is defined to implement ITelemetryStatusListener AIDL interface for unit testing purposes
+    #[derive(Clone)]
+    struct MockTelemetryStatusListener {
+        num_send_status_calls: Arc<Mutex<i32>>,
+    }
+
+    impl Interface for MockTelemetryStatusListener {}
+
+    impl MockTelemetryStatusListener {
+        fn new() -> Self {
+            let num_send_status_calls = Arc::new(Mutex::new(0));
+            MockTelemetryStatusListener { num_send_status_calls }
+        }
+
+        pub fn get_num_send_status_calls(&self) -> i32 {
+            *self.num_send_status_calls.lock().unwrap()
+        }
+    }
+
+    impl ITelemetryStatusListener for MockTelemetryStatusListener {
+        fn sendStatus(&self, _status_code: i32, _metrics_config_name: &str) -> BinderResult<()> {
+            let mut num_calls = self.num_send_status_calls.lock().unwrap();
+            *num_calls += 1;
+            Ok(())
+        }
+    }
+
+    fn create_serialized_config(uuid: &str) -> Vec<u8> {
+        let mut config = MetricsConfig::new();
+        config.uuid = uuid.to_string();
+        config.version = 2;
+        config.script = "Sample Script".to_string();
+
+        info!("Serializing metric config");
+        config.write_to_bytes().unwrap()
     }
 
     #[tokio::test]
@@ -593,15 +635,11 @@ mod tests {
             PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIG_DATA_DIR, UUID));
 
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        let mut config = MetricsConfig::new();
-        config.uuid = UUID.to_string();
-        config.version = 2;
-        config.script = "Sample Script".to_string();
 
         info!("Serializing metric config");
-        let serialized_config: &[u8] = &config.write_to_bytes().unwrap();
+        let serialized_config = create_serialized_config(UUID);
 
-        let result = test_environment.service.addMetricsConfig(serialized_config).await;
+        let result = test_environment.service.addMetricsConfig(&serialized_config).await;
         assert!(result.is_ok());
         assert!(file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
@@ -620,9 +658,8 @@ mod tests {
             PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID));
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let mut config = MetricsConfig::new();
-        config.uuid = UUID.to_owned();
-        test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+        let serialized_config = create_serialized_config(UUID);
+        test_environment.service.addMetricsConfig(&serialized_config).await.unwrap();
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
@@ -645,9 +682,8 @@ mod tests {
             PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID));
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let mut config = MetricsConfig::new();
-        config.uuid = UUID.to_owned();
-        test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+        let serialized_config = create_serialized_config(UUID);
+        test_environment.service.addMetricsConfig(&serialized_config).await.unwrap();
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
@@ -675,9 +711,8 @@ mod tests {
             PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID));
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let mut config = MetricsConfig::new();
-        config.uuid = UUID.to_owned();
-        test_environment.service.addMetricsConfig(&config.write_to_bytes().unwrap()).await.unwrap();
+        let serialized_config = create_serialized_config(UUID);
+        test_environment.service.addMetricsConfig(&serialized_config).await.unwrap();
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
@@ -715,22 +750,12 @@ mod tests {
             PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIG_DATA_DIR, UUID2));
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let mut config1 = MetricsConfig::new();
-        let mut config2 = MetricsConfig::new();
-        config1.uuid = UUID1.to_owned();
-        config2.uuid = UUID2.to_owned();
+        let serialized_config1 = create_serialized_config(UUID1);
+        let serialized_config2 = create_serialized_config(UUID2);
 
         // Add configs
-        test_environment
-            .service
-            .addMetricsConfig(&config1.write_to_bytes().unwrap())
-            .await
-            .unwrap();
-        test_environment
-            .service
-            .addMetricsConfig(&config2.write_to_bytes().unwrap())
-            .await
-            .unwrap();
+        test_environment.service.addMetricsConfig(&serialized_config1).await.unwrap();
+        test_environment.service.addMetricsConfig(&serialized_config2).await.unwrap();
         assert!(old_file_path1.is_file());
         assert!(old_file_path2.is_file());
         assert_eq!(2, test_environment.get_num_validate_config_calls());
@@ -754,7 +779,7 @@ mod tests {
     async fn clear_report_ready_listener() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "clear_repot_ready_listener";
+        const ROOT_PATH: &str = "clear_report_ready_listener";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let result = test_environment.service.clearReportReadyListener().await;
@@ -768,11 +793,55 @@ mod tests {
         const ROOT_PATH: &str = "set_report_ready_listener";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let listener: Strong<dyn ITelemetryReportReadyListener> =
-            Strong::new(Box::new(TelemetryReportReadyListener));
+        let listener = BnTelemetryReportReadyListener::new_binder(
+            MockTelemetryReportReadyListener,
+            BinderFeatures::default(),
+        );
 
         let result = test_environment.service.setReportReadyListener(&listener).await;
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn set_status_listener_and_check_status_code() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "set_status_listener";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        let listener = MockTelemetryStatusListener::new();
+
+        let binder_listener =
+            BnTelemetryStatusListener::new_binder(listener.clone(), BinderFeatures::default());
+
+        let serialized_config = create_serialized_config(UUID);
+        let result = test_environment.service.setStatusListener(&binder_listener).await;
+        assert!(result.is_ok());
+
+        let result = test_environment.service.addMetricsConfig(&serialized_config).await;
+        assert!(result.is_ok());
+        assert_eq!(1, listener.get_num_send_status_calls());
+    }
+
+    #[tokio::test]
+    async fn clear_status_listener() {
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "clear_status_listener";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        let listener = BnTelemetryStatusListener::new_binder(
+            MockTelemetryStatusListener::new(),
+            BinderFeatures::default(),
+        );
+
+        let result = test_environment.service.setStatusListener(&listener).await;
+        assert!(result.is_ok());
+
+        let result = test_environment.service.clearStatusListener().await;
+        assert!(result.is_ok());
+        assert!(test_environment.service.status_listener.lock().unwrap().is_none());
     }
 
     #[tokio::test]
