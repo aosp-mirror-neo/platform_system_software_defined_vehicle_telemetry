@@ -28,6 +28,7 @@ pub(crate) struct ServiceSubscription {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub(crate) enum ServiceAdapterError {
     #[error("Service subscription is invalid")]
     InvalidServiceSubscription,

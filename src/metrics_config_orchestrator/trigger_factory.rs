@@ -39,6 +39,7 @@ pub(crate) struct TriggerFactoryContext<
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum TriggerFactoryError {
     #[error("No parent triggers set for conditional trigger")]
     NoParentTriggers,
