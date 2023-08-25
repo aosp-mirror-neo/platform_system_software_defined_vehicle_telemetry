@@ -789,7 +789,7 @@ mod tests {
             Ok(())
         }
 
-        fn deactivate(self: &Arc<Self>) -> Result<(), PublisherError> {
+        fn deactivate(&self) -> Result<(), PublisherError> {
             Ok(())
         }
     }
