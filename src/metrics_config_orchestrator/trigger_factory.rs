@@ -12,19 +12,23 @@ use crate::metrics_config_orchestrator::{
     trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
 
-pub(crate) trait TriggerFactory<Pub: Publisher = PublisherImpl, Trig: Trigger = TriggerImpl> {
+pub(crate) trait TriggerFactory<
+    TPublisher: Publisher = PublisherImpl,
+    TTrigger: Trigger = TriggerImpl,
+>
+{
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext<Pub, Trig>,
-    ) -> Result<Trig, TriggerFactoryError>;
+        context: &TriggerFactoryContext<TPublisher, TTrigger>,
+    ) -> Result<Arc<TTrigger>, TriggerFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a trigger encapsulated object.
     fn validate(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext<Pub, Trig>,
+        context: &TriggerFactoryContext<TPublisher, TTrigger>,
     ) -> Result<(), TriggerFactoryError>;
 }
 
@@ -86,8 +90,8 @@ impl TriggerFactory for TriggerFactoryImpl {
         &self,
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryContext,
-    ) -> Result<TriggerImpl, TriggerFactoryError> {
-        Ok(TriggerImpl::new(
+    ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+        Ok(Arc::new(TriggerImpl::new(
             trigger_proto.name.clone(),
             match &trigger_proto.trigger_type {
                 Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
@@ -114,7 +118,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                 }
                 _ => return Err(TriggerFactoryError::UnknownTriggerType),
             },
-        ))
+        )))
     }
 
     fn validate(
@@ -262,8 +266,8 @@ mod tests {
         .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Data { publisher: res_publisher } = res.trigger_type {
-            assert!(Arc::ptr_eq(&res_publisher, &publishers.unwrap()[0]));
+        if let TriggerType::Data { publisher: res_publisher } = &res.trigger_type {
+            assert!(Arc::ptr_eq(res_publisher, &publishers.unwrap()[0]));
         } else {
             panic!("Unexpected trigger type");
         }
@@ -349,12 +353,12 @@ mod tests {
         .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Conditional { triggers, selector_expression } = res.trigger_type {
+        if let TriggerType::Conditional { triggers, selector_expression } = &res.trigger_type {
             assert_eq!(triggers.len(), 1);
             assert!(Arc::ptr_eq(&triggers[0], &parent_triggers.unwrap()[0]));
             // selector_expression should match the node at index 0
-            assert!(Arc::ptr_eq(&selector_expression, &node_0));
-            assert!(!Arc::ptr_eq(&selector_expression, &node_1))
+            assert!(Arc::ptr_eq(selector_expression, &node_0));
+            assert!(!Arc::ptr_eq(selector_expression, &node_1))
         } else {
             panic!("Unexpected trigger type");
         }

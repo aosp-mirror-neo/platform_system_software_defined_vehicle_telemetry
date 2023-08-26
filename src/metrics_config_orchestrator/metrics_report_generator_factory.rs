@@ -25,7 +25,7 @@ pub(crate) trait MetricsReportGeneratorFactory<
         &self,
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext<TTrigger>,
-    ) -> Result<TMetricsReportGenerator, MetricsReportGeneratorFactoryError>;
+    ) -> Result<Arc<TMetricsReportGenerator>, MetricsReportGeneratorFactoryError>;
 
     /// Verifies that the metrics report config protobuf message is valid and can be used
     /// to create a metrics report generator.
@@ -60,7 +60,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         &self,
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext,
-    ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
+    ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
         let triggers = metrics_report_config
             .trigger_names
             .iter()
@@ -74,14 +74,14 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                     })
             })
             .collect::<Result<_, _>>()?;
-        Ok(MetricsReportGeneratorImpl::new(
+        Ok(Arc::new(MetricsReportGeneratorImpl::new(
             metrics_report_config.name.clone(),
             context.config_proto.uuid.clone(),
             context.config_proto.version,
             metrics_report_config.report_incomplete,
             context.report_ready_callback.clone(),
             triggers,
-        ))
+        )))
     }
 
     fn validate(
@@ -123,7 +123,7 @@ mod tests {
         fn create_using_empty_context(
             &self,
             config: &MetricsReportConfig,
-        ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
+        ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
             self.create_using_context(config, None, None, None)
         }
 
@@ -133,7 +133,7 @@ mod tests {
             metrics_config_proto: Option<MetricsConfigProto>,
             report_ready_callback: Option<Arc<dyn Fn(MetricsReport) + Send + Sync>>,
             triggers: Option<Vec<Arc<TriggerImpl>>>,
-        ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
+        ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
             let metrics_config_proto = metrics_config_proto.unwrap_or_else(MetricsConfigProto::new);
             let report_ready_callback = report_ready_callback.unwrap_or_else(|| Arc::new(|_| {}));
             let triggers = triggers
