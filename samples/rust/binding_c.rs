@@ -27,8 +27,14 @@ extern "C" {
             unsafe extern "C" fn(
                 arg1: *mut ::std::os::raw::c_void,
                 arg2: *const ::std::os::raw::c_char,
-                arg3: usize,
             ),
+        >,
+    );
+
+    pub fn set_status_listener(
+        holder: *mut ServiceHolder,
+        cbFunc: ::std::option::Option<
+            unsafe extern "C" fn(arg1: ::std::os::raw::c_int, arg2: *const ::std::os::raw::c_char),
         >,
     );
 }
