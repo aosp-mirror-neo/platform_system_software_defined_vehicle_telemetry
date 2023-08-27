@@ -63,9 +63,19 @@ namespace android::sdv::telemetry {
         ALOGI("setReportReadyListener from CPP %s", std::string(err.toString8()).c_str());
     }
 
+    void TelemetryService::clear_report_ready_listener() {
+        android::binder::Status err = binder_service_->clearReportReadyListener();
+        ALOGI("clearReportReadyListener from CPP %s", std::string(err.toString8()).c_str());
+    }
+
     void TelemetryService::set_status_listener(void (*cbFunc)(int, const char*)) {
         android::sp<StatusListenerImpl> mStatusListenerImpl(new StatusListenerImpl(cbFunc));
         android::binder::Status err = binder_service_->setStatusListener(mStatusListenerImpl);
         ALOGI("set status callback from CPP %s", std::string(err.toString8()).c_str());
+    }
+
+    void TelemetryService::clear_status_listener() {
+        android::binder::Status err = binder_service_->clearStatusListener();
+        ALOGI("clearStatusListener from CPP %s", std::string(err.toString8()).c_str());
     }
 }

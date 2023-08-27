@@ -31,10 +31,15 @@ extern "C" {
         >,
     );
 
+    pub fn clear_report_ready_listener(holder: *mut ServiceHolder);
+
     pub fn set_status_listener(
         holder: *mut ServiceHolder,
         cbFunc: ::std::option::Option<
             unsafe extern "C" fn(arg1: ::std::os::raw::c_int, arg2: *const ::std::os::raw::c_char),
         >,
     );
+
+    pub fn clear_status_listener(holder: *mut ServiceHolder);
+
 }

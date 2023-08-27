@@ -35,7 +35,9 @@ public:
     void remove_all_metrics_configs();
     void remove_metrics_config(const std::string& metricsConfigUuid);
     void set_report_ready_listener(void* listener, void (*cbFunc)(void*, const char*));
+    void clear_report_ready_listener();
     void set_status_listener(void (*cbFunc)(int, const char*));
+    void clear_status_listener();
 
 private:
     // holds a reference to the binder service
