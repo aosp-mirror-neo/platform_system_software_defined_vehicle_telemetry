@@ -10,7 +10,7 @@ mod trigger_factory;
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdv_ast::{
-    MessageProvider, MessageProviderError, Node, NodeFactory, NodeFactoryImpl, NodeValue,
+    MessageProvider, MessageProviderError, Node, NodeError, NodeFactory, NodeFactoryImpl, NodeValue,
 };
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
@@ -90,8 +90,8 @@ pub enum MetricsConfigOrchestratorError {
     },
     #[error("Metric Config with UUID {uuid} doesn't exist")]
     InvalidConfigUuid { uuid: String },
-    #[error("Invalid expression nodes. Reason: {error_detail}")]
-    InvalidExpressionNodes { error_detail: String },
+    #[error("Invalid expression nodes. Reason: {e}")]
+    InvalidExpressionNodes { e: NodeError },
     #[error("Unable to activate start trigger: {error}")]
     UnableToActivateStartTrigger { error: String },
 }
@@ -219,9 +219,9 @@ where
         config_proto: &MetricsConfigProto,
         message_provider: &Arc<dyn MessageProvider>,
     ) -> Result<Vec<Arc<Node>>, MetricsConfigOrchestratorError> {
-        self.node_factory.create_nodes(&config_proto.expression_nodes, message_provider).map_err(
-            |error_detail| MetricsConfigOrchestratorError::InvalidExpressionNodes { error_detail },
-        )
+        self.node_factory
+            .create_nodes(&config_proto.expression_nodes, message_provider)
+            .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
     }
 
     /// Topologically sort publishers and triggers declared in the protobuf message
@@ -612,9 +612,9 @@ where
         }
 
         // Validate expression nodes to ensure they are set up correctly.
-        self.node_factory.validate(&config_proto.expression_nodes).map_err(|error_detail| {
-            MetricsConfigOrchestratorError::InvalidExpressionNodes { error_detail }
-        })?;
+        self.node_factory
+            .validate(&config_proto.expression_nodes)
+            .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
         // Create a vector of empty nodes for validation purposes.
         let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
@@ -786,9 +786,9 @@ mod tests {
     }
 
     impl NodeFactory for MockNodeFactory {
-        fn validate(&self, _proto_nodes: &[NodeProto]) -> Result<(), String> {
+        fn validate(&self, _proto_nodes: &[NodeProto]) -> Result<(), NodeError> {
             if self.fail_validate {
-                return Err("Simulated failure".to_string());
+                return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
             Ok(())
         }
@@ -797,9 +797,9 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             message_provider: &Arc<dyn MessageProvider>,
-        ) -> Result<Vec<Arc<Node>>, String> {
+        ) -> Result<Vec<Arc<Node>>, NodeError> {
             if self.fail_create_nodes {
-                return Err("Simulated failure".to_string());
+                return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
 
             *self.num_nodes.lock().unwrap() = proto_nodes.len();
