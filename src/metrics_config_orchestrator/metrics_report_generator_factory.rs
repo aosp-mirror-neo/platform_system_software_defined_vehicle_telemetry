@@ -110,7 +110,10 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::TriggerType;
     use crate::test_utils::ptr_eq;
 
+    const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";
+    const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    const VERSION: u32 = 42;
 
     impl MetricsReportGeneratorFactoryImpl {
         // The following functions create a context with passed data and use it to call `create`
@@ -121,25 +124,26 @@ mod tests {
             &self,
             config: &MetricsReportConfig,
         ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
-            self.create_using_context(config, None)
+            self.create_using_context(config, None, None, None)
         }
 
         fn create_using_context(
             &self,
-            config: &MetricsReportConfig,
+            report_config: &MetricsReportConfig,
+            metrics_config_proto: Option<MetricsConfigProto>,
+            report_ready_callback: Option<Arc<dyn Fn(MetricsReport) + Send + Sync>>,
             triggers: Option<Vec<Arc<TriggerImpl>>>,
         ) -> Result<MetricsReportGeneratorImpl, MetricsReportGeneratorFactoryError> {
-            let config_proto = MetricsConfigProto::new();
-            let report_ready_callback =
-                Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
+            let metrics_config_proto = metrics_config_proto.unwrap_or_else(MetricsConfigProto::new);
+            let report_ready_callback = report_ready_callback.unwrap_or_else(|| Arc::new(|_| {}));
             let triggers = triggers
                 .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
             let context = MetricsReportGeneratorFactoryCreateContext {
-                config_proto: &config_proto,
+                config_proto: &metrics_config_proto,
                 report_ready_callback: &report_ready_callback,
                 triggers: &triggers,
             };
-            self.create(config, &context)
+            self.create(report_config, &context)
         }
 
         fn validate_using_empty_context(
@@ -183,6 +187,7 @@ mod tests {
 
     fn create_valid_config() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
+        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
         config.report_incomplete = true;
         config.trigger_names.push(TRIGGER_NAME.to_owned());
         config
@@ -205,16 +210,31 @@ mod tests {
     #[test]
     fn create_success() {
         let factory = create_factory();
-        let config = create_valid_config();
+        let report_config = create_valid_config();
+        let mut metrics_config = MetricsConfigProto::new();
+        metrics_config.uuid = UUID.to_owned();
+        metrics_config.version = VERSION;
+        let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
         let trigger = Arc::new(TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: 0 },
         ));
 
-        let res = factory.create_using_context(&config, Some(vec![trigger.clone()])).unwrap();
+        let res = factory
+            .create_using_context(
+                &report_config,
+                Some(metrics_config),
+                Some(report_ready_callback.clone()),
+                Some(vec![trigger.clone()]),
+            )
+            .unwrap();
 
+        assert_eq!(res.name, METRICS_REPORT_CONFIG_NAME);
+        assert_eq!(res.config_uuid, UUID);
+        assert_eq!(res.config_version, VERSION);
         assert!(res.report_incomplete);
         assert_eq!(res.triggers.len(), 1);
+        assert!(ptr_eq(&res.report_ready_callback, &report_ready_callback));
         assert!(ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger + Send + Sync>)));
     }
 

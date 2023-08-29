@@ -1445,10 +1445,10 @@ mod tests {
             &message_providers[0].get_message(AGGREGATION_PUBLISHER_NAME).unwrap().unwrap(),
             &(value2 as Box<dyn MessageDyn>)
         );
-        let contexts = orchestrator.configs.lock().unwrap();
-        assert_eq!(contexts.len(), 1);
-        let context = &contexts[&config.uuid];
-        assert_eq!(context.publishers.len(), 2);
+        let configs = orchestrator.configs.lock().unwrap();
+        assert_eq!(configs.len(), 1);
+        let config = &configs[&config.uuid];
+        assert_eq!(config.publishers.len(), 2);
     }
 
     #[test]
