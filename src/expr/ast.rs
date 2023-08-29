@@ -2,8 +2,10 @@
 
 //! Library for building and traversing the abstract syntax tree.
 
+mod node_errors;
 mod node_value;
 
+pub use node_errors::NodeError;
 pub use node_value::NodeValue;
 
 use protobuf::MessageDyn;
@@ -22,7 +24,7 @@ use thiserror::Error;
 pub trait NodeFactory {
     /// Validate the expression nodes to ensure they do not contain cyclic dependencies
     /// and all indices are valid.
-    fn validate(&self, proto_nodes: &[NodeProto]) -> Result<(), String>;
+    fn validate(&self, proto_nodes: &[NodeProto]) -> Result<(), NodeError>;
 
     /// Creates rust Nodes from protobuf Nodes.
     /// Protobuf nodes use indices to represent left and right children.
@@ -31,7 +33,7 @@ pub trait NodeFactory {
         &self,
         proto_nodes: &[NodeProto],
         message_provider: &Arc<dyn MessageProvider>,
-    ) -> Result<Vec<Arc<Node>>, String>;
+    ) -> Result<Vec<Arc<Node>>, NodeError>;
 }
 
 /// Provides published messages.
@@ -122,20 +124,15 @@ impl NodeFactoryImpl {
         visit_status: &mut Vec<VisitStatus>,
         nodes: &mut Vec<Option<Arc<Node>>>,
         message_provider: &Option<&Arc<dyn MessageProvider>>,
-    ) -> Result<Option<Arc<Node>>, String> {
-        // get visit status and return error if index out of boound
-        let status = visit_status.get(index).ok_or(format!(
-            "Index {} out of bound. Expression nodes have size {}, double check that \
-                all child nodes have valid indices",
-            index,
-            proto_nodes.len()
-        ))?; // `?` returns early if error
+    ) -> Result<Option<Arc<Node>>, NodeError> {
+        // get visit status, `?` returns early if error
+        let status = visit_status
+            .get(index)
+            .ok_or(NodeError::IndexOutOfBound { i: index, n: proto_nodes.len() })?;
 
         // detect cycles using visit status, and visit the node
         match status {
-            VisitStatus::Visiting => {
-                Err(format!("Cycle detected at expression node index {}", index))
-            }
+            VisitStatus::Visiting => Err(NodeError::CyclicDependency { i: index }),
             VisitStatus::Visited => {
                 if nodes.is_empty() {
                     Ok(None)
@@ -172,14 +169,14 @@ impl NodeFactoryImpl {
                         let op = combination_node
                             .operator
                             .as_ref()
-                            .ok_or(format!("Node at index {} did not specify operator", index))?;
-                        // before recursion, check if operator type requires a right child
-                        op.check_right_child(&combination_node.right_index, index)?;
+                            .ok_or(NodeError::OperatorNotSet { i: index })?;
+                        // before recursion, check if the child node is set up correctly
+                        op.check_right_child(&combination_node.right_index)?;
 
                         // visit left child
                         let left_child_index = combination_node
                             .left_index
-                            .ok_or(format!("Node at index {} did not specify left child.", index))?
+                            .ok_or(NodeError::LeftChildNotSet { i: index })?
                             as usize;
                         let left = Self::visit(
                             left_child_index,
@@ -207,9 +204,7 @@ impl NodeFactoryImpl {
                             Ok(Arc::new(Node::Combination { operator: op.clone(), left, right }))
                         })?
                     } // match arm `Some(CombinationNode)`
-                    _ => {
-                        return Err(format!("Node at index {} did not specify a node_type", index))
-                    }
+                    _ => return Err(NodeError::NodeTypeNotSet { i: index }),
                 };
 
                 // mark index as visited and return Ok
@@ -225,17 +220,13 @@ impl NodeFactoryImpl {
     fn maybe_create_node(
         nodes: &mut Vec<Option<Arc<Node>>>,
         index: usize,
-        create_node_func: impl FnOnce() -> Result<Arc<Node>, String>,
-    ) -> Result<Option<Arc<Node>>, String> {
+        create_node_func: impl FnOnce() -> Result<Arc<Node>, NodeError>,
+    ) -> Result<Option<Arc<Node>>, NodeError> {
         if nodes.is_empty() {
             return Ok(None);
         }
         if index >= nodes.len() {
-            return Err(format!(
-                "maybe_create_node() called on invalid index {} on a vector of size {}",
-                index,
-                nodes.len()
-            ));
+            return Err(NodeError::IndexOutOfBound { i: index, n: nodes.len() });
         }
         nodes[index] = Some(create_node_func()?);
         Ok(nodes[index].clone())
@@ -243,7 +234,7 @@ impl NodeFactoryImpl {
 }
 
 impl NodeFactory for NodeFactoryImpl {
-    fn validate(&self, proto_nodes: &[NodeProto]) -> Result<(), String> {
+    fn validate(&self, proto_nodes: &[NodeProto]) -> Result<(), NodeError> {
         let n = proto_nodes.len();
         let mut visit_status = vec![VisitStatus::NotVisited; n];
         for i in 0..n {
@@ -256,7 +247,7 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         message_provider: &Arc<dyn MessageProvider>,
-    ) -> Result<Vec<Arc<Node>>, String> {
+    ) -> Result<Vec<Arc<Node>>, NodeError> {
         let n = proto_nodes.len();
         let mut visit_status = vec![VisitStatus::NotVisited; n];
         let mut rust_nodes: Vec<Option<Arc<Node>>> = vec![None; n];
@@ -273,12 +264,9 @@ impl NodeFactory for NodeFactoryImpl {
         // flatten Vec<Option<T>> into Vec<T>, ignoring None values.
         let nodes: Vec<Arc<Node>> = rust_nodes.into_iter().flatten().collect();
         if nodes.len() != n {
-            return Err(format!(
-                "failed to initialize expression nodes, \
-                expected {} nodes, but initialized {} nodes",
-                n,
-                nodes.len()
-            ));
+            return Err(NodeError::InternalError {
+                msg: format!("expected to create {} nodes, but created {} nodes", n, nodes.len()),
+            });
         }
         Ok(nodes)
     }
@@ -286,7 +274,7 @@ impl NodeFactory for NodeFactoryImpl {
 
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
-    pub fn evaluate(&self) -> Result<NodeValue, String> {
+    pub fn evaluate(&self) -> Result<NodeValue, NodeError> {
         match &self {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
@@ -296,12 +284,7 @@ impl Node {
                 // Base case of recursion: node is a leaf node, return value
                 message_provider
                     .get_message(publisher_name)
-                    .map_err(|err| {
-                        format!(
-                            "Unable to retrieve latest published message for publisher {}: {}",
-                            publisher_name, err
-                        )
-                    })?
+                    .map_err(|e| NodeError::MessageProviderError { e })?
                     .map_or_else(
                         || Ok(NodeValue::None),
                         |msg| NodeValue::extract_value(msg, fields),
@@ -309,25 +292,31 @@ impl Node {
             }
             Node::Combination { operator, left, right } => {
                 // evaluate left branch recursively
-                let left_val =
-                    match left {
-                        Some(left) => left.evaluate(),
-                        None => Err("Incorrect Node! Every non-leaf Node should have a left child"
-                            .to_string()),
-                    }?; // `?` returns early if error
+                let left_val = match left {
+                    Some(left) => left.evaluate(),
+                    None => Err(NodeError::InternalError {
+                        msg: "Incorrect Node! Node construction should have verified that \
+                            every non-leaf Node has a left child, but evaluate() encountered \
+                            a node without left child"
+                            .to_string(),
+                    }),
+                }?; // `?` returns early if error
 
                 // If unary operator, then operates on self.
                 // If binary operator, then [left] <operator> [right]
                 // The function short-circuits if possible. The closure provides right operand.
-                left_val.operate(operator, || {
-                    match right {
-                        Some(right) => right.evaluate(),
-                        None => {
-                            if operator.is_unary_operator() {
-                                return Ok(NodeValue::None);
-                            }
-                            Err("Incorrect AST, right child should always be specified for nodes with binary operators.".to_string())
+                left_val.operate(operator, || match right {
+                    Some(right) => right.evaluate(),
+                    None => {
+                        if operator.is_unary_operator() {
+                            return Ok(NodeValue::None);
                         }
+                        Err(NodeError::InternalError {
+                            msg: "Incorrect Node! Node construction should have verified that \
+                                nodes with binary operator specify two children, but evaluate() \
+                                encountered a node with binary operator but no right child"
+                                .to_string(),
+                        })
                     }
                 })
             }
@@ -373,7 +362,7 @@ trait OperatorProtoExtension {
     fn is_unary_operator(&self) -> bool;
 
     /// Helper function to check if operator requires a right child.
-    fn check_right_child(&self, right_index: &Option<u32>, index: usize) -> Result<(), String>;
+    fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), NodeError>;
 }
 
 impl OperatorProtoExtension for OperatorProto {
@@ -384,16 +373,13 @@ impl OperatorProtoExtension for OperatorProto {
         false
     }
 
-    fn check_right_child(&self, right_index: &Option<u32>, index: usize) -> Result<(), String> {
+    fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), NodeError> {
         let unary_op = self.is_unary_operator();
         let has_right_child = right_index.is_some();
         if unary_op && has_right_child {
-            Err(format!("Node at index {} has unary operator but specified two children", index))
+            Err(NodeError::UnaryOperatorIncorrectChildren)
         } else if !unary_op && !has_right_child {
-            Err(format!(
-                "Node at index {} has binary operator but did not specify right child",
-                index
-            ))
+            Err(NodeError::BinaryOperatorIncorrectChildren)
         } else {
             Ok(())
         }
@@ -506,10 +492,10 @@ mod tests {
         let node_factory = NodeFactoryImpl {};
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(err_msg.starts_with("Cycle detected"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::CyclicDependency { .. }));
     }
 
     #[test]
@@ -527,10 +513,10 @@ mod tests {
         let node_factory = NodeFactoryImpl {};
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(err_msg.starts_with("Cycle detected"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::CyclicDependency { .. }));
     }
 
     #[test]
@@ -545,10 +531,10 @@ mod tests {
         let node_factory = NodeFactoryImpl {};
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(err_msg.contains("out of bound"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::IndexOutOfBound { .. }));
     }
 
     #[test]
@@ -559,10 +545,10 @@ mod tests {
         let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(err_msg.contains("did not specify operator"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::OperatorNotSet { .. }));
     }
 
     #[test]
@@ -576,10 +562,10 @@ mod tests {
         let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(err_msg.contains("did not specify left child"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::LeftChildNotSet { .. }));
     }
 
     #[test]
@@ -599,10 +585,10 @@ mod tests {
         let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(err_msg.contains("did not specify right child"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::BinaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -612,14 +598,10 @@ mod tests {
         let node_factory = NodeFactoryImpl::new();
 
         // action
-        let err_msg = node_factory.validate(&all_proto_nodes).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes).err().unwrap();
 
         // assert
-        assert!(
-            err_msg.contains("unary operator but specified two children"),
-            "Unexpected error: {:?}",
-            err_msg
-        );
+        assert!(matches!(err, NodeError::UnaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -665,7 +647,7 @@ mod tests {
     }
 
     #[test]
-    fn test_create_nodes_ok() -> Result<(), String> {
+    fn test_create_nodes_ok() -> Result<(), NodeError> {
         // setup
         let op = LogicalOperator::AND;
         let node_factory = NodeFactoryImpl {};
@@ -682,11 +664,11 @@ mod tests {
                     if let NodeValue::Bool(value) = value {
                         assert_eq!(*value, proto_node.constant_leaf_node().bool_value());
                     } else {
-                        return Err(format!(
+                        panic!(
                             "Input Nodes contain only boolean constants, \
                                     output Node {:?} is a non-boolean constant",
                             value
-                        ));
+                        );
                     }
                 }
                 Node::Combination { operator, left, right } => {
@@ -701,9 +683,10 @@ mod tests {
                     ));
                 }
                 _ => {
-                    return Err("Output Nodes are expected to contain ConstantLeaf and \
+                    panic!(
+                        "Output Nodes are expected to contain ConstantLeaf and \
                                 Combination enum variants only"
-                        .to_string())
+                    )
                 }
             }
         }
@@ -721,7 +704,7 @@ mod tests {
         let nodes = node_factory.create_nodes(&all_proto_nodes, &message_provider);
 
         // assert
-        assert!(nodes.is_err());
+        assert!(matches!(nodes.err().unwrap(), NodeError::UnaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -781,7 +764,7 @@ mod tests {
         let nodes = node_factory.create_nodes(&all_proto_nodes, &message_provider);
 
         // assert error because binary operator needs 2 children
-        assert!(nodes.is_err());
+        assert!(matches!(nodes.err().unwrap(), NodeError::BinaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -802,7 +785,7 @@ mod tests {
         let nodes = node_factory.create_nodes(&all_proto_nodes, &message_provider);
 
         // assert
-        assert!(nodes.is_err());
+        assert!(matches!(nodes.err().unwrap(), NodeError::IndexOutOfBound { .. }));
     }
 
     #[test]
@@ -821,14 +804,14 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
 
         // action
-        let err_msg = node_factory.create_nodes(&all_proto_nodes, &message_provider).err().unwrap();
+        let err = node_factory.create_nodes(&all_proto_nodes, &message_provider).err().unwrap();
 
         // assert
-        assert!(err_msg.starts_with("Cycle detected"), "Unexpected error: {:?}", err_msg);
+        assert!(matches!(err, NodeError::CyclicDependency { .. }));
     }
 
     #[test]
-    fn test_evaluate_logical_operator_ok() -> Result<(), String> {
+    fn test_evaluate_logical_operator_ok() -> Result<(), NodeError> {
         let node_factory = NodeFactoryImpl {};
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
         // setup this tree:
@@ -865,7 +848,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_arithmetic_operator_ok() -> Result<(), String> {
+    fn test_evaluate_arithmetic_operator_ok() -> Result<(), NodeError> {
         let node_factory = NodeFactoryImpl {};
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
         // setup this tree: 5 / 2 * 5^2
@@ -928,7 +911,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_relational_operator_ok() -> Result<(), String> {
+    fn test_evaluate_relational_operator_ok() -> Result<(), NodeError> {
         let node_factory = NodeFactoryImpl {};
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
         // setup this tree which uses the protobuf message initialized in the lazy_static block
@@ -991,7 +974,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_mixed_operators() -> Result<(), String> {
+    fn test_evaluate_mixed_operators() -> Result<(), NodeError> {
         let node_factory = NodeFactoryImpl {};
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
         // setup tree containing all 3 types of operators
@@ -1055,7 +1038,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_mixed_leaf_node_types() -> Result<(), String> {
+    fn test_evaluate_mixed_leaf_node_types() -> Result<(), NodeError> {
         let node_factory = NodeFactoryImpl {};
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
         // setup this tree which uses the protobuf message initialized in the lazy_static block
@@ -1118,7 +1101,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_incompatible_types_should_fail() -> Result<(), String> {
+    fn test_evaluate_incompatible_types_should_fail() -> Result<(), NodeError> {
         let node_factory = NodeFactoryImpl {};
         let message_provider = Arc::new(MockMessageProvider::new()) as Arc<dyn MessageProvider>;
         let mut node_0 = NodeProto::new();
@@ -1141,7 +1124,7 @@ mod tests {
         let result = nodes[1].evaluate();
 
         // True cannot be less than True
-        assert!(result.is_err());
+        assert!(matches!(result.err().unwrap(), NodeError::ComparisonOperatorIncomptaibleOperands));
         Ok(())
     }
 
@@ -1158,7 +1141,7 @@ mod tests {
 
         let err = node.evaluate().err().unwrap();
 
-        assert!(err.contains("Unable to retrieve"));
+        assert!(matches!(err, NodeError::MessageProviderError { .. }));
     }
 
     #[test]
