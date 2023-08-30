@@ -79,6 +79,7 @@ impl PartialEq for NodeValue {
                 approximately_equal(*v1 as f64, *v2 as f64)
             }
             (NodeValue::Double(v1), NodeValue::Double(v2)) => approximately_equal(*v1, *v2),
+            (NodeValue::Message(v1), NodeValue::Message(v2)) => v1 == v2,
             (NodeValue::BoolList(v1), NodeValue::BoolList(v2)) => *v1 == *v2,
             (NodeValue::Int32List(v1), NodeValue::Int32List(v2)) => *v1 == *v2,
             (NodeValue::Int64List(v1), NodeValue::Int64List(v2)) => *v1 == *v2,
@@ -852,23 +853,13 @@ mod tests {
     fn test_extract_field_value_message_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["message_field".to_string()];
-        let expected_msg_bytes = msg
-            .message_field
-            .write_to_bytes()
-            .unwrap_or_else(|_| panic!("Failed to serialize TestNestedMessage"));
+        let expected_value = NodeValue::Message(Box::new(msg.message_field.clone().unwrap()));
 
         // action
         let node_value = NodeValue::extract_value(Box::new(msg), &field_names)?;
 
         // assert
-        if let NodeValue::Message(node_msg) = node_value {
-            let bytes = node_msg
-                .write_to_bytes_dyn()
-                .unwrap_or_else(|_| panic!("Failed to serialize NodeValue's protobuf message"));
-            assert_eq!(bytes, expected_msg_bytes);
-        } else {
-            panic!("Expect Message variant of NodeValue, got {:?}", node_value);
-        }
+        assert_eq!(node_value, expected_value);
         Ok(())
     }
 
