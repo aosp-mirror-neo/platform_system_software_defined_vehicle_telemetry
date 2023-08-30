@@ -30,7 +30,7 @@ pub(crate) trait PublisherFactory<
         &self,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryContext<TTrigger>,
-    ) -> Result<TPublisher, PublisherFactoryError>;
+    ) -> Result<Arc<TPublisher>, PublisherFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a publisher
     /// encapsulated object.
@@ -207,25 +207,25 @@ impl PublisherFactory for PublisherFactoryImpl {
         &self,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryContext,
-    ) -> Result<PublisherImpl, PublisherFactoryError> {
+    ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
         let name = publisher_proto.name.clone();
         let publisher_type = match &publisher_proto.publisher_type {
             Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
                 PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
             }
             Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
-                return Ok(PublisherImpl::new_service_publisher(
+                return Ok(Arc::new(PublisherImpl::new_service_publisher(
                     name,
                     service_publisher.service_name.clone(),
                     self.service_adapter.clone(),
-                ));
+                )));
             }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
                 self.create_aggregation_publisher(aggregation_publisher, context)?
             }
             _ => return Err(PublisherFactoryError::UnknownPublisherType),
         };
-        Ok(PublisherImpl::new(name, publisher_type))
+        Ok(Arc::new(PublisherImpl::new(name, publisher_type)))
     }
 
     fn validate(
@@ -512,7 +512,7 @@ mod tests {
             run_using_empty_factory_context(|context| factory.create(&publisher, context)).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        if let PublisherType::Signal { signal_name } = res.publisher_type {
+        if let PublisherType::Signal { signal_name } = &res.publisher_type {
             assert_eq!(signal_name, SIGNAL_NAME);
         } else {
             panic!("Unexpected publisher type");
@@ -672,7 +672,7 @@ mod tests {
             message_descriptor,
             reset_on_get,
             declarative_aggregations,
-        } = res.publisher_type
+        } = &res.publisher_type
         {
             assert_eq!(res_triggers.len(), 1);
             assert!(Arc::ptr_eq(&res_triggers[0], &triggers.unwrap()[0]));
@@ -725,7 +725,7 @@ mod tests {
         )
         .unwrap();
 
-        if let PublisherType::Aggregation { declarative_aggregations, .. } = res.publisher_type {
+        if let PublisherType::Aggregation { declarative_aggregations, .. } = &res.publisher_type {
             assert_eq!(declarative_aggregations.len(), 1);
             let aggregation = &declarative_aggregations[0];
             assert!(aggregation.seed_expression.is_none());
@@ -831,7 +831,7 @@ mod tests {
         )
         .unwrap();
 
-        if let PublisherType::Aggregation { declarative_aggregations, .. } = res.publisher_type {
+        if let PublisherType::Aggregation { declarative_aggregations, .. } = &res.publisher_type {
             assert_eq!(declarative_aggregations.len(), 1);
             let aggregation = &declarative_aggregations[0];
             assert!(aggregation.seed_expression.is_some());

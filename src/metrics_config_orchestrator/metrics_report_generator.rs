@@ -129,11 +129,10 @@ mod test {
     }
 
     fn create_trigger() -> MockTrigger {
-        MockTrigger {
-            name: String::default(),
-            subscribe_callback: None,
-            unsubscribe_callback: None,
-        }
+        MockTrigger::new_for_subscriber(
+            String::default(),
+            TriggerSubscriber::MetricsReportGenerator { name: REPORT_CONFIG_NAME.to_owned() },
+        )
     }
 
     #[test]
@@ -141,7 +140,7 @@ mod test {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = num_fired.clone();
-        trigger.subscribe_callback = Some(Arc::new(move |_, _| {
+        trigger.subscribe_callback.replace(Box::new(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
             None
         }));
@@ -156,28 +155,19 @@ mod test {
 
     #[test]
     fn on_trigger_fired_creates_reports() {
-        let mut trigger = create_trigger();
-        let fire_trigger_func_container = Arc::new(Mutex::new(None));
-        let fire_trigger_func_container_clone = fire_trigger_func_container.clone();
-        trigger.subscribe_callback = Some(Arc::new(move |_, fire_trigger_func| {
-            *fire_trigger_func_container_clone.lock().unwrap() = Some(fire_trigger_func);
-            None
-        }));
+        let trigger = Arc::new(create_trigger());
 
         let mut generator = create_generator();
         let report_container = Arc::new(Mutex::new(None));
         let report_container_clone = report_container.clone();
-        generator.report_ready_callback =
-            Arc::new(move |report| *report_container_clone.lock().unwrap() = Some(report));
-        generator.triggers.push(Arc::new(trigger));
+        generator.report_ready_callback = Arc::new(move |report| {
+            report_container_clone.lock().unwrap().replace(report);
+        });
+        generator.triggers.push(trigger.clone());
         Arc::new(generator).activate();
 
-        {
-            let fire_trigger_func_guard = fire_trigger_func_container.lock().unwrap();
-            let fire_trigger_func = fire_trigger_func_guard.as_ref().unwrap();
-            fire_trigger_func();
-            fire_trigger_func();
-        }
+        trigger.fire();
+        trigger.fire();
 
         let report_guard = report_container.lock().unwrap();
         let report = report_guard.as_ref().unwrap();
@@ -197,7 +187,7 @@ mod test {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = num_fired.clone();
-        trigger.unsubscribe_callback = Some(Arc::new(move |_| {
+        trigger.unsubscribe_callback.replace(Box::new(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
             None
         }));
