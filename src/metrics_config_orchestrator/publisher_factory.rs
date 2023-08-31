@@ -295,7 +295,7 @@ mod tests {
         async fn subscribe(
             &self,
             _service_name: &str,
-            _new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
+            _new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
         ) -> ServiceSubscription {
             panic!("The function should never be called")
         }
