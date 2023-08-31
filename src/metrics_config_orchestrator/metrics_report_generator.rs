@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use async_trait::async_trait;
 use log::error;
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp, wrappers::Int32Value};
 use sdvtelemetry_proto_rust::metrics_configuration::{metrics_report::ReportReason, MetricsReport};
@@ -15,9 +16,10 @@ use crate::metrics_config_orchestrator::{trigger::TriggerSubscriber, Trigger};
 
 const REPORT_UUID: &str = "00000000-0000-0000-0000-000000000000";
 
+#[async_trait]
 pub(crate) trait MetricsReportGenerator {
-    fn activate(self: &Arc<Self>);
-    fn deactivate(&self);
+    async fn activate(self: &Arc<Self>);
+    async fn deactivate(&self);
 }
 
 #[allow(dead_code)]
@@ -69,12 +71,14 @@ impl MetricsReportGeneratorImpl {
     }
 }
 
+#[async_trait]
 impl MetricsReportGenerator for MetricsReportGeneratorImpl {
-    fn activate(self: &Arc<Self>) {
+    async fn activate(self: &Arc<Self>) {
         for trigger in &self.triggers {
             let self_clone = self.clone();
-            if let Err(err) =
-                trigger.subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
+            if let Err(err) = trigger
+                .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
+                .await
             {
                 error!(
                     "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
@@ -86,9 +90,9 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         }
     }
 
-    fn deactivate(&self) {
+    async fn deactivate(&self) {
         for trigger in &self.triggers {
-            if let Err(err) = trigger.unsubscribe(&self.subscriber) {
+            if let Err(err) = trigger.unsubscribe(&self.subscriber).await {
                 error!(
                     "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
                     self.name,
@@ -135,8 +139,8 @@ mod test {
         )
     }
 
-    #[test]
-    fn activate_subscribes_to_trigger() {
+    #[tokio::test]
+    async fn activate_subscribes_to_trigger() {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = num_fired.clone();
@@ -148,13 +152,13 @@ mod test {
         let mut generator = create_generator();
         generator.triggers.push(Arc::new(trigger));
 
-        Arc::new(generator).activate();
+        Arc::new(generator).activate().await;
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
     }
 
-    #[test]
-    fn on_trigger_fired_creates_reports() {
+    #[tokio::test]
+    async fn on_trigger_fired_creates_reports() {
         let trigger = Arc::new(create_trigger());
 
         let mut generator = create_generator();
@@ -164,10 +168,10 @@ mod test {
             report_container_clone.lock().unwrap().replace(report);
         });
         generator.triggers.push(trigger.clone());
-        Arc::new(generator).activate();
+        Arc::new(generator).activate().await;
 
-        trigger.fire();
-        trigger.fire();
+        trigger.fire().await;
+        trigger.fire().await;
 
         let report_guard = report_container.lock().unwrap();
         let report = report_guard.as_ref().unwrap();
@@ -182,8 +186,8 @@ mod test {
         assert!(report.report_data.is::<Int32Value>());
     }
 
-    #[test]
-    fn deactivate_unsubscribes_from_trigger() {
+    #[tokio::test]
+    async fn deactivate_unsubscribes_from_trigger() {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = num_fired.clone();
@@ -196,8 +200,8 @@ mod test {
         generator.triggers.push(Arc::new(trigger));
         let generator = Arc::new(generator);
 
-        generator.activate();
-        generator.deactivate();
+        generator.activate().await;
+        generator.deactivate().await;
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
     }

@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use std::sync::{Arc, Mutex};
+use async_trait::async_trait;
+use tokio::sync::Mutex as AsyncMutex;
 
 use super::{Trigger, TriggerSubscriber};
 
@@ -10,7 +11,7 @@ pub(crate) struct MockTrigger {
     pub unsubscribe_callback: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
 
     name: String,
-    on_fired_callback: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    on_fired_callback: AsyncMutex<Option<Box<dyn FnMut() + Send + Sync>>>,
 }
 
 /// Mock implementation of Trigger trait for unit tests.
@@ -33,9 +34,8 @@ impl MockTrigger {
     }
 
     /// Fires the trigger.
-    pub(crate) fn fire(&self) {
-        let callback = { self.on_fired_callback.lock().unwrap().as_ref().unwrap().clone() };
-        callback();
+    pub(crate) async fn fire(&self) {
+        self.on_fired_callback.lock().await.as_mut().unwrap()();
     }
 
     pub(crate) fn set_subscribe_callback(
@@ -64,18 +64,19 @@ impl MockTrigger {
     }
 }
 
+#[async_trait]
 impl Trigger for MockTrigger {
     fn get_name(&self) -> &str {
         &self.name
     }
 
-    fn subscribe(
+    async fn subscribe(
         &self,
         subscriber: &TriggerSubscriber,
-        on_fired_callback: Box<dyn Fn() + Send + Sync>,
+        on_fired_callback: Box<dyn FnMut() + Send + Sync>,
     ) -> Result<(), String> {
         self.verify_subscriber(subscriber);
-        self.on_fired_callback.lock().unwrap().replace(on_fired_callback.into());
+        self.on_fired_callback.lock().await.replace(on_fired_callback);
 
         if let Some(callback) = &self.subscribe_callback {
             if let Some(error) = callback(&self.name) {
@@ -86,9 +87,9 @@ impl Trigger for MockTrigger {
         Ok(())
     }
 
-    fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String> {
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String> {
         self.verify_subscriber(subscriber);
-        *self.on_fired_callback.lock().unwrap() = None;
+        *self.on_fired_callback.lock().await = None;
 
         if let Some(callback) = &self.unsubscribe_callback {
             if let Some(error) = callback(&self.name) {
