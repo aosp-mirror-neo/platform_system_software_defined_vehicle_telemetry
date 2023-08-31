@@ -2,7 +2,6 @@
 
 //! Errors that can arise from incorrect node setup and from AST traversal.
 
-use crate::MessageProviderError;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -30,8 +29,8 @@ pub enum NodeError {
     // errors related to FieldLeafNode
     #[error("Field leaf node encountered error: {e}")]
     MessageProviderError { e: MessageProviderError },
-    #[error("Descriptor not found for publisher {publisher_name}")]
-    DescriptorProviderError { publisher_name: String },
+    #[error("Descriptor not found: {e}")]
+    DescriptorProviderError { e: DescriptorProviderError },
     #[error("Field {field_name} does not exist in message {message_name}")]
     FieldNotFound { field_name: String, message_name: String },
     #[error("Nested field {field_name} is illegal: {e}")]
@@ -68,4 +67,22 @@ pub enum NodeError {
     ContainsOperatorIncompatibleOperands,
     #[error("ALL_EQ operator requires left operand is a list, right operand is a scalar of compatible type to the list value")]
     AllEqualsOperatorIncompatibleOperands,
+}
+
+/// Error returned by MessageProvider
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum MessageProviderError {
+    /// Publisher name is invalid.
+    #[error("Publisher name is invalid")]
+    InvalidPublisherName,
+}
+
+/// Error returned by DescriptorProvider
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum DescriptorProviderError {
+    /// Publisher name is invalid.
+    #[error("Publisher name is invalid")]
+    InvalidPublisherName,
 }
