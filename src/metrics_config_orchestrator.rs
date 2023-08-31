@@ -24,6 +24,7 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 use thiserror::Error;
+use tokio::task;
 
 use crate::collection_extension::HashMapExtension;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
@@ -367,8 +368,8 @@ where
         )?))
     }
 
-    fn on_start_trigger_fired(
-        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    async fn on_start_trigger_fired(
+        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
         if let Some(start_trigger) = &config.start_trigger {
             if let Err(err) = start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart) {
@@ -382,7 +383,7 @@ where
         }
 
         for publisher in config.publishers.values() {
-            if let Err(err) = publisher.activate() {
+            if let Err(err) = publisher.activate().await {
                 error!(
                     "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
                         The publisher won't notify about new messages and any attempts to get its data will fail.",
@@ -456,12 +457,12 @@ impl<
 where
     TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
     TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger>,
-    TNodeFactory: NodeFactory + Sync,
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + 'static,
+    TNodeFactory: NodeFactory + Sync + 'static,
     TPublisher: Publisher + Send + Sync + 'static,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Sync,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Sync + 'static,
     TTrigger: Trigger + Sync + Send + 'static,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Sync,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Sync + 'static,
 {
     fn initialize_config(
         &self,
@@ -593,7 +594,9 @@ where
             start_trigger
                 .subscribe(
                     &TriggerSubscriber::MetricsConfigStart,
-                    Box::new(move || Self::on_start_trigger_fired(&config_clone)),
+                    Box::new(move || {
+                        task::spawn(Self::on_start_trigger_fired(config_clone.clone()));
+                    }),
                 )
                 .map_err(|error| MetricsConfigOrchestratorError::UnableToActivateStartTrigger {
                     error,
@@ -693,6 +696,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use protobuf::{well_known_types::wrappers::Int32Value, MessageDyn};
     use sdv_ast::{Node, NodeValue};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
@@ -706,6 +710,7 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::Mutex;
+    use tokio::{time, time::Duration};
 
     use super::*;
     use crate::metrics_config_orchestrator::publisher::PublisherError;
@@ -855,6 +860,7 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl Publisher for MockPublisher {
         fn get_name(&self) -> &str {
             &self.name
@@ -864,7 +870,7 @@ mod tests {
             self.latest_message.clone()
         }
 
-        fn activate(self: &Arc<Self>) -> Result<(), PublisherError> {
+        async fn activate(self: &Arc<Self>) -> Result<(), PublisherError> {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);
             }
@@ -872,7 +878,7 @@ mod tests {
             Ok(())
         }
 
-        fn deactivate(&self) -> Result<(), PublisherError> {
+        async fn deactivate(&self) -> Result<(), PublisherError> {
             Ok(())
         }
     }
@@ -1535,8 +1541,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn initialize_config_with_lifetime_triggers_success() {
+    #[tokio::test]
+    async fn initialize_config_with_lifetime_triggers_success() {
         const ACTIVATE: &str = "activate";
         const SUBSCRIBE: &str = "subscribe";
         const UNSUBSCRIBE: &str = "unsubscribe";
@@ -1618,6 +1624,8 @@ mod tests {
 
         orchestrator.initialize_config(&config).unwrap();
         start_trigger_mock.fire();
+        // Sleep to make sure trigger handler task is processed.
+        time::sleep(Duration::from_millis(1)).await;
 
         let expected_calls = vec![
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),

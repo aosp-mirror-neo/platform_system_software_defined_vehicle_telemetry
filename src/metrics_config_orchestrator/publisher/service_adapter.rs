@@ -1,25 +1,31 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use async_trait::async_trait;
 use protobuf::{well_known_types::wrappers::Int32Value, MessageDyn};
 use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU32, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
 use thiserror::Error;
-use tokio::time::Duration;
+use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
 /// Provides an interface to subscribe to messages published by services.
+#[async_trait]
 pub(crate) trait ServiceAdapter {
-    fn subscribe(
+    async fn subscribe(
         &self,
         service_name: &str,
-        new_message_callback: Box<dyn Fn(&dyn MessageDyn) + Send + Sync>,
+        new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
     ) -> ServiceSubscription;
-    fn unsubscribe(&self, subscription: ServiceSubscription) -> Result<(), ServiceAdapterError>;
+
+    async fn unsubscribe(
+        &self,
+        subscription: ServiceSubscription,
+    ) -> Result<(), ServiceAdapterError>;
 }
 
 pub(crate) struct ServiceSubscription {
@@ -46,8 +52,11 @@ pub(crate) struct ServiceAdapterImpl {
     // The first subscription to service creates a new map and passes it to an async loop
     // that generates the data. Last unsubscription to service clears the map signaling that
     // the loop should return.
-    service_subscriptions: Mutex<
-        HashMap<String, Arc<Mutex<HashMap<u32, Box<dyn Fn(&dyn MessageDyn) + Send + Sync>>>>>,
+    service_subscriptions: AsyncMutex<
+        HashMap<
+            String,
+            Arc<AsyncMutex<HashMap<u32, Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>>>>,
+        >,
     >,
 
     next_service_id: AtomicU32,
@@ -58,7 +67,7 @@ impl ServiceAdapterImpl {
         ServiceAdapterImpl {
             min_interval_ms: 500,
             max_interval_ms: 5000,
-            service_subscriptions: Mutex::new(HashMap::new()),
+            service_subscriptions: AsyncMutex::new(HashMap::new()),
             next_service_id: AtomicU32::new(1),
         }
     }
@@ -68,7 +77,7 @@ impl ServiceAdapterImpl {
         min_interval_ms: u64,
         max_interval_ms: u64,
         subscriptions_container: Arc<
-            Mutex<HashMap<u32, Box<dyn Fn(&dyn MessageDyn) + Send + Sync>>>,
+            AsyncMutex<HashMap<u32, Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>>>,
         >,
     ) {
         let mut small_rng = SmallRng::from_entropy();
@@ -76,7 +85,7 @@ impl ServiceAdapterImpl {
 
         loop {
             // Verify that the map hasn't been cleared.
-            if subscriptions_container.lock().unwrap().is_empty() {
+            if subscriptions_container.lock().await.is_empty() {
                 return;
             }
 
@@ -88,7 +97,7 @@ impl ServiceAdapterImpl {
             }))
             .await;
 
-            let subscriptions = subscriptions_container.lock().unwrap();
+            let subscriptions = subscriptions_container.lock().await;
 
             // Verify that the map hasn't been cleared.
             if subscriptions.is_empty() {
@@ -107,23 +116,24 @@ impl ServiceAdapterImpl {
     }
 }
 
+#[async_trait]
 impl ServiceAdapter for ServiceAdapterImpl {
-    fn subscribe(
+    async fn subscribe(
         &self,
         service_name: &str,
-        new_message_callback: Box<dyn Fn(&dyn MessageDyn) + Send + Sync>,
+        new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
     ) -> ServiceSubscription {
         let subscription_id = self.next_service_id.fetch_add(1, Ordering::SeqCst);
-        let mut subscriptions_map = self.service_subscriptions.lock().unwrap();
+        let mut subscriptions_map = self.service_subscriptions.lock().await;
 
         if let Some(subscriptions_container) = subscriptions_map.get(service_name) {
             // If there's already an async loop that generates the data, add callback to its map.
-            subscriptions_container.lock().unwrap().insert(subscription_id, new_message_callback);
+            subscriptions_container.lock().await.insert(subscription_id, new_message_callback);
         } else {
             // If there no async loop that generates the data, create a new map.
             let mut subscriptions = HashMap::new();
             subscriptions.insert(subscription_id, new_message_callback);
-            let subscriptions_container = Arc::new(Mutex::new(subscriptions));
+            let subscriptions_container = Arc::new(AsyncMutex::new(subscriptions));
             subscriptions_map.insert(service_name.to_owned(), subscriptions_container.clone());
 
             // Spawn a new async loop for the new map.
@@ -137,13 +147,16 @@ impl ServiceAdapter for ServiceAdapterImpl {
         ServiceSubscription { service_name: service_name.to_owned(), subscription_id }
     }
 
-    fn unsubscribe(&self, subscription: ServiceSubscription) -> Result<(), ServiceAdapterError> {
-        let mut subscriptions_map = self.service_subscriptions.lock().unwrap();
+    async fn unsubscribe(
+        &self,
+        subscription: ServiceSubscription,
+    ) -> Result<(), ServiceAdapterError> {
+        let mut subscriptions_map = self.service_subscriptions.lock().await;
 
         let is_last_subscription = if let Some(subscriptions_container) =
             subscriptions_map.get(&subscription.service_name)
         {
-            let mut subscriptions = subscriptions_container.lock().unwrap();
+            let mut subscriptions = subscriptions_container.lock().await;
 
             if subscriptions.remove(&subscription.subscription_id).is_none() {
                 return Err(ServiceAdapterError::InvalidServiceSubscription);
@@ -168,7 +181,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
 pub(super) mod tests {
     use lazy_static::lazy_static;
     use protobuf::{reflect::FieldDescriptor, MessageFull};
-    use std::fmt::Debug;
+    use std::{fmt::Debug, sync::Mutex};
     use tokio::time;
 
     use super::*;
@@ -225,21 +238,25 @@ pub(super) mod tests {
         let msg_nums_clone = msg_nums.clone();
         let msg_nums_clone2 = msg_nums.clone();
 
-        service_adapter.subscribe(
-            SERVICE_NAME,
-            Box::new(move |msg| {
-                msg_nums_clone.lock().unwrap().push((SERVICE_NAME, get_msg_value(msg)))
-            }),
-        );
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                Box::new(move |msg| {
+                    msg_nums_clone.lock().unwrap().push((SERVICE_NAME, get_msg_value(msg)))
+                }),
+            )
+            .await;
         time::sleep(Duration::from_millis(1)).await;
         service_adapter.min_interval_ms = 2 * INTERVAL_MS;
         service_adapter.max_interval_ms = service_adapter.min_interval_ms;
-        service_adapter.subscribe(
-            SERVICE_NAME2,
-            Box::new(move |msg| {
-                msg_nums_clone2.lock().unwrap().push((SERVICE_NAME2, get_msg_value(msg)))
-            }),
-        );
+        service_adapter
+            .subscribe(
+                SERVICE_NAME2,
+                Box::new(move |msg| {
+                    msg_nums_clone2.lock().unwrap().push((SERVICE_NAME2, get_msg_value(msg)))
+                }),
+            )
+            .await;
         // Sleep for 2.5 intervals to let adapter generate 3 messages.
         time::sleep(Duration::from_millis(5 * INTERVAL_MS / 2)).await;
 
@@ -255,29 +272,33 @@ pub(super) mod tests {
         let msg_nums_clone = msg_nums.clone();
         let msg_nums_clone2 = msg_nums.clone();
 
-        service_adapter.subscribe(
-            SERVICE_NAME,
-            Box::new(move |msg| msg_nums_clone.lock().unwrap().push((1, get_msg_value(msg)))),
-        );
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                Box::new(move |msg| msg_nums_clone.lock().unwrap().push((1, get_msg_value(msg)))),
+            )
+            .await;
         time::sleep(Duration::from_millis(INTERVAL_MS / 4)).await;
         // Increase interval so that new async loops won't generate messages any time soon.
         service_adapter.min_interval_ms = 100 * INTERVAL_MS;
         service_adapter.max_interval_ms = service_adapter.min_interval_ms;
-        service_adapter.subscribe(
-            SERVICE_NAME,
-            Box::new(move |msg| msg_nums_clone2.lock().unwrap().push((2, get_msg_value(msg)))),
-        );
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                Box::new(move |msg| msg_nums_clone2.lock().unwrap().push((2, get_msg_value(msg)))),
+            )
+            .await;
         // Sleep for 2.5 intervals to let adapter generate 4 messages.
         time::sleep(Duration::from_millis(5 * INTERVAL_MS / 2)).await;
 
         assert_eq!(msg_nums.lock().unwrap().len(), 4);
     }
 
-    #[test]
-    fn unsubscribe_not_subscribed_fails() {
+    #[tokio::test]
+    async fn unsubscribe_not_subscribed_fails() {
         let service_adapter = create_service_adapter();
 
-        let err = service_adapter.unsubscribe(create_invalid_subscription()).err().unwrap();
+        let err = service_adapter.unsubscribe(create_invalid_subscription()).await.err().unwrap();
 
         assert!(
             matches!(&err, ServiceAdapterError::InvalidServiceSubscription),
@@ -289,9 +310,9 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_not_subscribed_service_exists_fails() {
         let service_adapter = create_service_adapter();
-        service_adapter.subscribe(SERVICE_NAME, Box::new(|_| {}));
 
-        let err = service_adapter.unsubscribe(create_invalid_subscription()).err().unwrap();
+        service_adapter.subscribe(SERVICE_NAME, Box::new(|_| {})).await;
+        let err = service_adapter.unsubscribe(create_invalid_subscription()).await.err().unwrap();
 
         assert!(
             matches!(&err, ServiceAdapterError::InvalidServiceSubscription),
@@ -305,15 +326,46 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter();
         let msg_nums = Arc::new(Mutex::new(Vec::new()));
         let msg_nums_clone = msg_nums.clone();
-        let subscription = service_adapter.subscribe(
-            SERVICE_NAME,
-            Box::new(move |msg| msg_nums_clone.lock().unwrap().push(get_msg_value(msg))),
-        );
 
-        service_adapter.unsubscribe(subscription).unwrap();
+        let subscription = service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                Box::new(move |msg| msg_nums_clone.lock().unwrap().push(get_msg_value(msg))),
+            )
+            .await;
+        service_adapter.unsubscribe(subscription).await.unwrap();
         // Sleep for 1.5 interval to ensure the trigger won't fire.
         time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
 
         assert_eq!(msg_nums.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_from_callback_success() {
+        let service_adapter = Arc::new(create_service_adapter());
+        let service_adapter_clone = service_adapter.clone();
+        let subscription_holder = Arc::new(Mutex::new(None));
+        let subscription_holder_clone = subscription_holder.clone();
+
+        let subscription = service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                Box::new(move |_| {
+                    // Take and unwrap to make sure the holder is not empty or else
+                    // the callback fails if called twice.
+                    let subscription = subscription_holder_clone.lock().unwrap().take().unwrap();
+                    let service_adapter_clone = service_adapter_clone.clone();
+                    tokio::spawn(async move {
+                        service_adapter_clone.unsubscribe(subscription).await.unwrap();
+                    });
+                }),
+            )
+            .await;
+        subscription_holder.lock().unwrap().replace(subscription);
+        // Sleep for 2.5 intervals to let adapter generate 2 messages.
+        time::sleep(Duration::from_millis(5 * INTERVAL_MS / 2)).await;
+
+        // Verify that subscription has been consumed by the unsubscribe call.
+        assert!(subscription_holder.lock().unwrap().is_none())
     }
 }

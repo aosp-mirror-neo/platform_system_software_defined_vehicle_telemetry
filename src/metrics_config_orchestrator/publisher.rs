@@ -2,6 +2,7 @@
 
 pub(super) mod service_adapter;
 
+use async_trait::async_trait;
 use log::error;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_ast::Node;
@@ -13,16 +14,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 use thiserror::Error;
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::metrics_config_orchestrator::TriggerImpl;
 use service_adapter::{ServiceAdapter, ServiceAdapterError, ServiceSubscription};
 
+#[async_trait]
 pub(crate) trait Publisher {
     fn get_name(&self) -> &str;
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
 
-    fn activate(self: &Arc<Self>) -> Result<(), PublisherError>;
-    fn deactivate(&self) -> Result<(), PublisherError>;
+    async fn activate(self: &Arc<Self>) -> Result<(), PublisherError>;
+    async fn deactivate(&self) -> Result<(), PublisherError>;
 }
 
 #[derive(Error, Debug)]
@@ -58,7 +61,7 @@ pub(crate) enum PublisherType {
     Service {
         service_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-        service_subscription: Mutex<Option<ServiceSubscription>>,
+        service_subscription: AsyncMutex<Option<ServiceSubscription>>,
     },
     Aggregation {
         triggers: Vec<Arc<TriggerImpl>>,
@@ -93,7 +96,7 @@ impl PublisherImpl {
             PublisherType::Service {
                 service_name,
                 service_adapter,
-                service_subscription: Mutex::new(None),
+                service_subscription: AsyncMutex::new(None),
             },
         )
     }
@@ -103,6 +106,7 @@ impl PublisherImpl {
     }
 }
 
+#[async_trait]
 impl Publisher for PublisherImpl {
     fn get_name(&self) -> &str {
         &self.name
@@ -112,21 +116,25 @@ impl Publisher for PublisherImpl {
         self.latest_message.lock().unwrap().clone()
     }
 
-    fn activate(self: &Arc<Self>) -> Result<(), PublisherError> {
+    async fn activate(self: &Arc<Self>) -> Result<(), PublisherError> {
         match &self.publisher_type {
             PublisherType::Signal { .. } => {
                 return Err(PublisherError::SignalPublishersNotImplemented)
             }
             PublisherType::Service { service_name, service_adapter, service_subscription } => {
-                let mut subscription = service_subscription.lock().unwrap();
+                let mut subscription = service_subscription.lock().await;
                 if subscription.is_some() {
                     return Err(PublisherError::AlreadyActive);
                 }
                 let self_clone = self.clone();
-                *subscription = Some(service_adapter.subscribe(
-                    service_name,
-                    Box::new(move |msg| self_clone.on_service_publisher_new_message(msg)),
-                ));
+                *subscription = Some(
+                    service_adapter
+                        .subscribe(
+                            service_name,
+                            Box::new(move |msg| self_clone.on_service_publisher_new_message(msg)),
+                        )
+                        .await,
+                );
             }
             PublisherType::Aggregation { .. } => {
                 return Err(PublisherError::AggregationPublishersNotImplemented)
@@ -136,15 +144,15 @@ impl Publisher for PublisherImpl {
         Ok(())
     }
 
-    fn deactivate(&self) -> Result<(), PublisherError> {
+    async fn deactivate(&self) -> Result<(), PublisherError> {
         match &self.publisher_type {
             PublisherType::Signal { .. } => {
                 return Err(PublisherError::SignalPublishersNotImplemented)
             }
             PublisherType::Service { service_adapter, service_subscription, .. } => {
-                let mut maybe_subscription = service_subscription.lock().unwrap();
+                let mut maybe_subscription = service_subscription.lock().await;
                 if let Some(subscription) = maybe_subscription.take() {
-                    service_adapter.unsubscribe(subscription)?;
+                    service_adapter.unsubscribe(subscription).await?;
                 } else {
                     return Err(PublisherError::AlreadyInactive);
                 }
@@ -195,11 +203,12 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl ServiceAdapter for MockServiceAdapter {
-        fn subscribe(
+        async fn subscribe(
             &self,
             _service_name: &str,
-            new_message_callback: Box<dyn Fn(&dyn MessageDyn) + Send + Sync>,
+            new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
         ) -> ServiceSubscription {
             if let Some(callback) = &self.subscribe_callback {
                 callback(new_message_callback);
@@ -208,7 +217,7 @@ mod tests {
             ServiceSubscription { service_name: String::default(), subscription_id: u32::MAX }
         }
 
-        fn unsubscribe(
+        async fn unsubscribe(
             &self,
             _subscription: ServiceSubscription,
         ) -> Result<(), ServiceAdapterError> {
@@ -217,14 +226,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn activate_signal_publisher_fails_not_implemented() {
+    #[tokio::test]
+    async fn activate_signal_publisher_fails_not_implemented() {
         let publisher = Arc::new(PublisherImpl::new(
             PUBLISHER_NAME.to_owned(),
             PublisherType::Signal { signal_name: String::default() },
         ));
 
-        let err = publisher.activate().err().unwrap();
+        let err = publisher.activate().await.err().unwrap();
 
         assert!(
             matches!(&err, PublisherError::SignalPublishersNotImplemented),
@@ -233,8 +242,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn activate_service_publisher_subscription_changes_last_message() {
+    #[tokio::test]
+    async fn activate_service_publisher_subscription_changes_last_message() {
         let mut service_adapter = MockServiceAdapter::new();
         let new_message_callback = Arc::new(Mutex::new(None));
         let new_message_callback_ref = new_message_callback.clone();
@@ -251,7 +260,7 @@ mod tests {
         let mut msg = Int32Value::new();
         msg.value = 42;
 
-        publisher.activate().unwrap();
+        publisher.activate().await.unwrap();
         new_message_callback.lock().unwrap().as_ref().unwrap()(&msg);
 
         assert_eq!(
@@ -262,8 +271,8 @@ mod tests {
         assert_eq!(service_adapter.num_unsubscribe_calls.load(Ordering::Acquire), 0);
     }
 
-    #[test]
-    fn activate_service_publisher_already_activated_fails() {
+    #[tokio::test]
+    async fn activate_service_publisher_already_activated_fails() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
@@ -271,16 +280,16 @@ mod tests {
             service_adapter.clone(),
         ));
 
-        publisher.activate().unwrap();
-        let err = publisher.activate().err().unwrap();
+        publisher.activate().await.unwrap();
+        let err = publisher.activate().await.err().unwrap();
 
         assert!(matches!(&err, PublisherError::AlreadyActive), "Unexpected error: {}", err);
         assert_eq!(service_adapter.num_subscribe_calls.load(Ordering::Acquire), 1);
         assert_eq!(service_adapter.num_unsubscribe_calls.load(Ordering::Acquire), 0);
     }
 
-    #[test]
-    fn activate_aggregation_publisher_fails_not_implemented() {
+    #[tokio::test]
+    async fn activate_aggregation_publisher_fails_not_implemented() {
         let publisher = Arc::new(PublisherImpl::new(
             PUBLISHER_NAME.to_owned(),
             PublisherType::Aggregation {
@@ -291,7 +300,7 @@ mod tests {
             },
         ));
 
-        let err = publisher.activate().err().unwrap();
+        let err = publisher.activate().await.err().unwrap();
 
         assert!(
             matches!(&err, PublisherError::AggregationPublishersNotImplemented),
@@ -300,14 +309,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn dectivate_signal_publisher_fails_not_implemented() {
+    #[tokio::test]
+    async fn dectivate_signal_publisher_fails_not_implemented() {
         let publisher = PublisherImpl::new(
             PUBLISHER_NAME.to_owned(),
             PublisherType::Signal { signal_name: String::default() },
         );
 
-        let err = publisher.deactivate().err().unwrap();
+        let err = publisher.deactivate().await.err().unwrap();
 
         assert!(
             matches!(&err, PublisherError::SignalPublishersNotImplemented),
@@ -316,8 +325,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn deactivate_service_publisher_calls_unsubscribe() {
+    #[tokio::test]
+    async fn deactivate_service_publisher_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
@@ -325,15 +334,15 @@ mod tests {
             service_adapter.clone(),
         ));
 
-        publisher.activate().unwrap();
-        publisher.deactivate().unwrap();
+        publisher.activate().await.unwrap();
+        publisher.deactivate().await.unwrap();
 
         assert_eq!(service_adapter.num_subscribe_calls.load(Ordering::Acquire), 1);
         assert_eq!(service_adapter.num_unsubscribe_calls.load(Ordering::Acquire), 1);
     }
 
-    #[test]
-    fn deactivate_service_publisher_not_activated_fails() {
+    #[tokio::test]
+    async fn deactivate_service_publisher_not_activated_fails() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
@@ -341,15 +350,15 @@ mod tests {
             service_adapter.clone(),
         );
 
-        let err = publisher.deactivate().err().unwrap();
+        let err = publisher.deactivate().await.err().unwrap();
 
         assert!(matches!(&err, PublisherError::AlreadyInactive), "Unexpected error: {}", err);
         assert_eq!(service_adapter.num_subscribe_calls.load(Ordering::Acquire), 0);
         assert_eq!(service_adapter.num_unsubscribe_calls.load(Ordering::Acquire), 0);
     }
 
-    #[test]
-    fn deactivate_aggregation_fails_not_implemented() {
+    #[tokio::test]
+    async fn deactivate_aggregation_fails_not_implemented() {
         let publisher = PublisherImpl::new(
             PUBLISHER_NAME.to_owned(),
             PublisherType::Aggregation {
@@ -360,7 +369,7 @@ mod tests {
             },
         );
 
-        let err = publisher.deactivate().err().unwrap();
+        let err = publisher.deactivate().await.err().unwrap();
 
         assert!(
             matches!(&err, PublisherError::AggregationPublishersNotImplemented),
