@@ -387,6 +387,8 @@ where
         }
 
         for publisher in config.publishers.values() {
+            // Activating publishers one by one. In theory, it should be possible to also spawn
+            // activation tasks in parallel as an optimization.
             if let Err(err) = publisher.activate().await {
                 error!(
                     "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
