@@ -89,7 +89,6 @@ impl Trigger for MockTrigger {
 
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String> {
         self.verify_subscriber(subscriber);
-        *self.on_fired_callback.lock().await = None;
 
         if let Some(callback) = &self.unsubscribe_callback {
             if let Some(error) = callback(&self.name) {
