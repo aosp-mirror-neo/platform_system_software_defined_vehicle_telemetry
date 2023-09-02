@@ -255,6 +255,7 @@ impl PublisherFactory for PublisherFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use async_trait::async_trait;
     use protobuf::{
         descriptor::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto},
         EnumOrUnknown, MessageDyn, MessageField,
@@ -289,16 +290,17 @@ mod tests {
 
     struct MockServiceAdapter {}
 
+    #[async_trait]
     impl ServiceAdapter for MockServiceAdapter {
-        fn subscribe(
+        async fn subscribe(
             &self,
             _service_name: &str,
-            _new_message_callback: Box<dyn Fn(&dyn MessageDyn) + Send + Sync>,
+            _new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
         ) -> ServiceSubscription {
             panic!("The function should never be called")
         }
 
-        fn unsubscribe(
+        async fn unsubscribe(
             &self,
             _subscription: ServiceSubscription,
         ) -> Result<(), ServiceAdapterError> {
@@ -519,8 +521,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn create_service_publisher_success() {
+    #[tokio::test]
+    async fn create_service_publisher_success() {
         let factory = create_factory();
         let publisher = create_valid_service_publisher();
 
@@ -532,7 +534,7 @@ mod tests {
             &res.publisher_type
         {
             assert_eq!(service_name, SERVICE_NAME);
-            assert!(service_subscription.lock().unwrap().is_none());
+            assert!(service_subscription.lock().await.is_none());
         } else {
             panic!("Unexpected publisher type");
         }
