@@ -23,8 +23,8 @@ const char* UUID = "01bf0754-df95-46bb-bb35-522b6af66600";
 // is passed to the telemetry service.
 void trigger_report_ready_listener(void* listener, const char* data) {
     std::string str(data);
-    auto reportReadListener = static_cast<IReportReadyListener*>(listener);
-    reportReadListener->onReady(str);
+    auto reportReadyListener = static_cast<IReportReadyListener*>(listener);
+    reportReadyListener->onReady(str);
 }
 
 // Callback function triggered by the telemetry service. Pointer to this function
