@@ -183,7 +183,7 @@ mod tests {
         num_subscribe_calls: AtomicU32,
         num_unsubscribe_calls: AtomicU32,
         subscribe_callback:
-            Option<Box<dyn Fn(Box<dyn Fn(&dyn MessageDyn) + Send + Sync>) + Send + Sync>>,
+            Option<Box<dyn Fn(Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>) + Send + Sync>>,
     }
 
     impl MockServiceAdapter {
@@ -197,7 +197,7 @@ mod tests {
 
         fn set_subscribe_callback(
             &mut self,
-            callback: impl Fn(Box<dyn Fn(&dyn MessageDyn) + Send + Sync>) + Send + Sync + 'static,
+            callback: impl Fn(Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>) + Send + Sync + 'static,
         ) {
             self.subscribe_callback = Some(Box::new(callback));
         }
@@ -208,7 +208,7 @@ mod tests {
         async fn subscribe(
             &self,
             _service_name: &str,
-            new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
+            new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
         ) -> ServiceSubscription {
             if let Some(callback) = &self.subscribe_callback {
                 callback(new_message_callback);
@@ -261,7 +261,7 @@ mod tests {
         msg.value = 42;
 
         publisher.activate().await.unwrap();
-        new_message_callback.lock().unwrap().as_ref().unwrap()(&msg);
+        new_message_callback.lock().unwrap().take().unwrap()(&msg);
 
         assert_eq!(
             &publisher.get_latest_message().unwrap(),

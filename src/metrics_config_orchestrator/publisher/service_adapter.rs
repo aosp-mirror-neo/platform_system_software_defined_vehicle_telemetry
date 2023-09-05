@@ -19,7 +19,7 @@ pub(crate) trait ServiceAdapter {
     async fn subscribe(
         &self,
         service_name: &str,
-        new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
+        new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> ServiceSubscription;
 
     async fn unsubscribe(
@@ -55,7 +55,7 @@ pub(crate) struct ServiceAdapterImpl {
     service_subscriptions: AsyncMutex<
         HashMap<
             String,
-            Arc<AsyncMutex<HashMap<u32, Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>>>>,
+            Arc<AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>>,
         >,
     >,
 
@@ -77,7 +77,7 @@ impl ServiceAdapterImpl {
         min_interval_ms: u64,
         max_interval_ms: u64,
         subscriptions_container: Arc<
-            AsyncMutex<HashMap<u32, Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>>>,
+            AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
         >,
     ) {
         let mut small_rng = SmallRng::from_entropy();
@@ -97,7 +97,8 @@ impl ServiceAdapterImpl {
             }))
             .await;
 
-            let subscriptions = subscriptions_container.lock().await;
+            // Retrieve subscriptions.
+            let mut subscriptions = subscriptions_container.lock().await;
 
             // Verify that the map hasn't been cleared.
             if subscriptions.is_empty() {
@@ -109,7 +110,7 @@ impl ServiceAdapterImpl {
             message.value = num;
             num += 1;
 
-            for subscription in subscriptions.values() {
+            for subscription in subscriptions.values_mut() {
                 subscription(&message);
             }
         }
@@ -121,7 +122,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
     async fn subscribe(
         &self,
         service_name: &str,
-        new_message_callback: Box<dyn for<'a> Fn(&'a dyn MessageDyn) + Send + Sync>,
+        new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> ServiceSubscription {
         let subscription_id = self.next_service_id.fetch_add(1, Ordering::SeqCst);
         let mut subscriptions_map = self.service_subscriptions.lock().await;
@@ -343,7 +344,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_from_callback_success() {
         let service_adapter = Arc::new(create_service_adapter());
-        let service_adapter_clone = service_adapter.clone();
+        let mut service_adapter_clone = Some(service_adapter.clone());
         let subscription_holder = Arc::new(Mutex::new(None));
         let subscription_holder_clone = subscription_holder.clone();
 
@@ -351,10 +352,10 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Box::new(move |_| {
-                    // Take and unwrap to make sure the holder is not empty or else
-                    // the callback fails if called twice.
+                    // Take and unwrap to make sure the adapter and the holder are not empty
+                    // and the callback fails if called twice.
                     let subscription = subscription_holder_clone.lock().unwrap().take().unwrap();
-                    let service_adapter_clone = service_adapter_clone.clone();
+                    let service_adapter_clone = service_adapter_clone.take().unwrap();
                     tokio::spawn(async move {
                         service_adapter_clone.unsubscribe(subscription).await.unwrap();
                     });
