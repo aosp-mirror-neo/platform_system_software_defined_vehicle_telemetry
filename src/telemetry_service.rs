@@ -662,7 +662,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn add_metrics_config() {
+    async fn add_metrics_config_validate_config_calls_received() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -683,7 +683,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn activate_metrics_config() {
+    async fn activate_metrics_config_initialize_configs_calls_received() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -707,7 +707,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deactivate_metrics_config() {
+    async fn deactivate_metrics_config_finish_config_calls_received() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
         // Creating a separate directory for each unit test to avoid overlapping file

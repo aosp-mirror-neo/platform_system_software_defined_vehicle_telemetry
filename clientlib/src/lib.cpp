@@ -55,8 +55,20 @@ void set_report_ready_listener(ServiceHolder* holder, void* listener,
     service->set_report_ready_listener(listener, cbFunc);
 }
 
+void clear_report_ready_listener(ServiceHolder* holder) {
+    android::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    service->clear_report_ready_listener();
+}
+
 void set_status_listener(ServiceHolder* holder, void (*cbFunc)(int, const char*)) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
     service->set_status_listener(cbFunc);
+}
+
+void clear_status_listener(ServiceHolder* holder) {
+    android::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    service->clear_status_listener();
 }
