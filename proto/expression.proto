@@ -117,21 +117,3 @@ message CombinationNode {
   // is set, an error will be raised.
   optional uint32 right_index = 5;
 }
-
-message NewProtoNode {
-  // Required.
-  // Type name of protobuf message that is created by the node.
-  string message_type = 1;
-
-  message FieldAssignmentExpression {
-    // Required.
-    // The name of the protobuf message field to set.
-    string field_name = 1;
-
-    // Required.
-    // Index of root expression node that evaluates the value to set.
-    uint32 expression_node_index = 2;
-  }
-
-  repeated FieldAssignmentExpression field_assignments = 2;
-}

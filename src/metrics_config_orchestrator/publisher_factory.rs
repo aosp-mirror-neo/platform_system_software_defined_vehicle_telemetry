@@ -160,22 +160,27 @@ impl PublisherFactoryImpl {
                         field_name: declarative_aggregation_proto.field_name.clone(),
                     })?;
 
-                let (seed_expression, aggregation_expression) = if aggregation_type
+                let (seed_message_builder, aggregation_message_builder) = if aggregation_type
                     == AggregationType::CUSTOM
                 {
-                    if declarative_aggregation_proto.seed_expression.is_none() {
+                    if declarative_aggregation_proto.seed_message_builder.is_none() {
                         return Err(PublisherFactoryError::SeedExpressionNotSet {
                             field_name: declarative_aggregation_proto.field_name.clone(),
                         });
                     }
-                    if declarative_aggregation_proto.aggregation_expression.is_none() {
+                    if declarative_aggregation_proto.aggregation_message_builder.is_none() {
                         return Err(PublisherFactoryError::AggregationExpressionNotSet {
                             field_name: declarative_aggregation_proto.field_name.clone(),
                         });
                     }
                     (
-                        Some(declarative_aggregation_proto.seed_expression.clone().unwrap()),
-                        Some(declarative_aggregation_proto.aggregation_expression.clone().unwrap()),
+                        Some(declarative_aggregation_proto.seed_message_builder.clone().unwrap()),
+                        Some(
+                            declarative_aggregation_proto
+                                .aggregation_message_builder
+                                .clone()
+                                .unwrap(),
+                        ),
                     )
                 } else {
                     (None, None)
@@ -187,8 +192,8 @@ impl PublisherFactoryImpl {
                         field_name: declarative_aggregation_proto.field_name.clone(),
                         selector_expression: selector_expression.clone(),
                         aggregation_type,
-                        seed_expression,
-                        aggregation_expression,
+                        seed_message_builder,
+                        aggregation_message_builder,
                     },
                 ) {
                     Ok(_) => Ok(acc),
@@ -261,12 +266,10 @@ mod tests {
         EnumOrUnknown, MessageDyn, MessageField,
     };
     use sdv_ast::NodeValue;
-    use sdvtelemetry_proto_rust::{
-        expression::NewProtoNode,
-        metrics_configuration::{
-            AggregationPublisher as AggregationPublisherProto,
-            DeclarativeAggregation as DeclarativeAggregationProto, Publisher as PublisherProto,
-        },
+    use sdvtelemetry_proto_rust::metrics_configuration::{
+        AggregationPublisher as AggregationPublisherProto,
+        DeclarativeAggregation as DeclarativeAggregationProto, ProtoMessageBuilder,
+        Publisher as PublisherProto,
     };
     use std::collections::HashMap;
 
@@ -730,15 +733,15 @@ mod tests {
         if let PublisherType::Aggregation { declarative_aggregations, .. } = &res.publisher_type {
             assert_eq!(declarative_aggregations.len(), 1);
             let aggregation = &declarative_aggregations[0];
-            assert!(aggregation.seed_expression.is_none());
-            assert!(aggregation.aggregation_expression.is_none());
+            assert!(aggregation.seed_message_builder.is_none());
+            assert!(aggregation.aggregation_message_builder.is_none());
         } else {
             panic!("Unexpected publisher type");
         }
     }
 
     #[test]
-    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_seed_expression_fails(
+    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_seed_message_builder_fails(
     ) {
         let factory = create_factory();
 
@@ -769,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_aggregation_expression_fails(
+    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_aggregation_message_builder_fails(
     ) {
         let factory = create_factory();
 
@@ -777,7 +780,7 @@ mod tests {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let mut declarative_proto =
             create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
-        declarative_proto.seed_expression = MessageField::some(NewProtoNode::new());
+        declarative_proto.seed_message_builder = MessageField::some(ProtoMessageBuilder::new());
         set_aggregation_publisher(
             &mut publisher,
             &file_descriptor.messages().next().unwrap(),
@@ -811,8 +814,9 @@ mod tests {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let mut declarative_proto =
             create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
-        declarative_proto.seed_expression = MessageField::some(NewProtoNode::new());
-        declarative_proto.aggregation_expression = MessageField::some(NewProtoNode::new());
+        declarative_proto.seed_message_builder = MessageField::some(ProtoMessageBuilder::new());
+        declarative_proto.aggregation_message_builder =
+            MessageField::some(ProtoMessageBuilder::new());
 
         let aggregation_proto = set_aggregation_publisher(
             &mut publisher,
@@ -836,8 +840,8 @@ mod tests {
         if let PublisherType::Aggregation { declarative_aggregations, .. } = &res.publisher_type {
             assert_eq!(declarative_aggregations.len(), 1);
             let aggregation = &declarative_aggregations[0];
-            assert!(aggregation.seed_expression.is_some());
-            assert!(aggregation.aggregation_expression.is_some());
+            assert!(aggregation.seed_message_builder.is_some());
+            assert!(aggregation.aggregation_message_builder.is_some());
         } else {
             panic!("Unexpected publisher type");
         }
