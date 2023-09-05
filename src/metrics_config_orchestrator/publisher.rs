@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use log::error;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_ast::Node;
-use sdvtelemetry_proto_rust::{
-    expression::NewProtoNode, metrics_configuration::declarative_aggregation::AggregationType,
+use sdvtelemetry_proto_rust::metrics_configuration::{
+    declarative_aggregation::AggregationType, ProtoMessageBuilder,
 };
 use std::{
     marker::{Send, Sync},
@@ -77,8 +77,8 @@ pub(crate) struct DeclarativeAggregation {
     pub(super) selector_expression: Arc<Node>,
     pub(super) aggregation_type: AggregationType,
     // TODO(b/293213911): Create new rust type and remove reference to protobuf message
-    pub(super) seed_expression: Option<NewProtoNode>,
-    pub(super) aggregation_expression: Option<NewProtoNode>,
+    pub(super) seed_message_builder: Option<ProtoMessageBuilder>,
+    pub(super) aggregation_message_builder: Option<ProtoMessageBuilder>,
 }
 
 impl PublisherImpl {

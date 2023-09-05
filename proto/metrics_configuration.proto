@@ -221,8 +221,8 @@ message DeclarativeAggregation {
     // The latest published value.
     LATEST = 6;
 
-    // Custom aggregation specified by seed_expression and
-    // aggregation_expression.
+    // Custom aggregation specified by seed_message_builder and
+    // aggregation_message_builder.
     CUSTOM = 1000;
   }
 
@@ -231,14 +231,14 @@ message DeclarativeAggregation {
   AggregationType aggregation_type = 3;
 
   // Optional.
-  // The expression used to generate the initial value of the aggregate.
+  // The message builder used to generate the initial value of the aggregate.
   // Required if aggregation_type is CUSTOM.
-  expr.NewProtoNode seed_expression = 4;
+  ProtoMessageBuilder seed_message_builder = 4;
 
   // Optional.
-  // The expression used to aggregate the values.
+  // The message builder used to aggregate the values.
   // Required if aggregation_type is CUSTOM.
-  expr.NewProtoNode aggregation_expression = 5;
+  ProtoMessageBuilder aggregation_message_builder = 5;
 }
 
 // Specifies a script that aggregates data from the activation context.
@@ -274,11 +274,11 @@ message MetricsReportConfig {
   bool report_incomplete = 3;
 
   // Required.
-  // The expression that creates a message with metrics to report to the
+  // The message builder that creates a metrics report to the
   // OEM application. If a message from a publisher is not present in
   // the activation context, the context will be populated with the latest
   // published message.
-  expr.NewProtoNode selector_expression = 4;
+  ProtoMessageBuilder message_builder = 4;
 }
 
 // Report message that is sent to the OEM application.
@@ -343,4 +343,27 @@ message NetworkPublisherConfig {
   // Required.
   // The direction of traffic to monitor.
   TrafficDirection traffic_direction = 2;
+}
+
+// Builds a protobuf message of some given type, where the content of the
+// message is specified by the list of field assignments.
+message ProtoMessageBuilder {
+  // Required.
+  // Type name of protobuf message that is created by the builder.
+  string message_type = 1;
+
+  // Instruction on how to set a single field.
+  message FieldAssignment {
+    // Required.
+    // The name of the protobuf message field to set.
+    string field_name = 1;
+
+    // Required.
+    // Index of root expression node whose evaluation output is the value of the field.
+    uint32 expression_node_index = 2;
+  }
+
+  // Required.
+  // Instructions on how to set the fields of the message.
+  repeated FieldAssignment field_assignments = 2;
 }
