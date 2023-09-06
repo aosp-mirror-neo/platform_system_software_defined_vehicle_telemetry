@@ -1,5 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+mod message_builder;
+mod message_builder_factory;
 mod metrics_report_generator;
 mod metrics_report_generator_factory;
 mod publisher;
