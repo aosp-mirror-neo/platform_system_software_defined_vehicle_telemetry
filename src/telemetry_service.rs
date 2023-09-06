@@ -5,6 +5,7 @@
 mod collection_extension;
 mod file_io_utils;
 mod metrics_config_orchestrator;
+mod metrics_report_listener;
 
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
     ITelemetryReportListener::ITelemetryReportListener,
@@ -16,6 +17,7 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::{
 use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use std::sync::{Arc, Mutex};
 
+use crate::metrics_report_listener::MetricsReportListener;
 use async_trait::async_trait;
 use log::{error, info};
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
@@ -45,7 +47,7 @@ pub struct SdvTelemetryService {
     /// Hashmap to store the metricsConfigs's size passed by the client.
     metrics_configs_store: Arc<Mutex<HashMap<String, usize>>>,
     /// Report Ready listener to inform the client when a report is ready
-    report_ready_listener: Mutex<Option<Strong<dyn ITelemetryReportReadyListener>>>,
+    metrics_report_listener: Arc<MetricsReportListener>,
     /// Status Listener to send back status to client
     status_listener: Mutex<Option<Strong<dyn ITelemetryStatusListener>>>,
 }
@@ -67,8 +69,13 @@ impl SdvTelemetryService {
         let active_dir_path = Path::new(&active_data_dir);
         let inactive_dir_path = Path::new(&inactive_data_dir);
 
+        let metrics_report_listener = Arc::new(MetricsReportListener::new());
+        let listener = metrics_report_listener.clone(); // Clone the Arc to share ownership
+
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
-        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(|_| {}));
+        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(move |report| {
+            listener.on_report_ready(report)
+        }));
 
         let mut num_active_configs = 0;
         let mut num_inactive_configs = 0;
@@ -171,7 +178,7 @@ impl SdvTelemetryService {
             max_persistent_config_store_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
-            report_ready_listener: Mutex::new(None),
+            metrics_report_listener,
             status_listener: Mutex::new(None),
         })
     }
@@ -389,15 +396,10 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         listener: &Strong<dyn ITelemetryReportReadyListener>,
     ) -> BinderResult<()> {
         info!("setReportReadyListener");
-        let (status_code, result) = {
-            let mut guard = self.report_ready_listener.lock().unwrap();
-            if guard.is_none() {
-                *guard = Some(listener.clone());
-                (1, Ok("Report listener successfully added"))
-            } else {
-                (-1, Err("Report listener already exists"))
-            }
-        };
+        let (status_code, result) = self
+            .metrics_report_listener
+            .set_report_ready_listener(listener)
+            .map_or_else(|e| (-1, Err(e)), |_| (1, Ok("Report listener successfully added")));
         self.send_status(status_code, result)
     }
 
@@ -437,8 +439,13 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
     async fn clearReportReadyListener(&self) -> BinderResult<()> {
         info!("clearReportReadyListener");
-        *self.report_ready_listener.lock().unwrap() = None;
-        self.send_status::<MetricsConfigOrchestratorError>(1, Ok("Ok"))
+        let (status_code, result) = {
+            match self.metrics_report_listener.clear_report_ready_listener() {
+                Ok(()) => (1, Ok("Report listener successfully cleared")),
+                Err(e) => (-1, Err(e)),
+            }
+        };
+        self.send_status(status_code, result)
     }
 
     async fn clearStatusListener(&self) -> BinderResult<()> {
@@ -519,6 +526,103 @@ mod tests {
         }
     }
 
+    /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
+    struct TelemetryReportListener;
+
+    impl Interface for TelemetryReportListener {}
+
+    impl ITelemetryReportListener for TelemetryReportListener {
+        fn onResult(
+            &self,
+            _metrics_config_name: &str,
+            _parcel: &ParcelFileDescriptor,
+            _err: &[u8],
+            _status: i32,
+        ) -> BinderResult<()> {
+            info!("onResult");
+            Ok(())
+        }
+    }
+
+    /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
+    #[derive(Clone)]
+    struct MockTelemetryReportReadyListener {
+        num_on_ready_report_calls: Arc<Mutex<i32>>,
+        uuid: Arc<Mutex<String>>,
+    }
+
+    impl Interface for MockTelemetryReportReadyListener {}
+
+    impl MockTelemetryReportReadyListener {
+        fn new() -> Self {
+            MockTelemetryReportReadyListener {
+                num_on_ready_report_calls: Arc::new(Mutex::new(0)),
+                uuid: Arc::new(Mutex::new(String::new())),
+            }
+        }
+
+        fn get_num_on_ready_report_calls(&self) -> i32 {
+            *self.num_on_ready_report_calls.lock().unwrap()
+        }
+
+        fn get_uuid(&self) -> String {
+            self.uuid.lock().unwrap().to_string()
+        }
+    }
+
+    impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
+        fn onReady(&self, report_uuid: &str) -> BinderResult<()> {
+            let mut num_calls = self.num_on_ready_report_calls.lock().unwrap();
+            *num_calls += 1;
+            let mut uuid = self.uuid.lock().unwrap();
+            *uuid = String::from(report_uuid);
+            Ok(())
+        }
+    }
+
+    /// This struct is defined to implement ITelemetryStatusListener AIDL interface for unit testing purposes
+    #[derive(Clone)]
+    struct MockTelemetryStatusListener {
+        num_send_status_calls: Arc<Mutex<i32>>,
+        status: Arc<Mutex<MockStatusCode>>,
+    }
+
+    impl Interface for MockTelemetryStatusListener {}
+
+    impl MockTelemetryStatusListener {
+        fn new() -> Self {
+            let num_send_status_calls = Arc::new(Mutex::new(0));
+            MockTelemetryStatusListener {
+                num_send_status_calls,
+                status: Arc::new(Mutex::new(MockStatusCode::None)),
+            }
+        }
+
+        pub fn get_num_send_status_calls(&self) -> i32 {
+            *self.num_send_status_calls.lock().unwrap()
+        }
+
+        pub fn get_status_code(&self) -> MockStatusCode {
+            *self.status.lock().unwrap()
+        }
+    }
+
+    impl ITelemetryStatusListener for MockTelemetryStatusListener {
+        fn sendStatus(&self, status_code: i32, _status_msg: &str) -> BinderResult<()> {
+            let mut num_calls = self.num_send_status_calls.lock().unwrap();
+            *num_calls += 1;
+
+            let mut mut_status = self.status.lock().unwrap();
+            match status_code {
+                1 => *mut_status = MockStatusCode::Ok,
+                -1 => *mut_status = MockStatusCode::Err,
+                _ => *mut_status = MockStatusCode::None,
+            }
+
+            Ok(())
+        }
+    }
+
     struct TestEnvironment {
         dir_path: String,
         service: SdvTelemetryService,
@@ -575,79 +679,6 @@ mod tests {
                 self.dir_path.to_string(),
             )))
             .unwrap();
-        }
-    }
-
-    /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
-    struct TelemetryReportListener;
-
-    impl Interface for TelemetryReportListener {}
-
-    impl ITelemetryReportListener for TelemetryReportListener {
-        fn onResult(
-            &self,
-            _metrics_config_name: &str,
-            _parcel: &ParcelFileDescriptor,
-            _err: &[u8],
-            _status: i32,
-        ) -> BinderResult<()> {
-            info!("onResult");
-            Ok(())
-        }
-    }
-
-    /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
-    struct MockTelemetryReportReadyListener;
-
-    impl Interface for MockTelemetryReportReadyListener {}
-
-    impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, _metrics_config_name: &str) -> BinderResult<()> {
-            info!("onResult");
-            Ok(())
-        }
-    }
-
-    /// This struct is defined to implement ITelemetryStatusListener AIDL interface for unit testing purposes
-    #[derive(Clone)]
-    struct MockTelemetryStatusListener {
-        num_send_status_calls: Arc<Mutex<i32>>,
-        status: Arc<Mutex<MockStatusCode>>,
-    }
-
-    impl Interface for MockTelemetryStatusListener {}
-
-    impl MockTelemetryStatusListener {
-        fn new() -> Self {
-            let num_send_status_calls = Arc::new(Mutex::new(0));
-            MockTelemetryStatusListener {
-                num_send_status_calls,
-                status: Arc::new(Mutex::new(MockStatusCode::None)),
-            }
-        }
-
-        pub fn get_num_send_status_calls(&self) -> i32 {
-            *self.num_send_status_calls.lock().unwrap()
-        }
-
-        pub fn get_status_code(&self) -> MockStatusCode {
-            *self.status.lock().unwrap()
-        }
-    }
-
-    impl ITelemetryStatusListener for MockTelemetryStatusListener {
-        fn sendStatus(&self, status_code: i32, _status_msg: &str) -> BinderResult<()> {
-            let mut num_calls = self.num_send_status_calls.lock().unwrap();
-            *num_calls += 1;
-
-            let mut mut_status = self.status.lock().unwrap();
-            match status_code {
-                1 => *mut_status = MockStatusCode::Ok,
-                -1 => *mut_status = MockStatusCode::Err,
-                _ => *mut_status = MockStatusCode::None,
-            }
-
-            Ok(())
         }
     }
 
@@ -816,11 +847,35 @@ mod tests {
     async fn clear_report_ready_listener() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "clear_report_ready_listener";
+        const ROOT_PATH: &str = "set_report_ready_listener";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        let status_listener = MockTelemetryStatusListener::new();
+
+        let binder_status_listener = BnTelemetryStatusListener::new_binder(
+            status_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let report_ready_listener = MockTelemetryReportReadyListener::new();
+
+        let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
+            report_ready_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let result = test_environment.service.setStatusListener(&binder_status_listener).await;
+        assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
+
+        let result =
+            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
 
         let result = test_environment.service.clearReportReadyListener().await;
         assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
     }
 
     #[tokio::test]
@@ -830,19 +885,70 @@ mod tests {
         const ROOT_PATH: &str = "set_report_ready_listener";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let listener = BnTelemetryReportReadyListener::new_binder(
-            MockTelemetryReportReadyListener,
+        let status_listener = MockTelemetryStatusListener::new();
+
+        let binder_status_listener = BnTelemetryStatusListener::new_binder(
+            status_listener.clone(),
             BinderFeatures::default(),
         );
 
-        let result = test_environment.service.setReportReadyListener(&listener).await;
+        let report_ready_listener = MockTelemetryReportReadyListener::new();
+
+        let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
+            report_ready_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let result = test_environment.service.setStatusListener(&binder_status_listener).await;
         assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
+
+        let result =
+            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
+    }
+
+    #[tokio::test]
+    async fn set_report_listener_and_check_on_ready_calls() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "check_on_ready_calls";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        let status_listener = MockTelemetryStatusListener::new();
+
+        let binder_status_listener = BnTelemetryStatusListener::new_binder(
+            status_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let report_ready_listener = MockTelemetryReportReadyListener::new();
+
+        let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
+            report_ready_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let result = test_environment.service.setStatusListener(&binder_status_listener).await;
+        assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
+
+        let result =
+            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        assert!(result.is_ok());
+        assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
+
+        // Call onReady on report ready listener
+        let _ = report_ready_listener.onReady(UUID);
+        assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
+        assert_eq!(UUID, &report_ready_listener.get_uuid());
     }
 
     #[tokio::test]
     async fn set_multiple_report_ready_listener_fails() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "set_multiple_report_ready_listener";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
@@ -856,21 +962,16 @@ mod tests {
         let result = test_environment.service.setStatusListener(&binder_listener).await;
         assert!(result.is_ok());
 
-        let report_listener1 = BnTelemetryReportReadyListener::new_binder(
-            MockTelemetryReportReadyListener,
+        let report_listener = BnTelemetryReportReadyListener::new_binder(
+            MockTelemetryReportReadyListener::new(),
             BinderFeatures::default(),
         );
 
-        let report_listener2 = BnTelemetryReportReadyListener::new_binder(
-            MockTelemetryReportReadyListener,
-            BinderFeatures::default(),
-        );
-
-        let result = test_environment.service.setReportReadyListener(&report_listener1).await;
+        let result = test_environment.service.setReportReadyListener(&report_listener).await;
         assert!(result.is_ok());
         assert_eq!(MockStatusCode::Ok, status_listener.get_status_code());
 
-        let _result = test_environment.service.setReportReadyListener(&report_listener2).await;
+        let _result = test_environment.service.setReportReadyListener(&report_listener).await;
         assert_eq!(MockStatusCode::Err, status_listener.get_status_code());
     }
 
