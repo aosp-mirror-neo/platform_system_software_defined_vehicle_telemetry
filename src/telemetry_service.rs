@@ -848,7 +848,7 @@ mod tests {
     async fn clear_report_ready_listener() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "set_report_ready_listener";
+        const ROOT_PATH: &str = "clear_report_ready_listener";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let status_listener = MockTelemetryStatusListener::new();
