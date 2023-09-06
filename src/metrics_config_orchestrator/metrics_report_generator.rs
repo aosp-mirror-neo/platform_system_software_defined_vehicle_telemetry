@@ -75,6 +75,8 @@ impl MetricsReportGeneratorImpl {
 impl MetricsReportGenerator for MetricsReportGeneratorImpl {
     async fn activate(self: &Arc<Self>) {
         for trigger in &self.triggers {
+            // Subscribing to triggers one by one. In theory, it should be possible to also spawn
+            // subscription tasks in parallel as an optimization.
             let self_clone = self.clone();
             if let Err(err) = trigger
                 .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
@@ -92,6 +94,8 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
 
     async fn deactivate(&self) {
         for trigger in &self.triggers {
+            // Unsubscribing from triggers one by one. In theory, it should be possible to also
+            // spawn activation tasks in parallel as an optimization.
             if let Err(err) = trigger.unsubscribe(&self.subscriber).await {
                 error!(
                     "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
