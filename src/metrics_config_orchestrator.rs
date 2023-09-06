@@ -386,18 +386,6 @@ where
             }
         }
 
-        for publisher in config.publishers.values() {
-            // Activating publishers one by one. In theory, it should be possible to also spawn
-            // activation tasks in parallel as an optimization.
-            if let Err(err) = publisher.activate().await {
-                error!(
-                    "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
-                        The publisher won't notify about new messages and any attempts to get its data will fail.",
-                    publisher.get_name(), config.uuid, err
-                );
-            }
-        }
-
         if let Some(end_trigger) = &config.end_trigger {
             let config_clone = config.clone();
             if let Err(err) = end_trigger
@@ -601,6 +589,19 @@ where
         // Set real MetricsConfig in MessageProvider so that Publishers are discoverable by Nodes.
         {
             *message_provider.metrics_config.write().unwrap() = config.clone();
+        }
+
+        // Activate publishers.
+        for publisher in config.publishers.values() {
+            // Activating publishers one by one. In theory, it should be possible to also spawn
+            // activation tasks in parallel as an optimization.
+            if let Err(err) = publisher.activate().await {
+                error!(
+                    "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
+                        The publisher won't notify about new messages and any attempts to get its data will fail.",
+                    publisher.get_name(), config.uuid, err
+                );
+            }
         }
 
         // Activate start trigger, if set.
@@ -1563,7 +1564,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn initialize_config_with_lifetime_triggers_success() {
+    async fn initialize_config_with_lifecycle_triggers_success() {
         const ACTIVATE: &str = "activate";
         const SUBSCRIBE: &str = "subscribe";
         const UNSUBSCRIBE: &str = "unsubscribe";
@@ -1649,9 +1650,9 @@ mod tests {
         time::sleep(Duration::from_millis(1)).await;
 
         let expected_calls = vec![
+            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
-            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
         ];
