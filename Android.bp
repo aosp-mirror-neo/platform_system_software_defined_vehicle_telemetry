@@ -24,6 +24,7 @@ rust_defaults {
         "liblogger",
         "libbinder_rs",
         "libbinder_tokio_rs",
+        "libfutures",
         "librand",
         "libtokio",
         "libthiserror",
@@ -85,7 +86,6 @@ rust_test_host {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
-        "libfutures",
         "liblazy_static",
         "libprotobuf",
         "libsdv_ast_traversal",

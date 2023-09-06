@@ -8,6 +8,7 @@ mod trigger;
 mod trigger_factory;
 
 use async_trait::async_trait;
+use futures::{future::BoxFuture, FutureExt};
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
 use sdv_ast::{
@@ -224,12 +225,12 @@ impl<
 where
     TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
     TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger>,
-    TNodeFactory: NodeFactory,
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + 'static,
+    TNodeFactory: NodeFactory + 'static,
     TPublisher: Publisher + Send + Sync + 'static,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger>,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + 'static,
     TTrigger: Trigger + Send + Sync + 'static,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger>,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + 'static,
 {
     fn create_expression_nodes(
         &self,
@@ -370,62 +371,116 @@ where
         )?))
     }
 
-    async fn on_start_trigger_fired(
-        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) {
+    async fn maybe_subscribe_to_start_trigger(
+        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) -> Result<(), String> {
         if let Some(start_trigger) = &config.start_trigger {
-            if let Err(err) =
-                start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await
+            let mut config_clone = Some(config.clone());
+            start_trigger
+                .subscribe(
+                    &TriggerSubscriber::MetricsConfigStart,
+                    Box::new(move || {
+                        task::spawn(Self::on_start_trigger_fired(
+                            config_clone.take().expect("Start trigger fired more than once"),
+                        ));
+                    }),
+                )
+                .await
+        } else {
+            Ok(())
+        }
+    }
+
+    fn on_start_trigger_fired(
+        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) -> BoxFuture<'static, ()> {
+        async move {
+            // Unsubscribe from start trigger.
+            if let Err(err) = config
+                .start_trigger
+                .as_ref()
+                .expect("Start trigger is expected to exist in the start trigger fired handler")
+                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
+                .await
             {
                 error!(
                     "Error when trying to deactivate start trigger of Metrics Configuration {}: {}.\
-                     Metrics Configuration data collection will not start.",
+                        Metrics Configuration data collection will not start.",
                     config.uuid, err
                 );
                 return;
             }
-        }
 
-        if let Some(end_trigger) = &config.end_trigger {
-            let config_clone = config.clone();
-            if let Err(err) = end_trigger
-                .subscribe(
-                    &TriggerSubscriber::MetricsConfigEnd,
-                    Box::new(move || Self::on_end_trigger_fired(&config_clone)),
-                )
-                .await
-            {
-                error!(
-                    "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
-                     Metrics Configuration data collection will never end.",
-                    config.uuid, err
-                );
+            // Subscribe to end trigger if it's set.
+            if let Some(end_trigger) = &config.end_trigger {
+                let mut config_clone = Some(config.clone());
+                if let Err(err) = end_trigger
+                    .subscribe(
+                        &TriggerSubscriber::MetricsConfigEnd,
+                        Box::new(move || {
+                            task::spawn(Self::on_end_trigger_fired(
+                                config_clone.take().expect("End trigger fired more than once"),
+                            ));
+                        }),
+                    )
+                    .await
+                {
+                    error!(
+                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will never end.",
+                        config.uuid, err
+                    );
+                }
+            }
+
+            // Subscribe to finish trigger if it's set.
+            if let Some(finish_trigger) = &config.finish_trigger {
+                let config_clone = config.clone();
+                if let Err(err) = finish_trigger
+                    .subscribe(
+                        &TriggerSubscriber::MetricsConfigFinish,
+                        Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
+                    )
+                    .await
+                {
+                    error!(
+                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will never finish.",
+                        config.uuid, err
+                    );
+                }
             }
         }
-
-        if let Some(finish_trigger) = &config.finish_trigger {
-            let config_clone = config.clone();
-            if let Err(err) = finish_trigger
-                .subscribe(
-                    &TriggerSubscriber::MetricsConfigFinish,
-                    Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
-                )
-                .await
-            {
-                error!(
-                    "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
-                     Metrics Configuration data collection will never finish.",
-                    config.uuid, err
-                );
-            }
-        }
+        .boxed()
     }
 
-    fn on_end_trigger_fired(
-        _config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    async fn on_end_trigger_fired(
+        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
-        // TODO(b/289386420): implement end trigger handling logic.
-        warn!("End trigger handling logic is not implemented. Data collection won't end.");
+        // Unsubscribe from end trigger.
+        if let Err(err) = config
+            .end_trigger
+            .as_ref()
+            .expect("End trigger is expected to exist in the end trigger fired handler")
+            .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
+            .await
+        {
+            error!(
+                "Error when trying to deactivate end trigger of Metrics Configuration {}: {}.\
+                    Metrics Configuration data collection will not end.",
+                config.uuid, err
+            );
+            return;
+        }
+
+        // Subscribe to start trigger if it's set.
+        if let Err(err) = Self::maybe_subscribe_to_start_trigger(&config).await {
+            error!(
+                "Error when trying to activate start trigger of Metrics Configuration {}: {}.\
+                 Metrics Configuration data collection will never start.",
+                config.uuid, err
+            );
+        }
     }
 
     fn on_finish_trigger_fired(
@@ -605,22 +660,9 @@ where
         }
 
         // Activate start trigger, if set.
-        if let Some(start_trigger) = &config.start_trigger {
-            let mut config_clone = Some(config.clone());
-            start_trigger
-                .subscribe(
-                    &TriggerSubscriber::MetricsConfigStart,
-                    Box::new(move || {
-                        task::spawn(Self::on_start_trigger_fired(
-                            config_clone.take().expect("Start trigger fired more than once"),
-                        ));
-                    }),
-                )
-                .await
-                .map_err(|error| MetricsConfigOrchestratorError::UnableToActivateStartTrigger {
-                    error,
-                })?;
-        }
+        Self::maybe_subscribe_to_start_trigger(&config).await.map_err(|error| {
+            MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error }
+        })?;
 
         Ok(())
     }
@@ -1574,53 +1616,50 @@ mod tests {
 
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
 
+        let factory_calls_clone = factory_calls.clone();
+        let subscribe_callback = move |name: &str| {
+            factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()));
+            None
+        };
+        let factory_calls_clone = factory_calls.clone();
+        let unsubscribe_callback = move |name: &str| {
+            factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()));
+            None
+        };
+
         let mut start_trigger_mock = MockTrigger::new_for_subscriber(
             START_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigStart,
         );
-        let factory_calls_clone1 = factory_calls.clone();
-        start_trigger_mock.set_subscribe_callback(move |name| {
-            factory_calls_clone1.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()));
-            None
-        });
-        let factory_calls_clone2 = factory_calls.clone();
-        start_trigger_mock.set_unsubscribe_callback(move |name| {
-            factory_calls_clone2.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()));
-            None
-        });
+        start_trigger_mock.set_subscribe_callback(subscribe_callback.clone());
+        start_trigger_mock.set_unsubscribe_callback(unsubscribe_callback.clone());
 
         let mut end_trigger_mock = MockTrigger::new_for_subscriber(
             END_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigEnd,
         );
-        let factory_calls_clone3 = factory_calls.clone();
-        end_trigger_mock.set_subscribe_callback(move |name| {
-            factory_calls_clone3.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()));
-            None
-        });
+        end_trigger_mock.set_subscribe_callback(subscribe_callback.clone());
+        end_trigger_mock.set_unsubscribe_callback(unsubscribe_callback);
 
         let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
             FINISH_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigFinish,
         );
-        let factory_calls_clone4 = factory_calls.clone();
-        finish_trigger_mock.set_subscribe_callback(move |name| {
-            factory_calls_clone4.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()));
-            None
-        });
+        finish_trigger_mock.set_subscribe_callback(subscribe_callback);
 
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
 
-        let factory_calls_clone5 = factory_calls.clone();
+        let factory_calls_clone = factory_calls.clone();
         publisher_mock.set_activate_callback(move |name| {
-            factory_calls_clone5.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
         });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let start_trigger_mock = Arc::new(start_trigger_mock);
+        let end_trigger_mock = Arc::new(end_trigger_mock);
         orchestrator.trigger_factory.add_triggers(vec![
             start_trigger_mock.clone(),
-            end_trigger_mock.into(),
+            end_trigger_mock.clone(),
             finish_trigger_mock.into(),
         ]);
         orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
@@ -1646,6 +1685,11 @@ mod tests {
 
         orchestrator.initialize_config(&config).await.unwrap();
         start_trigger_mock.fire().await;
+
+        // Sleep to make sure trigger handler task is processed.
+        time::sleep(Duration::from_millis(1)).await;
+        end_trigger_mock.fire().await;
+
         // Sleep to make sure trigger handler task is processed.
         time::sleep(Duration::from_millis(1)).await;
 
@@ -1655,6 +1699,8 @@ mod tests {
             (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
+            (UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
     }
