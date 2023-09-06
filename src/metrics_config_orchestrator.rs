@@ -603,12 +603,14 @@ where
 
         // Activate start trigger, if set.
         if let Some(start_trigger) = &config.start_trigger {
-            let config_clone = config.clone();
+            let mut config_clone = Some(config.clone());
             start_trigger
                 .subscribe(
                     &TriggerSubscriber::MetricsConfigStart,
                     Box::new(move || {
-                        task::spawn(Self::on_start_trigger_fired(config_clone.clone()));
+                        task::spawn(Self::on_start_trigger_fired(
+                            config_clone.take().expect("Start trigger fired more than once"),
+                        ));
                     }),
                 )
                 .await
@@ -1652,6 +1654,32 @@ mod tests {
             (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
+    }
+
+    #[should_panic]
+    #[tokio::test]
+    async fn initialize_config_unsubscribed_start_trigger_fires_panics() {
+        let start_trigger_mock = MockTrigger::new_for_subscriber(
+            SOME_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::MetricsConfigStart,
+        );
+
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let start_trigger_mock = Arc::new(start_trigger_mock);
+        orchestrator.trigger_factory.add_triggers(vec![start_trigger_mock.clone()]);
+
+        let mut start_trigger = TriggerProto::new();
+        start_trigger.name = SOME_TRIGGER_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.start_trigger_name = start_trigger.name.clone();
+        config.triggers.push(start_trigger);
+
+        orchestrator.initialize_config(&config).await.unwrap();
+        start_trigger_mock.fire().await;
+        // Fire second time, causing panic.
+        start_trigger_mock.fire().await;
     }
 
     #[test]
