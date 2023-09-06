@@ -7,6 +7,7 @@ mod publisher_factory;
 mod trigger;
 mod trigger_factory;
 
+use async_trait::async_trait;
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
 use sdv_ast::{
@@ -46,9 +47,10 @@ const PUBLISHER: &str = "publisher";
 const TRIGGER: &str = "trigger";
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
+#[async_trait]
 pub trait MetricsConfigOrchestrator {
     /// Initialize lifecycle of the specified Metrics Configuration.
-    fn initialize_config(
+    async fn initialize_config(
         &self,
         config: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError>;
@@ -372,7 +374,9 @@ where
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
         if let Some(start_trigger) = &config.start_trigger {
-            if let Err(err) = start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart) {
+            if let Err(err) =
+                start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await
+            {
                 error!(
                     "Error when trying to deactivate start trigger of Metrics Configuration {}: {}.\
                      Metrics Configuration data collection will not start.",
@@ -394,10 +398,13 @@ where
 
         if let Some(end_trigger) = &config.end_trigger {
             let config_clone = config.clone();
-            if let Err(err) = end_trigger.subscribe(
-                &TriggerSubscriber::MetricsConfigEnd,
-                Box::new(move || Self::on_end_trigger_fired(&config_clone)),
-            ) {
+            if let Err(err) = end_trigger
+                .subscribe(
+                    &TriggerSubscriber::MetricsConfigEnd,
+                    Box::new(move || Self::on_end_trigger_fired(&config_clone)),
+                )
+                .await
+            {
                 error!(
                     "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
                      Metrics Configuration data collection will never end.",
@@ -408,10 +415,13 @@ where
 
         if let Some(finish_trigger) = &config.finish_trigger {
             let config_clone = config.clone();
-            if let Err(err) = finish_trigger.subscribe(
-                &TriggerSubscriber::MetricsConfigFinish,
-                Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
-            ) {
+            if let Err(err) = finish_trigger
+                .subscribe(
+                    &TriggerSubscriber::MetricsConfigFinish,
+                    Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
+                )
+                .await
+            {
                 error!(
                     "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
                      Metrics Configuration data collection will never finish.",
@@ -436,6 +446,7 @@ where
     }
 }
 
+#[async_trait]
 impl<
         TMetricsReportGenerator,
         TMetricsReportGeneratorFactory,
@@ -457,14 +468,14 @@ impl<
 where
     TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
     TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + 'static,
-    TNodeFactory: NodeFactory + Sync + 'static,
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + Send + Sync + 'static,
+    TNodeFactory: NodeFactory + Send + Sync + 'static,
     TPublisher: Publisher + Send + Sync + 'static,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Sync + 'static,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Send + Sync + 'static,
     TTrigger: Trigger + Sync + Send + 'static,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Sync + 'static,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Send + Sync + 'static,
 {
-    fn initialize_config(
+    async fn initialize_config(
         &self,
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
@@ -573,14 +584,16 @@ where
         });
 
         // Store MetricsConfig with encapsulated objects.
-        let mut configs = self.configs.lock().unwrap();
-        let config = match configs.try_insert_value(config_proto.uuid.clone(), config) {
-            Ok(val) => val,
-            Err(()) => {
-                return Err(MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid {
-                    uuid: config_proto.uuid.clone(),
-                })
-            }
+        {
+            let mut configs = self.configs.lock().unwrap();
+            match configs.try_insert_value(config_proto.uuid.clone(), config.clone()) {
+                Ok(val) => val,
+                Err(()) => {
+                    return Err(MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid {
+                        uuid: config_proto.uuid.clone(),
+                    })
+                }
+            };
         };
 
         // Set real MetricsConfig in MessageProvider so that Publishers are discoverable by Nodes.
@@ -598,6 +611,7 @@ where
                         task::spawn(Self::on_start_trigger_fired(config_clone.clone()));
                     }),
                 )
+                .await
                 .map_err(|error| MetricsConfigOrchestratorError::UnableToActivateStartTrigger {
                     error,
                 })?;
@@ -744,9 +758,10 @@ mod tests {
 
     struct MockMetricsReportGenerator {}
 
+    #[async_trait]
     impl MetricsReportGenerator for MockMetricsReportGenerator {
-        fn activate(self: &Arc<Self>) {}
-        fn deactivate(&self) {}
+        async fn activate(self: &Arc<Self>) {}
+        async fn deactivate(&self) {}
     }
 
     struct MockMetricsReportGeneratorFactory {
@@ -886,9 +901,9 @@ mod tests {
     struct MockPublisherFactory {
         publishers: Mutex<HashMap<String, Arc<MockPublisher>>>,
         create_callback:
-            Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync>>,
+            Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync>>,
         validate_callback:
-            Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync>>,
+            Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync>>,
     }
 
     impl MockPublisherFactory {
@@ -910,14 +925,14 @@ mod tests {
 
         fn set_create_callback(
             &mut self,
-            callback: impl Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync + 'static,
+            callback: impl Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync + 'static,
         ) {
             self.create_callback.replace(Box::new(callback));
         }
 
         fn set_validate_callback(
             &mut self,
-            callback: impl Fn(&PublisherProto) -> Option<PublisherFactoryError> + Sync + 'static,
+            callback: impl Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync + 'static,
         ) {
             self.validate_callback.replace(Box::new(callback));
         }
@@ -963,8 +978,10 @@ mod tests {
 
     struct MockTriggerFactory {
         triggers: Mutex<HashMap<String, Arc<MockTrigger>>>,
-        create_callback: Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync>>,
-        validate_callback: Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync>>,
+        create_callback:
+            Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Send + Sync>>,
+        validate_callback:
+            Option<Box<dyn Fn(&TriggerProto) -> Option<TriggerFactoryError> + Send + Sync>>,
     }
 
     impl MockTriggerFactory {
@@ -984,14 +1001,14 @@ mod tests {
 
         fn set_create_callback(
             &mut self,
-            callback: impl Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync + 'static,
+            callback: impl Fn(&TriggerProto) -> Option<TriggerFactoryError> + Send + Sync + 'static,
         ) {
             self.create_callback.replace(Box::new(callback));
         }
 
         fn set_validate_callback(
             &mut self,
-            callback: impl Fn(&TriggerProto) -> Option<TriggerFactoryError> + Sync + 'static,
+            callback: impl Fn(&TriggerProto) -> Option<TriggerFactoryError> + Send + Sync + 'static,
         ) {
             self.validate_callback.replace(Box::new(callback));
         }
@@ -1232,12 +1249,12 @@ mod tests {
         config
     }
 
-    #[test]
-    fn initialize_config_duplicate_publisher_name_fails() {
+    #[tokio::test]
+    async fn initialize_config_duplicate_publisher_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_name();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -1247,12 +1264,12 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_duplicate_trigger_name_fails() {
+    #[tokio::test]
+    async fn initialize_config_duplicate_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_trigger_name();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -1262,12 +1279,12 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_duplicate_publisher_trigger_name_fails() {
+    #[tokio::test]
+    async fn initialize_config_duplicate_publisher_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
@@ -1277,12 +1294,12 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_publisher_trigger_cycle_fails() {
+    #[tokio::test]
+    async fn initialize_config_publisher_trigger_cycle_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_publisher_trigger_cycle();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
@@ -1292,12 +1309,12 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_aggregation_publisher_invalid_trigger_fails() {
+    #[tokio::test]
+    async fn initialize_config_aggregation_publisher_invalid_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1307,12 +1324,12 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_data_trigger_invalid_publisher_fails() {
+    #[tokio::test]
+    async fn initialize_config_data_trigger_invalid_publisher_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_data_trigger_publisher();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
@@ -1322,12 +1339,12 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_conditional_trigger_invalid_parent_trigger_fails() {
+    #[tokio::test]
+    async fn initialize_config_conditional_trigger_invalid_parent_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1337,13 +1354,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_duplicate_uuid_fails() {
+    #[tokio::test]
+    async fn initialize_config_duplicate_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let (config1, config2) = create_configs_with_duplicate_uuid();
-        orchestrator.initialize_config(&config1).unwrap();
+        orchestrator.initialize_config(&config1).await.unwrap();
 
-        let err = orchestrator.initialize_config(&config2).err().unwrap();
+        let err = orchestrator.initialize_config(&config2).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
@@ -1353,15 +1370,15 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
     }
 
-    #[test]
-    fn initialize_config_invalid_expression_nodes_fails() {
+    #[tokio::test]
+    async fn initialize_config_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator.node_factory.fail_create_nodes();
 
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
@@ -1371,15 +1388,15 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_publisher_factory_error_fails() {
+    #[tokio::test]
+    async fn initialize_config_publisher_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator
             .publisher_factory
             .set_create_callback(|_| Some(PublisherFactoryError::UnknownPublisherType));
         let config = create_valid_config_with_publisher();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -1389,8 +1406,8 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_trigger_factory_error_fails() {
+    #[tokio::test]
+    async fn initialize_config_trigger_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator
             .trigger_factory
@@ -1398,7 +1415,7 @@ mod tests {
 
         let config = create_valid_config_with_trigger();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -1408,8 +1425,8 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn initialize_config_metrics_report_config_factory_error_fails() {
+    #[tokio::test]
+    async fn initialize_config_metrics_report_config_factory_error_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator.metrics_report_generator_factory.error.lock().unwrap().replace(
             MetricsReportGeneratorFactoryError::InvalidTriggerName {
@@ -1418,7 +1435,7 @@ mod tests {
         );
         let config = create_valid_config_with_metrics_report_config();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         if let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
             report_config_name,
@@ -1436,8 +1453,8 @@ mod tests {
         }
     }
 
-    #[test]
-    fn initialize_config_with_dependencies_success() {
+    #[tokio::test]
+    async fn initialize_config_with_dependencies_success() {
         let mut value1 = Box::new(Int32Value::new());
         value1.value = 101;
         let mut value2 = Box::new(Int32Value::new());
@@ -1469,7 +1486,7 @@ mod tests {
 
         let config = create_valid_config_with_dependencies();
 
-        orchestrator.initialize_config(&config).unwrap();
+        orchestrator.initialize_config(&config).await.unwrap();
 
         let expected_calls = vec![
             SERVICE_PUBLISHER_NAME,
@@ -1495,15 +1512,15 @@ mod tests {
         assert_eq!(config.publishers.len(), 2);
     }
 
-    #[test]
-    fn initialize_config_invalid_start_trigger_fails() {
+    #[tokio::test]
+    async fn initialize_config_invalid_start_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
 
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
         config.start_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1512,8 +1529,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn initialize_config_start_trigger_doesnt_activate_fails() {
+    #[tokio::test]
+    async fn initialize_config_start_trigger_doesnt_activate_fails() {
         const ERROR_MESSAGE: &str = "error_message";
 
         let mut trigger_mock = MockTrigger::new_for_subscriber(
@@ -1532,7 +1549,7 @@ mod tests {
         config.start_trigger_name = start_trigger.name.clone();
         config.triggers.push(start_trigger);
 
-        let err = orchestrator.initialize_config(&config).err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } if error == ERROR_MESSAGE),
@@ -1622,8 +1639,8 @@ mod tests {
         config.triggers.push(finish_trigger);
         config.publishers.push(publisher);
 
-        orchestrator.initialize_config(&config).unwrap();
-        start_trigger_mock.fire();
+        orchestrator.initialize_config(&config).await.unwrap();
+        start_trigger_mock.fire().await;
         // Sleep to make sure trigger handler task is processed.
         time::sleep(Duration::from_millis(1)).await;
 
@@ -1650,14 +1667,14 @@ mod tests {
         )
     }
 
-    #[test]
-    fn finish_config_success() {
+    #[tokio::test]
+    async fn finish_config_success() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
 
         let mut metrics_config = MetricsConfigProto::new();
         metrics_config.uuid = UUID.to_owned();
 
-        orchestrator.initialize_config(&metrics_config).unwrap();
+        orchestrator.initialize_config(&metrics_config).await.unwrap();
 
         assert!(orchestrator.finish_config(UUID).is_ok());
     }
@@ -1782,11 +1799,11 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
     }
 
-    #[test]
-    fn validate_config_duplicate_uuid_fails() {
+    #[tokio::test]
+    async fn validate_config_duplicate_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let (config1, config2) = create_configs_with_duplicate_uuid();
-        orchestrator.initialize_config(&config1).unwrap();
+        orchestrator.initialize_config(&config1).await.unwrap();
 
         let err = orchestrator.validate_config(&config2).err().unwrap();
 

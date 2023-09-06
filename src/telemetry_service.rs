@@ -102,7 +102,7 @@ impl SdvTelemetryService {
                     let uuid = &config.uuid;
 
                     // Validates and initializes metrics config
-                    match config_orchestrator.initialize_config(&config) {
+                    match config_orchestrator.initialize_config(&config).await {
                         Ok(()) => {
                             let mut metric_config_map = configs_store.lock().unwrap();
                             metric_config_map.insert(uuid.clone(), bytes.len());
@@ -267,7 +267,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             let uuid = &config.uuid;
 
             // Initializes metrics config
-            match self.metrics_config_orchestrator.initialize_config(&config) {
+            match self.metrics_config_orchestrator.initialize_config(&config).await {
                 Ok(()) => {
                     let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
                     file_io_utils::rename_file(&path, &new_path)
@@ -500,8 +500,9 @@ mod tests {
         }
     }
 
+    #[async_trait]
     impl MetricsConfigOrchestrator for MockMetricsConfigOrchestratorImpl {
-        fn initialize_config(
+        async fn initialize_config(
             &self,
             _: &MetricsConfigProto,
         ) -> Result<(), MetricsConfigOrchestratorError> {
