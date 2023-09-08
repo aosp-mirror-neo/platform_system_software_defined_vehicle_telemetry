@@ -417,7 +417,13 @@ where
 
             // Activate metrics report generators.
             for generator in &config.metrics_report_generators {
-                generator.activate().await;
+                if let Err(err) = generator.activate().await {
+                    error!(
+                        "Error when trying to activate metrics report generator {}: {}.",
+                        generator.get_name(),
+                        err
+                    );
+                }
             }
 
             // Subscribe to end trigger if it's set.
@@ -484,7 +490,13 @@ where
 
         // Deactivate metrics report generators.
         for generator in &config.metrics_report_generators {
-            generator.deactivate().await;
+            if let Err(err) = generator.deactivate().await {
+                error!(
+                    "Error when trying to deactivate metrics report generator {}: {}.",
+                    generator.get_name(),
+                    err
+                );
+            }
         }
 
         // Subscribe to start trigger if it's set.
@@ -786,6 +798,7 @@ mod tests {
     use tokio::{time, time::Duration};
 
     use super::*;
+    use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
     use crate::metrics_config_orchestrator::publisher::PublisherError;
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
@@ -837,16 +850,24 @@ mod tests {
 
     #[async_trait]
     impl MetricsReportGenerator for MockMetricsReportGenerator {
-        async fn activate(self: &Arc<Self>) {
+        fn get_name(&self) -> &str {
+            &self.name
+        }
+
+        async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError> {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);
             }
+
+            Ok(())
         }
 
-        async fn deactivate(&self) {
+        async fn deactivate(&self) -> Result<(), MetricsReportGeneratorError> {
             if let Some(callback) = &self.deactivate_callback {
                 callback(&self.name);
             }
+
+            Ok(())
         }
     }
 

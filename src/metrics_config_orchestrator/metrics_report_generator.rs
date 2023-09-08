@@ -11,15 +11,32 @@ use std::{
         Arc,
     },
 };
+use thiserror::Error;
+use tokio::sync::Mutex as AsyncMutex;
 
-use crate::metrics_config_orchestrator::{trigger::TriggerSubscriber, Trigger};
+use crate::metrics_config_orchestrator::{
+    trigger::{TriggerError, TriggerSubscriber},
+    Trigger,
+};
 
 const REPORT_UUID: &str = "00000000-0000-0000-0000-000000000000";
 
 #[async_trait]
 pub(crate) trait MetricsReportGenerator {
-    async fn activate(self: &Arc<Self>);
-    async fn deactivate(&self);
+    fn get_name(&self) -> &str;
+
+    async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError>;
+    async fn deactivate(&self) -> Result<(), MetricsReportGeneratorError>;
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum MetricsReportGeneratorError {
+    #[error("Unable to activate metrics report generator: it's already active")]
+    AlreadyActive,
+    #[error("Unable to deactivate metrics report generator: it's already inactive")]
+    AlreadyInactive,
+    #[error("Unable to deactivate metrics report generator due to unsubscription errors: {unsubscribe_errors:?}")]
+    UnableToUnsubscribe { unsubscribe_errors: Vec<TriggerError> },
 }
 
 #[allow(dead_code)]
@@ -32,8 +49,69 @@ pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
     pub(super) triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
 
+    is_active: AsyncMutex<bool>,
     report_number: AtomicU32,
     subscriber: TriggerSubscriber,
+}
+
+#[async_trait]
+impl MetricsReportGenerator for MetricsReportGeneratorImpl {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError> {
+        let mut is_active = self.is_active.lock().await;
+
+        if *is_active {
+            return Err(MetricsReportGeneratorError::AlreadyActive);
+        }
+
+        // Subscribing to triggers one by one. In theory, it should be possible to also spawn
+        // subscription tasks in parallel as an optimization.
+        for trigger in &self.triggers {
+            let self_clone = self.clone();
+            if let Err(err) = trigger
+                .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
+                .await
+            {
+                error!(
+                    "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
+                    self.name,
+                    trigger.get_name(),
+                    err
+                );
+            }
+        }
+
+        *is_active = true;
+        Ok(())
+    }
+
+    async fn deactivate(&self) -> Result<(), MetricsReportGeneratorError> {
+        let mut is_active = self.is_active.lock().await;
+
+        if !*is_active {
+            return Err(MetricsReportGeneratorError::AlreadyInactive);
+        }
+
+        let mut unsubscribe_errors = vec![];
+
+        // Unsubscribing from triggers one by one. In theory, it should be possible to also
+        // spawn activation tasks in parallel as an optimization.
+        for trigger in &self.triggers {
+            if let Err(err) = trigger.unsubscribe(&self.subscriber).await {
+                unsubscribe_errors.push(err);
+            }
+        }
+
+        if !unsubscribe_errors.is_empty() {
+            return Err(MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors });
+        }
+
+        *is_active = false;
+        Ok(())
+    }
 }
 
 impl MetricsReportGeneratorImpl {
@@ -53,7 +131,8 @@ impl MetricsReportGeneratorImpl {
             report_incomplete,
             report_ready_callback,
             triggers,
-            report_number: AtomicU32::new(1),
+            is_active: false.into(),
+            report_number: 1.into(),
             subscriber,
         }
     }
@@ -68,43 +147,6 @@ impl MetricsReportGeneratorImpl {
         report.metrics_config_version = self.config_version;
         report.report_data = Some(Any::pack_dyn(&Int32Value::new()).unwrap()).into();
         (self.report_ready_callback)(report);
-    }
-}
-
-#[async_trait]
-impl MetricsReportGenerator for MetricsReportGeneratorImpl {
-    async fn activate(self: &Arc<Self>) {
-        for trigger in &self.triggers {
-            // Subscribing to triggers one by one. In theory, it should be possible to also spawn
-            // subscription tasks in parallel as an optimization.
-            let self_clone = self.clone();
-            if let Err(err) = trigger
-                .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
-                .await
-            {
-                error!(
-                    "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
-                    self.name,
-                    trigger.get_name(),
-                    err
-                );
-            }
-        }
-    }
-
-    async fn deactivate(&self) {
-        for trigger in &self.triggers {
-            // Unsubscribing from triggers one by one. In theory, it should be possible to also
-            // spawn activation tasks in parallel as an optimization.
-            if let Err(err) = trigger.unsubscribe(&self.subscriber).await {
-                error!(
-                    "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
-                    self.name,
-                    trigger.get_name(),
-                    err
-                );
-            }
-        }
     }
 }
 
@@ -144,6 +186,20 @@ mod test {
     }
 
     #[tokio::test]
+    async fn activate_already_active_fails() {
+        let generator = Arc::new(create_generator());
+
+        generator.activate().await.unwrap();
+        let err = generator.activate().await.err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorError::AlreadyActive),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
     async fn activate_subscribes_to_trigger() {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
@@ -156,7 +212,7 @@ mod test {
         let mut generator = create_generator();
         generator.triggers.push(Arc::new(trigger));
 
-        Arc::new(generator).activate().await;
+        Arc::new(generator).activate().await.unwrap();
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
     }
@@ -172,7 +228,7 @@ mod test {
             report_container_clone.lock().unwrap().replace(report);
         });
         generator.triggers.push(trigger.clone());
-        Arc::new(generator).activate().await;
+        Arc::new(generator).activate().await.unwrap();
 
         trigger.fire().await;
         trigger.fire().await;
@@ -191,22 +247,63 @@ mod test {
     }
 
     #[tokio::test]
+    async fn deactivate_already_inactive_fails() {
+        let generator = Arc::new(create_generator());
+
+        let err = generator.deactivate().await.err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorError::AlreadyInactive),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
     async fn deactivate_unsubscribes_from_trigger() {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = num_fired.clone();
-        trigger.unsubscribe_callback.replace(Box::new(move |_| {
+        trigger.set_unsubscribe_callback(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
             None
-        }));
+        });
 
         let mut generator = create_generator();
         generator.triggers.push(Arc::new(trigger));
         let generator = Arc::new(generator);
 
-        generator.activate().await;
-        generator.deactivate().await;
+        generator.activate().await.unwrap();
+        generator.deactivate().await.unwrap();
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn deactivate_unsubscribe_returns_error_fails() {
+        const SUBSCRIBER_NAME: &str = "subscriber";
+
+        let mut trigger = create_trigger();
+        trigger.set_unsubscribe_callback(move |_| {
+            Some(TriggerError::NotSubscribed { subscriber_name: SUBSCRIBER_NAME.to_owned() })
+        });
+
+        let mut generator = create_generator();
+        generator.triggers.push(Arc::new(trigger));
+        let generator = Arc::new(generator);
+
+        generator.activate().await.unwrap();
+        let err = generator.deactivate().await.err().unwrap();
+
+        if let MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors } = &err {
+            assert_eq!(unsubscribe_errors.len(), 1);
+            assert!(
+                matches!(&unsubscribe_errors[0], TriggerError::NotSubscribed { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
+                "Unexpected inner error: {:?}",
+                unsubscribe_errors[0]
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err);
+        }
     }
 }
