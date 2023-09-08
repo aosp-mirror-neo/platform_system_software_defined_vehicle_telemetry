@@ -39,7 +39,7 @@ use publisher::{Publisher, PublisherImpl};
 use publisher_factory::{
     PublisherFactory, PublisherFactoryContext, PublisherFactoryError, PublisherFactoryImpl,
 };
-use trigger::{Trigger, TriggerImpl, TriggerSubscriber};
+use trigger::{Trigger, TriggerError, TriggerImpl, TriggerSubscriber};
 use trigger_factory::{
     TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
 };
@@ -98,7 +98,10 @@ pub enum MetricsConfigOrchestratorError {
     #[error("Invalid expression nodes. Reason: {e}")]
     InvalidExpressionNodes { e: NodeError },
     #[error("Unable to activate start trigger: {error}")]
-    UnableToActivateStartTrigger { error: String },
+    UnableToActivateStartTrigger {
+        #[from]
+        error: TriggerError,
+    },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -372,7 +375,7 @@ where
 
     async fn maybe_subscribe_to_start_trigger(
         config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) -> Result<(), String> {
+    ) -> Result<(), TriggerError> {
         if let Some(start_trigger) = &config.start_trigger {
             let mut config_clone = Some(config.clone());
             start_trigger
@@ -669,9 +672,7 @@ where
         }
 
         // Activate start trigger, if set.
-        Self::maybe_subscribe_to_start_trigger(&config).await.map_err(|error| {
-            MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error }
-        })?;
+        Self::maybe_subscribe_to_start_trigger(&config).await?;
 
         Ok(())
     }
@@ -1632,13 +1633,17 @@ mod tests {
 
     #[tokio::test]
     async fn initialize_config_start_trigger_doesnt_activate_fails() {
-        const ERROR_MESSAGE: &str = "error_message";
+        const SUBSCRIBER_NAME: &str = "subscriber";
 
         let mut trigger_mock = MockTrigger::new_for_subscriber(
             SOME_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigStart,
         );
-        trigger_mock.set_subscribe_callback(|_| Some(ERROR_MESSAGE.to_owned()));
+        trigger_mock.set_subscribe_callback(|_| {
+            Some(TriggerError::DuplicateSubscription {
+                subscriber_name: SUBSCRIBER_NAME.to_owned(),
+            })
+        });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         orchestrator.trigger_factory.add_triggers(vec![Arc::new(trigger_mock)]);
@@ -1652,11 +1657,15 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } if error == ERROR_MESSAGE),
-            "Unexpected error: {:?}",
-            err
-        );
+        if let MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } = &err {
+            assert!(
+                matches!(&error, TriggerError::DuplicateSubscription { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
+                "Unexpected inner error: {:?}",
+                error
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err)
+        }
     }
 
     #[tokio::test]

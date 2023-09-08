@@ -3,12 +3,12 @@
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{Trigger, TriggerSubscriber};
+use super::{Trigger, TriggerError, TriggerSubscriber};
 
 pub(crate) struct MockTrigger {
     pub expected_subscribers: Vec<TriggerSubscriber>,
-    pub subscribe_callback: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
-    pub unsubscribe_callback: Option<Box<dyn Fn(&str) -> Option<String> + Send + Sync>>,
+    pub subscribe_callback: Option<Box<dyn Fn(&str) -> Option<TriggerError> + Send + Sync>>,
+    pub unsubscribe_callback: Option<Box<dyn Fn(&str) -> Option<TriggerError> + Send + Sync>>,
 
     name: String,
     on_fired_callback: AsyncMutex<Option<Box<dyn FnMut() + Send + Sync>>>,
@@ -40,14 +40,14 @@ impl MockTrigger {
 
     pub(crate) fn set_subscribe_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<TriggerError> + Send + Sync + 'static,
     ) {
         self.subscribe_callback.replace(Box::new(callback));
     }
 
     pub(crate) fn set_unsubscribe_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<String> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<TriggerError> + Send + Sync + 'static,
     ) {
         self.unsubscribe_callback.replace(Box::new(callback));
     }
@@ -74,7 +74,7 @@ impl Trigger for MockTrigger {
         &self,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), String> {
+    ) -> Result<(), TriggerError> {
         self.verify_subscriber(subscriber);
         self.on_fired_callback.lock().await.replace(on_fired_callback);
 
@@ -87,7 +87,7 @@ impl Trigger for MockTrigger {
         Ok(())
     }
 
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String> {
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError> {
         self.verify_subscriber(subscriber);
 
         if let Some(callback) = &self.unsubscribe_callback {
