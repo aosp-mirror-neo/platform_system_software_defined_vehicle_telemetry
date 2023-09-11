@@ -10,7 +10,6 @@ mod trigger;
 mod trigger_factory;
 
 use async_trait::async_trait;
-use futures::{future::BoxFuture, FutureExt};
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
 use sdv_ast::{
@@ -28,7 +27,6 @@ use std::{
     sync::{Arc, Mutex, RwLock},
 };
 use thiserror::Error;
-use tokio::task;
 
 use crate::collection_extension::HashMapExtension;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
@@ -384,9 +382,9 @@ where
                 .subscribe(
                     &TriggerSubscriber::MetricsConfigStart,
                     Box::new(move || {
-                        task::spawn(Self::on_start_trigger_fired(
-                            config_clone.take().expect("Start trigger fired more than once"),
-                        ));
+                        if let Some(config) = config_clone.take() {
+                            Self::on_start_trigger_fired(config);
+                        }
                     }),
                 )
                 .await
@@ -397,8 +395,8 @@ where
 
     fn on_start_trigger_fired(
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) -> BoxFuture<'static, ()> {
-        async move {
+    ) {
+        tokio::spawn(async move {
             // Unsubscribe from start trigger.
             if let Err(err) = config
                 .start_trigger
@@ -433,9 +431,9 @@ where
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigEnd,
                         Box::new(move || {
-                            task::spawn(Self::on_end_trigger_fired(
-                                config_clone.take().expect("End trigger fired more than once"),
-                            ));
+                            if let Some(config) = config_clone.take() {
+                                Self::on_end_trigger_fired(config);
+                            }
                         }),
                     )
                     .await
@@ -465,48 +463,49 @@ where
                     );
                 }
             }
-        }
-        .boxed()
+        });
     }
 
-    async fn on_end_trigger_fired(
+    fn on_end_trigger_fired(
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
-        // Unsubscribe from end trigger.
-        if let Err(err) = config
-            .end_trigger
-            .as_ref()
-            .expect("End trigger is expected to exist in the end trigger fired handler")
-            .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
-            .await
-        {
-            error!(
-                "Error when trying to deactivate end trigger of Metrics Configuration {}: {}.\
-                    Metrics Configuration data collection will not end.",
-                config.uuid, err
-            );
-            return;
-        }
-
-        // Deactivate metrics report generators.
-        for generator in &config.metrics_report_generators {
-            if let Err(err) = generator.deactivate().await {
+        tokio::spawn(async move {
+            // Unsubscribe from end trigger.
+            if let Err(err) = config
+                .end_trigger
+                .as_ref()
+                .expect("End trigger is expected to exist in the end trigger fired handler")
+                .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
+                .await
+            {
                 error!(
-                    "Error when trying to deactivate metrics report generator {}: {}.",
-                    generator.get_name(),
-                    err
+                    "Error when trying to deactivate end trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will not end.",
+                    config.uuid, err
+                );
+                return;
+            }
+
+            // Deactivate metrics report generators.
+            for generator in &config.metrics_report_generators {
+                if let Err(err) = generator.deactivate().await {
+                    error!(
+                        "Error when trying to deactivate metrics report generator {}: {}.",
+                        generator.get_name(),
+                        err
+                    );
+                }
+            }
+
+            // Subscribe to start trigger if it's set.
+            if let Err(err) = Self::maybe_subscribe_to_start_trigger(&config).await {
+                error!(
+                    "Error when trying to activate start trigger of Metrics Configuration {}: {}.\
+                    Metrics Configuration data collection will never start.",
+                    config.uuid, err
                 );
             }
-        }
-
-        // Subscribe to start trigger if it's set.
-        if let Err(err) = Self::maybe_subscribe_to_start_trigger(&config).await {
-            error!(
-                "Error when trying to activate start trigger of Metrics Configuration {}: {}.\
-                 Metrics Configuration data collection will never start.",
-                config.uuid, err
-            );
-        }
+        });
     }
 
     fn on_finish_trigger_fired(
@@ -1787,10 +1786,16 @@ mod tests {
         config.publishers.push(publisher);
 
         orchestrator.initialize_config(&config).await.unwrap();
+
+        // Fire twice to verify that the second fire event is ignored.
+        start_trigger_mock.fire().await;
         start_trigger_mock.fire().await;
 
         // Sleep to make sure trigger handler task is processed.
         time::sleep(Duration::from_millis(1)).await;
+
+        // Fire twice to verify that the second fire event is ignored.
+        end_trigger_mock.fire().await;
         end_trigger_mock.fire().await;
 
         // Sleep to make sure trigger handler task is processed.
@@ -1806,32 +1811,6 @@ mod tests {
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-    }
-
-    #[should_panic]
-    #[tokio::test]
-    async fn initialize_config_unsubscribed_start_trigger_fires_panics() {
-        let start_trigger_mock = MockTrigger::new_for_subscriber(
-            SOME_TRIGGER_NAME.to_owned(),
-            TriggerSubscriber::MetricsConfigStart,
-        );
-
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        let start_trigger_mock = Arc::new(start_trigger_mock);
-        orchestrator.trigger_factory.add_triggers(vec![start_trigger_mock.clone()]);
-
-        let mut start_trigger = TriggerProto::new();
-        start_trigger.name = SOME_TRIGGER_NAME.to_owned();
-
-        let mut config = MetricsConfigProto::new();
-        config.uuid = UUID.to_owned();
-        config.start_trigger_name = start_trigger.name.clone();
-        config.triggers.push(start_trigger);
-
-        orchestrator.initialize_config(&config).await.unwrap();
-        start_trigger_mock.fire().await;
-        // Fire second time, causing panic.
-        start_trigger_mock.fire().await;
     }
 
     #[test]
