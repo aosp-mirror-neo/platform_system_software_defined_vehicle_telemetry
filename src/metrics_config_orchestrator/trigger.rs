@@ -8,6 +8,7 @@ use std::{
     marker::{Send, Sync},
     sync::Arc,
 };
+use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
 use crate::collection_extension::HashMapExtension;
@@ -24,11 +25,19 @@ pub(crate) trait Trigger {
         &self,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), String>;
+    ) -> Result<(), TriggerError>;
 
     /// Unsubscribe from trigger fire events.
     /// Last unsubscription deactivates the trigger.
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String>;
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError>;
+}
+
+#[derive(Error, Debug)]
+pub enum TriggerError {
+    #[error("Subscriber {subscriber_name} is already subscribed to the trigger. Duplicate subscriptions are not allowed.")]
+    DuplicateSubscription { subscriber_name: String },
+    #[error("Subscriber {subscriber_name} wasn't subscribed to the trigger")]
+    NotSubscribed { subscriber_name: String },
 }
 
 #[allow(dead_code)]
@@ -99,12 +108,14 @@ impl Trigger for TriggerImpl {
         &self,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), String> {
+    ) -> Result<(), TriggerError> {
         let maybe_callbacks_container = {
             let callbacks_container = self.callback_map.lock().await;
             let mut callbacks = callbacks_container.lock().await;
             if callbacks.try_insert_value(subscriber.clone(), on_fired_callback).is_err() {
-                return Err(format!("Subscriber {} is already subscribed to the trigger. Duplicate subscriptions are not allowed.", subscriber));
+                return Err(TriggerError::DuplicateSubscription {
+                    subscriber_name: subscriber.to_string(),
+                });
             }
 
             // Return a reference to the container if this is the first subscription.
@@ -118,18 +129,20 @@ impl Trigger for TriggerImpl {
         if let Some(callbacks_container) = maybe_callbacks_container {
             // If a container was returned, this is the first subscription and underlying
             // trigger type needs to be activated.
-            self.trigger_type.activate(callbacks_container)?;
+            self.trigger_type.activate(callbacks_container);
         }
 
         Ok(())
     }
 
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), String> {
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError> {
         let mut callbacks_container = self.callback_map.lock().await;
         let is_last_unsubscription = {
             let mut callbacks = callbacks_container.lock().await;
             if callbacks.remove(subscriber).is_none() {
-                return Err(format!("Subscriber {} wasn't subscribed to the trigger", subscriber));
+                return Err(TriggerError::NotSubscribed {
+                    subscriber_name: subscriber.to_string(),
+                });
             }
 
             callbacks.is_empty()
@@ -150,19 +163,14 @@ impl TriggerType {
         callbacks_container: Arc<
             AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,
         >,
-    ) -> Result<(), String> {
+    ) {
         match self {
-            TriggerType::Data { .. } => {
-                return Err("Activation of Data triggers is not implemented".to_owned())
-            }
+            TriggerType::Data { .. } => unimplemented!(),
             TriggerType::Periodic { interval_ms } => {
                 tokio::spawn(Self::call_periodically(*interval_ms, callbacks_container));
             }
-            TriggerType::Conditional { .. } => {
-                return Err("Activation of Conditional triggers is not implemented".to_owned())
-            }
+            TriggerType::Conditional { .. } => unimplemented!(),
         };
-        Ok(())
     }
 
     /// Periodically invokes callbacks until the weak reference is no longer valid.
@@ -263,11 +271,16 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(err.contains("already subscribed"));
+        assert!(
+            matches!(&err, TriggerError::DuplicateSubscription { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigStart.to_string()),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
+    #[should_panic]
     #[tokio::test]
-    async fn subscribe_to_data_trigger_fails_not_implemented() {
+    async fn subscribe_to_data_trigger_panics() {
         let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Data {
@@ -278,13 +291,10 @@ mod tests {
             },
         );
 
-        let err = trigger
+        trigger
             .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
             .await
-            .err()
             .unwrap();
-
-        assert!(err.contains("not implemented"));
     }
 
     #[tokio::test]
@@ -386,8 +396,9 @@ mod tests {
         assert_eq!(callback_listener.lock().unwrap().fired_count, 3);
     }
 
+    #[should_panic]
     #[tokio::test]
-    async fn subscribe_to_conditional_trigger_fails_not_implemented() {
+    async fn subscribe_to_conditional_trigger_panics() {
         let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Conditional {
@@ -396,13 +407,10 @@ mod tests {
             },
         );
 
-        let err = trigger
+        trigger
             .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
             .await
-            .err()
             .unwrap();
-
-        assert!(err.contains("not implemented"));
     }
 
     #[tokio::test]
@@ -411,6 +419,10 @@ mod tests {
 
         let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.err().unwrap();
 
-        assert!(err.contains("wasn't subscribed"));
+        assert!(
+            matches!(&err, TriggerError::NotSubscribed { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigStart.to_string()),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 }
