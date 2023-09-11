@@ -134,7 +134,6 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     phantom_generator: PhantomData<TMetricsReportGenerator>,
 }
 
-#[allow(dead_code)]
 pub(super) struct MetricsConfig<
     TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
     TPublisher: Publisher = PublisherImpl,
@@ -411,6 +410,11 @@ where
                 return;
             }
 
+            // Activate metrics report generators.
+            for generator in &config.metrics_report_generators {
+                generator.activate().await;
+            }
+
             // Subscribe to end trigger if it's set.
             if let Some(end_trigger) = &config.end_trigger {
                 let mut config_clone = Some(config.clone());
@@ -471,6 +475,11 @@ where
                 config.uuid, err
             );
             return;
+        }
+
+        // Deactivate metrics report generators.
+        for generator in &config.metrics_report_generators {
+            generator.deactivate().await;
         }
 
         // Subscribe to start trigger if it's set.
@@ -803,22 +812,59 @@ mod tests {
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
-    struct MockMetricsReportGenerator {}
+    struct MockMetricsReportGenerator {
+        name: String,
+        activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
+        deactivate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    }
+
+    impl MockMetricsReportGenerator {
+        fn new(name: String) -> Self {
+            MockMetricsReportGenerator { name, activate_callback: None, deactivate_callback: None }
+        }
+
+        fn set_activate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
+            self.activate_callback.replace(Box::new(callback));
+        }
+
+        fn set_deactivate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
+            self.deactivate_callback.replace(Box::new(callback));
+        }
+    }
 
     #[async_trait]
     impl MetricsReportGenerator for MockMetricsReportGenerator {
-        async fn activate(self: &Arc<Self>) {}
-        async fn deactivate(&self) {}
+        async fn activate(self: &Arc<Self>) {
+            if let Some(callback) = &self.activate_callback {
+                callback(&self.name);
+            }
+        }
+
+        async fn deactivate(&self) {
+            if let Some(callback) = &self.deactivate_callback {
+                callback(&self.name);
+            }
+        }
     }
 
     struct MockMetricsReportGeneratorFactory {
+        report_generators: Mutex<HashMap<String, Arc<MockMetricsReportGenerator>>>,
         /// When set, the factory will return this error once.
         error: Mutex<Option<MetricsReportGeneratorFactoryError>>,
     }
 
     impl MockMetricsReportGeneratorFactory {
         fn new() -> Self {
-            MockMetricsReportGeneratorFactory { error: Mutex::new(None) }
+            MockMetricsReportGeneratorFactory {
+                report_generators: HashMap::new().into(),
+                error: None.into(),
+            }
+        }
+
+        fn add_report_generators(&self, report_generators: Vec<Arc<MockMetricsReportGenerator>>) {
+            self.report_generators.lock().unwrap().extend(
+                report_generators.into_iter().map(|generator| (generator.name.clone(), generator)),
+            );
         }
     }
 
@@ -827,14 +873,22 @@ mod tests {
     {
         fn create(
             &self,
-            _config: &MetricsReportConfig,
+            config: &MetricsReportConfig,
             _context: &MetricsReportGeneratorFactoryCreateContext<MockTrigger>,
         ) -> Result<Arc<MockMetricsReportGenerator>, MetricsReportGeneratorFactoryError> {
-            self.error
-                .lock()
-                .unwrap()
-                .take()
-                .map_or_else(|| Ok(Arc::new(MockMetricsReportGenerator {})), Err)
+            if let Some(error) = self.error.lock().unwrap().take() {
+                return Err(error);
+            }
+
+            let report_generator = if let Some(report_generator) =
+                self.report_generators.lock().unwrap().remove(&config.name)
+            {
+                report_generator
+            } else {
+                Arc::new(MockMetricsReportGenerator::new(config.name.clone()))
+            };
+
+            Ok(report_generator)
         }
 
         fn validate(
@@ -909,7 +963,7 @@ mod tests {
     struct MockPublisher {
         name: String,
         latest_message: Option<Box<dyn MessageDyn>>,
-        activate_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+        activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     }
 
     impl MockPublisher {
@@ -918,7 +972,7 @@ mod tests {
         }
 
         fn set_activate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
-            self.activate_callback.replace(Arc::new(callback));
+            self.activate_callback.replace(Box::new(callback));
         }
     }
 
@@ -1608,11 +1662,13 @@ mod tests {
     #[tokio::test]
     async fn initialize_config_with_lifecycle_triggers_success() {
         const ACTIVATE: &str = "activate";
+        const DEACTIVATE: &str = "deactivate";
         const SUBSCRIBE: &str = "subscribe";
         const UNSUBSCRIBE: &str = "unsubscribe";
         const START_TRIGGER_NAME: &str = "start_trigger";
         const END_TRIGGER_NAME: &str = "end_trigger";
         const FINISH_TRIGGER_NAME: &str = "finish_trigger";
+        const REPORT_GENERATOR_NAME: &str = "report_generator";
 
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
 
@@ -1654,15 +1710,30 @@ mod tests {
             factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
         });
 
+        let mut report_generator_mock =
+            MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
+
+        let factory_calls_clone = factory_calls.clone();
+        report_generator_mock.set_activate_callback(move |name| {
+            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
+        });
+        let factory_calls_clone = factory_calls.clone();
+        report_generator_mock.set_deactivate_callback(move |name| {
+            factory_calls_clone.lock().unwrap().push((DEACTIVATE.to_owned(), name.to_owned()))
+        });
+
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let start_trigger_mock = Arc::new(start_trigger_mock);
         let end_trigger_mock = Arc::new(end_trigger_mock);
+        orchestrator
+            .metrics_report_generator_factory
+            .add_report_generators(vec![report_generator_mock.into()]);
+        orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
         orchestrator.trigger_factory.add_triggers(vec![
             start_trigger_mock.clone(),
             end_trigger_mock.clone(),
             finish_trigger_mock.into(),
         ]);
-        orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
 
         let mut start_trigger = TriggerProto::new();
         start_trigger.name = START_TRIGGER_NAME.to_owned();
