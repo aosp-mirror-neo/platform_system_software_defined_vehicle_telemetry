@@ -77,31 +77,6 @@ pub(crate) struct DeclarativeAggregation {
     pub(super) aggregation_message_builder: Option<ProtoMessageBuilder>,
 }
 
-impl PublisherImpl {
-    pub(super) fn new(name: String, publisher_type: PublisherType) -> Self {
-        PublisherImpl { name, publisher_type, latest_message: None.into() }
-    }
-
-    pub(super) fn new_service_publisher(
-        name: String,
-        service_name: String,
-        service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-    ) -> Self {
-        Self::new(
-            name,
-            PublisherType::Service {
-                service_name,
-                service_adapter,
-                service_subscription: None.into(),
-            },
-        )
-    }
-
-    fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
-        self.latest_message.lock().unwrap().replace(message.clone_box());
-    }
-}
-
 #[async_trait]
 impl Publisher for PublisherImpl {
     fn get_name(&self) -> &str {
@@ -147,6 +122,31 @@ impl Publisher for PublisherImpl {
         }
 
         Ok(())
+    }
+}
+
+impl PublisherImpl {
+    pub(super) fn new(name: String, publisher_type: PublisherType) -> Self {
+        PublisherImpl { name, publisher_type, latest_message: None.into() }
+    }
+
+    pub(super) fn new_service_publisher(
+        name: String,
+        service_name: String,
+        service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+    ) -> Self {
+        Self::new(
+            name,
+            PublisherType::Service {
+                service_name,
+                service_adapter,
+                service_subscription: None.into(),
+            },
+        )
+    }
+
+    fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
+        self.latest_message.lock().unwrap().replace(message.clone_box());
     }
 }
 

@@ -62,61 +62,6 @@ pub(crate) struct ServiceAdapterImpl {
     next_service_id: AtomicU32,
 }
 
-impl ServiceAdapterImpl {
-    pub(crate) fn new() -> Self {
-        ServiceAdapterImpl {
-            min_interval_ms: 500,
-            max_interval_ms: 5000,
-            service_subscriptions: AsyncMutex::new(HashMap::new()),
-            next_service_id: AtomicU32::new(1),
-        }
-    }
-
-    // Publishes messages at random intervals until the map is cleared.
-    async fn publish_data_randomly(
-        min_interval_ms: u64,
-        max_interval_ms: u64,
-        subscriptions_container: Arc<
-            AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
-        >,
-    ) {
-        let mut small_rng = SmallRng::from_entropy();
-        let mut num = 1;
-
-        loop {
-            // Verify that the map hasn't been cleared.
-            if subscriptions_container.lock().await.is_empty() {
-                return;
-            }
-
-            // If there is an interval, sleep randomly in within bounds, otherwise sleep fixed duration.
-            tokio::time::sleep(Duration::from_millis(if min_interval_ms != max_interval_ms {
-                small_rng.gen_range(min_interval_ms..max_interval_ms)
-            } else {
-                min_interval_ms
-            }))
-            .await;
-
-            // Retrieve subscriptions.
-            let mut subscriptions = subscriptions_container.lock().await;
-
-            // Verify that the map hasn't been cleared.
-            if subscriptions.is_empty() {
-                return;
-            }
-
-            // Generate a message and notify subscribers.
-            let mut message = Int32Value::new();
-            message.value = num;
-            num += 1;
-
-            for subscription in subscriptions.values_mut() {
-                subscription(&message);
-            }
-        }
-    }
-}
-
 #[async_trait]
 impl ServiceAdapter for ServiceAdapterImpl {
     async fn subscribe(
@@ -175,6 +120,61 @@ impl ServiceAdapter for ServiceAdapterImpl {
         }
 
         Ok(())
+    }
+}
+
+impl ServiceAdapterImpl {
+    pub(crate) fn new() -> Self {
+        ServiceAdapterImpl {
+            min_interval_ms: 500,
+            max_interval_ms: 5000,
+            service_subscriptions: AsyncMutex::new(HashMap::new()),
+            next_service_id: AtomicU32::new(1),
+        }
+    }
+
+    // Publishes messages at random intervals until the map is cleared.
+    async fn publish_data_randomly(
+        min_interval_ms: u64,
+        max_interval_ms: u64,
+        subscriptions_container: Arc<
+            AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
+        >,
+    ) {
+        let mut small_rng = SmallRng::from_entropy();
+        let mut num = 1;
+
+        loop {
+            // Verify that the map hasn't been cleared.
+            if subscriptions_container.lock().await.is_empty() {
+                return;
+            }
+
+            // If there is an interval, sleep randomly in within bounds, otherwise sleep fixed duration.
+            tokio::time::sleep(Duration::from_millis(if min_interval_ms != max_interval_ms {
+                small_rng.gen_range(min_interval_ms..max_interval_ms)
+            } else {
+                min_interval_ms
+            }))
+            .await;
+
+            // Retrieve subscriptions.
+            let mut subscriptions = subscriptions_container.lock().await;
+
+            // Verify that the map hasn't been cleared.
+            if subscriptions.is_empty() {
+                return;
+            }
+
+            // Generate a message and notify subscribers.
+            let mut message = Int32Value::new();
+            message.value = num;
+            num += 1;
+
+            for subscription in subscriptions.values_mut() {
+                subscription(&message);
+            }
+        }
     }
 }
 

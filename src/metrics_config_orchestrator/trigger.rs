@@ -88,16 +88,6 @@ impl fmt::Display for TriggerSubscriber {
     }
 }
 
-impl TriggerImpl {
-    pub(super) fn new(name: String, trigger_type: TriggerType) -> Self {
-        TriggerImpl {
-            name,
-            trigger_type,
-            callback_map: AsyncMutex::new(Arc::new(AsyncMutex::new(HashMap::new()))),
-        }
-    }
-}
-
 #[async_trait]
 impl Trigger for TriggerImpl {
     fn get_name(&self) -> &str {
@@ -154,6 +144,16 @@ impl Trigger for TriggerImpl {
         }
 
         Ok(())
+    }
+}
+
+impl TriggerImpl {
+    pub(super) fn new(name: String, trigger_type: TriggerType) -> Self {
+        TriggerImpl {
+            name,
+            trigger_type,
+            callback_map: AsyncMutex::new(Arc::new(AsyncMutex::new(HashMap::new()))),
+        }
     }
 }
 

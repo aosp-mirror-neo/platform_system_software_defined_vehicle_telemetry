@@ -57,34 +57,6 @@ pub enum TriggerFactoryError {
 
 pub(crate) struct TriggerFactoryImpl {}
 
-impl TriggerFactoryImpl {
-    pub(super) fn new() -> Self {
-        TriggerFactoryImpl {}
-    }
-}
-
-impl TriggerFactoryImpl {
-    fn get_conditional_trigger_expression<'a>(
-        conditional_trigger_proto: &'a ConditionalTriggerProto,
-        nodes: &'a [Arc<Node>],
-    ) -> Result<&'a Arc<Node>, TriggerFactoryError> {
-        let selector_node_index = conditional_trigger_proto
-            .selector_node_index
-            .ok_or(TriggerFactoryError::MissingNodeIndex)?;
-        nodes
-            .get(selector_node_index as usize)
-            .ok_or(TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index })
-    }
-
-    fn verify_not_empty(names: &[String]) -> Result<(), TriggerFactoryError> {
-        if names.is_empty() {
-            Err(TriggerFactoryError::NoParentTriggers)
-        } else {
-            Ok(())
-        }
-    }
-}
-
 impl TriggerFactory for TriggerFactoryImpl {
     fn create(
         &self,
@@ -139,6 +111,32 @@ impl TriggerFactory for TriggerFactoryImpl {
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
         };
         Ok(())
+    }
+}
+
+impl TriggerFactoryImpl {
+    pub(super) fn new() -> Self {
+        TriggerFactoryImpl {}
+    }
+
+    fn get_conditional_trigger_expression<'a>(
+        conditional_trigger_proto: &'a ConditionalTriggerProto,
+        nodes: &'a [Arc<Node>],
+    ) -> Result<&'a Arc<Node>, TriggerFactoryError> {
+        let selector_node_index = conditional_trigger_proto
+            .selector_node_index
+            .ok_or(TriggerFactoryError::MissingNodeIndex)?;
+        nodes
+            .get(selector_node_index as usize)
+            .ok_or(TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index })
+    }
+
+    fn verify_not_empty(names: &[String]) -> Result<(), TriggerFactoryError> {
+        if names.is_empty() {
+            Err(TriggerFactoryError::NoParentTriggers)
+        } else {
+            Ok(())
+        }
     }
 }
 
