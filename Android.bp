@@ -89,6 +89,7 @@ rust_test_host {
         "liblazy_static",
         "libprotobuf",
         "libsdv_ast_traversal",
+        "libsdv_telem_test_proto",
         "libsdvtelemetry_proto_rust",
     ],
     proc_macros: [

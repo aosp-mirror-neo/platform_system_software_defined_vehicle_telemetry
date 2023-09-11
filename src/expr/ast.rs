@@ -412,7 +412,7 @@ mod tests {
     use super::*;
     use crate::NodeValue;
     use lazy_static::lazy_static;
-    use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+    use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{
             ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
