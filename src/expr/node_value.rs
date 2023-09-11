@@ -7,9 +7,13 @@
 mod protobuf_reflection_extensions;
 
 use crate::node_errors::NodeError;
+pub use crate::node_value::protobuf_reflection_extensions::NodeValueToReflExt;
 use crate::node_value::protobuf_reflection_extensions::ProtobufReflectionExt;
 
-use protobuf::reflect::{ReflectFieldRef, ReflectValueRef};
+use protobuf::{
+    reflect::{ReflectFieldRef, ReflectValueRef},
+    MessageDyn,
+};
 use sdvtelemetry_proto_rust::expression::{
     combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -42,7 +46,7 @@ pub enum NodeValue {
     Double(f64),
 
     /// A protobuf message value.
-    Message(Box<dyn protobuf::MessageDyn>),
+    Message(Box<dyn MessageDyn>),
 
     /// Repeated boolean values.
     BoolList(Vec<bool>),
@@ -150,7 +154,7 @@ impl NodeValue {
 
     /// Gets a NodeValue from a protobuf message and its fields.
     pub fn extract_value(
-        msg: Box<dyn protobuf::MessageDyn>,
+        msg: Box<dyn MessageDyn>,
         fields: &[String],
     ) -> Result<NodeValue, NodeError> {
         // if no field names, return the message itself as the NodeValue
@@ -165,7 +169,7 @@ impl NodeValue {
 
     /// Reads a field value from a protobuf message using the reflection.
     fn extract_field_value(
-        msg: &dyn protobuf::MessageDyn,
+        msg: &dyn MessageDyn,
         fields: &[String],
     ) -> Result<NodeValue, NodeError> {
         let msg_descriptor = msg.descriptor_dyn();
@@ -448,6 +452,18 @@ impl NodeValue {
             NodeValue::Double(val) => *val,
             _ => return Err(err_provider()),
         })
+    }
+
+    /// Returns the Message value or the provided error if NodeValue is not a Message.
+    fn get_message(
+        &self,
+        err_provider: impl FnOnce() -> NodeError,
+    ) -> Result<&dyn MessageDyn, NodeError> {
+        if let NodeValue::Message(msg) = self {
+            Ok(msg.as_ref())
+        } else {
+            Err(err_provider())
+        }
     }
 
     /// Checks whether the node value is zero.
