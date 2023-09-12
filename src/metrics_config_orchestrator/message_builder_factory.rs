@@ -81,6 +81,9 @@ impl MessageBuilderFactoryImpl {
 }
 
 impl MessageBuilderFactory for MessageBuilderFactoryImpl {
+    // TODO: b/299950214 - verify that node output is compatible with field type.
+    // As a result, validate() will ensure the dynamic message doesn't contain
+    // unsupported field types such as map, string, bytes fields.
     fn validate(
         &self,
         proto_message_builder: &ProtoMessageBuilder,

@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_ast::{Node, NodeError, NodeValueToReflExt};
+use sdv_ast::{Node, NodeError, ReflectRepeatedMutExt, ToReflectValueBox};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -52,15 +52,22 @@ impl MessageBuilder {
                 },
             )?;
             if field_descriptor.is_singular() {
+                let node_value = node.evaluate().map_err(node_err_to_builder_err)?;
                 field_descriptor.set_singular_field(
                     msg.as_mut(),
-                    node.evaluate()
-                        .map_err(node_err_to_builder_err)?
+                    node_value
                         .to_reflect_value_box(&field_descriptor.singular_runtime_type())
                         .map_err(node_err_to_builder_err)?,
                 );
+            } else if field_descriptor.is_repeated() {
+                let node_value = node.evaluate().map_err(node_err_to_builder_err)?;
+                field_descriptor
+                    .mut_repeated(msg.as_mut())
+                    .push_node_value_content(&node_value)
+                    .map_err(node_err_to_builder_err)?;
+            } else {
+                // TODO: b/299950214 - fail validation on map field
             }
-            // TODO: b/299994477 - support populating repeated fields
         }
         Ok(msg)
     }
@@ -71,7 +78,7 @@ mod tests {
     use super::*;
     use lazy_static::lazy_static;
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
-    use sdv_ast::{MessageProvider, MessageProviderError, NodeValue};
+    use sdv_ast::NodeValue;
     use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use std::sync::Arc;
 
@@ -90,17 +97,10 @@ mod tests {
     const FLOAT_FIELD_NAME: &str = "float_field";
     const ENUM_FIELD_NAME: &str = "enum_field";
     const MESSAGE_FIELD_NAME: &str = "message_field";
-
-    struct TestNestedMessageProvider {}
-
-    impl MessageProvider for TestNestedMessageProvider {
-        fn get_message(
-            &self,
-            _publisher_name: &str,
-        ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-            Ok(Some(Box::new(TEST_NESTED_MESSAGE.clone())))
-        }
-    }
+    const REPEATED_BOOL_FIELD_NAME: &str = "repeated_bools";
+    const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
+    const REPEATED_DOUBLE_FIELD_NAME: &str = "repeated_doubles";
+    const REPEATED_ENUM_FIELD_NAME: &str = "repeated_enums";
 
     /// Creates a MessageBuilder struct object using the descriptor and
     /// field_name + node pairs as field assignments.
@@ -153,11 +153,53 @@ mod tests {
                 (INT_FIELD_NAME, Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(42) })),
                 (
                     MESSAGE_FIELD_NAME,
-                    Arc::new(Node::FieldLeaf {
-                        publisher_name: "foo".to_string(),
-                        fields: vec![],
-                        message_provider: Arc::new(TestNestedMessageProvider {}),
+                    Arc::new(Node::ConstantLeaf {
+                        value: NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone())),
                     }),
+                ),
+            ],
+        );
+
+        // action
+        let res = builder.build()?;
+
+        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
+        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_repeated_primitive_fields_ok() -> Result<(), MessageBuilderError> {
+        let booleans = vec![true, false, true, false];
+        let integers = vec![42, 100, -1];
+        let doubles = vec![0.0, 1.0];
+        let enums = vec![1, 1, 0]; // SOME, SOME, NONE
+        let mut expected_message = TestMessage::new();
+        expected_message.repeated_bools = booleans.clone();
+        expected_message.repeated_i64s = integers.clone();
+        expected_message.repeated_doubles = doubles.clone();
+        expected_message.repeated_enums =
+            vec![TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
+
+        // create MessageBuilder struct object, this is the subject of the test
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            vec![
+                (
+                    REPEATED_BOOL_FIELD_NAME,
+                    Arc::new(Node::ConstantLeaf { value: NodeValue::BoolList(booleans) }),
+                ),
+                (
+                    REPEATED_INT_FIELD_NAME,
+                    Arc::new(Node::ConstantLeaf { value: NodeValue::Int64List(integers) }),
+                ),
+                (
+                    REPEATED_DOUBLE_FIELD_NAME,
+                    Arc::new(Node::ConstantLeaf { value: NodeValue::DoubleList(doubles) }),
+                ),
+                (
+                    REPEATED_ENUM_FIELD_NAME,
+                    Arc::new(Node::ConstantLeaf { value: NodeValue::Int64List(enums) }),
                 ),
             ],
         );
