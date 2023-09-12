@@ -20,7 +20,9 @@ pub(crate) trait Trigger {
     fn get_name(&self) -> &str;
 
     /// Subscribe to trigger fire events.
+    ///
     /// First subscription activates the trigger.
+    /// The callback mustn't block because it's executed on the trigger thread.
     async fn subscribe(
         &self,
         subscriber: &TriggerSubscriber,
@@ -28,7 +30,9 @@ pub(crate) trait Trigger {
     ) -> Result<(), TriggerError>;
 
     /// Unsubscribe from trigger fire events.
+    ///
     /// Last unsubscription deactivates the trigger.
+    /// After asynchronous function is complete, the callback is guaranteed not to be called.
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError>;
 }
 
@@ -202,7 +206,9 @@ impl TriggerType {
                 return;
             }
 
-            // Fire trigger.
+            // Synchronously invoke callbacks.
+            // The loop needs to wait before they finish to release the mutex lock when they're
+            // done because they're allowed to mutate themselves.
             for callback in callbacks.values_mut() {
                 callback();
             }
