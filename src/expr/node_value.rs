@@ -4,11 +4,12 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-use crate::node_errors::NodeError;
+mod protobuf_reflection_extensions;
 
-use protobuf::reflect::{
-    ReflectFieldRef, ReflectRepeatedRef, ReflectValueRef, RuntimeType as ProtobufRuntimeType,
-};
+use crate::node_errors::NodeError;
+use crate::node_value::protobuf_reflection_extensions::ProtobufReflectionExt;
+
+use protobuf::reflect::{ReflectFieldRef, ReflectValueRef};
 use sdvtelemetry_proto_rust::expression::{
     combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -20,8 +21,6 @@ use sdvtelemetry_proto_rust::expression::{
 const EPSILON: f32 = 1e-6;
 
 /// Holds a generic value.
-/// TODO(b/288481877): Add list value because FieldLeafNode can extract values
-/// from repeated fields.
 #[derive(Clone, Debug)]
 pub enum NodeValue {
     /// No value.
@@ -180,20 +179,7 @@ impl NodeValue {
 
         // Base case for recursion: one field is provided, simply read the value
         if fields.len() == 1 {
-            return match &field_value {
-                // `optional` or singular protobuf field
-                ReflectFieldRef::Optional(singular_field) => match singular_field.value() {
-                    Some(field_value) => Self::from_singular_field_value(field_value),
-                    None => Ok(NodeValue::None),
-                },
-                // `repeated` protobuf field
-                ReflectFieldRef::Repeated(repeated_field) => {
-                    // convert reflection value into a NodeValue and return
-                    Self::from_repeated_field(repeated_field)
-                }
-                // map field
-                _ => Err(NodeError::UnsupportedSingularFieldType),
-            };
+            return field_value.to_node_value();
         }
 
         // If fields length > 1, get nested field values iff the value is a single protobuf message,
@@ -359,156 +345,6 @@ impl NodeValue {
             }
             RelationalOperator::ALL_EQ => self.all_equals(other),
         }?))
-    }
-
-    /// Converts a protobuf reflection on a singular field into a NodeValue.
-    fn from_singular_field_value(field_value: ReflectValueRef<'_>) -> Result<NodeValue, NodeError> {
-        Ok(match field_value {
-            ReflectValueRef::U32(v) => NodeValue::Int64(v as i64),
-            ReflectValueRef::U64(v) => NodeValue::Int64(v as i64),
-            ReflectValueRef::I32(v) => NodeValue::Int32(v),
-            ReflectValueRef::I64(v) => NodeValue::Int64(v),
-            ReflectValueRef::F32(v) => NodeValue::Float(v),
-            ReflectValueRef::F64(v) => NodeValue::Double(v),
-            ReflectValueRef::Bool(v) => NodeValue::Bool(v),
-            ReflectValueRef::Enum(_, v) => NodeValue::Int32(v),
-            ReflectValueRef::Message(v) => NodeValue::Message(v.clone_box()),
-            _ => return Err(NodeError::UnsupportedSingularFieldType),
-        })
-    }
-
-    /// Converts a protobuf reflection on a repeated field into a NodeValue.
-    fn from_repeated_field(
-        repeated_field: &ReflectRepeatedRef<'_>,
-    ) -> Result<NodeValue, NodeError> {
-        // depending on the field type, create the correct list type
-        // `repeated int32` = NodeValue::Int32List etc.
-        Ok(match repeated_field.element_type() {
-            ProtobufRuntimeType::I32 => {
-                NodeValue::Int32List(Self::refl_to_vec(
-                    repeated_field,
-                    // closure that unwraps an i32 value from a value reflection
-                    |val: ReflectValueRef<'_>| {
-                        val.to_i32().ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be i32",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::I64 => {
-                NodeValue::Int64List(Self::refl_to_vec(
-                    repeated_field,
-                    // unwraps an i64 value from a value reflection or error
-                    |val: ReflectValueRef<'_>| {
-                        val.to_i64().ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be i64",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::U32 => {
-                NodeValue::Int64List(Self::refl_to_vec(
-                    repeated_field,
-                    |val: ReflectValueRef<'_>| {
-                        // map Option<u32> into Option<i64> and convert it to a Result
-                        val.to_u32().map(|x| x as i64).ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be u32",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::U64 => {
-                NodeValue::Int64List(Self::refl_to_vec(
-                    repeated_field,
-                    |val: ReflectValueRef<'_>| {
-                        // map Option<u64> into Option<i64> and convert it to a Result
-                        val.to_u64().map(|x| x as i64).ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be u64",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::F32 => {
-                NodeValue::FloatList(Self::refl_to_vec(
-                    repeated_field,
-                    // closure that unwraps f32 value from a single value reflection
-                    |val: ReflectValueRef<'_>| {
-                        val.to_f32().ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be f32",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::F64 => {
-                NodeValue::DoubleList(Self::refl_to_vec(
-                    repeated_field,
-                    // unwraps a f64 value from a value reflection or error
-                    |val: ReflectValueRef<'_>| {
-                        val.to_f64().ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be f64",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::Bool => {
-                NodeValue::BoolList(Self::refl_to_vec(
-                    repeated_field,
-                    // unwraps a bool value from a value reflection or error
-                    |val: ReflectValueRef<'_>| {
-                        val.to_bool().ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be bool",
-                                repeated_field
-                            ),
-                        })
-                    },
-                )?)
-            }
-            ProtobufRuntimeType::Enum(_) => NodeValue::Int32List(Self::refl_to_vec(
-                repeated_field,
-                // unwraps an enum as i32 from a value reflection or error
-                |val: ReflectValueRef<'_>| {
-                    val.to_enum_value().ok_or(NodeError::TypeMismatch {
-                        msg: format!(
-                            "Repeated field {:?} type expected to be enum",
-                            repeated_field
-                        ),
-                    })
-                },
-            )?),
-            _ => {
-                return Err(NodeError::UnsupportedRepeatedFieldType);
-            }
-        })
-    }
-
-    /// Converts a protobuf reflection of a repeated field into a vector.
-    /// For example, a `repeated int32` field will become `Vec<i32>`, or error if
-    /// the `transform_func` returned an error.
-    fn refl_to_vec<T>(
-        repeated_field: &ReflectRepeatedRef,
-        transform_func: impl Fn(ReflectValueRef) -> Result<T, NodeError>,
-    ) -> Result<Vec<T>, NodeError> {
-        // apply `transform_func` to each element in the repeated_field
-        repeated_field.into_iter().map(transform_func).collect()
     }
 
     /// Check if list contains some element.
