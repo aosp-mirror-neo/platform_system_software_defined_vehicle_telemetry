@@ -11,7 +11,7 @@ use sdv_ast::{
     NodeFactory, NodeFactoryContext, NodeFactoryImpl,
 };
 use sdv_telem_expr_parser::Parser;
-use sdv_telem_expr_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdvtelemetry_proto_rust::expression::{
     combination_node::ArithmeticOperator, CombinationNode, ConstantLeafNode, FieldLeafNode,
     Node as NodeProto,
