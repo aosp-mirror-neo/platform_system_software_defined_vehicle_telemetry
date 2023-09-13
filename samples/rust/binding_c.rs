@@ -27,6 +27,7 @@ extern "C" {
             unsafe extern "C" fn(
                 arg1: *mut ::std::os::raw::c_void,
                 arg2: *const ::std::os::raw::c_char,
+                arg3: ::std::os::raw::c_int,
             ),
         >,
     );

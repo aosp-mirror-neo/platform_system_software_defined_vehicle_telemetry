@@ -44,18 +44,18 @@ interface ITelemetryService {
      * Sends finished telemetry reports or errors associated with the given uuid using the
      * {@code ITelemetryReportListener}.
      */
-    void getFinishedReport(
-            in @utf8InCpp String metricsConfigUuid, in ITelemetryReportListener listener);
-
-    /**
-     * Sends all finished telemetry reports or errors using the {@code ITelemetryReportListener}.
-     */
-    void getAllFinishedReports(in ITelemetryReportListener listener);
+    void getFinishedReport(in @utf8InCpp String metricsConfigUuid, in int report_number);
 
     /**
      * Registers a listener for receiving notifications when a report or telemetry error is ready.
      */
     void setReportReadyListener(in ITelemetryReportReadyListener listener);
+
+    /**
+     * Registers a listener for pulling metrics report when the client is notified a new report is
+     * ready.
+     */
+    void setReportListener(in ITelemetryReportListener listener);
 
     /**
      * Registers a callback for receiving status codes for API calls.
@@ -66,6 +66,11 @@ interface ITelemetryService {
      * Clears listener to stop receiving notifications when a report or telemetry error is ready.
      */
     void clearReportReadyListener();
+
+    /**
+     * Clears listener to stop receiving mertics reports.
+     */
+    void clearReportListener();
 
     /**
      * Clears listener to stop receiving status codes.

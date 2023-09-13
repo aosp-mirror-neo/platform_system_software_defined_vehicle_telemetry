@@ -17,11 +17,12 @@ enum TelemetryServiceStatusCodes {
     REMOVE_METRICS_CONFIG_SUCCEEDED = 203,
     REMOVE_ALL_METRICS_CONFIGS_SUCCEEDED = 204,
     GET_FINISHED_REPORT_SUCCEEDED = 205,
-    GET_ALL_FINISHED_REPORTS_SUCCEEDED = 206,
-    SET_REPORT_READY_LISTENER_SUCCEEDED = 207,
+    SET_REPORT_READY_LISTENER_SUCCEEDED = 206,
+    SET_REPORT_LISTENER_SUCCEEDED = 207,
     SET_STATUS_LISTENER_SUCCEEDED = 208,
     CLEAR_REPORT_READY_LISTENER_SUCCEEDED = 209,
-    CLEAR_STATUS_LISTENER_SUCCEEDED = 210,
+    CLEAR_REPORT_LISTENER_SUCCEEDED = 210,
+    CLEAR_STATUS_LISTENER_SUCCEEDED = 211,
 
     /**
      * Common error messages during API calls
@@ -65,23 +66,39 @@ enum TelemetryServiceStatusCodes {
     SET_REPORT_READY_LISTENER_FAILED_LISTENER_EXISTS = 420,
 
     /**
+     * Errors specific to set report ready listener
+     */
+    SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS = 421,
+
+    /**
      * Errors specific to set status listener
      */
-    SET_STATUS_LISTENER_FAILED_LISTENER_EXISTS = 421,
+    SET_STATUS_LISTENER_FAILED_LISTENER_EXISTS = 422,
 
     /**
      * Errors specific to clear report ready listener
      */
-    CLEAR_REPORT_READY_LISTENER_FAILED_LISTENER_NOT_SET = 422,
+    CLEAR_REPORT_READY_LISTENER_FAILED_LISTENER_NOT_SET = 423,
+
+    /**
+     * Errors specific to clear report listener
+     */
+    CLEAR_REPORT_LISTENER_FAILED_LISTENER_NOT_SET = 424,
 
     /**
      * Errors specific to clear status listener
      */
-    CLEAR_STATUS_LISTENER_FAILED_LISTENER_NOT_SET = 423,
+    CLEAR_STATUS_LISTENER_FAILED_LISTENER_NOT_SET = 425,
+
+    /**
+     * Errors specific to get finished report
+     */
+    GET_FINISHED_REPORT_FAILED_LISTENER_NOT_SET = 426,
+    GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND = 427,
 
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined
      */
-    TELEMETRY_SERVICE_UNKNOWN_ERROR = 424,
+    TELEMETRY_SERVICE_UNKNOWN_ERROR = 428,
 
 }

@@ -454,7 +454,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         listener: &Strong<dyn ITelemetryReportReadyListener>,
     ) -> BinderResult<()> {
         info!("setReportReadyListener");
-        let (status_code, result) =
+        let (status_code, status_message) =
             self.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
                 |_| {
                     (
@@ -469,14 +469,37 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     )
                 },
             );
-        self.send_status(status_code, result)
+        self.send_status(status_code, status_message)
+    }
+
+    async fn setReportListener(
+        &self,
+        listener: &Strong<dyn ITelemetryReportListener>,
+    ) -> BinderResult<()> {
+        info!("setReportListener");
+        let (status_code, status_message) =
+            self.metrics_report_listener.set_report_listener(listener).map_or_else(
+                |_| {
+                    (
+                        StatusCodes::SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS.0,
+                        "Report Ready Listener already exists",
+                    )
+                },
+                |_| {
+                    (
+                        StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
+                        "Report Ready Listener successfully added",
+                    )
+                },
+            );
+        self.send_status(status_code, status_message)
     }
 
     async fn setStatusListener(
         &self,
         listener: &Strong<dyn ITelemetryStatusListener>,
     ) -> BinderResult<()> {
-        let (status_code, result) = {
+        let (status_code, status_message) = {
             let mut guard = self.status_listener.lock().unwrap();
             if guard.is_none() {
                 *guard = Some(listener.clone());
@@ -488,30 +511,35 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 )
             }
         };
-        self.send_status(status_code, result)
+        self.send_status(status_code, status_message)
     }
 
     #[allow(unused_variables)]
     async fn getFinishedReport(
         &self,
-        metrics_config_uuid: &str,
-        listener: &Strong<(dyn ITelemetryReportListener)>,
+        metrics_report_uuid: &str,
+        report_number: i32,
     ) -> BinderResult<()> {
-        info!("getFinishedReport: {}", metrics_config_uuid);
-        self.send_status(StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0, metrics_config_uuid)
-    }
+        info!("getFinishedReport: {}", metrics_report_uuid);
+        let (status_code, status_message) = self
+            .metrics_report_listener
+            .get_finished_report(metrics_report_uuid, report_number)
+            .map_or_else(
+                |_| {
+                    (
+                        StatusCodes::GET_FINISHED_REPORT_FAILED_LISTENER_NOT_SET.0,
+                        metrics_report_uuid,
+                    )
+                },
+                |_| (StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0, metrics_report_uuid),
+            );
 
-    async fn getAllFinishedReports(
-        &self,
-        _listener: &Strong<dyn ITelemetryReportListener>,
-    ) -> BinderResult<()> {
-        info!("getAllFinishedReports");
-        self.send_status(StatusCodes::GET_ALL_FINISHED_REPORTS_SUCCEEDED.0, "Ok")
+        self.send_status(status_code, status_message)
     }
 
     async fn clearReportReadyListener(&self) -> BinderResult<()> {
         info!("clearReportReadyListener");
-        let (status_code, result) = {
+        let (status_code, status_message) = {
             match self.metrics_report_listener.clear_report_ready_listener() {
                 Ok(()) => (
                     StatusCodes::CLEAR_REPORT_READY_LISTENER_SUCCEEDED.0,
@@ -523,7 +551,24 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 ),
             }
         };
-        self.send_status(status_code, result)
+        self.send_status(status_code, status_message)
+    }
+
+    async fn clearReportListener(&self) -> BinderResult<()> {
+        info!("clearReportListener");
+        let (status_code, status_message) = {
+            match self.metrics_report_listener.clear_report_listener() {
+                Ok(()) => (
+                    StatusCodes::CLEAR_REPORT_LISTENER_SUCCEEDED.0,
+                    "Report listener successfully cleared",
+                ),
+                Err(_) => (
+                    StatusCodes::CLEAR_REPORT_LISTENER_FAILED_LISTENER_NOT_SET.0,
+                    "Report listener not set",
+                ),
+            }
+        };
+        self.send_status(status_code, status_message)
     }
 
     async fn clearStatusListener(&self) -> BinderResult<()> {
@@ -541,13 +586,15 @@ mod tests {
     extern crate protobuf;
     use super::*;
     use android_sdv_telemetry::aidl::android::sdv::telemetry::{
+        ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
         ITelemetryStatusListener::BnTelemetryStatusListener,
     };
 
-    use binder::{BinderFeatures, ParcelFileDescriptor};
+    use binder::BinderFeatures;
     use protobuf::Message;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
+    use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
 
@@ -593,19 +640,53 @@ mod tests {
     }
 
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
-    struct TelemetryReportListener;
+    #[derive(Clone)]
+    struct MockTelemetryReportListener {
+        num_on_result_calls: Arc<Mutex<i32>>,
+        uuid: Arc<Mutex<String>>,
+        report_number: Arc<Mutex<u32>>,
+        metrics_report: Arc<Mutex<Option<MetricsReport>>>,
+    }
 
-    impl Interface for TelemetryReportListener {}
+    impl Interface for MockTelemetryReportListener {}
 
-    impl ITelemetryReportListener for TelemetryReportListener {
-        fn onResult(
-            &self,
-            _metrics_config_name: &str,
-            _parcel: &ParcelFileDescriptor,
-            _err: &[u8],
-            _status: i32,
-        ) -> BinderResult<()> {
-            info!("onResult");
+    impl MockTelemetryReportListener {
+        fn new() -> Self {
+            MockTelemetryReportListener {
+                num_on_result_calls: Arc::new(Mutex::new(0)),
+                report_number: Arc::new(Mutex::new(0)),
+                uuid: Arc::new(Mutex::new(String::new())),
+                metrics_report: Arc::new(Mutex::new(None)),
+            }
+        }
+
+        fn get_num_on_result_calls(&self) -> i32 {
+            *self.num_on_result_calls.lock().unwrap()
+        }
+
+        fn get_report_number(&self) -> u32 {
+            *self.report_number.lock().unwrap()
+        }
+
+        fn get_uuid(&self) -> String {
+            self.uuid.lock().unwrap().to_string()
+        }
+    }
+
+    impl ITelemetryReportListener for MockTelemetryReportListener {
+        fn onResult(&self, serialized_report: &[u8]) -> BinderResult<()> {
+            let metrics_report: MetricsReport =
+                protobuf::Message::parse_from_bytes(serialized_report).unwrap();
+
+            let mut num_on_result_calls = self.num_on_result_calls.lock().unwrap();
+            *num_on_result_calls += 1;
+            let mut report_number = self.report_number.lock().unwrap();
+            *report_number = metrics_report.report_number;
+            let mut uuid = self.uuid.lock().unwrap();
+            *uuid = metrics_report.clone().metrics_config_uuid;
+            let mut report = self.metrics_report.lock().unwrap();
+            *report = Some(metrics_report);
+
             Ok(())
         }
     }
@@ -614,6 +695,7 @@ mod tests {
     #[derive(Clone)]
     struct MockTelemetryReportReadyListener {
         num_on_ready_report_calls: Arc<Mutex<i32>>,
+        report_number: Arc<Mutex<u32>>,
         uuid: Arc<Mutex<String>>,
     }
 
@@ -623,6 +705,7 @@ mod tests {
         fn new() -> Self {
             MockTelemetryReportReadyListener {
                 num_on_ready_report_calls: Arc::new(Mutex::new(0)),
+                report_number: Arc::new(Mutex::new(0)),
                 uuid: Arc::new(Mutex::new(String::new())),
             }
         }
@@ -631,15 +714,21 @@ mod tests {
             *self.num_on_ready_report_calls.lock().unwrap()
         }
 
+        fn get_report_number(&self) -> u32 {
+            *self.report_number.lock().unwrap()
+        }
+
         fn get_uuid(&self) -> String {
             self.uuid.lock().unwrap().to_string()
         }
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, report_uuid: &str) -> BinderResult<()> {
+        fn onReady(&self, report_uuid: &str, metrics_report_number: i32) -> BinderResult<()> {
             let mut num_calls = self.num_on_ready_report_calls.lock().unwrap();
             *num_calls += 1;
+            let mut report_number = self.report_number.lock().unwrap();
+            *report_number = metrics_report_number as u32;
             let mut uuid = self.uuid.lock().unwrap();
             *uuid = String::from(report_uuid);
             Ok(())
@@ -997,6 +1086,7 @@ mod tests {
     #[tokio::test]
     async fn set_report_listener_and_check_on_ready_calls() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+        const REPORT_NUMBER: u32 = 42;
 
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
@@ -1020,8 +1110,9 @@ mod tests {
         );
 
         // Call onReady on report ready listener
-        let _ = report_ready_listener.onReady(UUID);
+        let _ = report_ready_listener.onReady(UUID, REPORT_NUMBER.try_into().unwrap());
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
+        assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID, &report_ready_listener.get_uuid());
     }
 
@@ -1046,6 +1137,55 @@ mod tests {
         let _ = test_environment.service.setReportReadyListener(&report_listener).await;
         assert_eq!(
             StatusCodes::SET_REPORT_READY_LISTENER_FAILED_LISTENER_EXISTS.0,
+            test_environment.get_status_code()
+        );
+    }
+
+    #[tokio::test]
+    async fn set_report_listener() {
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "set_report_listener";
+
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        test_environment.set_mock_status_listener().await;
+
+        let report_listener = MockTelemetryReportListener::new();
+
+        let binder_report_listener = BnTelemetryReportListener::new_binder(
+            report_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let _ = test_environment.service.setReportListener(&binder_report_listener).await;
+
+        assert_eq!(
+            StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
+            test_environment.get_status_code()
+        );
+    }
+
+    #[tokio::test]
+    async fn set_multiple_report_listener_fails() {
+        const ROOT_PATH: &str = "set_multiple_report_listener";
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        test_environment.set_mock_status_listener().await;
+
+        let report_listener = BnTelemetryReportListener::new_binder(
+            MockTelemetryReportListener::new(),
+            BinderFeatures::default(),
+        );
+
+        let _ = test_environment.service.setReportListener(&report_listener).await;
+
+        assert_eq!(
+            StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
+            test_environment.get_status_code()
+        );
+
+        let _ = test_environment.service.setReportListener(&report_listener).await;
+        assert_eq!(
+            StatusCodes::SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS.0,
             test_environment.get_status_code()
         );
     }
@@ -1113,29 +1253,63 @@ mod tests {
 
     #[tokio::test]
     async fn get_finished_report() {
+        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+        const REPORT_NUMBER: u32 = 42;
+
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_finished_report";
-        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        test_environment.set_mock_status_listener().await;
 
-        let listener: Strong<dyn ITelemetryReportListener> =
-            Strong::new(Box::new(TelemetryReportListener));
+        // Setting Report Ready Listener
 
-        let result = test_environment.service.getFinishedReport("TestConfig", &listener).await;
-        assert!(result.is_ok());
-    }
+        let report_ready_listener = MockTelemetryReportReadyListener::new();
 
-    #[tokio::test]
-    async fn get_all_finished_report() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "get_all_finished_report";
-        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
+            report_ready_listener.clone(),
+            BinderFeatures::default(),
+        );
 
-        let listener: Strong<dyn ITelemetryReportListener> =
-            Strong::new(Box::new(TelemetryReportListener));
+        let _ =
+            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
 
-        let result = test_environment.service.getAllFinishedReports(&listener).await;
-        assert!(result.is_ok());
+        assert_eq!(
+            StatusCodes::SET_REPORT_READY_LISTENER_SUCCEEDED.0,
+            test_environment.get_status_code()
+        );
+
+        // Setting Report Listener
+
+        let report_listener = MockTelemetryReportListener::new();
+
+        let binder_report_listener = BnTelemetryReportListener::new_binder(
+            report_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let _ = test_environment.service.setReportListener(&binder_report_listener).await;
+
+        assert_eq!(
+            StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
+            test_environment.get_status_code()
+        );
+
+        // Send report to metric report listener
+        let mut report = MetricsReport::new();
+        report.metrics_config_uuid = UUID.to_string();
+        report.report_number = REPORT_NUMBER;
+
+        // Call on_report_ready callback on metrics report listener
+        test_environment.service.metrics_report_listener.on_report_ready(report);
+        let _ = test_environment
+            .service
+            .getFinishedReport(UUID, REPORT_NUMBER.try_into().unwrap())
+            .await;
+
+        assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
+        assert_eq!(1, report_listener.get_num_on_result_calls());
+        assert_eq!(UUID, report_listener.get_uuid());
+        assert_eq!(REPORT_NUMBER, report_listener.get_report_number());
     }
 }
