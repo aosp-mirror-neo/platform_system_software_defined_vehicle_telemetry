@@ -6,12 +6,25 @@
 use crate::{NodeError, NodeValue};
 
 use protobuf::reflect::{
-    ReflectFieldRef, ReflectRepeatedRef, ReflectValueRef, RuntimeType as ProtobufRuntimeType,
+    ReflectFieldRef, ReflectRepeatedRef, ReflectValueBox, ReflectValueRef,
+    RuntimeType as ProtobufRuntimeType,
 };
 
-/// Protobuf reflection to NodeValue
+/// Protobuf reflection to NodeValue.
 pub trait ProtobufReflectionExt {
     fn to_node_value(&self) -> Result<NodeValue, NodeError>;
+}
+
+/// NodeValue to protobuf reflection.
+pub trait NodeValueToReflExt {
+    /// Convert the NodeValue into a ReflectValueBox using the given type.
+    /// For example, if the value_type is Bool, it will attempt to get a boolean
+    /// from NodeValue (self) and put that boolean into a ReflectValueBox.
+    /// Returns an error if the `value_type` does not match with the NodeValue type.
+    fn to_reflect_value_box(
+        &self,
+        value_type: &ProtobufRuntimeType,
+    ) -> Result<ReflectValueBox, NodeError>;
 }
 
 trait RepeatedFieldReflectionExt {
@@ -151,5 +164,37 @@ impl RepeatedFieldReflectionExt for ReflectRepeatedRef<'_> {
     ) -> Result<Vec<T>, NodeError> {
         // apply `transform_func` to each element in the repeated_field
         self.into_iter().map(transform_func).collect()
+    }
+}
+
+impl NodeValueToReflExt for NodeValue {
+    fn to_reflect_value_box(
+        &self,
+        value_type: &ProtobufRuntimeType,
+    ) -> Result<ReflectValueBox, NodeError> {
+        let err_provider = || NodeError::TypeMismatch {
+            msg: format!(
+                "{:?} cannot be converted into ReflectValueBox of type {:?}",
+                self, value_type
+            ),
+        };
+        Ok(match value_type {
+            ProtobufRuntimeType::I32 => ReflectValueBox::I32(self.get_int(&err_provider)? as i32),
+            ProtobufRuntimeType::I64 => ReflectValueBox::I64(self.get_int(&err_provider)?),
+            ProtobufRuntimeType::U32 => ReflectValueBox::U32(self.get_int(&err_provider)? as u32),
+            ProtobufRuntimeType::U64 => ReflectValueBox::U64(self.get_int(&err_provider)? as u64),
+            ProtobufRuntimeType::F32 => {
+                ReflectValueBox::F32(self.get_double(&err_provider)? as f32)
+            }
+            ProtobufRuntimeType::F64 => ReflectValueBox::F64(self.get_double(&err_provider)?),
+            ProtobufRuntimeType::Bool => ReflectValueBox::Bool(self.get_bool(&err_provider)?),
+            ProtobufRuntimeType::Enum(enum_descriptor) => {
+                ReflectValueBox::Enum(enum_descriptor.clone(), self.get_int(&err_provider)? as i32)
+            }
+            ProtobufRuntimeType::Message(_) => {
+                ReflectValueBox::Message(self.get_message(err_provider)?.clone_box())
+            }
+            _ => return Err(NodeError::UnsupportedSingularFieldType),
+        })
     }
 }
