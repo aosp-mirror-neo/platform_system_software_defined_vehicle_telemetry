@@ -228,15 +228,18 @@ mod tests {
 
     struct CallbackListener {
         fired_count: u32,
+        fired_limit: u32,
     }
 
     impl CallbackListener {
         fn new() -> CallbackListener {
-            CallbackListener { fired_count: 0 }
+            CallbackListener { fired_count: 0, fired_limit: 0 }
         }
 
-        fn on_callback_fired(&mut self) {
+        /// Increases fired count and returns whether the fired limit has been reached if it's set.
+        fn on_callback_fired(&mut self) -> bool {
             self.fired_count += 1;
+            self.fired_limit > 0 && self.fired_count >= self.fired_limit
         }
     }
 
@@ -297,6 +300,7 @@ mod tests {
             .unwrap();
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_immediately_unsubscribe_doesnt_fire() {
         let trigger = create_valid_periodic_trigger();
@@ -306,94 +310,92 @@ mod tests {
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move || callback_listener_clone.lock().unwrap().on_callback_fired()),
+                Box::new(move || {
+                    callback_listener_clone.lock().unwrap().on_callback_fired();
+                }),
             )
             .await
             .unwrap();
         trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.unwrap();
-        // Sleep for 1.5 interval to ensure the trigger won't fire.
-        time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
+        // Sleep for 2 intervals to ensure the trigger won't fire.
+        time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
 
         assert_eq!(callback_listener.lock().unwrap().fired_count, 0);
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_fires_twice() {
-        let trigger = create_valid_periodic_trigger();
-        let callback_listener = Arc::new(Mutex::new(CallbackListener::new()));
-        let callback_listener_clone = callback_listener.clone();
-
-        trigger
-            .subscribe(
-                &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move || callback_listener_clone.lock().unwrap().on_callback_fired()),
-            )
-            .await
-            .unwrap();
-        // Sleep for 2.5 interval to let trigger fire twice.
-        time::sleep(Duration::from_millis(INTERVAL_MS * 5 / 2)).await;
-        trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.unwrap();
-        // Sleep for 1.5 interval to ensure the trigger won't fire.
-        time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
-
-        assert_eq!(callback_listener.lock().unwrap().fired_count, 2);
-    }
-
-    #[tokio::test]
-    async fn subscribe_to_periodic_trigger_unsubscribe_from_callback_success() {
         let trigger = Arc::new(create_valid_periodic_trigger());
+        let mut callback_listener = CallbackListener::new();
+        callback_listener.fired_limit = 2;
+
+        let callback_listener = Arc::new(Mutex::new(callback_listener));
+        let callback_listener_clone = callback_listener.clone();
         let mut trigger_clone = Some(trigger.clone());
 
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move || {
-                    let trigger_clone = trigger_clone.take().unwrap();
-                    tokio::spawn(async move {
-                        trigger_clone
-                            .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
-                            .await
-                            .unwrap();
-                    });
+                    if callback_listener_clone.lock().unwrap().on_callback_fired() {
+                        let trigger_clone = trigger_clone.take().unwrap();
+                        tokio::spawn(async move {
+                            trigger_clone
+                                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
+                                .await
+                                .unwrap();
+                        });
+                    }
                 }),
             )
             .await
             .unwrap();
+        // Sleep for 4 intervals to let trigger fire twice, unsubscribe
+        // and ensure the trigger won't fire again.
+        time::sleep(Duration::from_millis(4 * INTERVAL_MS)).await;
+
+        assert_eq!(callback_listener.lock().unwrap().fired_count, 2);
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
-    async fn subscribe_to_periodic_trigger_multiple_subscriptions_no_duplicate_fires() {
-        let trigger = create_valid_periodic_trigger();
-        let callback_listener = Arc::new(Mutex::new(CallbackListener::new()));
-        let callback_listener_clone1 = callback_listener.clone();
-        let callback_listener_clone2 = callback_listener.clone();
-        let callback_listener_clone3 = callback_listener.clone();
+    async fn subscribe_to_periodic_trigger_one_async_loop() {
+        let mut trigger = create_valid_periodic_trigger();
+        let subscription1_got_data = Arc::new(Mutex::new(false));
+        let subscription2_got_data = Arc::new(Mutex::new(false));
+        let subscription1_got_data_clone = subscription1_got_data.clone();
+        let subscription2_got_data_clone = subscription2_got_data.clone();
 
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move || callback_listener_clone1.lock().unwrap().on_callback_fired()),
+                Box::new(move || *subscription1_got_data_clone.lock().unwrap() = true),
             )
             .await
             .unwrap();
+
+        // Increase interval so that new async loops won't generate messages any time soon.
+        if let TriggerType::Periodic { interval_ms } = &mut trigger.trigger_type {
+            *interval_ms = 100 * INTERVAL_MS;
+        } else {
+            panic!("Unexpected trigger type");
+        }
+
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigEnd,
-                Box::new(move || callback_listener_clone2.lock().unwrap().on_callback_fired()),
+                Box::new(move || *subscription2_got_data_clone.lock().unwrap() = true),
             )
             .await
             .unwrap();
-        trigger
-            .subscribe(
-                &TriggerSubscriber::MetricsConfigFinish,
-                Box::new(move || callback_listener_clone3.lock().unwrap().on_callback_fired()),
-            )
-            .await
-            .unwrap();
-        // Sleep for 1.5 interval to let trigger fire once.
-        time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
 
-        assert_eq!(callback_listener.lock().unwrap().fired_count, 3);
+        // Sleep for 2 intervals to let trigger fire.
+        time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
+
+        // Verify that both subscriptions were notified.
+        assert!(*subscription1_got_data.lock().unwrap());
+        assert!(*subscription2_got_data.lock().unwrap());
     }
 
     #[should_panic]
