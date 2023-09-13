@@ -11,7 +11,7 @@ use ast_extensions::{
     VisitStatus,
 };
 pub use node_errors::{DescriptorProviderError, MessageProviderError, NodeError};
-pub use node_value::NodeValue;
+pub use node_value::{NodeValue, NodeValueToReflExt};
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdvtelemetry_proto_rust::expression::{
