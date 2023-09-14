@@ -190,332 +190,6 @@ impl DescriptorProvider for DescriptorProviderImpl {
     }
 }
 
-impl MetricsConfigOrchestratorImpl {
-    pub(super) fn new(
-        report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-    ) -> Self {
-        MetricsConfigOrchestratorImpl {
-            configs: Mutex::new(HashMap::new()),
-            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl {},
-            node_factory: NodeFactoryImpl::new(),
-            publisher_factory: PublisherFactoryImpl::new(),
-            trigger_factory: TriggerFactoryImpl::new(),
-            report_ready_callback: Arc::new(report_ready_callback),
-            phantom_generator: PhantomData,
-        }
-    }
-}
-
-impl<
-        TMetricsReportGenerator,
-        TMetricsReportGeneratorFactory,
-        TNodeFactory,
-        TPublisher,
-        TPublisherFactory,
-        TTrigger,
-        TTriggerFactory,
-    >
-    MetricsConfigOrchestratorImpl<
-        TMetricsReportGenerator,
-        TMetricsReportGeneratorFactory,
-        TNodeFactory,
-        TPublisher,
-        TPublisherFactory,
-        TTrigger,
-        TTriggerFactory,
-    >
-where
-    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
-    TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + 'static,
-    TNodeFactory: NodeFactory + 'static,
-    TPublisher: Publisher + Send + Sync + 'static,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + 'static,
-    TTrigger: Trigger + Send + Sync + 'static,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + 'static,
-{
-    fn create_expression_nodes(
-        &self,
-        config_proto: &MetricsConfigProto,
-        context: &NodeFactoryContext,
-    ) -> Result<Vec<Arc<Node>>, MetricsConfigOrchestratorError> {
-        self.node_factory
-            .create_nodes(&config_proto.expression_nodes, context)
-            .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
-    }
-
-    /// Topologically sort publishers and triggers declared in the protobuf message
-    /// and try to fold the sorted list using provided functions.
-    fn try_fold_topoligically_sorted_publishers_triggers(
-        config_proto: &MetricsConfigProto,
-        publisher_func: impl Fn(
-            &PublisherProto,
-            &mut HashMap<String, Arc<TPublisher>>,
-            &HashMap<String, Arc<TTrigger>>,
-        ) -> Result<(), MetricsConfigOrchestratorError>,
-        trigger_func: impl Fn(
-            &TriggerProto,
-            &HashMap<String, Arc<TPublisher>>,
-            &mut HashMap<String, Arc<TTrigger>>,
-        ) -> Result<(), MetricsConfigOrchestratorError>,
-    ) -> Result<
-        (HashMap<String, Arc<TPublisher>>, HashMap<String, Arc<TTrigger>>),
-        MetricsConfigOrchestratorError,
-    > {
-        enum DependencyContainer<'a> {
-            Publisher { publisher_proto: &'a PublisherProto },
-            Trigger { trigger_proto: &'a TriggerProto },
-        }
-
-        // Build dependency map for topological sorting.
-        let dependency_map = config_proto.publishers.iter().try_fold(
-            HashMap::new(),
-            |mut acc, publisher_proto| match acc.try_insert_value(
-                (PUBLISHER, publisher_proto.name.as_str()),
-                (
-                    DependencyContainer::Publisher { publisher_proto },
-                    if let Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) =
-                        &publisher_proto.publisher_type
-                    {
-                        aggregation_publisher
-                            .trigger_names
-                            .iter()
-                            .map(|name| (TRIGGER, name.as_str()))
-                            .collect()
-                    } else {
-                        vec![]
-                    },
-                ),
-            ) {
-                Ok(_) => Ok(acc),
-                Err(()) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
-                    publisher_name: publisher_proto.name.clone(),
-                }),
-            },
-        )?;
-
-        let dependency_map =
-            config_proto.triggers.iter().try_fold(dependency_map, |mut acc, trigger_proto| {
-                let publisher_key = (PUBLISHER, trigger_proto.name.as_str());
-                if acc.contains_key(&publisher_key) {
-                    return Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
-                        trigger_name: trigger_proto.name.clone(),
-                    });
-                }
-                match acc.try_insert_value(
-                    (TRIGGER, trigger_proto.name.as_str()),
-                    (
-                        DependencyContainer::Trigger { trigger_proto },
-                        match &trigger_proto.trigger_type {
-                            Some(TriggerTypeProto::DataTrigger(data_trigger)) => {
-                                vec![(PUBLISHER, data_trigger.publisher_name.as_str())]
-                            }
-                            Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
-                                conditional_trigger
-                                    .trigger_names
-                                    .iter()
-                                    .map(|name| (TRIGGER, name.as_str()))
-                                    .collect()
-                            }
-                            _ => vec![],
-                        },
-                    ),
-                ) {
-                    Ok(_) => Ok(acc),
-                    Err(()) => Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
-                        trigger_name: trigger_proto.name.clone(),
-                    }),
-                }
-            })?;
-
-        // Retrieve topologically sorted vector of keys.
-        let sorted_vector = dependency_map
-            .to_topological_sorted_vec(|(_, dependencies)| dependencies)
-            .ok_or(MetricsConfigOrchestratorError::CycledPublishersTriggers)?;
-
-        // Create publishers and triggers in the topologically sorted order to make sure
-        // the dependencies are created before those that reference them.
-        sorted_vector.iter().rev().try_fold(
-            (HashMap::new(), HashMap::new()),
-            |(mut publishers, mut triggers), container_key| {
-                match dependency_map.get(container_key) {
-                    Some((DependencyContainer::Publisher { publisher_proto, .. }, _)) => {
-                        publisher_func(publisher_proto, &mut publishers, &triggers)
-                    }
-                    Some((DependencyContainer::Trigger { trigger_proto, .. }, _)) => {
-                        trigger_func(trigger_proto, &publishers, &mut triggers)
-                    }
-                    None => {
-                        let (container_type, name) = container_key;
-                        Err(MetricsConfigOrchestratorError::InvalidDependency {
-                            dependency_type: container_type.to_string(),
-                            dependency_name: name.to_string(),
-                        })
-                    }
-                }?;
-                Ok((publishers, triggers))
-            },
-        )
-    }
-
-    fn maybe_get_trigger<'a>(
-        triggers: &'a HashMap<String, Arc<TTrigger>>,
-        trigger_name: &str,
-    ) -> Result<Option<&'a Arc<TTrigger>>, MetricsConfigOrchestratorError> {
-        if trigger_name.is_empty() {
-            return Ok(None);
-        }
-        Ok(Some(triggers.get(trigger_name).ok_or(
-            MetricsConfigOrchestratorError::InvalidDependency {
-                dependency_type: TRIGGER.to_owned(),
-                dependency_name: trigger_name.to_owned(),
-            },
-        )?))
-    }
-
-    async fn maybe_subscribe_to_start_trigger(
-        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) -> Result<(), TriggerError> {
-        if let Some(start_trigger) = &config.start_trigger {
-            let mut config_clone = Some(config.clone());
-            start_trigger
-                .subscribe(
-                    &TriggerSubscriber::MetricsConfigStart,
-                    Box::new(move || {
-                        if let Some(config) = config_clone.take() {
-                            Self::on_start_trigger_fired(config);
-                        }
-                    }),
-                )
-                .await
-        } else {
-            Ok(())
-        }
-    }
-
-    fn on_start_trigger_fired(
-        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) {
-        tokio::spawn(async move {
-            // Unsubscribe from start trigger.
-            if let Err(err) = config
-                .start_trigger
-                .as_ref()
-                .expect("Start trigger is expected to exist in the start trigger fired handler")
-                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
-                .await
-            {
-                error!(
-                    "Error when trying to deactivate start trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will not start.",
-                    config.uuid, err
-                );
-                return;
-            }
-
-            // Activate metrics report generators.
-            for generator in &config.metrics_report_generators {
-                if let Err(err) = generator.activate().await {
-                    error!(
-                        "Error when trying to activate metrics report generator {}: {}.",
-                        generator.get_name(),
-                        err
-                    );
-                }
-            }
-
-            // Subscribe to end trigger if it's set.
-            if let Some(end_trigger) = &config.end_trigger {
-                let mut config_clone = Some(config.clone());
-                if let Err(err) = end_trigger
-                    .subscribe(
-                        &TriggerSubscriber::MetricsConfigEnd,
-                        Box::new(move || {
-                            if let Some(config) = config_clone.take() {
-                                Self::on_end_trigger_fired(config);
-                            }
-                        }),
-                    )
-                    .await
-                {
-                    error!(
-                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will never end.",
-                        config.uuid, err
-                    );
-                }
-            }
-
-            // Subscribe to finish trigger if it's set.
-            if let Some(finish_trigger) = &config.finish_trigger {
-                let config_clone = config.clone();
-                if let Err(err) = finish_trigger
-                    .subscribe(
-                        &TriggerSubscriber::MetricsConfigFinish,
-                        Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
-                    )
-                    .await
-                {
-                    error!(
-                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will never finish.",
-                        config.uuid, err
-                    );
-                }
-            }
-        });
-    }
-
-    fn on_end_trigger_fired(
-        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) {
-        tokio::spawn(async move {
-            // Unsubscribe from end trigger.
-            if let Err(err) = config
-                .end_trigger
-                .as_ref()
-                .expect("End trigger is expected to exist in the end trigger fired handler")
-                .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
-                .await
-            {
-                error!(
-                    "Error when trying to deactivate end trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will not end.",
-                    config.uuid, err
-                );
-                return;
-            }
-
-            // Deactivate metrics report generators.
-            for generator in &config.metrics_report_generators {
-                if let Err(err) = generator.deactivate().await {
-                    error!(
-                        "Error when trying to deactivate metrics report generator {}: {}.",
-                        generator.get_name(),
-                        err
-                    );
-                }
-            }
-
-            // Subscribe to start trigger if it's set.
-            if let Err(err) = Self::maybe_subscribe_to_start_trigger(&config).await {
-                error!(
-                    "Error when trying to activate start trigger of Metrics Configuration {}: {}.\
-                    Metrics Configuration data collection will never start.",
-                    config.uuid, err
-                );
-            }
-        });
-    }
-
-    fn on_finish_trigger_fired(
-        _config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) {
-        // TODO(b/294616843): implement finish trigger handling logic.
-        warn!("Finish trigger handling logic is not implemented. Data collection won't finish.");
-    }
-}
-
 #[async_trait]
 impl<
         TMetricsReportGenerator,
@@ -775,6 +449,336 @@ where
         })?;
 
         Ok(())
+    }
+}
+
+impl MetricsConfigOrchestratorImpl {
+    pub(super) fn new(
+        report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
+    ) -> Self {
+        MetricsConfigOrchestratorImpl {
+            configs: Mutex::new(HashMap::new()),
+            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl {},
+            node_factory: NodeFactoryImpl::new(),
+            publisher_factory: PublisherFactoryImpl::new(),
+            trigger_factory: TriggerFactoryImpl::new(),
+            report_ready_callback: Arc::new(report_ready_callback),
+            phantom_generator: PhantomData,
+        }
+    }
+}
+
+impl<
+        TMetricsReportGenerator,
+        TMetricsReportGeneratorFactory,
+        TNodeFactory,
+        TPublisher,
+        TPublisherFactory,
+        TTrigger,
+        TTriggerFactory,
+    >
+    MetricsConfigOrchestratorImpl<
+        TMetricsReportGenerator,
+        TMetricsReportGeneratorFactory,
+        TNodeFactory,
+        TPublisher,
+        TPublisherFactory,
+        TTrigger,
+        TTriggerFactory,
+    >
+where
+    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
+    TMetricsReportGeneratorFactory:
+        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + 'static,
+    TNodeFactory: NodeFactory + 'static,
+    TPublisher: Publisher + Send + Sync + 'static,
+    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + 'static,
+    TTrigger: Trigger + Send + Sync + 'static,
+    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + 'static,
+{
+    // Private functions.
+
+    fn create_expression_nodes(
+        &self,
+        config_proto: &MetricsConfigProto,
+        context: &NodeFactoryContext,
+    ) -> Result<Vec<Arc<Node>>, MetricsConfigOrchestratorError> {
+        self.node_factory
+            .create_nodes(&config_proto.expression_nodes, context)
+            .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
+    }
+
+    fn maybe_get_trigger<'a>(
+        triggers: &'a HashMap<String, Arc<TTrigger>>,
+        trigger_name: &str,
+    ) -> Result<Option<&'a Arc<TTrigger>>, MetricsConfigOrchestratorError> {
+        if trigger_name.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(triggers.get(trigger_name).ok_or(
+            MetricsConfigOrchestratorError::InvalidDependency {
+                dependency_type: TRIGGER.to_owned(),
+                dependency_name: trigger_name.to_owned(),
+            },
+        )?))
+    }
+
+    async fn maybe_subscribe_to_start_trigger(
+        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) -> Result<(), TriggerError> {
+        if let Some(start_trigger) = &config.start_trigger {
+            let mut config_clone = Some(config.clone());
+            start_trigger
+                .subscribe(
+                    &TriggerSubscriber::MetricsConfigStart,
+                    Box::new(move || {
+                        if let Some(config) = config_clone.take() {
+                            Self::on_start_trigger_fired(config);
+                        }
+                    }),
+                )
+                .await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Topologically sort publishers and triggers declared in the protobuf message
+    /// and try to fold the sorted list using provided functions.
+    fn try_fold_topoligically_sorted_publishers_triggers(
+        config_proto: &MetricsConfigProto,
+        publisher_func: impl Fn(
+            &PublisherProto,
+            &mut HashMap<String, Arc<TPublisher>>,
+            &HashMap<String, Arc<TTrigger>>,
+        ) -> Result<(), MetricsConfigOrchestratorError>,
+        trigger_func: impl Fn(
+            &TriggerProto,
+            &HashMap<String, Arc<TPublisher>>,
+            &mut HashMap<String, Arc<TTrigger>>,
+        ) -> Result<(), MetricsConfigOrchestratorError>,
+    ) -> Result<
+        (HashMap<String, Arc<TPublisher>>, HashMap<String, Arc<TTrigger>>),
+        MetricsConfigOrchestratorError,
+    > {
+        enum DependencyContainer<'a> {
+            Publisher { publisher_proto: &'a PublisherProto },
+            Trigger { trigger_proto: &'a TriggerProto },
+        }
+
+        // Build dependency map for topological sorting.
+        let dependency_map = config_proto.publishers.iter().try_fold(
+            HashMap::new(),
+            |mut acc, publisher_proto| match acc.try_insert_value(
+                (PUBLISHER, publisher_proto.name.as_str()),
+                (
+                    DependencyContainer::Publisher { publisher_proto },
+                    if let Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) =
+                        &publisher_proto.publisher_type
+                    {
+                        aggregation_publisher
+                            .trigger_names
+                            .iter()
+                            .map(|name| (TRIGGER, name.as_str()))
+                            .collect()
+                    } else {
+                        vec![]
+                    },
+                ),
+            ) {
+                Ok(_) => Ok(acc),
+                Err(()) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
+                    publisher_name: publisher_proto.name.clone(),
+                }),
+            },
+        )?;
+
+        let dependency_map =
+            config_proto.triggers.iter().try_fold(dependency_map, |mut acc, trigger_proto| {
+                let publisher_key = (PUBLISHER, trigger_proto.name.as_str());
+                if acc.contains_key(&publisher_key) {
+                    return Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
+                        trigger_name: trigger_proto.name.clone(),
+                    });
+                }
+                match acc.try_insert_value(
+                    (TRIGGER, trigger_proto.name.as_str()),
+                    (
+                        DependencyContainer::Trigger { trigger_proto },
+                        match &trigger_proto.trigger_type {
+                            Some(TriggerTypeProto::DataTrigger(data_trigger)) => {
+                                vec![(PUBLISHER, data_trigger.publisher_name.as_str())]
+                            }
+                            Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
+                                conditional_trigger
+                                    .trigger_names
+                                    .iter()
+                                    .map(|name| (TRIGGER, name.as_str()))
+                                    .collect()
+                            }
+                            _ => vec![],
+                        },
+                    ),
+                ) {
+                    Ok(_) => Ok(acc),
+                    Err(()) => Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
+                        trigger_name: trigger_proto.name.clone(),
+                    }),
+                }
+            })?;
+
+        // Retrieve topologically sorted vector of keys.
+        let sorted_vector = dependency_map
+            .to_topological_sorted_vec(|(_, dependencies)| dependencies)
+            .ok_or(MetricsConfigOrchestratorError::CycledPublishersTriggers)?;
+
+        // Create publishers and triggers in the topologically sorted order to make sure
+        // the dependencies are created before those that reference them.
+        sorted_vector.iter().rev().try_fold(
+            (HashMap::new(), HashMap::new()),
+            |(mut publishers, mut triggers), container_key| {
+                match dependency_map.get(container_key) {
+                    Some((DependencyContainer::Publisher { publisher_proto, .. }, _)) => {
+                        publisher_func(publisher_proto, &mut publishers, &triggers)
+                    }
+                    Some((DependencyContainer::Trigger { trigger_proto, .. }, _)) => {
+                        trigger_func(trigger_proto, &publishers, &mut triggers)
+                    }
+                    None => {
+                        let (container_type, name) = container_key;
+                        Err(MetricsConfigOrchestratorError::InvalidDependency {
+                            dependency_type: container_type.to_string(),
+                            dependency_name: name.to_string(),
+                        })
+                    }
+                }?;
+                Ok((publishers, triggers))
+            },
+        )
+    }
+
+    // Lifecycle event handlers.
+
+    fn on_start_trigger_fired(
+        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
+        tokio::spawn(async move {
+            // Unsubscribe from start trigger.
+            if let Err(err) = config
+                .start_trigger
+                .as_ref()
+                .expect("Start trigger is expected to exist in the start trigger fired handler")
+                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
+                .await
+            {
+                error!(
+                    "Error when trying to deactivate start trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will not start.",
+                    config.uuid, err
+                );
+                return;
+            }
+
+            // Activate metrics report generators.
+            for generator in &config.metrics_report_generators {
+                if let Err(err) = generator.activate().await {
+                    error!(
+                        "Error when trying to activate metrics report generator {}: {}.",
+                        generator.get_name(),
+                        err
+                    );
+                }
+            }
+
+            // Subscribe to end trigger if it's set.
+            if let Some(end_trigger) = &config.end_trigger {
+                let mut config_clone = Some(config.clone());
+                if let Err(err) = end_trigger
+                    .subscribe(
+                        &TriggerSubscriber::MetricsConfigEnd,
+                        Box::new(move || {
+                            if let Some(config) = config_clone.take() {
+                                Self::on_end_trigger_fired(config);
+                            }
+                        }),
+                    )
+                    .await
+                {
+                    error!(
+                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will never end.",
+                        config.uuid, err
+                    );
+                }
+            }
+
+            // Subscribe to finish trigger if it's set.
+            if let Some(finish_trigger) = &config.finish_trigger {
+                let config_clone = config.clone();
+                if let Err(err) = finish_trigger
+                    .subscribe(
+                        &TriggerSubscriber::MetricsConfigFinish,
+                        Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
+                    )
+                    .await
+                {
+                    error!(
+                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will never finish.",
+                        config.uuid, err
+                    );
+                }
+            }
+        });
+    }
+
+    fn on_end_trigger_fired(
+        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
+        tokio::spawn(async move {
+            // Unsubscribe from end trigger.
+            if let Err(err) = config
+                .end_trigger
+                .as_ref()
+                .expect("End trigger is expected to exist in the end trigger fired handler")
+                .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
+                .await
+            {
+                error!(
+                    "Error when trying to deactivate end trigger of Metrics Configuration {}: {}.\
+                        Metrics Configuration data collection will not end.",
+                    config.uuid, err
+                );
+                return;
+            }
+
+            // Deactivate metrics report generators.
+            for generator in &config.metrics_report_generators {
+                if let Err(err) = generator.deactivate().await {
+                    error!(
+                        "Error when trying to deactivate metrics report generator {}: {}.",
+                        generator.get_name(),
+                        err
+                    );
+                }
+            }
+
+            // Subscribe to start trigger if it's set.
+            if let Err(err) = Self::maybe_subscribe_to_start_trigger(&config).await {
+                error!(
+                    "Error when trying to activate start trigger of Metrics Configuration {}: {}.\
+                    Metrics Configuration data collection will never start.",
+                    config.uuid, err
+                );
+            }
+        });
+    }
+
+    fn on_finish_trigger_fired(
+        _config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
+        // TODO(b/294616843): implement finish trigger handling logic.
+        warn!("Finish trigger handling logic is not implemented. Data collection won't finish.");
     }
 }
 

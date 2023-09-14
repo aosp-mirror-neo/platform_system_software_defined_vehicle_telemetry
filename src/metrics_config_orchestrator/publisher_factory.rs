@@ -74,13 +74,62 @@ pub(crate) struct PublisherFactoryImpl {
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
 }
 
-impl PublisherFactoryImpl {
-    pub(super) fn new() -> Self {
-        PublisherFactoryImpl { service_adapter: Arc::new(ServiceAdapterImpl::new()) }
+impl PublisherFactory for PublisherFactoryImpl {
+    fn create(
+        &self,
+        publisher_proto: &PublisherProto,
+        context: &PublisherFactoryContext,
+    ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
+        let name = publisher_proto.name.clone();
+        let publisher_type = match &publisher_proto.publisher_type {
+            Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
+                PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
+            }
+            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+                return Ok(Arc::new(PublisherImpl::new_service_publisher(
+                    name,
+                    service_publisher.service_name.clone(),
+                    self.service_adapter.clone(),
+                )));
+            }
+            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
+                self.create_aggregation_publisher(aggregation_publisher, context)?
+            }
+            _ => return Err(PublisherFactoryError::UnknownPublisherType),
+        };
+        Ok(Arc::new(PublisherImpl::new(name, publisher_type)))
+    }
+
+    fn validate(
+        &self,
+        publisher_proto: &PublisherProto,
+        context: &PublisherFactoryContext,
+    ) -> Result<(), PublisherFactoryError> {
+        match &publisher_proto.publisher_type {
+            Some(PublisherTypeProto::SignalPublisher(_))
+            | Some(PublisherTypeProto::ServicePublisher(_)) => (),
+            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
+                let descriptor = self.get_message_descriptor(
+                    &aggregation_publisher.message_type_name,
+                    context.file_descriptors,
+                )?;
+                self.create_declarative_aggregations(
+                    &aggregation_publisher.declarative_aggregations,
+                    &descriptor,
+                    context.expression_nodes,
+                )?;
+            }
+            _ => return Err(PublisherFactoryError::UnknownPublisherType),
+        };
+        Ok(())
     }
 }
 
 impl PublisherFactoryImpl {
+    pub(super) fn new() -> Self {
+        PublisherFactoryImpl { service_adapter: Arc::new(ServiceAdapterImpl::new()) }
+    }
+
     /// Returns the first descriptor from the vector that has the specified type name.
     fn get_message_descriptor(
         &self,
@@ -204,57 +253,6 @@ impl PublisherFactoryImpl {
             })?
             .into_values()
             .collect())
-    }
-}
-
-impl PublisherFactory for PublisherFactoryImpl {
-    fn create(
-        &self,
-        publisher_proto: &PublisherProto,
-        context: &PublisherFactoryContext,
-    ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
-        let name = publisher_proto.name.clone();
-        let publisher_type = match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
-                PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
-            }
-            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
-                return Ok(Arc::new(PublisherImpl::new_service_publisher(
-                    name,
-                    service_publisher.service_name.clone(),
-                    self.service_adapter.clone(),
-                )));
-            }
-            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
-                self.create_aggregation_publisher(aggregation_publisher, context)?
-            }
-            _ => return Err(PublisherFactoryError::UnknownPublisherType),
-        };
-        Ok(Arc::new(PublisherImpl::new(name, publisher_type)))
-    }
-
-    fn validate(
-        &self,
-        publisher_proto: &PublisherProto,
-        context: &PublisherFactoryContext,
-    ) -> Result<(), PublisherFactoryError> {
-        match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::SignalPublisher(_))
-            | Some(PublisherTypeProto::ServicePublisher(_)) => (),
-            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
-                let descriptor = self.get_message_descriptor(
-                    &aggregation_publisher.message_type_name,
-                    context.file_descriptors,
-                )?;
-                self.create_declarative_aggregations(
-                    &aggregation_publisher.declarative_aggregations,
-                    &descriptor,
-                    context.expression_nodes,
-                )?;
-            }
-            _ => return Err(PublisherFactoryError::UnknownPublisherType),
-        };
-        Ok(())
     }
 }
 

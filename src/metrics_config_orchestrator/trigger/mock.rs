@@ -5,6 +5,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::{Trigger, TriggerError, TriggerSubscriber};
 
+/// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {
     pub expected_subscribers: Vec<TriggerSubscriber>,
     pub subscribe_callback: Option<Box<dyn Fn(&str) -> Option<TriggerError> + Send + Sync>>,
@@ -14,7 +15,42 @@ pub(crate) struct MockTrigger {
     on_fired_callback: AsyncMutex<Option<Box<dyn FnMut() + Send + Sync>>>,
 }
 
-/// Mock implementation of Trigger trait for unit tests.
+#[async_trait]
+impl Trigger for MockTrigger {
+    fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    async fn subscribe(
+        &self,
+        subscriber: &TriggerSubscriber,
+        on_fired_callback: Box<dyn FnMut() + Send + Sync>,
+    ) -> Result<(), TriggerError> {
+        self.verify_subscriber(subscriber);
+        self.on_fired_callback.lock().await.replace(on_fired_callback);
+
+        if let Some(callback) = &self.subscribe_callback {
+            if let Some(error) = callback(&self.name) {
+                return Err(error);
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError> {
+        self.verify_subscriber(subscriber);
+
+        if let Some(callback) = &self.unsubscribe_callback {
+            if let Some(error) = callback(&self.name) {
+                return Err(error);
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl MockTrigger {
     /// Returns a new instance of MockTrigger
     pub(crate) fn new(name: String) -> Self {
@@ -61,41 +97,5 @@ impl MockTrigger {
             TriggerSubscriber::MetricsReportGenerator { name } => matches!(other, TriggerSubscriber::MetricsReportGenerator { name: other_name } if name == other_name),
             TriggerSubscriber::PeriodicTrigger { name } => matches!(other, TriggerSubscriber::PeriodicTrigger { name: other_name } if name == other_name),
         }), "Subscriber {} wasn't expected", subscriber);
-    }
-}
-
-#[async_trait]
-impl Trigger for MockTrigger {
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-
-    async fn subscribe(
-        &self,
-        subscriber: &TriggerSubscriber,
-        on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), TriggerError> {
-        self.verify_subscriber(subscriber);
-        self.on_fired_callback.lock().await.replace(on_fired_callback);
-
-        if let Some(callback) = &self.subscribe_callback {
-            if let Some(error) = callback(&self.name) {
-                return Err(error);
-            }
-        }
-
-        Ok(())
-    }
-
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError> {
-        self.verify_subscriber(subscriber);
-
-        if let Some(callback) = &self.unsubscribe_callback {
-            if let Some(error) = callback(&self.name) {
-                return Err(error);
-            }
-        }
-
-        Ok(())
     }
 }
