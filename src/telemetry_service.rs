@@ -755,11 +755,8 @@ mod tests {
     // Drop will work even in case of a panic.
     impl Drop for TestEnvironment {
         fn drop(&mut self) {
-            // Run a future to completion on the current thread.
-            futures::executor::block_on(file_io_utils::remove_dir(&PathBuf::from(
-                self.dir_path.to_string(),
-            )))
-            .unwrap();
+            // Removing all files created during the test
+            fs::remove_dir_all(PathBuf::from(self.dir_path.to_string())).unwrap();
         }
     }
 
