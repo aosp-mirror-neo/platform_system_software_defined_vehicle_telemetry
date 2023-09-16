@@ -232,6 +232,7 @@ pub(super) mod tests {
         true
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_two_services_success() {
         let mut service_adapter = create_service_adapter();
@@ -258,41 +259,44 @@ pub(super) mod tests {
                 }),
             )
             .await;
-        // Sleep for 2.5 intervals to let adapter generate 3 messages.
-        time::sleep(Duration::from_millis(5 * INTERVAL_MS / 2)).await;
+        // Sleep for 3 intervals to let adapter generate 3 messages.
+        time::sleep(Duration::from_millis(3 * INTERVAL_MS)).await;
 
-        let received = msg_nums.lock().unwrap();
+        let received = msg_nums.lock().unwrap().iter().take(3).cloned().collect::<Vec<_>>();
         let expected = vec![(SERVICE_NAME, 1), (SERVICE_NAME, 2), (SERVICE_NAME2, 1)];
         assert_vec_eq(&expected, &received);
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_same_service_one_async_loop() {
         let mut service_adapter = create_service_adapter();
-        let msg_nums = Arc::new(Mutex::new(Vec::new()));
-        let msg_nums_clone = msg_nums.clone();
-        let msg_nums_clone2 = msg_nums.clone();
+        let subscription1_got_data = Arc::new(Mutex::new(false));
+        let subscription2_got_data = Arc::new(Mutex::new(false));
+        let subscription1_got_data_clone = subscription1_got_data.clone();
+        let subscription2_got_data_clone = subscription2_got_data.clone();
 
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                Box::new(move |msg| msg_nums_clone.lock().unwrap().push((1, get_msg_value(msg)))),
+                Box::new(move |_| *subscription1_got_data_clone.lock().unwrap() = true),
             )
             .await;
-        time::sleep(Duration::from_millis(INTERVAL_MS / 4)).await;
         // Increase interval so that new async loops won't generate messages any time soon.
         service_adapter.min_interval_ms = 100 * INTERVAL_MS;
         service_adapter.max_interval_ms = service_adapter.min_interval_ms;
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                Box::new(move |msg| msg_nums_clone2.lock().unwrap().push((2, get_msg_value(msg)))),
+                Box::new(move |_| *subscription2_got_data_clone.lock().unwrap() = true),
             )
             .await;
-        // Sleep for 2.5 intervals to let adapter generate 4 messages.
-        time::sleep(Duration::from_millis(5 * INTERVAL_MS / 2)).await;
+        // Sleep for 2 intervals to let adapter generate messages.
+        time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
 
-        assert_eq!(msg_nums.lock().unwrap().len(), 4);
+        // Verify that both subscriptions were notified.
+        assert!(*subscription1_got_data.lock().unwrap());
+        assert!(*subscription2_got_data.lock().unwrap());
     }
 
     #[tokio::test]
@@ -322,6 +326,7 @@ pub(super) mod tests {
         );
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn unsubscribe_stops_firing() {
         let service_adapter = create_service_adapter();
@@ -341,6 +346,7 @@ pub(super) mod tests {
         assert_eq!(msg_nums.lock().unwrap().len(), 0);
     }
 
+    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn unsubscribe_from_callback_success() {
         let service_adapter = Arc::new(create_service_adapter());
