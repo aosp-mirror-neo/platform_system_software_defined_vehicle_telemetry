@@ -232,7 +232,6 @@ pub(super) mod tests {
         true
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_two_services_success() {
         let mut service_adapter = create_service_adapter();
@@ -260,6 +259,7 @@ pub(super) mod tests {
             )
             .await;
         // Sleep for 3 intervals to let adapter generate 3 messages.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(3 * INTERVAL_MS)).await;
 
         let received = msg_nums.lock().unwrap().iter().take(3).cloned().collect::<Vec<_>>();
@@ -267,7 +267,6 @@ pub(super) mod tests {
         assert_vec_eq(&expected, &received);
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_same_service_one_async_loop() {
         let mut service_adapter = create_service_adapter();
@@ -292,6 +291,7 @@ pub(super) mod tests {
             )
             .await;
         // Sleep for 2 intervals to let adapter generate messages.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
 
         // Verify that both subscriptions were notified.
@@ -326,7 +326,6 @@ pub(super) mod tests {
         );
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn unsubscribe_stops_firing() {
         let service_adapter = create_service_adapter();
@@ -341,12 +340,12 @@ pub(super) mod tests {
             .await;
         service_adapter.unsubscribe(subscription).await.unwrap();
         // Sleep for 1.5 interval to ensure the trigger won't fire.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(INTERVAL_MS * 3 / 2)).await;
 
         assert_eq!(msg_nums.lock().unwrap().len(), 0);
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn unsubscribe_from_callback_success() {
         let service_adapter = Arc::new(create_service_adapter());
@@ -370,6 +369,7 @@ pub(super) mod tests {
             .await;
         subscription_holder.lock().unwrap().replace(subscription);
         // Sleep for 2.5 intervals to let adapter generate 2 messages.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(5 * INTERVAL_MS / 2)).await;
 
         // Verify that subscription has been consumed by the unsubscribe call.

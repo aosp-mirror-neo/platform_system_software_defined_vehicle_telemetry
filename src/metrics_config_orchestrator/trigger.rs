@@ -300,7 +300,6 @@ mod tests {
             .unwrap();
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_immediately_unsubscribe_doesnt_fire() {
         let trigger = create_valid_periodic_trigger();
@@ -318,12 +317,12 @@ mod tests {
             .unwrap();
         trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.unwrap();
         // Sleep for 2 intervals to ensure the trigger won't fire.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
 
         assert_eq!(callback_listener.lock().unwrap().fired_count, 0);
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_fires_twice() {
         let trigger = Arc::new(create_valid_periodic_trigger());
@@ -353,12 +352,12 @@ mod tests {
             .unwrap();
         // Sleep for 4 intervals to let trigger fire twice, unsubscribe
         // and ensure the trigger won't fire again.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(4 * INTERVAL_MS)).await;
 
         assert_eq!(callback_listener.lock().unwrap().fired_count, 2);
     }
 
-    // TODO(b/300703055): Find a way to remove sleeps.
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_one_async_loop() {
         let mut trigger = create_valid_periodic_trigger();
@@ -391,6 +390,7 @@ mod tests {
             .unwrap();
 
         // Sleep for 2 intervals to let trigger fire.
+        // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
 
         // Verify that both subscriptions were notified.
