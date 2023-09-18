@@ -117,7 +117,7 @@ void remove_all_metrics_configs(ServiceHolder* holder);
  * produced a report as params.
  */
 void set_report_ready_listener(ServiceHolder* holder, void* listener,
-                               void (*cbFunc)(void*, const char*));
+                               void (*cbFunc)(void*, const char*, int32_t));
 
 /**
  * Clears a previously set report ready listener. Client can receive errors related to the

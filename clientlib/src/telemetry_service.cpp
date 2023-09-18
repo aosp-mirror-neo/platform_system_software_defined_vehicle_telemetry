@@ -56,7 +56,7 @@ namespace android::sdv::telemetry {
     }
 
     void TelemetryService::set_report_ready_listener(void* listener,
-                                                     void (*cbFunc)(void*, const char*)) {
+                                                     void (*cbFunc)(void*, const char*, int32_t)) {
         android::sp<ReportReadyListenerImpl> mReportReadyListener(
             new ReportReadyListenerImpl(listener, cbFunc));
         android::binder::Status err = binder_service_->setReportReadyListener(mReportReadyListener);

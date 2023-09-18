@@ -49,7 +49,7 @@ void remove_all_metrics_configs(ServiceHolder* holder) {
 }
 
 void set_report_ready_listener(ServiceHolder* holder, void* listener,
-                               void (*cbFunc)(void*, const char*)) {
+                               void (*cbFunc)(void*, const char*, int32_t)) {
     android::sdv::telemetry::TelemetryService* service =
                 reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
     service->set_report_ready_listener(listener, cbFunc);
