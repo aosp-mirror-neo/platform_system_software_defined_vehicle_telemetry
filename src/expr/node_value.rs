@@ -7,8 +7,10 @@
 mod protobuf_reflection_extensions;
 
 use crate::node_errors::NodeError;
-pub use crate::node_value::protobuf_reflection_extensions::NodeValueToReflExt;
-use crate::node_value::protobuf_reflection_extensions::ProtobufReflectionExt;
+use crate::node_value::protobuf_reflection_extensions::ToNodeValue;
+pub use crate::node_value::protobuf_reflection_extensions::{
+    ReflectRepeatedMutExt, ToReflectValueBox,
+};
 
 use protobuf::{
     reflect::{ReflectFieldRef, ReflectValueRef},
