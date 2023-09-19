@@ -6,8 +6,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-#[allow(dead_code)]
-pub(crate) struct MessageBuilder {
+pub(crate) trait MessageBuilder: Send + Sync {
+    /// Builds a protobuf message dynamically.
+    fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError>;
+}
+
+pub(crate) struct MessageBuilderImpl {
     /// Uses descriptor to create and populate a protobuf message
     pub message_descriptor: MessageDescriptor,
 
@@ -15,7 +19,6 @@ pub(crate) struct MessageBuilder {
     pub field_assignments: HashMap<String, Arc<Node>>,
 }
 
-#[allow(dead_code)]
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MessageBuilderError {
@@ -28,17 +31,8 @@ pub enum MessageBuilderError {
     FieldExistenceValidationError { field_name: String, message_type: String },
 }
 
-#[allow(dead_code)]
-impl MessageBuilder {
-    pub fn new(
-        message_descriptor: MessageDescriptor,
-        field_assignments: HashMap<String, Arc<Node>>,
-    ) -> Self {
-        MessageBuilder { message_descriptor, field_assignments }
-    }
-
-    /// Builds a protobuf message dynamically.
-    pub fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
+impl MessageBuilder for MessageBuilderImpl {
+    fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
         let mut msg = self.message_descriptor.new_instance();
         for (field_name, node) in self.field_assignments.iter() {
             let node_err_to_builder_err = |e| MessageBuilderError::FieldAssignmentError {
@@ -73,6 +67,18 @@ impl MessageBuilder {
     }
 }
 
+impl MessageBuilderImpl {
+    pub fn new(
+        message_descriptor: MessageDescriptor,
+        field_assignments: HashMap<String, Arc<Node>>,
+    ) -> Self {
+        MessageBuilderImpl { message_descriptor, field_assignments }
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod mock;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,17 +108,17 @@ mod tests {
     const REPEATED_DOUBLE_FIELD_NAME: &str = "repeated_doubles";
     const REPEATED_ENUM_FIELD_NAME: &str = "repeated_enums";
 
-    /// Creates a MessageBuilder struct object using the descriptor and
+    /// Creates a MessageBuilderImpl struct object using the descriptor and
     /// field_name + node pairs as field assignments.
     fn create_message_builder(
         message_descriptor: MessageDescriptor,
         field_name_and_node_pairs: Vec<(&str, Arc<Node>)>,
-    ) -> MessageBuilder {
+    ) -> MessageBuilderImpl {
         let field_assignments = field_name_and_node_pairs
             .into_iter()
             .map(|(field, node)| (field.to_string(), node))
             .collect::<HashMap<_, _>>();
-        MessageBuilder::new(message_descriptor, field_assignments)
+        MessageBuilderImpl::new(message_descriptor, field_assignments)
     }
 
     #[test]
@@ -122,7 +128,7 @@ mod tests {
         expected_message.float_field = 0.0;
         expected_message.enum_field = TestEnum::SOME.into(); // this enum is equal to int 1
 
-        // create MessageBuilder struct object, this is the subject of the test
+        // create MessageBuilderImpl struct object, this is the subject of the test
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
@@ -146,7 +152,7 @@ mod tests {
         expected_message.int_field = 42;
         expected_message.message_field = MessageField::some(TEST_NESTED_MESSAGE.clone());
 
-        // create MessageBuilder struct object, this is the subject of the test
+        // create MessageBuilderImpl struct object, this is the subject of the test
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
@@ -181,7 +187,7 @@ mod tests {
         expected_message.repeated_enums =
             vec![TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
 
-        // create MessageBuilder struct object, this is the subject of the test
+        // create MessageBuilderImpl struct object, this is the subject of the test
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
