@@ -12,7 +12,7 @@ use std::{
     },
 };
 use thiserror::Error;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::{sync::Mutex as AsyncMutex, task};
 
 use crate::metrics_config_orchestrator::{
     trigger::{TriggerError, TriggerSubscriber},
@@ -138,22 +138,29 @@ impl MetricsReportGeneratorImpl {
     }
 
     fn on_trigger_fired(self: &Arc<Self>) {
-        let mut report = MetricsReport::new();
-        report.uuid = REPORT_UUID.to_owned();
-        report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);
-        report.report_timestamp = Some(Timestamp::now()).into();
-        report.report_reason = ReportReason::REGULAR.into();
-        report.metrics_config_uuid = self.config_uuid.clone();
-        report.metrics_config_version = self.config_version;
-        report.report_data = Some(Any::pack_dyn(&Int32Value::new()).unwrap()).into();
-        (self.report_ready_callback)(report);
+        // Send report in a non-blocking task since it's handled outside of orchestrator
+        // by a function that is not allowed to mutate itself.
+        let self_clone = self.clone();
+        task::spawn(async move {
+            let mut report = MetricsReport::new();
+            report.uuid = REPORT_UUID.to_owned();
+            report.report_number = self_clone.report_number.fetch_add(1, Ordering::SeqCst);
+            report.report_timestamp = Some(Timestamp::now()).into();
+            report.report_reason = ReportReason::REGULAR.into();
+            report.metrics_config_uuid = self_clone.config_uuid.clone();
+            report.metrics_config_version = self_clone.config_version;
+            report.report_data = Some(Any::pack_dyn(&Int32Value::new()).unwrap()).into();
+
+            (self_clone.report_ready_callback)(report);
+        });
     }
 }
 
 #[cfg(test)]
 mod test {
     use lazy_static::lazy_static;
-    use std::sync::Mutex;
+    use std::{thread, time::Duration};
+    use tokio::sync::watch;
 
     use super::*;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
@@ -222,19 +229,20 @@ mod test {
         let trigger = Arc::new(create_trigger());
 
         let mut generator = create_generator();
-        let report_container = Arc::new(Mutex::new(None));
-        let report_container_clone = report_container.clone();
-        generator.report_ready_callback = Arc::new(move |report| {
-            report_container_clone.lock().unwrap().replace(report);
-        });
+        let (tx, mut rx) = watch::channel(None);
+        generator.report_ready_callback = Arc::new(move |report| tx.send(Some(report)).unwrap());
         generator.triggers.push(trigger.clone());
         Arc::new(generator).activate().await.unwrap();
 
+        // Fire twice to make sure report number is incremented.
         trigger.fire().await;
-        trigger.fire().await;
+        rx.changed().await.unwrap();
 
-        let report_guard = report_container.lock().unwrap();
-        let report = report_guard.as_ref().unwrap();
+        trigger.fire().await;
+        rx.changed().await.unwrap();
+
+        let report_container = rx.borrow();
+        let report = report_container.as_ref().unwrap();
         assert_eq!(report.report_number, 2);
         // Less than 1 hour old.
         assert!(
@@ -244,6 +252,18 @@ mod test {
         assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
         assert!(report.report_data.is::<Int32Value>());
+    }
+
+    #[tokio::test]
+    async fn report_ready_callback_doesnt_block_trigger_fire() {
+        let trigger = Arc::new(create_trigger());
+
+        let mut generator = create_generator();
+        generator.report_ready_callback = Arc::new(|_| thread::sleep(Duration::MAX));
+        generator.triggers.push(trigger.clone());
+        Arc::new(generator).activate().await.unwrap();
+
+        trigger.fire().await;
     }
 
     #[tokio::test]

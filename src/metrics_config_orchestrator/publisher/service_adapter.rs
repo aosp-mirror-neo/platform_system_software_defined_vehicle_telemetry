@@ -16,12 +16,16 @@ use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
 pub(crate) trait ServiceAdapter {
+    /// Subscribe to new messages from the service specified with the specified name.
+    /// The callback mustn't block because it's executed on the adapter thread.
     async fn subscribe(
         &self,
         service_name: &str,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> ServiceSubscription;
 
+    /// Deactivate specified subscription.
+    /// After asynchronous function is complete, the callback is guaranteed not to be called.
     async fn unsubscribe(
         &self,
         subscription: ServiceSubscription,
@@ -171,6 +175,9 @@ impl ServiceAdapterImpl {
             message.value = num;
             num += 1;
 
+            // Synchronously invoke callbacks.
+            // The loop needs to wait before they finish to release the mutex lock when they're
+            // done because they're allowed to mutate themselves.
             for subscription in subscriptions.values_mut() {
                 subscription(&message);
             }
