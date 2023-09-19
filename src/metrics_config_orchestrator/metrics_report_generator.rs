@@ -19,8 +19,6 @@ use crate::metrics_config_orchestrator::{
     Trigger,
 };
 
-const REPORT_UUID: &str = "00000000-0000-0000-0000-000000000000";
-
 #[async_trait]
 pub(crate) trait MetricsReportGenerator {
     fn get_name(&self) -> &str;
@@ -143,7 +141,6 @@ impl MetricsReportGeneratorImpl {
         let self_clone = self.clone();
         task::spawn(async move {
             let mut report = MetricsReport::new();
-            report.uuid = REPORT_UUID.to_owned();
             report.report_number = self_clone.report_number.fetch_add(1, Ordering::SeqCst);
             report.report_timestamp = Some(Timestamp::now()).into();
             report.report_reason = ReportReason::REGULAR.into();
