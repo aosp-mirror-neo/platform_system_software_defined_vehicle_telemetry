@@ -16,7 +16,7 @@ use tokio::{sync::Mutex as AsyncMutex, task};
 
 use crate::metrics_config_orchestrator::{
     message_builder::{MessageBuilder, MessageBuilderError},
-    trigger::{TriggerError, TriggerSubscriber},
+    trigger::{TriggerSubscriber, TriggerUnsubscribeError},
     Trigger,
 };
 
@@ -35,7 +35,7 @@ pub(crate) enum MetricsReportGeneratorError {
     #[error("Unable to deactivate metrics report generator: it's already inactive")]
     AlreadyInactive,
     #[error("Unable to deactivate metrics report generator due to unsubscription errors: {unsubscribe_errors:?}")]
-    UnableToUnsubscribe { unsubscribe_errors: Vec<TriggerError> },
+    UnableToUnsubscribe { unsubscribe_errors: Vec<TriggerUnsubscribeError> },
     #[error("Unable to build report due to error in MessageBuilder: {e}")]
     FailedToBuildReport { e: MessageBuilderError },
 }
@@ -321,7 +321,9 @@ mod test {
 
         let mut trigger = create_trigger();
         trigger.set_unsubscribe_callback(move |_| {
-            Some(TriggerError::NotSubscribed { subscriber_name: SUBSCRIBER_NAME.to_owned() })
+            Some(TriggerUnsubscribeError::NotSubscribed {
+                subscriber_name: SUBSCRIBER_NAME.to_owned(),
+            })
         });
 
         let mut generator = create_generator();
@@ -334,7 +336,7 @@ mod test {
         if let MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors } = &err {
             assert_eq!(unsubscribe_errors.len(), 1);
             assert!(
-                matches!(&unsubscribe_errors[0], TriggerError::NotSubscribed { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
+                matches!(&unsubscribe_errors[0], TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
                 "Unexpected inner error: {:?}",
                 unsubscribe_errors[0]
             );

@@ -33,7 +33,7 @@ pub(crate) trait Publisher {
     fn get_name(&self) -> &str;
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
 
-    async fn activate(self: &Arc<Self>) -> Result<(), PublisherActivateError>;
+    async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError>;
 
     async fn subscribe(
@@ -67,7 +67,7 @@ pub(crate) enum PublisherDeactivateError {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub(crate) enum PublisherSubscribeError {
+pub enum PublisherSubscribeError {
     #[error("Unable to subscribe to publisher when it's {state}")]
     PublisherNotActive { state: String },
     #[error("Data trigger {data_trigger_name} is already subscribed to the publisher. Duplicate subscriptions are not allowed.")]
@@ -76,7 +76,7 @@ pub(crate) enum PublisherSubscribeError {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub(crate) enum PublisherUnsubscribeError {
+pub enum PublisherUnsubscribeError {
     #[error("Unable to unsubscribe from publisher when it's {state}")]
     PublisherNotActive { state: String },
     #[error("Data trigger {data_trigger_name} wasn't subscribed to the publisher")]
@@ -147,7 +147,7 @@ impl Publisher for PublisherImpl {
         self.latest_message.lock().unwrap().clone()
     }
 
-    async fn activate(self: &Arc<Self>) -> Result<(), PublisherActivateError> {
+    async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
         {
             let mut state = self.state.lock().await;
             if !matches!(*state, PublisherState::Inactive) {
@@ -293,7 +293,8 @@ impl PublisherImpl {
                 // Replace latest message.
                 self_clone.latest_message.lock().unwrap().replace(message_clone.clone_box());
 
-                // Notify subscriptions.
+                // Notify subscribed data triggers.
+                // TODO(b/294129114): Replace callback_map with just a single callback.
                 for callback in callback_map.values_mut() {
                     callback(message_clone.as_ref());
                 }
@@ -301,6 +302,9 @@ impl PublisherImpl {
         });
     }
 }
+
+#[cfg(test)]
+pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
@@ -407,7 +411,7 @@ mod tests {
     ) -> Arc<PublisherImpl> {
         let publisher = create_inactive_service_publisher(service_adapter);
 
-        publisher.activate().await.unwrap();
+        publisher.clone().activate().await.unwrap();
         publisher
     }
 
