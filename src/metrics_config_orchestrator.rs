@@ -802,7 +802,10 @@ mod tests {
 
     use super::*;
     use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
-    use crate::metrics_config_orchestrator::publisher::PublisherError;
+    use crate::metrics_config_orchestrator::publisher::{
+        PublisherActivateError, PublisherDeactivateError, PublisherSubscribeError,
+        PublisherUnsubscribeError,
+    };
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
@@ -1013,7 +1016,7 @@ mod tests {
             self.latest_message.clone()
         }
 
-        async fn activate(self: &Arc<Self>) -> Result<(), PublisherError> {
+        async fn activate(self: &Arc<Self>) -> Result<(), PublisherActivateError> {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);
             }
@@ -1021,7 +1024,22 @@ mod tests {
             Ok(())
         }
 
-        async fn deactivate(&self) -> Result<(), PublisherError> {
+        async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
+            Ok(())
+        }
+
+        async fn subscribe(
+            &self,
+            _data_trigger_name: &str,
+            _callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+        ) -> Result<(), PublisherSubscribeError> {
+            Ok(())
+        }
+
+        async fn unsubscribe(
+            &self,
+            _data_trigger_name: &str,
+        ) -> Result<(), PublisherUnsubscribeError> {
             Ok(())
         }
     }

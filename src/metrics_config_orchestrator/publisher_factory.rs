@@ -535,7 +535,7 @@ mod tests {
             &res.publisher_type
         {
             assert_eq!(service_name, SERVICE_NAME);
-            assert!(service_subscription.lock().await.is_none());
+            assert!(service_subscription.lock().unwrap().is_none());
         } else {
             panic!("Unexpected publisher type");
         }
