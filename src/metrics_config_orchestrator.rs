@@ -387,7 +387,8 @@ where
             descriptor_provider: Box::new(DescriptorProviderImpl {}),
         };
         // Validate expression nodes to ensure they are set up correctly.
-        self.node_factory
+        let node_types = self
+            .node_factory
             .validate(&config_proto.expression_nodes, &node_factory_context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
@@ -435,7 +436,7 @@ where
         let context = MetricsReportGeneratorFactoryValidateContext {
             trigger_protos: &config_proto.triggers,
             file_descriptors: &file_descriptors,
-            nodes: &expression_nodes,
+            node_types: &node_types,
         };
         config_proto.metrics_report_configs.iter().try_for_each(|proto| {
             self.metrics_report_generator_factory.validate(proto, &context).map_err(|err| {
@@ -786,7 +787,7 @@ where
 mod tests {
     use async_trait::async_trait;
     use protobuf::{well_known_types::wrappers::Int32Value, MessageDyn};
-    use sdv_ast::{Node, NodeValue};
+    use sdv_ast::{Node, NodeValue, NodeValueType};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -961,13 +962,13 @@ mod tests {
     impl NodeFactory for MockNodeFactory {
         fn validate(
             &self,
-            _proto_nodes: &[NodeProto],
+            proto_nodes: &[NodeProto],
             _context: &NodeFactoryContext,
-        ) -> Result<(), NodeError> {
+        ) -> Result<Vec<NodeValueType>, NodeError> {
             if self.fail_validate {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
-            Ok(())
+            Ok(vec![NodeValueType::Int; proto_nodes.len()])
         }
 
         fn create_nodes(

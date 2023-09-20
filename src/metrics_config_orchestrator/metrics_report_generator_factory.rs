@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::FileDescriptor;
-use sdv_ast::Node;
+use sdv_ast::{Node, NodeValueType};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
     Trigger as TriggerProto,
@@ -14,7 +14,8 @@ use thiserror::Error;
 
 use crate::metrics_config_orchestrator::{
     message_builder_factory::{
-        MessageBuilderFactory, MessageBuilderFactoryContext, MessageBuilderFactoryError,
+        MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
+        MessageBuilderFactoryValidateContext,
     },
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger, TriggerImpl,
 };
@@ -52,7 +53,7 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigg
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
     pub trigger_protos: &'a Vec<TriggerProto>,
     pub file_descriptors: &'a [FileDescriptor],
-    pub nodes: &'a [Arc<Node>],
+    pub node_types: &'a [NodeValueType],
 }
 
 #[derive(Error, Debug)]
@@ -90,7 +91,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 .message_builder
                 .as_ref()
                 .ok_or(MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet)?,
-            &MessageBuilderFactoryContext::new(context.file_descriptors, context.nodes),
+            &MessageBuilderFactoryCreateContext::new(context.file_descriptors, context.nodes),
         )?;
         let triggers = metrics_report_config
             .trigger_names
@@ -127,7 +128,10 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 .message_builder
                 .as_ref()
                 .ok_or(MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet)?,
-            &MessageBuilderFactoryContext::new(context.file_descriptors, context.nodes),
+            &MessageBuilderFactoryValidateContext::new(
+                context.file_descriptors,
+                context.node_types,
+            ),
         )?;
 
         // validate trigger names for this report config exist
@@ -152,7 +156,7 @@ mod tests {
     use super::*;
     use crate::collection_extension::VecExtension;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
-        get_test_file_descriptors, get_test_nodes, MockMessageBuilderFactory,
+        get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
     use crate::test_utils::ptr_eq;
@@ -221,7 +225,7 @@ mod tests {
             let context = MetricsReportGeneratorFactoryValidateContext {
                 trigger_protos: &triggers,
                 file_descriptors: get_test_file_descriptors(),
-                nodes: get_test_nodes(),
+                node_types: get_test_node_types(),
             };
             self.validate(config, &context)
         }
