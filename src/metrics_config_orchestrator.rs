@@ -24,7 +24,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::{
     collections::HashMap,
     marker::{PhantomData, Sync},
-    sync::{Arc, Mutex, RwLock},
+    sync::{Arc, Mutex, OnceLock},
 };
 use thiserror::Error;
 
@@ -156,7 +156,7 @@ where
     TPublisher: Publisher,
     TTrigger: Trigger,
 {
-    metrics_config: RwLock<Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>,
+    metrics_config: OnceLock<Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>,
 }
 
 impl<TMetricsReportGenerator, TPublisher, TTrigger> MessageProvider
@@ -170,7 +170,7 @@ where
         &self,
         publisher_name: &str,
     ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-        self.metrics_config.read().unwrap().publishers.get(publisher_name).map_or_else(
+        self.metrics_config.get().unwrap().publishers.get(publisher_name).map_or_else(
             || Err(MessageProviderError::InvalidPublisherName),
             |publisher| Ok(publisher.get_latest_message()),
         )
@@ -224,16 +224,7 @@ where
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
         // Create expression nodes.
-        let message_provider = Arc::new(MessageProviderImpl {
-            metrics_config: RwLock::new(Arc::new(MetricsConfig {
-                uuid: String::default(),
-                metrics_report_generators: vec![],
-                publishers: HashMap::new(),
-                start_trigger: None,
-                end_trigger: None,
-                finish_trigger: None,
-            })),
-        });
+        let message_provider = Arc::new(MessageProviderImpl { metrics_config: OnceLock::new() });
         let node_factory_context = NodeFactoryContext {
             message_provider: Some(message_provider.clone()),
             descriptor_provider: Box::new(DescriptorProviderImpl {}),
@@ -341,9 +332,10 @@ where
         };
 
         // Set real MetricsConfig in MessageProvider so that Publishers are discoverable by Nodes.
-        {
-            *message_provider.metrics_config.write().unwrap() = config.clone();
-        }
+        message_provider
+            .metrics_config
+            .set(config.clone())
+            .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
         // Activate publishers.
         for publisher in config.publishers.values() {
