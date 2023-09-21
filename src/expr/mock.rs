@@ -1,4 +1,3 @@
-use crate::{DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError};
 use lazy_static::lazy_static;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
@@ -6,6 +5,11 @@ use sdvtelemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
 };
 use std::sync::Arc;
+
+use crate::expr::{
+    ast::{DescriptorProvider, MessageProvider},
+    node_errors::{DescriptorProviderError, MessageProviderError},
+};
 
 // Common constants to be reused across tests.
 

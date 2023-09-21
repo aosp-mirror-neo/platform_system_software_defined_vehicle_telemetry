@@ -1,14 +1,21 @@
+rust_defaults {
+    name: "sdv_ast_defaults",
+    host_supported: true,
+    rustlibs: [
+        "liblog_rust",
+        "liblogger",
+        "libsdv_log_rust",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+    ],
+}
+
 rust_library {
     name: "libsdv_telem_expr_parser",
     crate_name: "sdv_telem_expr_parser",
     defaults: ["sdv_ast_defaults"],
     srcs: [
         "text_parser.rs",
-    ],
-    rustlibs: [
-        "liblog_rust",
-        "liblogger",
-        "libsdv_log_rust",
     ],
 }
 

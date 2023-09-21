@@ -1,15 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-//! Library for building and traversing the abstract syntax tree.
-
-mod ast_extensions;
-mod node_errors;
-mod node_value;
-
-use ast_extensions::{FieldLeafNodeExtension, OperatorProtoExtension, VisitStatus};
-pub use ast_extensions::{NodeValueType, NodeValueTypeExtension};
-pub use node_errors::{DescriptorProviderError, MessageProviderError, NodeError};
-pub use node_value::{NodeValue, ReflectRepeatedMutExt, ToReflectValueBox};
+//! Module for building and traversing the abstract syntax tree.
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdvtelemetry_proto_rust::expression::{
@@ -20,6 +11,15 @@ use std::{
     fmt,
     marker::{Send, Sync},
     sync::Arc,
+};
+
+use crate::expr::{
+    ast_extensions::{
+        FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
+        VisitStatus,
+    },
+    node_errors::{DescriptorProviderError, MessageProviderError, NodeError},
+    node_value::NodeValue,
 };
 
 /// Creates rust nodes from protobuf expression nodes.
@@ -408,19 +408,16 @@ impl fmt::Debug for Node {
 }
 
 #[cfg(test)]
-pub(crate) mod mock;
-
-#[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::mock::*;
-    use crate::NodeValue;
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{
             ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
         },
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
+
+    use super::*;
+    use crate::expr::mock::*;
 
     const PUBLISHER_NAME: &str = "publisher_foo";
 

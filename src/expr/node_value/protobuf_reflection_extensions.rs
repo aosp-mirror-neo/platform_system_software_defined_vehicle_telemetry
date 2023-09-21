@@ -3,12 +3,12 @@
 //! Helper functions used for converting between protobuf reflection value and
 //! node value.
 
-use crate::{NodeError, NodeValue};
-
 use protobuf::reflect::{
     ReflectFieldRef, ReflectRepeatedMut, ReflectRepeatedRef, ReflectValueBox, ReflectValueRef,
     RuntimeType as ProtobufRuntimeType,
 };
+
+use crate::expr::{node_errors::NodeError, node_value::NodeValue};
 
 /// Implementing type will be able to convert itself into a NodeValue.
 pub trait ToNodeValue {

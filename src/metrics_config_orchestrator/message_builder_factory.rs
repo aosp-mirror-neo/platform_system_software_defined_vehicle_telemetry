@@ -1,11 +1,14 @@
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
-use sdv_ast::{Node, NodeValueType, NodeValueTypeExtension};
 use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use std::{collections::HashMap, sync::Arc};
 use thiserror::Error;
 
 use crate::{
     collection_extension::HashMapExtension,
+    expr::{
+        ast::Node,
+        ast_extensions::{NodeValueType, NodeValueTypeExtension},
+    },
     metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderImpl},
 };
 
@@ -229,10 +232,11 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use mock::get_test_file_descriptors;
-    use sdv_ast::NodeValue;
     use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::FieldAssignment;
+
+    use super::*;
+    use crate::expr::node_value::NodeValue;
 
     // Package and message name are in to src/test_utils/test_message.proto
     const TEST_MESSAGE_FULL_NAME: &str = ".android.sdv.telemetry.test.TestMessage";

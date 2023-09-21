@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
-use sdv_ast::Node;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     declarative_aggregation::AggregationType,
     AggregationPublisher as AggregationPublisherProto,
@@ -16,6 +15,7 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
+use crate::expr::ast::Node;
 use crate::metrics_config_orchestrator::{
     publisher::{
         service_adapter::{ServiceAdapter, ServiceAdapterImpl},
@@ -262,7 +262,6 @@ mod tests {
         descriptor::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto},
         EnumOrUnknown, MessageDyn,
     };
-    use sdv_ast::NodeValue;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         declarative_aggregation::AggregationType,
         AggregationPublisher as AggregationPublisherProto,
@@ -272,6 +271,7 @@ mod tests {
 
     use super::*;
     use crate::collection_extension::VecExtension;
+    use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::{
         publisher::service_adapter::{ServiceAdapterError, ServiceSubscription},
         trigger::TriggerType,
