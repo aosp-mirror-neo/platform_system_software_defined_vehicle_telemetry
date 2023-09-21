@@ -29,6 +29,7 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
+use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
     MetricsReportGeneratorFactory, MetricsReportGeneratorFactoryCreateContext,
@@ -285,6 +286,8 @@ where
             config_proto,
             triggers: &triggers,
             report_ready_callback: &self.report_ready_callback,
+            file_descriptors: &file_descriptors,
+            nodes: &expression_nodes,
         };
         let metrics_report_configs = config_proto
             .metrics_report_configs
@@ -429,8 +432,11 @@ where
         )?;
 
         // Validate metrics report configs.
-        let context =
-            MetricsReportGeneratorFactoryValidateContext { trigger_protos: &config_proto.triggers };
+        let context = MetricsReportGeneratorFactoryValidateContext {
+            trigger_protos: &config_proto.triggers,
+            file_descriptors: &file_descriptors,
+            nodes: &expression_nodes,
+        };
         config_proto.metrics_report_configs.iter().try_for_each(|proto| {
             self.metrics_report_generator_factory.validate(proto, &context).map_err(|err| {
                 MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
@@ -450,7 +456,9 @@ impl MetricsConfigOrchestratorImpl {
     ) -> Self {
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl {},
+            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(Box::new(
+                MessageBuilderFactoryImpl::new(),
+            )),
             node_factory: NodeFactoryImpl::new(),
             publisher_factory: PublisherFactoryImpl::new(),
             trigger_factory: TriggerFactoryImpl::new(),

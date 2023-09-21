@@ -9,12 +9,11 @@ use thiserror::Error;
 
 use crate::{
     collection_extension::HashMapExtension,
-    metrics_config_orchestrator::message_builder::MessageBuilder,
+    metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderImpl},
 };
 
 /// Factory that validates MetricsConfig's ProtoMessageBuilder and creates
 /// corresponding Rust representations.
-#[allow(dead_code)]
 pub(crate) trait MessageBuilderFactory: Send + Sync {
     fn validate(
         &self,
@@ -26,16 +25,14 @@ pub(crate) trait MessageBuilderFactory: Send + Sync {
         &self,
         proto_message_builder: &ProtoMessageBuilder,
         context: &MessageBuilderFactoryContext,
-    ) -> Result<MessageBuilder, MessageBuilderFactoryError>;
+    ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError>;
 }
 
-#[allow(dead_code)]
 pub(crate) struct MessageBuilderFactoryContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
 }
 
-#[allow(dead_code)]
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MessageBuilderFactoryError {
@@ -49,7 +46,6 @@ pub enum MessageBuilderFactoryError {
     InvalidNodeIndex { field_name: String, i: u32 },
 }
 
-#[allow(dead_code)]
 impl<'a> MessageBuilderFactoryContext<'a> {
     /// Constructor
     pub(crate) fn new(file_descriptors: &'a [FileDescriptor], nodes: &'a [Arc<Node>]) -> Self {
@@ -70,10 +66,8 @@ impl<'a> MessageBuilderFactoryContext<'a> {
 }
 
 /// Concrete implementation of the factory trait.
-#[allow(dead_code)]
 pub(crate) struct MessageBuilderFactoryImpl {}
 
-#[allow(dead_code)]
 impl MessageBuilderFactoryImpl {
     pub fn new() -> Self {
         MessageBuilderFactoryImpl {}
@@ -125,7 +119,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
         &self,
         proto_message_builder: &ProtoMessageBuilder,
         context: &MessageBuilderFactoryContext,
-    ) -> Result<MessageBuilder, MessageBuilderFactoryError> {
+    ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError> {
         let message_descriptor =
             context.get_message_descriptor(&proto_message_builder.message_type)?;
         // maps field_name to Arc<Node>, the node evaluation output is the field value
@@ -153,16 +147,18 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
                 Ok(map)
             },
         )?;
-        Ok(MessageBuilder::new(message_descriptor.clone(), field_assignments))
+        Ok(Box::new(MessageBuilderImpl::new(message_descriptor.clone(), field_assignments)))
     }
 }
 
 #[cfg(test)]
+pub(crate) mod mock;
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use protobuf::MessageFull;
+    use mock::get_test_file_descriptors;
     use sdv_ast::NodeValue;
-    use sdv_telem_test_proto::test_message::TestMessage;
     use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::FieldAssignment;
 
     // Package and message name are in to src/test_utils/test_message.proto
@@ -170,8 +166,7 @@ mod tests {
     const INT_FIELD_NAME: &str = "int_field";
 
     fn create_test_file_descriptors() -> Vec<FileDescriptor> {
-        let fd_proto = TestMessage::descriptor().file_descriptor_proto().clone();
-        vec![FileDescriptor::new_dynamic(fd_proto, &[]).unwrap()]
+        get_test_file_descriptors().to_vec()
     }
 
     fn create_nodes_with_size(n: usize) -> Vec<Arc<Node>> {
@@ -302,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn test_factory_create_ok() -> Result<(), MessageBuilderFactoryError> {
+    fn test_factory_create_ok() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
         let nodes = create_nodes_with_size(1);
@@ -312,11 +307,6 @@ mod tests {
             vec![create_field_assignment_proto(INT_FIELD_NAME, 0)],
         );
 
-        // action
-        let message_builder = factory.create(&proto_message_builder, &context)?;
-
-        // Cannot compare MessageDescriptors, so compare the protobuf representations
-        assert_eq!(message_builder.message_descriptor.proto(), TestMessage::descriptor().proto());
-        Ok(())
+        factory.create(&proto_message_builder, &context).unwrap();
     }
 }

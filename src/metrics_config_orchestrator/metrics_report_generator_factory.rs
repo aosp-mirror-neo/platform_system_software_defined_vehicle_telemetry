@@ -1,5 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use protobuf::reflect::FileDescriptor;
+use sdv_ast::Node;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
     Trigger as TriggerProto,
@@ -11,6 +13,9 @@ use std::{
 use thiserror::Error;
 
 use crate::metrics_config_orchestrator::{
+    message_builder_factory::{
+        MessageBuilderFactory, MessageBuilderFactoryContext, MessageBuilderFactoryError,
+    },
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger, TriggerImpl,
 };
 
@@ -37,13 +42,17 @@ pub(crate) trait MetricsReportGeneratorFactory<
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigger = TriggerImpl> {
-    pub(super) config_proto: &'a MetricsConfigProto,
-    pub(super) report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
-    pub(super) triggers: &'a HashMap<String, Arc<TTrigger>>,
+    pub config_proto: &'a MetricsConfigProto,
+    pub report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
+    pub triggers: &'a HashMap<String, Arc<TTrigger>>,
+    pub file_descriptors: &'a [FileDescriptor],
+    pub nodes: &'a [Arc<Node>],
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
     pub trigger_protos: &'a Vec<TriggerProto>,
+    pub file_descriptors: &'a [FileDescriptor],
+    pub nodes: &'a [Arc<Node>],
 }
 
 #[derive(Error, Debug)]
@@ -51,9 +60,24 @@ pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
 pub enum MetricsReportGeneratorFactoryError {
     #[error("Trigger name {trigger_name} is invalid")]
     InvalidTriggerName { trigger_name: String },
+    #[error("MetricsReportConfig contains invalid ProtoMessageBuilder: {e}")]
+    InvalidProtoMessageBuilder {
+        #[from]
+        e: MessageBuilderFactoryError,
+    },
+    #[error("MetricsReportConfig must specify the ProtoMessageBuilder")]
+    ProtoMessageBuilderNotSet,
 }
 
-pub(crate) struct MetricsReportGeneratorFactoryImpl {}
+pub(crate) struct MetricsReportGeneratorFactoryImpl {
+    pub(super) message_builder_factory: Box<dyn MessageBuilderFactory>,
+}
+
+impl MetricsReportGeneratorFactoryImpl {
+    pub fn new(message_builder_factory: Box<dyn MessageBuilderFactory>) -> Self {
+        MetricsReportGeneratorFactoryImpl { message_builder_factory }
+    }
+}
 
 impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
     fn create(
@@ -61,6 +85,13 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext,
     ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
+        let message_builder = self.message_builder_factory.create(
+            metrics_report_config
+                .message_builder
+                .as_ref()
+                .ok_or(MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet)?,
+            &MessageBuilderFactoryContext::new(context.file_descriptors, context.nodes),
+        )?;
         let triggers = metrics_report_config
             .trigger_names
             .iter()
@@ -81,6 +112,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             metrics_report_config.report_incomplete,
             context.report_ready_callback.clone(),
             triggers,
+            message_builder,
         )))
     }
 
@@ -89,6 +121,16 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryValidateContext,
     ) -> Result<(), MetricsReportGeneratorFactoryError> {
+        // validate protobuf message builder is valid
+        self.message_builder_factory.validate(
+            metrics_report_config
+                .message_builder
+                .as_ref()
+                .ok_or(MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet)?,
+            &MessageBuilderFactoryContext::new(context.file_descriptors, context.nodes),
+        )?;
+
+        // validate trigger names for this report config exist
         let names_set =
             context.trigger_protos.iter().map(|proto| &proto.name).collect::<HashSet<_>>();
         metrics_report_config.trigger_names.iter().try_for_each(|name| {
@@ -105,8 +147,13 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
+
     use super::*;
     use crate::collection_extension::VecExtension;
+    use crate::metrics_config_orchestrator::message_builder_factory::mock::{
+        get_test_file_descriptors, get_test_nodes, MockMessageBuilderFactory,
+    };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
     use crate::test_utils::ptr_eq;
 
@@ -142,6 +189,8 @@ mod tests {
                 config_proto: &metrics_config_proto,
                 report_ready_callback: &report_ready_callback,
                 triggers: &triggers,
+                file_descriptors: get_test_file_descriptors(),
+                nodes: get_test_nodes(),
             };
             self.create(report_config, &context)
         }
@@ -169,19 +218,23 @@ mod tests {
                         .collect()
                 })
                 .unwrap_or_default();
-            let context =
-                MetricsReportGeneratorFactoryValidateContext { trigger_protos: &triggers };
+            let context = MetricsReportGeneratorFactoryValidateContext {
+                trigger_protos: &triggers,
+                file_descriptors: get_test_file_descriptors(),
+                nodes: get_test_nodes(),
+            };
             self.validate(config, &context)
         }
     }
 
     fn create_factory() -> MetricsReportGeneratorFactoryImpl {
-        MetricsReportGeneratorFactoryImpl {}
+        MetricsReportGeneratorFactoryImpl::new(Box::new(MockMessageBuilderFactory::new()))
     }
 
     fn create_config_with_invalid_trigger_name() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
         config.trigger_names.push(TRIGGER_NAME.to_owned());
+        config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
         config
     }
 
@@ -190,6 +243,7 @@ mod tests {
         config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
         config.report_incomplete = true;
         config.trigger_names.push(TRIGGER_NAME.to_owned());
+        config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
         config
     }
 
@@ -202,6 +256,43 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_config_has_no_proto_message_builder_fails() {
+        let factory = create_factory();
+        let config = MetricsReportConfig::new();
+
+        let err = factory.create_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_proto_message_builder_factory_returns_error_fails() {
+        let mut message_builder_factory = MockMessageBuilderFactory::new();
+        message_builder_factory.fail_create();
+        let factory = MetricsReportGeneratorFactoryImpl::new(Box::new(message_builder_factory));
+        let config = create_valid_config();
+        let trigger = Arc::new(TriggerImpl::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval_ms: 0 },
+        ));
+
+        let err = factory
+            .create_using_context(&config, None, None, Some(vec![trigger.clone()]))
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -247,6 +338,39 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_config_has_no_proto_message_builder_fails() {
+        let factory = create_factory();
+        let config = MetricsReportConfig::new();
+
+        let err = factory.validate_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_proto_message_builder_factory_returns_error_fails() {
+        let mut message_builder_factory = MockMessageBuilderFactory::new();
+        message_builder_factory.fail_validate();
+        let factory = MetricsReportGeneratorFactoryImpl::new(Box::new(message_builder_factory));
+        let config = create_valid_config();
+
+        let err = factory
+            .validate_using_context(&config, Some(vec![TRIGGER_NAME.to_owned()]))
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }),
             "Unexpected error: {:?}",
             err
         );

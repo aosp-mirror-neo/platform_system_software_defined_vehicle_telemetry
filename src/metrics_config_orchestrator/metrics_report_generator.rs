@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use log::error;
-use protobuf::well_known_types::{any::Any, timestamp::Timestamp, wrappers::Int32Value};
+use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
 use sdvtelemetry_proto_rust::metrics_configuration::{metrics_report::ReportReason, MetricsReport};
 use std::{
     marker::{Send, Sync},
@@ -15,6 +15,7 @@ use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, task};
 
 use crate::metrics_config_orchestrator::{
+    message_builder::{MessageBuilder, MessageBuilderError},
     trigger::{TriggerError, TriggerSubscriber},
     Trigger,
 };
@@ -35,6 +36,8 @@ pub(crate) enum MetricsReportGeneratorError {
     AlreadyInactive,
     #[error("Unable to deactivate metrics report generator due to unsubscription errors: {unsubscribe_errors:?}")]
     UnableToUnsubscribe { unsubscribe_errors: Vec<TriggerError> },
+    #[error("Unable to build report due to error in MessageBuilder: {e}")]
+    FailedToBuildReport { e: MessageBuilderError },
 }
 
 #[allow(dead_code)]
@@ -50,6 +53,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     is_active: AsyncMutex<bool>,
     report_number: AtomicU32,
     subscriber: TriggerSubscriber,
+    message_builder: Box<dyn MessageBuilder>,
 }
 
 #[async_trait]
@@ -120,6 +124,7 @@ impl MetricsReportGeneratorImpl {
         report_incomplete: bool,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
         triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+        message_builder: Box<dyn MessageBuilder>,
     ) -> Self {
         let subscriber = TriggerSubscriber::MetricsReportGenerator { name: name.clone() };
         MetricsReportGeneratorImpl {
@@ -132,6 +137,7 @@ impl MetricsReportGeneratorImpl {
             is_active: false.into(),
             report_number: 1.into(),
             subscriber,
+            message_builder,
         }
     }
 
@@ -140,15 +146,22 @@ impl MetricsReportGeneratorImpl {
         // by a function that is not allowed to mutate itself.
         let self_clone = self.clone();
         task::spawn(async move {
-            let mut report = MetricsReport::new();
-            report.report_number = self_clone.report_number.fetch_add(1, Ordering::SeqCst);
-            report.report_timestamp = Some(Timestamp::now()).into();
-            report.report_reason = ReportReason::REGULAR.into();
-            report.metrics_config_uuid = self_clone.config_uuid.clone();
-            report.metrics_config_version = self_clone.config_version;
-            report.report_data = Some(Any::pack_dyn(&Int32Value::new()).unwrap()).into();
+            match self_clone.message_builder.build() {
+                Ok(report_data) => {
+                    let mut report = MetricsReport::new();
+                    report.report_number = self_clone.report_number.fetch_add(1, Ordering::SeqCst);
+                    report.report_timestamp = Some(Timestamp::now()).into();
+                    report.report_reason = ReportReason::REGULAR.into();
+                    report.metrics_config_uuid = self_clone.config_uuid.clone();
+                    report.metrics_config_version = self_clone.config_version;
+                    report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
 
-            (self_clone.report_ready_callback)(report);
+                    (self_clone.report_ready_callback)(report);
+                }
+                Err(e) => {
+                    error!("{:?}", MetricsReportGeneratorError::FailedToBuildReport { e });
+                }
+            }
         });
     }
 }
@@ -160,7 +173,10 @@ mod test {
     use tokio::sync::watch;
 
     use super::*;
-    use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
+    use crate::metrics_config_orchestrator::{
+        message_builder::mock::MockMessageBuilder, trigger::mock::MockTrigger,
+    };
+    use sdv_telem_test_proto::test_message::TestMessage;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
@@ -169,6 +185,7 @@ mod test {
     lazy_static! {
         static ref NOOP_REPORT_READY_CALLBACK: Arc<dyn Fn(MetricsReport) + Send + Sync> =
             Arc::new(|_| {});
+        static ref MOCK_MESSAGE_BUILDER: MockMessageBuilder = MockMessageBuilder::new();
     }
 
     fn create_generator() -> MetricsReportGeneratorImpl {
@@ -179,6 +196,7 @@ mod test {
             true,
             NOOP_REPORT_READY_CALLBACK.clone(),
             vec![],
+            Box::new(MOCK_MESSAGE_BUILDER.clone()),
         )
     }
 
@@ -248,7 +266,8 @@ mod test {
         assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
         assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
-        assert!(report.report_data.is::<Int32Value>());
+        // as built by MockMessageBuilder
+        assert!(report.report_data.is::<TestMessage>());
     }
 
     #[tokio::test]
