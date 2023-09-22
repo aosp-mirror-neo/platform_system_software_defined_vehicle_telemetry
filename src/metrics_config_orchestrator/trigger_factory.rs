@@ -148,6 +148,7 @@ mod tests {
     use super::*;
     use crate::collection_extension::VecExtension;
     use crate::metrics_config_orchestrator::publisher::PublisherType;
+    use crate::test_utils::ptr_eq;
 
     const INTERVAL: u64 = u64::MAX;
     const NODE_INDEX: u32 = 42;
@@ -199,7 +200,7 @@ mod tests {
         execute_func(&context)
     }
 
-    fn create_valid_data_trigger() -> (TriggerProto, Option<Vec<Arc<PublisherImpl>>>) {
+    fn create_valid_data_trigger() -> (TriggerProto, Arc<PublisherImpl>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let data_trigger = trigger.mut_data_trigger();
         data_trigger.publisher_name = PUBLISHER_NAME.to_owned();
@@ -209,7 +210,7 @@ mod tests {
             PublisherType::Signal { signal_name: SIGNAL_NAME.to_owned() },
         ));
 
-        (trigger, Some(vec![publisher]))
+        (trigger, publisher)
     }
 
     fn create_valid_periodic_trigger() -> TriggerProto {
@@ -256,16 +257,16 @@ mod tests {
     #[test]
     fn create_data_trigger_success() {
         let factory = create_factory();
-        let (trigger, publishers) = create_valid_data_trigger();
+        let (trigger, publisher) = create_valid_data_trigger();
 
-        let res = run_using_factory_context(publishers.clone(), None, None, |context| {
+        let res = run_using_factory_context(Some(vec![publisher.clone()]), None, None, |context| {
             factory.create(&trigger, context)
         })
         .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
         if let TriggerType::Data { publisher: res_publisher } = &res.trigger_type {
-            assert!(Arc::ptr_eq(res_publisher, &publishers.unwrap()[0]));
+            assert!(ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher + Send + Sync>)));
         } else {
             panic!("Unexpected trigger type");
         }
@@ -365,9 +366,9 @@ mod tests {
     #[test]
     fn validate_data_trigger_success() {
         let factory = create_factory();
-        let (trigger, publishers) = create_valid_data_trigger();
+        let (trigger, publisher) = create_valid_data_trigger();
 
-        run_using_factory_context(publishers, None, None, |context| {
+        run_using_factory_context(Some(vec![publisher]), None, None, |context| {
             factory.validate(&trigger, context)
         })
         .unwrap();

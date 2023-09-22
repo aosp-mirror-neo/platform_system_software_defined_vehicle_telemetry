@@ -3,13 +3,15 @@
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{Trigger, TriggerError, TriggerSubscriber};
+use super::{Trigger, TriggerSubscribeError, TriggerSubscriber, TriggerUnsubscribeError};
 
 /// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {
     pub expected_subscribers: Vec<TriggerSubscriber>,
-    pub subscribe_callback: Option<Box<dyn Fn(&str) -> Option<TriggerError> + Send + Sync>>,
-    pub unsubscribe_callback: Option<Box<dyn Fn(&str) -> Option<TriggerError> + Send + Sync>>,
+    pub subscribe_callback:
+        Option<Box<dyn Fn(&str) -> Option<TriggerSubscribeError> + Send + Sync>>,
+    pub unsubscribe_callback:
+        Option<Box<dyn Fn(&str) -> Option<TriggerUnsubscribeError> + Send + Sync>>,
 
     name: String,
     on_fired_callback: AsyncMutex<Option<Box<dyn FnMut() + Send + Sync>>>,
@@ -25,7 +27,7 @@ impl Trigger for MockTrigger {
         &self,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), TriggerError> {
+    ) -> Result<(), TriggerSubscribeError> {
         self.verify_subscriber(subscriber);
         self.on_fired_callback.lock().await.replace(on_fired_callback);
 
@@ -38,7 +40,10 @@ impl Trigger for MockTrigger {
         Ok(())
     }
 
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError> {
+    async fn unsubscribe(
+        &self,
+        subscriber: &TriggerSubscriber,
+    ) -> Result<(), TriggerUnsubscribeError> {
         self.verify_subscriber(subscriber);
 
         if let Some(callback) = &self.unsubscribe_callback {
@@ -76,14 +81,14 @@ impl MockTrigger {
 
     pub(crate) fn set_subscribe_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<TriggerError> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<TriggerSubscribeError> + Send + Sync + 'static,
     ) {
         self.subscribe_callback.replace(Box::new(callback));
     }
 
     pub(crate) fn set_unsubscribe_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<TriggerError> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<TriggerUnsubscribeError> + Send + Sync + 'static,
     ) {
         self.unsubscribe_callback.replace(Box::new(callback));
     }

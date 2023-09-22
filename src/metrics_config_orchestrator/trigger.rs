@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use async_trait::async_trait;
+use protobuf::MessageDyn;
 use sdv_ast::Node;
 use std::{
     collections::HashMap,
@@ -12,7 +13,10 @@ use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
 use crate::collection_extension::HashMapExtension;
-use crate::metrics_config_orchestrator::PublisherImpl;
+use crate::metrics_config_orchestrator::{
+    publisher::{PublisherSubscribeError, PublisherUnsubscribeError},
+    Publisher,
+};
 
 #[async_trait]
 pub(crate) trait Trigger {
@@ -27,21 +31,38 @@ pub(crate) trait Trigger {
         &self,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), TriggerError>;
+    ) -> Result<(), TriggerSubscribeError>;
 
     /// Unsubscribe from trigger fire events.
     ///
     /// Last unsubscription deactivates the trigger.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError>;
+    async fn unsubscribe(
+        &self,
+        subscriber: &TriggerSubscriber,
+    ) -> Result<(), TriggerUnsubscribeError>;
 }
 
 #[derive(Error, Debug)]
-pub enum TriggerError {
+pub enum TriggerSubscribeError {
     #[error("Subscriber {subscriber_name} is already subscribed to the trigger. Duplicate subscriptions are not allowed.")]
     DuplicateSubscription { subscriber_name: String },
+    #[error("Error when subscribing to the underlying publisher: {error}")]
+    PublisherSubscribeError {
+        #[from]
+        error: PublisherSubscribeError,
+    },
+}
+
+#[derive(Error, Debug)]
+pub enum TriggerUnsubscribeError {
     #[error("Subscriber {subscriber_name} wasn't subscribed to the trigger")]
     NotSubscribed { subscriber_name: String },
+    #[error("Error when unsubscribing from the underlying publisher: {error}")]
+    PublisherUnsubscribeError {
+        #[from]
+        error: PublisherUnsubscribeError,
+    },
 }
 
 #[allow(dead_code)]
@@ -70,7 +91,7 @@ pub(crate) struct TriggerImpl {
 
 #[allow(dead_code)]
 pub(crate) enum TriggerType {
-    Data { publisher: Arc<PublisherImpl> },
+    Data { publisher: Arc<dyn Publisher + Send + Sync> },
     Periodic { interval_ms: u64 },
     Conditional { triggers: Vec<Arc<TriggerImpl>>, selector_expression: Arc<Node> },
 }
@@ -102,12 +123,12 @@ impl Trigger for TriggerImpl {
         &self,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
-    ) -> Result<(), TriggerError> {
+    ) -> Result<(), TriggerSubscribeError> {
         let maybe_callbacks_container = {
             let callbacks_container = self.callback_map.lock().await;
             let mut callbacks = callbacks_container.lock().await;
             if callbacks.try_insert_value(subscriber.clone(), on_fired_callback).is_err() {
-                return Err(TriggerError::DuplicateSubscription {
+                return Err(TriggerSubscribeError::DuplicateSubscription {
                     subscriber_name: subscriber.to_string(),
                 });
             }
@@ -123,18 +144,21 @@ impl Trigger for TriggerImpl {
         if let Some(callbacks_container) = maybe_callbacks_container {
             // If a container was returned, this is the first subscription and underlying
             // trigger type needs to be activated.
-            self.trigger_type.activate(callbacks_container);
+            self.activate(callbacks_container).await?;
         }
 
         Ok(())
     }
 
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) -> Result<(), TriggerError> {
+    async fn unsubscribe(
+        &self,
+        subscriber: &TriggerSubscriber,
+    ) -> Result<(), TriggerUnsubscribeError> {
         let mut callbacks_container = self.callback_map.lock().await;
         let is_last_unsubscription = {
             let mut callbacks = callbacks_container.lock().await;
             if callbacks.remove(subscriber).is_none() {
-                return Err(TriggerError::NotSubscribed {
+                return Err(TriggerUnsubscribeError::NotSubscribed {
                     subscriber_name: subscriber.to_string(),
                 });
             }
@@ -145,6 +169,9 @@ impl Trigger for TriggerImpl {
         if is_last_unsubscription {
             // Create a new map to ensure no new items will be added to the old one.
             *callbacks_container = Arc::new(AsyncMutex::new(HashMap::new()));
+
+            // Deactivate the trigger.
+            self.deactivate().await?;
         }
 
         Ok(())
@@ -159,22 +186,37 @@ impl TriggerImpl {
             callback_map: AsyncMutex::new(Arc::new(AsyncMutex::new(HashMap::new()))),
         }
     }
-}
 
-impl TriggerType {
-    pub(super) fn activate(
+    async fn activate(
         &self,
         callbacks_container: Arc<
             AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,
         >,
-    ) {
-        match self {
-            TriggerType::Data { .. } => unimplemented!(),
+    ) -> Result<(), TriggerSubscribeError> {
+        match &self.trigger_type {
+            TriggerType::Data { publisher } => {
+                publisher
+                    .subscribe(
+                        &self.name,
+                        Box::new(move |msg| {
+                            Self::on_publisher_new_message(&callbacks_container, msg)
+                        }),
+                    )
+                    .await?;
+            }
             TriggerType::Periodic { interval_ms } => {
                 tokio::spawn(Self::call_periodically(*interval_ms, callbacks_container));
             }
             TriggerType::Conditional { .. } => unimplemented!(),
         };
+        Ok(())
+    }
+
+    async fn deactivate(&self) -> Result<(), TriggerUnsubscribeError> {
+        if let TriggerType::Data { publisher } = &self.trigger_type {
+            publisher.unsubscribe(&self.name).await?;
+        }
+        Ok(())
     }
 
     /// Periodically invokes callbacks until the weak reference is no longer valid.
@@ -198,21 +240,42 @@ impl TriggerType {
             // Sleep until next interval tick.
             timer.tick().await;
 
-            // Retrieve callbacks.
-            let mut callbacks = callbacks_container.lock().await;
-
-            // Verify that the map hasn't been cleared.
-            if callbacks.is_empty() {
-                return;
-            }
-
-            // Synchronously invoke callbacks.
-            // The loop needs to wait before they finish to release the mutex lock when they're
-            // done because they're allowed to mutate themselves.
-            for callback in callbacks.values_mut() {
-                callback();
-            }
+            // Fire trigger.
+            Self::fire_trigger(&callbacks_container).await;
         }
+    }
+
+    async fn fire_trigger(
+        callbacks_container: &Arc<
+            AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,
+        >,
+    ) {
+        // Retrieve callbacks.
+        let mut callbacks = callbacks_container.lock().await;
+
+        // Verify that the map hasn't been cleared.
+        if callbacks.is_empty() {
+            return;
+        }
+
+        // Synchronously invoke callbacks.
+        // The loop needs to wait before they finish to release the mutex lock when they're
+        // done because they're allowed to mutate themselves.
+        for callback in callbacks.values_mut() {
+            callback();
+        }
+    }
+
+    fn on_publisher_new_message(
+        callbacks_container: &Arc<
+            AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,
+        >,
+        _message: &dyn MessageDyn,
+    ) {
+        let callbacks_container_clone = callbacks_container.clone();
+        tokio::spawn(async move {
+            Self::fire_trigger(&callbacks_container_clone).await;
+        });
     }
 }
 
@@ -221,31 +284,37 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_ast::NodeValue;
-    use std::sync::Mutex;
-    use tokio::time;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use tokio::{sync::Notify, time};
 
-    use crate::metrics_config_orchestrator::publisher::PublisherType;
+    use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
 
     use super::*;
 
     const INTERVAL_MS: u64 = 10;
+    const PUBLISHER_NAME: &str = "publisher";
     const TRIGGER_NAME: &str = "trigger";
 
     struct CallbackListener {
-        fired_count: u32,
-        fired_limit: u32,
+        callback_notify: Notify,
+        fired_count: AtomicU32,
     }
 
     impl CallbackListener {
         fn new() -> CallbackListener {
-            CallbackListener { fired_count: 0, fired_limit: 0 }
+            CallbackListener { callback_notify: Notify::new(), fired_count: 0.into() }
+        }
+
+        fn get_fired_count(&self) -> u32 {
+            self.fired_count.load(Ordering::Acquire)
         }
 
         /// Increases fired count and returns whether the fired limit has been reached if it's set.
-        fn on_callback_fired(&mut self) -> bool {
-            self.fired_count += 1;
-            self.fired_limit > 0 && self.fired_count >= self.fired_limit
+        fn on_callback_fired(&self) {
+            self.fired_count.fetch_add(1, Ordering::SeqCst);
+            self.callback_notify.notify_one();
         }
     }
 
@@ -253,11 +322,21 @@ mod tests {
         Node::ConstantLeaf { value: NodeValue::Bool(false) }
     }
 
+    fn create_valid_data_trigger(publisher: Arc<MockPublisher>) -> TriggerImpl {
+        TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Data { publisher })
+    }
+
     fn create_valid_periodic_trigger() -> TriggerImpl {
         TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: INTERVAL_MS },
         )
+    }
+
+    fn create_valid_mock_publisher() -> MockPublisher {
+        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned());
+        publisher.expected_trigger_names.insert(TRIGGER_NAME.to_owned());
+        publisher
     }
 
     fn empty_fn() {}
@@ -281,43 +360,71 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, TriggerError::DuplicateSubscription { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigStart.to_string()),
+            matches!(&err, TriggerSubscribeError::DuplicateSubscription { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigStart.to_string()),
             "Unexpected error: {:?}",
             err
         );
     }
 
-    #[should_panic]
     #[tokio::test]
-    async fn subscribe_to_data_trigger_panics() {
-        let trigger = TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Data {
-                publisher: Arc::new(PublisherImpl::new(
-                    "Publisher".to_owned(),
-                    PublisherType::Signal { signal_name: "Signal".to_owned() },
-                )),
-            },
-        );
+    async fn subscribe_to_data_trigger_subscribe_returns_error_fails() {
+        let mut publisher = create_valid_mock_publisher();
+        publisher.set_subscribe_callback(|| {
+            Some(PublisherSubscribeError::DuplicateSubscription {
+                data_trigger_name: TRIGGER_NAME.to_owned(),
+            })
+        });
+        let trigger = create_valid_data_trigger(Arc::new(publisher));
 
-        trigger
+        let err = trigger
             .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
             .await
+            .err()
             .unwrap();
+
+        if let TriggerSubscribeError::PublisherSubscribeError { error } = &err {
+            assert!(
+                matches!(error, PublisherSubscribeError::DuplicateSubscription { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
+                "Unexpected inner error: {:?}",
+                error
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err);
+        }
     }
 
     #[tokio::test]
-    async fn subscribe_to_periodic_trigger_immediately_unsubscribe_doesnt_fire() {
-        let trigger = create_valid_periodic_trigger();
-        let callback_listener = Arc::new(Mutex::new(CallbackListener::new()));
+    async fn subscribe_to_data_trigger_subscribes_to_publisher() {
+        let publisher = Arc::new(create_valid_mock_publisher());
+        let trigger = create_valid_data_trigger(publisher.clone());
+        let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = callback_listener.clone();
 
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move || {
-                    callback_listener_clone.lock().unwrap().on_callback_fired();
-                }),
+                Box::new(move || callback_listener_clone.on_callback_fired()),
+            )
+            .await
+            .unwrap();
+
+        publisher.fire_new_message(&Int32Value::new()).await;
+
+        callback_listener.callback_notify.notified().await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_periodic_trigger_immediately_unsubscribe_doesnt_fire() {
+        let trigger = create_valid_periodic_trigger();
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_listener_clone = callback_listener.clone();
+
+        trigger
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.on_callback_fired()),
             )
             .await
             .unwrap();
@@ -326,56 +433,69 @@ mod tests {
         // TODO(b/300703055): Find a way to remove sleeps.
         time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
 
-        assert_eq!(callback_listener.lock().unwrap().fired_count, 0);
+        assert_eq!(callback_listener.get_fired_count(), 0);
     }
 
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_fires_twice() {
-        let trigger = Arc::new(create_valid_periodic_trigger());
-        let mut callback_listener = CallbackListener::new();
-        callback_listener.fired_limit = 2;
-
-        let callback_listener = Arc::new(Mutex::new(callback_listener));
+        let trigger = create_valid_periodic_trigger();
+        let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = callback_listener.clone();
+
+        // Subscribe to trigger.
+        trigger
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.on_callback_fired()),
+            )
+            .await
+            .unwrap();
+
+        // Wait for trigger to fire twice.
+        callback_listener.callback_notify.notified().await;
+        callback_listener.callback_notify.notified().await;
+
+        // Unsubscribe from trigger.
+        trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.unwrap();
+
+        assert_eq!(callback_listener.get_fired_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_periodic_trigger_unsubscribe_from_callback_success() {
+        let trigger = Arc::new(create_valid_periodic_trigger());
         let mut trigger_clone = Some(trigger.clone());
 
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move || {
-                    if callback_listener_clone.lock().unwrap().on_callback_fired() {
-                        let trigger_clone = trigger_clone.take().unwrap();
-                        tokio::spawn(async move {
-                            trigger_clone
-                                .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
-                                .await
-                                .unwrap();
-                        });
-                    }
+                    let trigger_clone = trigger_clone.take().unwrap();
+                    tokio::spawn(async move {
+                        trigger_clone
+                            .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
+                            .await
+                            .unwrap();
+                    });
                 }),
             )
             .await
             .unwrap();
-        // Sleep for 4 intervals to let trigger fire twice, unsubscribe
-        // and ensure the trigger won't fire again.
-        // TODO(b/300703055): Find a way to remove sleeps.
-        time::sleep(Duration::from_millis(4 * INTERVAL_MS)).await;
-
-        assert_eq!(callback_listener.lock().unwrap().fired_count, 2);
     }
 
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_one_async_loop() {
         let mut trigger = create_valid_periodic_trigger();
-        let subscription1_got_data = Arc::new(Mutex::new(false));
-        let subscription2_got_data = Arc::new(Mutex::new(false));
-        let subscription1_got_data_clone = subscription1_got_data.clone();
-        let subscription2_got_data_clone = subscription2_got_data.clone();
+        let callback_listener1 = Arc::new(CallbackListener::new());
+        let callback_listener1_clone = callback_listener1.clone();
+        let callback_listener2 = Arc::new(CallbackListener::new());
+        let callback_listener2_clone = callback_listener2.clone();
 
+        // Subscribe to trigger.
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move || *subscription1_got_data_clone.lock().unwrap() = true),
+                Box::new(move || callback_listener1_clone.on_callback_fired()),
             )
             .await
             .unwrap();
@@ -387,21 +507,22 @@ mod tests {
             panic!("Unexpected trigger type");
         }
 
+        // Create another subscription.
         trigger
             .subscribe(
                 &TriggerSubscriber::MetricsConfigEnd,
-                Box::new(move || *subscription2_got_data_clone.lock().unwrap() = true),
+                Box::new(move || callback_listener2_clone.on_callback_fired()),
             )
             .await
             .unwrap();
 
-        // Sleep for 2 intervals to let trigger fire.
-        // TODO(b/300703055): Find a way to remove sleeps.
-        time::sleep(Duration::from_millis(2 * INTERVAL_MS)).await;
+        // Wait for trigger to fire once.
+        callback_listener1.callback_notify.notified().await;
+        callback_listener2.callback_notify.notified().await;
 
         // Verify that both subscriptions were notified.
-        assert!(*subscription1_got_data.lock().unwrap());
-        assert!(*subscription2_got_data.lock().unwrap());
+        assert_eq!(callback_listener1.get_fired_count(), 1);
+        assert_eq!(callback_listener2.get_fired_count(), 1);
     }
 
     #[should_panic]
@@ -428,9 +549,36 @@ mod tests {
         let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.err().unwrap();
 
         assert!(
-            matches!(&err, TriggerError::NotSubscribed { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigStart.to_string()),
+            matches!(&err, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigStart.to_string()),
             "Unexpected error: {:?}",
             err
         );
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_from_data_trigger_unsubscribe_returns_error_fails() {
+        let mut publisher = create_valid_mock_publisher();
+        publisher.set_unsubscribe_callback(|| {
+            Some(PublisherUnsubscribeError::NotSubscribed {
+                data_trigger_name: TRIGGER_NAME.to_owned(),
+            })
+        });
+        let trigger = create_valid_data_trigger(Arc::new(publisher));
+
+        trigger
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
+            .await
+            .unwrap();
+        let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.err().unwrap();
+
+        if let TriggerUnsubscribeError::PublisherUnsubscribeError { error } = &err {
+            assert!(
+                matches!(error, PublisherUnsubscribeError::NotSubscribed { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
+                "Unexpected inner error: {:?}",
+                error
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err);
+        }
     }
 }

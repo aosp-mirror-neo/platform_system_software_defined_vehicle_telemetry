@@ -40,7 +40,7 @@ use publisher::{Publisher, PublisherImpl};
 use publisher_factory::{
     PublisherFactory, PublisherFactoryContext, PublisherFactoryError, PublisherFactoryImpl,
 };
-use trigger::{Trigger, TriggerError, TriggerImpl, TriggerSubscriber};
+use trigger::{Trigger, TriggerImpl, TriggerSubscribeError, TriggerSubscriber};
 use trigger_factory::{
     TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
 };
@@ -101,7 +101,7 @@ pub enum MetricsConfigOrchestratorError {
     #[error("Unable to activate start trigger: {error}")]
     UnableToActivateStartTrigger {
         #[from]
-        error: TriggerError,
+        error: TriggerSubscribeError,
     },
 }
 
@@ -344,7 +344,7 @@ where
         for publisher in config.publishers.values() {
             // Activating publishers one by one. In theory, it should be possible to also spawn
             // activation tasks in parallel as an optimization.
-            if let Err(err) = publisher.activate().await {
+            if let Err(err) = publisher.clone().activate().await {
                 error!(
                     "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
                         The publisher won't notify about new messages and any attempts to get its data will fail.",
@@ -525,7 +525,7 @@ where
 
     async fn maybe_subscribe_to_start_trigger(
         config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) -> Result<(), TriggerError> {
+    ) -> Result<(), TriggerSubscribeError> {
         if let Some(start_trigger) = &config.start_trigger {
             let mut config_clone = Some(config.clone());
             start_trigger
@@ -802,10 +802,7 @@ mod tests {
 
     use super::*;
     use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
-    use crate::metrics_config_orchestrator::publisher::{
-        PublisherActivateError, PublisherDeactivateError, PublisherSubscribeError,
-        PublisherUnsubscribeError,
-    };
+    use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
@@ -987,60 +984,6 @@ mod tests {
 
             let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
             Ok(vec![empty_node; proto_nodes.len()])
-        }
-    }
-
-    struct MockPublisher {
-        name: String,
-        latest_message: Option<Box<dyn MessageDyn>>,
-        activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    }
-
-    impl MockPublisher {
-        fn new(name: String) -> Self {
-            MockPublisher { name, latest_message: None, activate_callback: None }
-        }
-
-        fn set_activate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
-            self.activate_callback.replace(Box::new(callback));
-        }
-    }
-
-    #[async_trait]
-    impl Publisher for MockPublisher {
-        fn get_name(&self) -> &str {
-            &self.name
-        }
-
-        fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
-            self.latest_message.clone()
-        }
-
-        async fn activate(self: &Arc<Self>) -> Result<(), PublisherActivateError> {
-            if let Some(callback) = &self.activate_callback {
-                callback(&self.name);
-            }
-
-            Ok(())
-        }
-
-        async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
-            Ok(())
-        }
-
-        async fn subscribe(
-            &self,
-            _data_trigger_name: &str,
-            _callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-        ) -> Result<(), PublisherSubscribeError> {
-            Ok(())
-        }
-
-        async fn unsubscribe(
-            &self,
-            _data_trigger_name: &str,
-        ) -> Result<(), PublisherUnsubscribeError> {
-            Ok(())
         }
     }
 
@@ -1684,7 +1627,7 @@ mod tests {
             TriggerSubscriber::MetricsConfigStart,
         );
         trigger_mock.set_subscribe_callback(|_| {
-            Some(TriggerError::DuplicateSubscription {
+            Some(TriggerSubscribeError::DuplicateSubscription {
                 subscriber_name: SUBSCRIBER_NAME.to_owned(),
             })
         });
@@ -1703,7 +1646,7 @@ mod tests {
 
         if let MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } = &err {
             assert!(
-                matches!(&error, TriggerError::DuplicateSubscription { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
+                matches!(&error, TriggerSubscribeError::DuplicateSubscription { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
                 "Unexpected inner error: {:?}",
                 error
             );
