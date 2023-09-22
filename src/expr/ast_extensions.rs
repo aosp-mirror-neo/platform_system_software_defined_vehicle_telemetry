@@ -20,8 +20,10 @@ pub enum VisitStatus {
     Visited,
 }
 
-/// Used for type checking (operator-operand compatibility) in the expression nodes.
-#[derive(Clone, PartialEq)]
+/// Used for compatibility type checking in expression nodes, such as
+/// operator-operand compatibility and protobuf field assignment compatibility.
+#[derive(Clone, PartialEq, Debug)]
+#[allow(missing_docs)]
 pub enum NodeValueType {
     None,
     Bool,
@@ -57,7 +59,9 @@ impl NodeValueType {
     }
 }
 
+/// Implementing types will be able to get its corresponding NodeValueType.
 pub trait NodeValueTypeExtension {
+    /// Get self's NodeValueType.
     fn get_node_value_type(&self) -> Result<NodeValueType, NodeError>;
 }
 

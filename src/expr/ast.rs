@@ -6,10 +6,8 @@ mod ast_extensions;
 mod node_errors;
 mod node_value;
 
-use ast_extensions::{
-    FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
-    VisitStatus,
-};
+use ast_extensions::{FieldLeafNodeExtension, OperatorProtoExtension, VisitStatus};
+pub use ast_extensions::{NodeValueType, NodeValueTypeExtension};
 pub use node_errors::{DescriptorProviderError, MessageProviderError, NodeError};
 pub use node_value::{NodeValue, ReflectRepeatedMutExt, ToReflectValueBox};
 
@@ -32,7 +30,7 @@ pub trait NodeFactory {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<(), NodeError>;
+    ) -> Result<Vec<NodeValueType>, NodeError>;
 
     /// Creates rust Nodes from protobuf Nodes.
     /// Protobuf nodes use indices to represent left and right children.
@@ -274,7 +272,7 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<(), NodeError> {
+    ) -> Result<Vec<NodeValueType>, NodeError> {
         let n = proto_nodes.len();
         let mut visit_status = vec![VisitStatus::NotVisited; n];
         let mut node_value_types = vec![NodeValueType::None; n];
@@ -288,7 +286,7 @@ impl NodeFactory for NodeFactoryImpl {
                 context,
             )?;
         }
-        Ok(())
+        Ok(node_value_types)
     }
 
     fn create_nodes(
