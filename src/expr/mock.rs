@@ -1,0 +1,135 @@
+use crate::{DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError};
+use lazy_static::lazy_static;
+use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+use sdvtelemetry_proto_rust::expression::combination_node::{
+    ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+};
+use std::sync::Arc;
+
+// Common constants to be reused across tests.
+
+// Use static variable to store the protobuf message that will be returned by the
+// `provide_test_message` function, which is an argument to `evaluate()`.
+// Cannot use local variable because Rust compiler complains that the proto msg
+// returned by the closure does not live long enough, so we must give it a
+// static lifetime to ensure it outlives evaluate().
+// Lazy static is used because Node::new() does not return a 'static lifetime, so its
+// return value cannot be stored in a static variable. Hence we use lazy_static
+lazy_static! {
+    pub static ref OP_AND: OperatorProto =
+        OperatorProto::LogicalOperator(LogicalOperator::AND.into());
+    pub static ref OP_OR: OperatorProto =
+        OperatorProto::LogicalOperator(LogicalOperator::OR.into());
+    pub static ref OP_XOR: OperatorProto =
+        OperatorProto::LogicalOperator(LogicalOperator::XOR.into());
+    pub static ref OP_NOT: OperatorProto =
+        OperatorProto::LogicalOperator(LogicalOperator::NOT.into());
+    pub static ref OP_ADD: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into());
+    pub static ref OP_SUBTRACT: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into());
+    pub static ref OP_MULTIPLY: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::MULTIPLY.into());
+    pub static ref OP_DIVIDE: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::DIVIDE.into());
+    pub static ref OP_MODULUS: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULUS.into());
+    pub static ref OP_POWER: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into());
+    pub static ref OP_EQ: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::EQ.into());
+    pub static ref OP_NOT_EQ: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into());
+    pub static ref OP_GT: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::GT.into());
+    pub static ref OP_GT_OR_EQ: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::GT_OR_EQ.into());
+    pub static ref OP_LT: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::LT.into());
+    pub static ref OP_LT_OR_EQ: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into());
+    pub static ref OP_CONTAINS: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into());
+    pub static ref OP_DOES_NOT_CONTAIN: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::DOES_NOT_CONTAIN.into());
+    pub static ref OP_ALL_EQ: OperatorProto =
+        OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into());
+    pub static ref TEST_MESSAGE: TestMessage = {
+        let mut test_message = TestMessage::new();
+        // initialize scalar (optional) fields
+        test_message.int_field = 80;
+        test_message.float_field = 100.0;
+        test_message.string_field = "Hello world".to_string();
+        test_message.enum_field = TestEnum::SOME.into();
+
+        // initialize nested field
+        let mut test_nested_message = TestNestedMessage::new();
+        test_nested_message.bool_field = true;
+        test_nested_message.repeated_i32s = vec![1, 2];
+        test_message.message_field = protobuf::MessageField::some(test_nested_message.clone());
+
+        // initialize repeated fields
+        test_message.repeated_bools = vec![true, true, false, true];
+        test_message.repeated_i64s = vec![3, 4, 5];
+        test_message.repeated_doubles = vec![
+            std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
+        test_message.repeated_enums = vec![
+            TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
+        test_message.repeated_messages = vec![
+            test_nested_message.clone(), test_nested_message];
+
+        test_message
+    };
+    pub static ref EMPTY_TEST_MESSAGE: TestMessage = TestMessage::new();
+    pub static ref MOCK_MESSAGE_PROVIDER: Arc<MockMessageProvider> = Arc::new(MockMessageProvider::new());
+}
+
+pub struct MockMessageProvider {
+    pub result_provider: Option<
+        Box<dyn Fn() -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> + Send + Sync>,
+    >,
+}
+
+impl MockMessageProvider {
+    pub fn new() -> Self {
+        MockMessageProvider { result_provider: None }
+    }
+}
+
+impl MessageProvider for MockMessageProvider {
+    fn get_message(
+        &self,
+        _publisher_name: &str,
+    ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+        if let Some(provider) = &self.result_provider {
+            provider()
+        } else {
+            Ok(Some(Box::new(TEST_MESSAGE.clone())))
+        }
+    }
+}
+
+pub struct MockDescriptorProvider {
+    pub result_provider:
+        Option<Box<dyn Fn() -> Result<MessageDescriptor, DescriptorProviderError> + Send + Sync>>,
+}
+
+impl MockDescriptorProvider {
+    pub fn new() -> Self {
+        MockDescriptorProvider { result_provider: None }
+    }
+}
+
+impl DescriptorProvider for MockDescriptorProvider {
+    fn get_descriptor(
+        &self,
+        _publisher_name: &str,
+    ) -> Result<MessageDescriptor, DescriptorProviderError> {
+        if let Some(provider) = &self.result_provider {
+            provider()
+        } else {
+            Ok(TEST_MESSAGE.descriptor_dyn())
+        }
+    }
+}

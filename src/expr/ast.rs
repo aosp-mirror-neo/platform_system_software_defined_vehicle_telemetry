@@ -406,11 +406,13 @@ impl fmt::Debug for Node {
 }
 
 #[cfg(test)]
+pub(crate) mod mock;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mock::*;
     use crate::NodeValue;
-    use lazy_static::lazy_static;
-    use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{
             ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -418,88 +420,11 @@ mod tests {
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
 
-    // Use static variable to store the protobuf message that will be returned by the
-    // `provide_test_message` function, which is an argument to `evaluate()`.
-    // Cannot use local variable because Rust compiler complains that the proto msg
-    // returned by the closure does not live long enough, so we must give it a
-    // static lifetime to ensure it outlives evaluate().
-    // Lazy static is used because Node::new() does not return a 'static lifetime, so its
-    // return value cannot be stored in a static variable. Hence we use lazy_static
-    lazy_static! {
-        static ref TEST_MESSAGE: TestMessage = {
-            let mut test_message = TestMessage::new();
-            test_message.int_field = 80;
-            test_message.float_field = 100.0;
-            test_message.string_field = "Hello world".to_string();
-            test_message.enum_field = TestEnum::SOME.into();
-
-            let mut test_nested_message = TestNestedMessage::new();
-            test_nested_message.bool_field = true;
-            test_nested_message.repeated_i32s = vec![1, 2];
-            test_message.message_field = protobuf::MessageField::some(test_nested_message);
-
-            test_message.repeated_doubles =
-                vec![std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
-
-            test_message
-        };
-    }
-
-    struct MockMessageProvider {
-        result_provider: Option<
-            Box<
-                dyn Fn() -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> + Send + Sync,
-            >,
-        >,
-    }
-
-    impl MockMessageProvider {
-        fn new() -> Self {
-            MockMessageProvider { result_provider: None }
-        }
-    }
-
-    impl MessageProvider for MockMessageProvider {
-        fn get_message(
-            &self,
-            _publisher_name: &str,
-        ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-            if let Some(provider) = &self.result_provider {
-                provider()
-            } else {
-                Ok(Some(Box::new((*TEST_MESSAGE).clone())))
-            }
-        }
-    }
-
-    struct MockDescriptorProvider {
-        result_provider: Option<
-            Box<dyn Fn() -> Result<MessageDescriptor, DescriptorProviderError> + Send + Sync>,
-        >,
-    }
-
-    impl MockDescriptorProvider {
-        fn new() -> Self {
-            MockDescriptorProvider { result_provider: None }
-        }
-    }
-
-    impl DescriptorProvider for MockDescriptorProvider {
-        fn get_descriptor(
-            &self,
-            _publisher_name: &str,
-        ) -> Result<MessageDescriptor, DescriptorProviderError> {
-            if let Some(provider) = &self.result_provider {
-                provider()
-            } else {
-                Ok(TEST_MESSAGE.descriptor_dyn())
-            }
-        }
-    }
+    const PUBLISHER_NAME: &str = "publisher_foo";
 
     fn create_factory_context() -> NodeFactoryContext {
         NodeFactoryContext {
-            message_provider: Some(Arc::new(MockMessageProvider::new())),
+            message_provider: Some(MOCK_MESSAGE_PROVIDER.clone()),
             descriptor_provider: Box::new(MockDescriptorProvider::new()),
         }
     }
@@ -577,7 +502,7 @@ mod tests {
     fn test_validate_node_has_string_field_fails() {
         let mut node_0 = NodeProto::new();
         let mut leaf = FieldLeafNode::new();
-        leaf.publisher_name = "publisher".to_string();
+        leaf.publisher_name = PUBLISHER_NAME.to_string();
         leaf.field_names = vec!["string_field".to_string()];
         node_0.set_field_leaf_node(leaf);
         let all_proto_nodes = vec![node_0];
@@ -786,7 +711,7 @@ mod tests {
         let mut node_2 = NodeProto::new();
 
         let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = "publisher".to_string();
+        field_leaf.publisher_name = PUBLISHER_NAME.to_string();
         field_leaf.field_names = vec!["message_field".to_string(), "repeated_i32s".to_string()];
         node_0.set_field_leaf_node(field_leaf);
 
@@ -837,7 +762,7 @@ mod tests {
     fn test_validate_published_message_no_descriptor_should_fail() {
         let mut node = NodeProto::new();
         let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = "publisher".to_string();
+        field_leaf.publisher_name = PUBLISHER_NAME.to_string();
         field_leaf.field_names = vec!["int_field".to_string()];
         node.set_field_leaf_node(field_leaf);
         let all_proto_nodes = vec![node];
@@ -845,7 +770,7 @@ mod tests {
         let node_factory = NodeFactoryImpl {};
         // make descriptor provider return error
         let context = NodeFactoryContext {
-            message_provider: Some(Arc::new(MockMessageProvider::new())),
+            message_provider: None,
             descriptor_provider: Box::new(MockDescriptorProvider {
                 result_provider: Some(Box::new(|| {
                     Err(DescriptorProviderError::InvalidPublisherName)
@@ -861,10 +786,50 @@ mod tests {
 
     #[test]
     fn test_validate_ok() {
-        // setup - root node has 2 child nodes
-        let all_proto_nodes = create_true_false_branch(LogicalOperator::AND);
         let node_factory = NodeFactoryImpl::new();
         let context = create_factory_context();
+        // setup tree containing all 3 types of operators
+        //                       index 4 (&&)
+        //                    /               \
+        //                index 2             index 3
+        //               LT_OR_EQ              TRUE
+        //              /        \
+        //     index 0 (5)      index 1 (+)
+        //                       /         \
+        //               index 0 (5)       index 0 (5)
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut node_2 = NodeProto::new();
+        let mut node_3 = NodeProto::new();
+        let mut node_4 = NodeProto::new();
+
+        let mut constant_leaf_five = ConstantLeafNode::new();
+        constant_leaf_five.set_int32_value(5);
+        node_0.set_constant_leaf_node(constant_leaf_five);
+
+        let mut add_node = CombinationNode::new();
+        add_node.left_index = Some(0); // 5
+        add_node.right_index = Some(0); // 5
+        add_node.set_arithmetic_operator(ArithmeticOperator::ADD);
+        node_1.set_combination_node(add_node);
+
+        let mut gt_eq_node = CombinationNode::new();
+        gt_eq_node.left_index = Some(0); // 5
+        gt_eq_node.right_index = Some(1); // 5+5 = 10
+        gt_eq_node.set_relational_operator(RelationalOperator::LT_OR_EQ);
+        node_2.set_combination_node(gt_eq_node);
+
+        let mut constant_leaf_true = ConstantLeafNode::new();
+        constant_leaf_true.set_bool_value(true);
+        node_3.set_constant_leaf_node(constant_leaf_true);
+
+        let mut and_node = CombinationNode::new();
+        and_node.left_index = Some(2); // 5 <= 10
+        and_node.right_index = Some(3); // TRUE
+        and_node.set_logical_operator(LogicalOperator::AND);
+        node_4.set_combination_node(and_node);
+
+        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
 
         // action
         let res = node_factory.validate(&all_proto_nodes, &context);
@@ -1039,36 +1004,37 @@ mod tests {
 
     #[test]
     fn test_evaluate_logical_operator_ok() -> Result<(), NodeError> {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
         // setup this tree:
-        //            index 3 (XOR)
-        //          /              \
-        //    index 0              index 2 (output of function `create_true_false_branch`)
-        //    TRUE                  OR
+        //               XOR
+        //          /             \
+        //        True             OR
         //                       /        \
-        //               index 0 (T)      index 1 (F)
-        let mut all_proto_nodes = create_true_false_branch(LogicalOperator::OR);
-        let mut node_index_3 = NodeProto::new();
-        let mut xor_node = CombinationNode::new();
-        xor_node.left_index = Some(0); // True
-        xor_node.right_index = Some(2); // True || False
-        xor_node.set_logical_operator(LogicalOperator::XOR);
-        node_index_3.set_combination_node(xor_node.clone());
-        all_proto_nodes.push(node_index_3.clone());
-
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context)?;
+        //                    True       False
+        let true_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) });
+        let false_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(false) });
+        let or_node = Arc::new(Node::Combination {
+            operator: OP_OR.clone(),
+            left: Some(true_node.clone()),
+            right: Some(false_node.clone()),
+        });
+        let xor_node = Node::Combination {
+            operator: OP_XOR.clone(),
+            left: Some(true_node.clone()),
+            right: Some(or_node.clone()),
+        };
+        let nodes = vec![true_node, false_node, or_node, xor_node.into()];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
-            NodeValue::Bool(true),  // index 0 = constant value of T
-            NodeValue::Bool(false), // index 1 = constant value of F
-            NodeValue::Bool(true),  // index 2 = T || F = T
-            NodeValue::Bool(false), // index 3 = F = index 0 XOR index 2
+            NodeValue::Bool(true),  // true_node
+            NodeValue::Bool(false), // false_node
+            NodeValue::Bool(true),  // true || false = true
+            NodeValue::Bool(false), // true ^ (true || false) = false
         ];
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            // action + assertion
             assert_eq!(rust_node.evaluate()?, *expected_val_ref);
         }
         Ok(())
@@ -1076,50 +1042,30 @@ mod tests {
 
     #[test]
     fn test_evaluate_arithmetic_operator_ok() -> Result<(), NodeError> {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
         // setup this tree: 5 / 2 * 5^2
-        //            index 4 (MULTIPLY)
-        //          /              \
-        //      index 2              index 3
-        //       DIVIDE               POWER
-        //    /         \          /        \
-        // index 0   index 1   index 0     index 1
-        //   5          2       5             2
-        let mut node_0 = NodeProto::new();
-        let mut node_1 = NodeProto::new();
-        let mut node_2 = NodeProto::new();
-        let mut node_3 = NodeProto::new();
-        let mut node_4 = NodeProto::new();
-
-        let mut constant_leaf_five = ConstantLeafNode::new();
-        constant_leaf_five.set_int32_value(5);
-        node_0.set_constant_leaf_node(constant_leaf_five);
-
-        let mut constant_leaf_two = ConstantLeafNode::new();
-        constant_leaf_two.set_int32_value(2);
-        node_1.set_constant_leaf_node(constant_leaf_two);
-
-        let mut combination_divide = CombinationNode::new();
-        combination_divide.set_arithmetic_operator(ArithmeticOperator::DIVIDE);
-        combination_divide.left_index = Some(0);
-        combination_divide.right_index = Some(1);
-        node_2.set_combination_node(combination_divide);
-
-        let mut combination_pow = CombinationNode::new();
-        combination_pow.set_arithmetic_operator(ArithmeticOperator::POWER);
-        combination_pow.left_index = Some(0);
-        combination_pow.right_index = Some(1);
-        node_3.set_combination_node(combination_pow);
-
-        let mut combination_multiply = CombinationNode::new();
-        combination_multiply.set_arithmetic_operator(ArithmeticOperator::MULTIPLY);
-        combination_multiply.left_index = Some(2);
-        combination_multiply.right_index = Some(3);
-        node_4.set_combination_node(combination_multiply);
-
-        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context)?;
+        //              MULTIPLY
+        //          /             \
+        //       DIVIDE            POWER
+        //    /         \        /        \
+        //   5          2       5           2
+        let five_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) });
+        let two_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(2) });
+        let divide_node = Arc::new(Node::Combination {
+            operator: OP_DIVIDE.clone(),
+            left: Some(five_node.clone()),
+            right: Some(two_node.clone()),
+        });
+        let power_node = Arc::new(Node::Combination {
+            operator: OP_POWER.clone(),
+            left: Some(five_node.clone()),
+            right: Some(two_node.clone()),
+        });
+        let multiply_node = Arc::new(Node::Combination {
+            operator: OP_MULTIPLY.clone(),
+            left: Some(divide_node.clone()),
+            right: Some(power_node.clone()),
+        });
+        let nodes = vec![five_node, two_node, divide_node, power_node, multiply_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
@@ -1139,58 +1085,38 @@ mod tests {
 
     #[test]
     fn test_evaluate_relational_operator_ok() -> Result<(), NodeError> {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
-        // setup this tree which uses the protobuf message initialized in the lazy_static block
-        //                             index 4 (EQ)
+        // setup this tree which uses the protobuf message in the expr/mock.rs
+        //                                 EQ
         //                           /              \
-        //                      index 2                 index 3
         //                      CONTAINS                  true
         //               /                  \
-        //          index 0                index 1
         // TestMessage.repeated_doubles       Pi
-        let mut node_0 = NodeProto::new();
-        let mut node_1 = NodeProto::new();
-        let mut node_2 = NodeProto::new();
-        let mut node_3 = NodeProto::new();
-        let mut node_4 = NodeProto::new();
-
-        let mut leaf_doubles = FieldLeafNode::new();
-        leaf_doubles.publisher_name = "publisher_name".to_string();
-        leaf_doubles.field_names.push("repeated_doubles".to_string());
-        node_0.set_field_leaf_node(leaf_doubles);
-
-        let mut constant_pi = ConstantLeafNode::new();
-        constant_pi.set_float_value(std::f32::consts::PI);
-        node_1.set_constant_leaf_node(constant_pi);
-
-        let mut combination_contains = CombinationNode::new();
-        combination_contains.set_relational_operator(RelationalOperator::CONTAINS);
-        combination_contains.left_index = Some(0);
-        combination_contains.right_index = Some(1);
-        node_2.set_combination_node(combination_contains);
-
-        let mut constant_true = ConstantLeafNode::new();
-        constant_true.set_bool_value(true);
-        node_3.set_constant_leaf_node(constant_true);
-
-        let mut combination_eq = CombinationNode::new();
-        combination_eq.set_relational_operator(RelationalOperator::EQ);
-        combination_eq.left_index = Some(2);
-        combination_eq.right_index = Some(3);
-        node_4.set_combination_node(combination_eq);
-
-        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context)?;
+        let repeated_doubles_node = Arc::new(Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_string(),
+            fields: vec!["repeated_doubles".to_string()],
+            message_provider: MOCK_MESSAGE_PROVIDER.clone(),
+        });
+        let pi_node =
+            Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
+        let contains_node = Arc::new(Node::Combination {
+            operator: OP_CONTAINS.clone(),
+            left: Some(repeated_doubles_node.clone()),
+            right: Some(pi_node.clone()),
+        });
+        let eq_node = Arc::new(Node::Combination {
+            operator: OP_EQ.clone(),
+            left: Some(contains_node.clone()),
+            right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
+        });
+        let nodes = vec![repeated_doubles_node, pi_node, contains_node, eq_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
             // index 0 = [Pi, Tau, e]
             NodeValue::DoubleList(TEST_MESSAGE.repeated_doubles.clone()),
-            NodeValue::Float(std::f32::consts::PI), // index 1 = constant value of Pi
-            NodeValue::Bool(true),                  // index 2 = true because list contains Pi
-            NodeValue::Bool(true),                  // index 3 = constant of true
-            NodeValue::Bool(true),                  // index 4 = true because index 2 == index 3
+            NodeValue::Float(std::f32::consts::PI), // constant value of Pi
+            NodeValue::Bool(true),                  // list contains Pi = true
+            NodeValue::Bool(true),                  // true == true
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
@@ -1202,59 +1128,38 @@ mod tests {
 
     #[test]
     fn test_evaluate_mixed_operators() -> Result<(), NodeError> {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
         // setup tree containing all 3 types of operators
-        //                       index 4 (&&)
+        //                       logical (&&)
         //                    /               \
-        //                index 2             index 3
-        //               LT_OR_EQ              TRUE
+        //   relational (LT_OR_EQ)            True
         //              /        \
-        //     index 0 (5)      index 1 (+)
+        //            5      arithmetic (+)
         //                       /         \
-        //               index 0 (5)       index 0 (5)
-        let mut node_0 = NodeProto::new();
-        let mut node_1 = NodeProto::new();
-        let mut node_2 = NodeProto::new();
-        let mut node_3 = NodeProto::new();
-        let mut node_4 = NodeProto::new();
-
-        let mut constant_leaf_five = ConstantLeafNode::new();
-        constant_leaf_five.set_int32_value(5);
-        node_0.set_constant_leaf_node(constant_leaf_five);
-
-        let mut add_node = CombinationNode::new();
-        add_node.left_index = Some(0); // 5
-        add_node.right_index = Some(0); // 5
-        add_node.set_arithmetic_operator(ArithmeticOperator::ADD);
-        node_1.set_combination_node(add_node);
-
-        let mut gt_eq_node = CombinationNode::new();
-        gt_eq_node.left_index = Some(0); // 5
-        gt_eq_node.right_index = Some(1); // 5+5 = 10
-        gt_eq_node.set_relational_operator(RelationalOperator::LT_OR_EQ);
-        node_2.set_combination_node(gt_eq_node);
-
-        let mut constant_leaf_true = ConstantLeafNode::new();
-        constant_leaf_true.set_bool_value(true);
-        node_3.set_constant_leaf_node(constant_leaf_true);
-
-        let mut and_node = CombinationNode::new();
-        and_node.left_index = Some(2); // 5 <= 10
-        and_node.right_index = Some(3); // TRUE
-        and_node.set_logical_operator(LogicalOperator::AND);
-        node_4.set_combination_node(and_node);
-
-        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context)?;
+        //                     5            5
+        let five_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) });
+        let add_node = Arc::new(Node::Combination {
+            operator: OP_ADD.clone(),
+            left: Some(five_node.clone()),
+            right: Some(five_node.clone()),
+        });
+        let lt_or_eq_node = Arc::new(Node::Combination {
+            operator: OP_LT_OR_EQ.clone(),
+            left: Some(five_node.clone()),
+            right: Some(add_node.clone()),
+        });
+        let and_node = Arc::new(Node::Combination {
+            operator: OP_AND.clone(),
+            left: Some(lt_or_eq_node.clone()),
+            right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
+        });
+        let nodes = vec![five_node, add_node, lt_or_eq_node, and_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
-            NodeValue::Int32(5),   // index 0 = 5
-            NodeValue::Int64(10),  // index 1 = 5+5 = 10
-            NodeValue::Bool(true), // index 2 = 5 <= 10
-            NodeValue::Bool(true), // index 3 = constant value of True
-            NodeValue::Bool(true), // index 4 = True && True = True
+            NodeValue::Int32(5),   // constant of 5
+            NodeValue::Int64(10),  // 5+5 = 10
+            NodeValue::Bool(true), // True because 5 <= 10
+            NodeValue::Bool(true), // True && True = True
         ];
 
         // assert that evaluated_result[i] == expected_result[i] for all index i
@@ -1266,9 +1171,7 @@ mod tests {
 
     #[test]
     fn test_evaluate_mixed_leaf_node_types() -> Result<(), NodeError> {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
-        // setup this tree which uses the protobuf message initialized in the lazy_static block
+        // setup this tree which uses the message initialized in expr/mock.rs
         //                           index 4 (<)
         //                       /               \
         //                index 2                  index 3
@@ -1276,48 +1179,35 @@ mod tests {
         //           /                \
         //     index 0               index 1
         // TestMessage.float_field       2
-        let mut node_0 = NodeProto::new();
-        let mut node_1 = NodeProto::new();
-        let mut node_2 = NodeProto::new();
-        let mut node_3 = NodeProto::new();
-        let mut node_4 = NodeProto::new();
+        let float_field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_string(),
+            fields: vec!["float_field".to_string()],
+            message_provider: MOCK_MESSAGE_PROVIDER.clone(),
+        });
+        let divide_node = Arc::new(Node::Combination {
+            operator: OP_DIVIDE.clone(),
+            left: Some(float_field_node.clone()),
+            right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(2) })),
+        });
+        let int_field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_string(),
+            fields: vec!["int_field".to_string()],
+            message_provider: MOCK_MESSAGE_PROVIDER.clone(),
+        });
+        let lt_node = Arc::new(Node::Combination {
+            operator: OP_LT.clone(),
+            left: Some(divide_node.clone()),
+            right: Some(int_field_node.clone()),
+        });
 
-        let mut float_field_node = FieldLeafNode::new();
-        float_field_node.publisher_name = "publisher_name".to_string();
-        float_field_node.field_names.push("float_field".to_string());
-        node_0.set_field_leaf_node(float_field_node);
-
-        let mut constant_leaf_two = ConstantLeafNode::new();
-        constant_leaf_two.set_int32_value(2);
-        node_1.set_constant_leaf_node(constant_leaf_two);
-
-        let mut combination_divide = CombinationNode::new();
-        combination_divide.set_arithmetic_operator(ArithmeticOperator::DIVIDE);
-        combination_divide.left_index = Some(0);
-        combination_divide.right_index = Some(1);
-        node_2.set_combination_node(combination_divide);
-
-        let mut int_field_node = FieldLeafNode::new();
-        int_field_node.publisher_name = "publisher_name".to_string();
-        int_field_node.field_names.push("int_field".to_string());
-        node_3.set_field_leaf_node(int_field_node);
-
-        let mut combination_less_than = CombinationNode::new();
-        combination_less_than.set_relational_operator(RelationalOperator::LT);
-        combination_less_than.left_index = Some(2);
-        combination_less_than.right_index = Some(3);
-        node_4.set_combination_node(combination_less_than);
-
-        let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context)?;
+        let nodes = vec![float_field_node, divide_node, int_field_node, lt_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
-            NodeValue::Float(100.0), // index 0 = field value of 100
-            NodeValue::Int32(2),     // index 1 = constant value of 2
-            NodeValue::Double(50.0), // index 2 = 100 / 2 = 50
-            NodeValue::Int32(80),    // index 3 = field value of 80
-            NodeValue::Bool(true),   // index 4 = 50 < 80 = true
+            NodeValue::Float(100.0), // field_field has value of 100
+            NodeValue::Double(50.0), // 100 / 2 = 50
+            NodeValue::Int32(80),    // int_field has value 80
+            NodeValue::Bool(true),   // 50 < 80 = true
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
@@ -1351,7 +1241,7 @@ mod tests {
         let node = Node::FieldLeaf {
             publisher_name: String::default(),
             fields: vec![],
-            message_provider: Arc::new(message_provider) as Arc<dyn MessageProvider>,
+            message_provider: Arc::new(message_provider),
         };
 
         let err = node.evaluate().err().unwrap();
@@ -1366,7 +1256,7 @@ mod tests {
         let node = Node::FieldLeaf {
             publisher_name: String::default(),
             fields: vec![],
-            message_provider: Arc::new(message_provider) as Arc<dyn MessageProvider>,
+            message_provider: Arc::new(message_provider),
         };
 
         let res = node.evaluate().unwrap();
