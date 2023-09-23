@@ -60,7 +60,7 @@ impl MessageBuilder for MessageBuilderImpl {
                     .push_node_value_content(&node_value)
                     .map_err(node_err_to_builder_err)?;
             } else {
-                // TODO: b/299950214 - fail validation on map field
+                panic!("Validation should have ensured map fields are not allowed");
             }
         }
         Ok(msg)

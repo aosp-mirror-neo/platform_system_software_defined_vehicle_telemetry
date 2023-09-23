@@ -1,5 +1,5 @@
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
-use sdv_ast::Node;
+use sdv_ast::{Node, NodeValueType, NodeValueTypeExtension};
 use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use std::{
     collections::{HashMap, HashSet},
@@ -18,21 +18,27 @@ pub(crate) trait MessageBuilderFactory: Send + Sync {
     fn validate(
         &self,
         proto_message_builder: &ProtoMessageBuilder,
-        context: &MessageBuilderFactoryContext,
+        context: &MessageBuilderFactoryValidateContext,
     ) -> Result<(), MessageBuilderFactoryError>;
 
     fn create(
         &self,
         proto_message_builder: &ProtoMessageBuilder,
-        context: &MessageBuilderFactoryContext,
+        context: &MessageBuilderFactoryCreateContext,
     ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError>;
 }
 
-pub(crate) struct MessageBuilderFactoryContext<'a> {
+pub(crate) struct MessageBuilderFactoryCreateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
 }
 
+pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
+    pub file_descriptors: &'a [FileDescriptor],
+    pub node_types: &'a [NodeValueType],
+}
+
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MessageBuilderFactoryError {
@@ -44,24 +50,29 @@ pub enum MessageBuilderFactoryError {
     DuplicateFieldAssignment { field_name: String, message_type: String },
     #[error("Field assignment for {field_name} is an expression node at invalid index {i}")]
     InvalidNodeIndex { field_name: String, i: u32 },
+    #[error("Field {field_name} of message {message_type} has unsupported type")]
+    UnsupportedFieldType { field_name: String, message_type: String },
+    #[error(
+        "Field {field_name} of message {message_type} has incompatible value assignment: {msg}"
+    )]
+    IncompatibleFieldAssignment { field_name: String, message_type: String, msg: String },
 }
 
-impl<'a> MessageBuilderFactoryContext<'a> {
-    /// Constructor
+impl<'a> MessageBuilderFactoryCreateContext<'a> {
+    /// Constructor for the context used by factory's create() method
     pub(crate) fn new(file_descriptors: &'a [FileDescriptor], nodes: &'a [Arc<Node>]) -> Self {
-        MessageBuilderFactoryContext { file_descriptors, nodes }
+        MessageBuilderFactoryCreateContext { file_descriptors, nodes }
     }
+}
 
-    fn get_message_descriptor(
-        &self,
-        message_type: &str,
-    ) -> Result<MessageDescriptor, MessageBuilderFactoryError> {
-        // iterate through all file_descriptors, find MessageDescriptor for the given message_type
-        // message_by_full_name() method requires the name to start with dot, it returns a clone
-        // of the MessageDescriptor, so we can return it as-is without cloning again
-        self.file_descriptors.iter().find_map(|fd| fd.message_by_full_name(message_type)).ok_or(
-            MessageBuilderFactoryError::MessageNotFound { message_type: message_type.to_string() },
-        )
+#[allow(dead_code)]
+impl<'a> MessageBuilderFactoryValidateContext<'a> {
+    /// Constructor for the context used by factory's validate() method
+    pub(crate) fn new(
+        file_descriptors: &'a [FileDescriptor],
+        node_types: &'a [NodeValueType],
+    ) -> Self {
+        MessageBuilderFactoryValidateContext { file_descriptors, node_types }
     }
 }
 
@@ -72,19 +83,30 @@ impl MessageBuilderFactoryImpl {
     pub fn new() -> Self {
         MessageBuilderFactoryImpl {}
     }
+
+    fn get_message_descriptor(
+        file_descriptors: &[FileDescriptor],
+        message_type: &str,
+    ) -> Result<MessageDescriptor, MessageBuilderFactoryError> {
+        // iterate through all file_descriptors, find MessageDescriptor for the given message_type
+        // message_by_full_name() method requires the name to start with dot, it returns a clone
+        // of the MessageDescriptor, so we can return it as-is without cloning again
+        file_descriptors.iter().find_map(|fd| fd.message_by_full_name(message_type)).ok_or(
+            MessageBuilderFactoryError::MessageNotFound { message_type: message_type.to_string() },
+        )
+    }
 }
 
 impl MessageBuilderFactory for MessageBuilderFactoryImpl {
-    // TODO: b/299950214 - verify that node output is compatible with field type.
-    // As a result, validate() will ensure the dynamic message doesn't contain
-    // unsupported field types such as map, string, bytes fields.
     fn validate(
         &self,
         proto_message_builder: &ProtoMessageBuilder,
-        context: &MessageBuilderFactoryContext,
+        context: &MessageBuilderFactoryValidateContext,
     ) -> Result<(), MessageBuilderFactoryError> {
-        let message_descriptor =
-            context.get_message_descriptor(&proto_message_builder.message_type)?;
+        let message_descriptor = Self::get_message_descriptor(
+            context.file_descriptors,
+            &proto_message_builder.message_type,
+        )?;
 
         let get_msg_type = || proto_message_builder.message_type.clone();
         let mut field_names = HashSet::new();
@@ -97,18 +119,42 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
                     message_type: get_msg_type(),
                 });
             }
-            // validate the field value is a valid node
-            if field_assignment.expression_node_index as usize >= context.nodes.len() {
-                return Err(MessageBuilderFactoryError::InvalidNodeIndex {
+
+            // validate the field value references a valid node index
+            let node_type = context
+                .node_types
+                .get(field_assignment.expression_node_index as usize)
+                .ok_or(MessageBuilderFactoryError::InvalidNodeIndex {
                     field_name: get_field_name(),
                     i: field_assignment.expression_node_index,
-                });
-            }
+                })?;
+
             // validate this field exists in the given message
-            if message_descriptor.field_by_name(&field_assignment.field_name).is_none() {
-                return Err(MessageBuilderFactoryError::FieldNotFound {
+            let field_descriptor = message_descriptor
+                .field_by_name(&field_assignment.field_name)
+                .ok_or(MessageBuilderFactoryError::FieldNotFound {
+                field_name: get_field_name(),
+                message_type: get_msg_type(),
+            })?;
+
+            // validate this field has a supported type (no strings, maps, bytes)
+            let field_type =
+                field_descriptor.runtime_field_type().get_node_value_type().map_err(|_| {
+                    MessageBuilderFactoryError::UnsupportedFieldType {
+                        field_name: get_field_name(),
+                        message_type: get_msg_type(),
+                    }
+                })?;
+
+            // validate this field's type is consistent with node evaluation output's type
+            if field_type != *node_type {
+                return Err(MessageBuilderFactoryError::IncompatibleFieldAssignment {
                     field_name: get_field_name(),
                     message_type: get_msg_type(),
+                    msg: format!(
+                        "Field expects type {:?} but expression node's output type is {:?}",
+                        field_type, node_type
+                    ),
                 });
             }
         }
@@ -118,10 +164,12 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
     fn create(
         &self,
         proto_message_builder: &ProtoMessageBuilder,
-        context: &MessageBuilderFactoryContext,
+        context: &MessageBuilderFactoryCreateContext,
     ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError> {
-        let message_descriptor =
-            context.get_message_descriptor(&proto_message_builder.message_type)?;
+        let message_descriptor = Self::get_message_descriptor(
+            context.file_descriptors,
+            &proto_message_builder.message_type,
+        )?;
         // maps field_name to Arc<Node>, the node evaluation output is the field value
         let field_assignments = proto_message_builder.field_assignments.iter().try_fold(
             HashMap::new(),
@@ -164,6 +212,7 @@ mod tests {
     // Package and message name are in to src/test_utils/test_message.proto
     const TEST_MESSAGE_FULL_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const INT_FIELD_NAME: &str = "int_field";
+    const STRING_FIELD_NAME: &str = "string_field";
 
     fn create_test_file_descriptors() -> Vec<FileDescriptor> {
         get_test_file_descriptors().to_vec()
@@ -195,8 +244,8 @@ mod tests {
     fn test_factory_validate_ok() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
-        let nodes = create_nodes_with_size(1);
-        let context = MessageBuilderFactoryContext::new(&fds, &nodes);
+        let node_types = vec![NodeValueType::Int];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![create_field_assignment_proto(INT_FIELD_NAME, 0)],
@@ -209,8 +258,8 @@ mod tests {
     fn test_factory_validate_message_not_found_fails() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
-        let nodes = create_nodes_with_size(2);
-        let context = MessageBuilderFactoryContext::new(&fds, &nodes);
+        let node_types = vec![NodeValueType::Int];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
         let proto_message_builder = create_proto_message_builder(
             // not a valid message in test_message.proto
             ".com.example.foo.BarMessage",
@@ -229,10 +278,10 @@ mod tests {
     #[test]
     fn test_factory_validate_field_assignment_node_index_out_of_bound_fails() {
         let factory = MessageBuilderFactoryImpl::new();
-        // create 10 expression nodes and put it in context
         let fds = create_test_file_descriptors();
-        let nodes = create_nodes_with_size(10);
-        let context = MessageBuilderFactoryContext::new(&fds, &nodes);
+        // only 10 nodes in context
+        let node_types = vec![NodeValueType::Int; 10];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             // field assignment requires node at index 20
@@ -252,8 +301,8 @@ mod tests {
     fn test_factory_validate_duplicate_field_assignment_fails() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
-        let nodes = create_nodes_with_size(2);
-        let context = MessageBuilderFactoryContext::new(&fds, &nodes);
+        let node_types = vec![NodeValueType::Int; 2];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![
@@ -276,8 +325,8 @@ mod tests {
     fn test_factory_validate_field_name_not_found_fails() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
-        let nodes = create_nodes_with_size(2);
-        let context = MessageBuilderFactoryContext::new(&fds, &nodes);
+        let node_types = vec![NodeValueType::Int; 2];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![
@@ -297,16 +346,126 @@ mod tests {
     }
 
     #[test]
+    fn test_factory_validate_field_has_unsupported_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let node_types = vec![NodeValueType::Bool];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // String field is not supported
+            vec![create_field_assignment_proto(STRING_FIELD_NAME, 0)],
+        );
+
+        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::UnsupportedFieldType { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_validate_field_has_incompatible_node_output_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        // Node at index 0 will produce a boolean output
+        let node_types = vec![NodeValueType::Bool];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // Some int field uses node at index 0 as its value assignment
+            vec![create_field_assignment_proto(INT_FIELD_NAME, 0)],
+        );
+
+        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::IncompatibleFieldAssignment { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_factory_create_ok() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
         let nodes = create_nodes_with_size(1);
-        let context = MessageBuilderFactoryContext::new(&fds, &nodes);
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![create_field_assignment_proto(INT_FIELD_NAME, 0)],
         );
 
         factory.create(&proto_message_builder, &context).unwrap();
+    }
+
+    #[test]
+    fn test_factory_create_message_not_found_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let nodes = create_nodes_with_size(2);
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes);
+        let proto_message_builder = create_proto_message_builder(
+            // not a valid message in test_message.proto
+            ".com.example.foo.BarMessage",
+            vec![create_field_assignment_proto(INT_FIELD_NAME, 0)],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_create_field_assignment_node_index_out_of_bound_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        // create 10 expression nodes and put it in context
+        let fds = create_test_file_descriptors();
+        let nodes = create_nodes_with_size(10);
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // field assignment requires node at index 20
+            vec![create_field_assignment_proto(INT_FIELD_NAME, 20)],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::InvalidNodeIndex { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_create_duplicate_field_assignment_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let nodes = create_nodes_with_size(2);
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            vec![
+                // the same field has 2 assignments
+                create_field_assignment_proto(INT_FIELD_NAME, 0),
+                create_field_assignment_proto(INT_FIELD_NAME, 1),
+            ],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
+            "Unexpected error: {}",
+            err
+        );
     }
 }
