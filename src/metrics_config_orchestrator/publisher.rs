@@ -14,7 +14,7 @@ use std::{
     fmt,
     fmt::{Debug, Display, Formatter},
     marker::{Send, Sync},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
 };
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
@@ -94,7 +94,10 @@ pub(crate) struct PublisherImpl {
 pub(crate) enum PublisherState {
     Inactive,
     Activating,
-    Active { callback_map: HashMap<String, Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>> },
+    Active {
+        callback_map:
+            Arc<AsyncMutex<HashMap<String, Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>>>>,
+    },
     Deactivating,
 }
 
@@ -156,6 +159,8 @@ impl Publisher for PublisherImpl {
             *state = PublisherState::Activating;
         }
 
+        let callback_map = Arc::new(AsyncMutex::new(HashMap::new()));
+
         if let PublisherType::Service { service_name, service_adapter, service_subscription } =
             &self.publisher_type
         {
@@ -163,11 +168,14 @@ impl Publisher for PublisherImpl {
                 panic!("Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
             }
 
+            let callback_map_reference = Arc::downgrade(&callback_map);
             let self_clone = self.clone();
             let subscription = service_adapter
                 .subscribe(
                     service_name,
-                    Box::new(move |msg| self_clone.on_service_publisher_new_message(msg)),
+                    Box::new(move |msg| {
+                        self_clone.on_service_publisher_new_message(&callback_map_reference, msg)
+                    }),
                 )
                 .await;
 
@@ -183,7 +191,7 @@ impl Publisher for PublisherImpl {
             if !matches!(*state, PublisherState::Activating) {
                 panic!("Unable to mark publisher {} as active because it is in an inconsistent state: {} instead of Activating", self.name, state);
             }
-            *state = PublisherState::Active { callback_map: HashMap::new() };
+            *state = PublisherState::Active { callback_map };
         }
 
         Ok(())
@@ -193,7 +201,7 @@ impl Publisher for PublisherImpl {
         {
             let mut state = self.state.lock().await;
             if let PublisherState::Active { callback_map } = &*state {
-                if !callback_map.is_empty() {
+                if !callback_map.lock().await.is_empty() {
                     return Err(PublisherDeactivateError::CannotDeactivateWithSubscriptions);
                 }
             } else {
@@ -230,13 +238,15 @@ impl Publisher for PublisherImpl {
         data_trigger_name: &str,
         callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> Result<(), PublisherSubscribeError> {
-        let mut state = self.state.lock().await;
-        if let PublisherState::Active { callback_map } = &mut *state {
-            callback_map.try_insert_value(data_trigger_name.to_owned(), callback).map_err(
-                |_| PublisherSubscribeError::DuplicateSubscription {
+        let state = self.state.lock().await;
+        if let PublisherState::Active { callback_map } = &*state {
+            callback_map
+                .lock()
+                .await
+                .try_insert_value(data_trigger_name.to_owned(), callback)
+                .map_err(|_| PublisherSubscribeError::DuplicateSubscription {
                     data_trigger_name: data_trigger_name.to_owned(),
-                },
-            )?;
+                })?;
         } else {
             return Err(PublisherSubscribeError::PublisherNotActive { state: state.to_string() });
         }
@@ -245,9 +255,9 @@ impl Publisher for PublisherImpl {
     }
 
     async fn unsubscribe(&self, data_trigger_name: &str) -> Result<(), PublisherUnsubscribeError> {
-        let mut state = self.state.lock().await;
-        if let PublisherState::Active { callback_map } = &mut *state {
-            if callback_map.remove(data_trigger_name).is_none() {
+        let state = self.state.lock().await;
+        if let PublisherState::Active { callback_map } = &*state {
+            if callback_map.lock().await.remove(data_trigger_name).is_none() {
                 Err(PublisherUnsubscribeError::NotSubscribed {
                     data_trigger_name: data_trigger_name.to_owned(),
                 })
@@ -285,19 +295,34 @@ impl PublisherImpl {
         )
     }
 
-    fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
+    fn on_service_publisher_new_message(
+        self: &Arc<Self>,
+        callback_map_reference: &Weak<
+            AsyncMutex<HashMap<String, Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>>>,
+        >,
+        message: &dyn MessageDyn,
+    ) {
         let self_clone = self.clone();
+        let callback_map_reference = callback_map_reference.clone();
         let message_clone = message.clone_box();
         tokio::spawn(async move {
-            if let PublisherState::Active { callback_map } = &mut *self_clone.state.lock().await {
-                // Replace latest message.
-                self_clone.latest_message.lock().unwrap().replace(message_clone.clone_box());
+            // Return if the state has been changed to non-active while the task was pending
+            // and the weak reference is no longer valid.
+            let callback_map = match callback_map_reference.upgrade() {
+                Some(callback_map) => callback_map,
+                None => return,
+            };
 
-                // Notify subscribed data triggers.
-                // TODO(b/294129114): Replace callback_map with just a single callback.
-                for callback in callback_map.values_mut() {
-                    callback(message_clone.as_ref());
-                }
+            // Lock map to make sure no subscriptions are added and publisher is not deactivated.
+            let mut callback_map_guard = callback_map.lock().await;
+
+            // Replace latest message.
+            self_clone.latest_message.lock().unwrap().replace(message_clone.clone_box());
+
+            // Notify subscribed data triggers.
+            // TODO(b/294129114): Replace callback_map with just a single callback.
+            for callback in callback_map_guard.values_mut() {
+                callback(message_clone.as_ref());
             }
         });
     }
