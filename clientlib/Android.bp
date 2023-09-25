@@ -25,7 +25,9 @@ cc_defaults {
 cc_library {
     name: "libtelemetry_c",
     srcs: [
+        "src/callback_container.cpp",
         "src/status_listener_impl.cpp",
+        "src/report_listener_impl.cpp",
         "src/report_ready_listener_impl.cpp",
         "src/telemetry_service.cpp",
         "src/lib.cpp",

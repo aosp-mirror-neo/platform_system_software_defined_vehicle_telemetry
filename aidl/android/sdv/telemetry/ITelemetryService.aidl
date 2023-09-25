@@ -15,47 +15,43 @@ interface ITelemetryService {
     /**
      * Adds telemetry MetricsConfigs to TelemetryService.
      */
-    void addMetricsConfig(in byte[] metricsConfig);
+    void addMetricsConfig(in int api_call_id, in byte[] metricsConfig);
 
     /**
      * Activates a MetricsConfig based on uuid. This will also create objects
      * related to the MetricsConfig.
      */
-    void activateMetricsConfig(in @utf8InCpp String metricsConfigUuid);
+    void activateMetricsConfig(in int api_call_id, in @utf8InCpp String metricsConfigUuid);
 
     /**
      * Deactivates a MetricsConfig based on uuid. This will also destroy objects
      * related to the MetricsConfig.
      */
-    void deactivateMetricsConfig(in @utf8InCpp String metricsConfigUuid);
+    void deactivateMetricsConfig(
+            in int api_call_id, in @utf8InCpp String metricsConfigUuid);
 
     /**
      * Removes a MetricsConfig based on uuid. This will also remove outputs produced by the
      * MetricsConfig.
      */
-    void removeMetricsConfig(in @utf8InCpp String metricsConfigUuid);
+    void removeMetricsConfig(in int api_call_id, in @utf8InCpp String metricsConfigUuid);
 
     /**
      * Removes all MetricsConfigs. This will also remove all MetricsConfig outputs.
      */
-    void removeAllMetricsConfigs();
+    void removeAllMetricsConfigs(in int api_call_id);
 
     /**
      * Sends finished telemetry reports or errors associated with the given uuid using the
      * {@code ITelemetryReportListener}.
      */
-    void getFinishedReport(in @utf8InCpp String metricsConfigUuid, in int report_number);
+    void getMetricsReport(in int report_number, in @utf8InCpp String metricsConfigUuid,
+            in ITelemetryReportListener listener);
 
     /**
      * Registers a listener for receiving notifications when a report or telemetry error is ready.
      */
     void setReportReadyListener(in ITelemetryReportReadyListener listener);
-
-    /**
-     * Registers a listener for pulling metrics report when the client is notified a new report is
-     * ready.
-     */
-    void setReportListener(in ITelemetryReportListener listener);
 
     /**
      * Registers a callback for receiving status codes for API calls.
@@ -66,11 +62,6 @@ interface ITelemetryService {
      * Clears listener to stop receiving notifications when a report or telemetry error is ready.
      */
     void clearReportReadyListener();
-
-    /**
-     * Clears listener to stop receiving mertics reports.
-     */
-    void clearReportListener();
 
     /**
      * Clears listener to stop receiving status codes.

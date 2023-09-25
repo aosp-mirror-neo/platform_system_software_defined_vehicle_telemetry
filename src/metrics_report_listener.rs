@@ -1,13 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use android_sdv_telemetry::aidl::android::sdv::telemetry::{
-    ITelemetryReportListener::ITelemetryReportListener,
-    ITelemetryReportReadyListener::ITelemetryReportReadyListener,
-};
+use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 
 use android_sdv_telemetry::binder::Strong;
-use protobuf::Message;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
@@ -17,18 +13,12 @@ pub struct MetricsReportListener {
     /// Hashmap to store the MetricsReport until the client asks for it.
     metrics_report_store: Mutex<HashMap<(String, i32), MetricsReport>>,
     /// Report Ready listener to inform the client when a report is ready
-    report_listener: Mutex<Option<Strong<dyn ITelemetryReportListener>>>,
-    /// Report Ready listener to inform the client when a report is ready
     report_ready_listener: Mutex<Option<Strong<dyn ITelemetryReportReadyListener>>>,
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MetricsReportListenerError {
-    #[error("Report Listener already exists")]
-    ReportListenerExists,
-    #[error("Report Listener not set")]
-    ReportListenerNotSet,
     #[error("Report Ready Listener already exists")]
     ReportReadyListenerExists,
     #[error("Report Ready Listener not set")]
@@ -42,7 +32,6 @@ impl MetricsReportListener {
         MetricsReportListener {
             metrics_report_store: Mutex::new(HashMap::new()),
             report_ready_listener: Mutex::new(None),
-            report_listener: Mutex::new(None),
         }
     }
 
@@ -56,15 +45,15 @@ impl MetricsReportListener {
             .insert((uuid.clone(), report_number), metrics_report);
         let listener = self.report_ready_listener.lock().unwrap();
         if let Some(listener_ref) = listener.as_ref() {
-            let _ = listener_ref.deref().onReady(&uuid, report_number);
+            let _ = listener_ref.deref().onReady(report_number, &uuid);
         }
     }
 
-    pub fn get_finished_report(
+    pub fn get_metrics_report(
         &self,
-        metrics_report_uuid: &str,
         report_number: i32,
-    ) -> Result<(), MetricsReportListenerError> {
+        metrics_report_uuid: &str,
+    ) -> Result<MetricsReport, MetricsReportListenerError> {
         let report = {
             let mut report_container = self.metrics_report_store.lock().unwrap();
             report_container.remove(&(metrics_report_uuid.to_string(), report_number))
@@ -73,37 +62,7 @@ impl MetricsReportListener {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
         };
 
-        let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
-        let listener = self.report_listener.lock().unwrap();
-        if let Some(listener_ref) = listener.as_ref() {
-            let _ = listener_ref.deref().onResult(serialized_report);
-        } else {
-            return Err(MetricsReportListenerError::ReportListenerNotSet);
-        }
-
-        Ok(())
-    }
-
-    pub fn set_report_listener(
-        &self,
-        listener: &Strong<dyn ITelemetryReportListener>,
-    ) -> Result<(), MetricsReportListenerError> {
-        let mut guard = self.report_listener.lock().unwrap();
-        if guard.is_none() {
-            *guard = Some(listener.clone());
-            Ok(())
-        } else {
-            Err(MetricsReportListenerError::ReportListenerExists)
-        }
-    }
-
-    pub fn clear_report_listener(&self) -> Result<(), MetricsReportListenerError> {
-        let mut listener = self.report_listener.lock().unwrap();
-        if listener.is_none() {
-            return Err(MetricsReportListenerError::ReportListenerNotSet);
-        }
-        *listener = None;
-        Ok(())
+        Ok(metrics_report)
     }
 
     pub fn set_report_ready_listener(

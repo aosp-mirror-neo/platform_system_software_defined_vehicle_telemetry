@@ -12,5 +12,6 @@ oneway interface ITelemetryStatusListener {
      * Called by telemetry service to provide notifications on finished reports or script
      * runtime error.
      */
-    void sendStatus(in int status_code, in @utf8InCpp String status_message);
+    void sendStatus(
+            in int api_call_id, in int status_code, in @utf8InCpp String status_message);
 }

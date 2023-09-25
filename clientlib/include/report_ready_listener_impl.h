@@ -5,23 +5,24 @@
 
 namespace android::sdv::telemetry {
 
+typedef void (*ReportReadyCallbackFunction)(void*, int32_t, const char*);
+
 class ReportReadyListenerImpl :
       public android::sdv::telemetry::BnTelemetryReportReadyListener {
 public:
-    ReportReadyListenerImpl(void* cb, void (*cbFunc)(void*, const char*, int32_t));
-    ~ReportReadyListenerImpl();
-    android::binder::Status onReady(const std::string& metricConfigUuid,
-                                    int32_t reportNumber) override;
+    void set_report_ready_listener(void* cbObject, ReportReadyCallbackFunction cbFunc);
+    android::binder::Status onReady(int32_t reportNumber,
+                                    const std::string& metricConfigUuid) override;
 
 private:
     // Void pointer storing the CB object passed by the OEM client app.
-    void *clientCB_;
+    void* clientCb_;
 
     // Function pointer to the CB function provided by the OEM client application.
     // Client will have its own implementation of CB interface which will be stored
     // as void* pointer in telemetry_service.h. The void* cb will be cast back to the
     // CB interfce by the client in the CB function.
-    void (*cbFuncPtr)(void*, const char*, int32_t);
+    ReportReadyCallbackFunction cbFuncPtr_;
 };
 
 }

@@ -9,8 +9,7 @@ package android.sdv.telemetry;
  */
 oneway interface ITelemetryReportReadyListener {
     /**
-     * Called by telemetry service to provide notifications on finished reports or script
-     * runtime error.
+     * Called by telemetry service to provide notifications on finished reports
      */
-    void onReady(in @utf8InCpp String metricsConfigUuid, in int reportNumber);
+    void onReady(in int reportNumber, in @utf8InCpp String metricsConfigUuid);
 }
