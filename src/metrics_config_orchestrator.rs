@@ -42,7 +42,8 @@ use publisher_factory::{
 };
 use trigger::{Trigger, TriggerImpl, TriggerSubscribeError, TriggerSubscriber};
 use trigger_factory::{
-    TriggerFactory, TriggerFactoryContext, TriggerFactoryError, TriggerFactoryImpl,
+    TriggerFactory, TriggerFactoryCreateContext, TriggerFactoryError, TriggerFactoryImpl,
+    TriggerFactoryValidateContext,
 };
 
 const PUBLISHER: &str = "publisher";
@@ -261,7 +262,7 @@ where
             },
             // Create a rust Trigger object using already created Publisher and Trigger objects to resolve dependencies.
             |trigger_proto, publishers, triggers| {
-                let context = TriggerFactoryContext {
+                let context = TriggerFactoryCreateContext {
                     expression_nodes: &expression_nodes,
                     publishers,
                     triggers,
@@ -402,7 +403,7 @@ where
 
         Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
-            |publisher_proto, _, triggers| {
+            |publisher_proto, _publishers, triggers| {
                 let context = PublisherFactoryContext {
                     expression_nodes: &expression_nodes,
                     file_descriptors: &file_descriptors,
@@ -416,11 +417,9 @@ where
                 })?;
                 Ok(())
             },
-            |trigger_proto, publishers, triggers| {
-                let context = TriggerFactoryContext {
-                    expression_nodes: &expression_nodes,
-                    publishers,
-                    triggers,
+            |trigger_proto, _publishers, _triggers| {
+                let context = TriggerFactoryValidateContext {
+                    expression_nodes_count: config_proto.expression_nodes.len(),
                 };
                 self.trigger_factory.validate(trigger_proto, &context).map_err(|e| {
                     MetricsConfigOrchestratorError::InvalidTriggerDefinition {
@@ -1032,7 +1031,7 @@ mod tests {
         fn create(
             &self,
             publisher_proto: &PublisherProto,
-            _: &PublisherFactoryContext<MockTrigger>,
+            _context: &PublisherFactoryContext<MockTrigger>,
         ) -> Result<Arc<MockPublisher>, PublisherFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(publisher_proto) {
@@ -1054,7 +1053,7 @@ mod tests {
         fn validate(
             &self,
             publisher_proto: &PublisherProto,
-            _: &PublisherFactoryContext<MockTrigger>,
+            _context: &PublisherFactoryContext<MockTrigger>,
         ) -> Result<(), PublisherFactoryError> {
             if let Some(callback) = &self.validate_callback {
                 if let Some(res) = callback(publisher_proto) {
@@ -1108,7 +1107,7 @@ mod tests {
         fn create(
             &self,
             trigger_proto: &TriggerProto,
-            _: &TriggerFactoryContext<MockPublisher, MockTrigger>,
+            _context: &TriggerFactoryCreateContext<MockPublisher, MockTrigger>,
         ) -> Result<Arc<MockTrigger>, TriggerFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(trigger_proto) {
@@ -1130,7 +1129,7 @@ mod tests {
         fn validate(
             &self,
             trigger_proto: &TriggerProto,
-            _: &TriggerFactoryContext<MockPublisher, MockTrigger>,
+            _context: &TriggerFactoryValidateContext,
         ) -> Result<(), TriggerFactoryError> {
             if let Some(callback) = &self.validate_callback {
                 if let Some(res) = callback(trigger_proto) {
