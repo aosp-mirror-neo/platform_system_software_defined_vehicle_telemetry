@@ -511,85 +511,10 @@ impl NodeValue {
 mod tests {
 
     use super::*;
-    use lazy_static::lazy_static;
+    use crate::mock::*;
     use protobuf::Message;
-    use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
-    use sdvtelemetry_proto_rust::expression::{
-        combination_node::{
-            ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
-        },
-        ConstantLeafNode,
-    };
+    use sdvtelemetry_proto_rust::expression::ConstantLeafNode;
     use std::sync::Mutex;
-
-    // Static variables within the tests module scope that are reused across tests.
-    lazy_static! {
-        static ref OP_AND: OperatorProto =
-            OperatorProto::LogicalOperator(LogicalOperator::AND.into());
-        static ref OP_OR: OperatorProto =
-            OperatorProto::LogicalOperator(LogicalOperator::OR.into());
-        static ref OP_XOR: OperatorProto =
-            OperatorProto::LogicalOperator(LogicalOperator::XOR.into());
-        static ref OP_NOT: OperatorProto =
-            OperatorProto::LogicalOperator(LogicalOperator::NOT.into());
-        static ref OP_ADD: OperatorProto =
-            OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into());
-        static ref OP_SUBTRACT: OperatorProto =
-            OperatorProto::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into());
-        static ref OP_MULTIPLY: OperatorProto =
-            OperatorProto::ArithmeticOperator(ArithmeticOperator::MULTIPLY.into());
-        static ref OP_DIVIDE: OperatorProto =
-            OperatorProto::ArithmeticOperator(ArithmeticOperator::DIVIDE.into());
-        static ref OP_MODULUS: OperatorProto =
-            OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULUS.into());
-        static ref OP_POWER: OperatorProto =
-            OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into());
-        static ref OP_EQ: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::EQ.into());
-        static ref OP_NOT_EQ: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into());
-        static ref OP_GT: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::GT.into());
-        static ref OP_GT_OR_EQ: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::GT_OR_EQ.into());
-        static ref OP_LT: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::LT.into());
-        static ref OP_LT_OR_EQ: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into());
-        static ref OP_CONTAINS: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into());
-        static ref OP_DOES_NOT_CONTAIN: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::DOES_NOT_CONTAIN.into());
-        static ref OP_ALL_EQ: OperatorProto =
-            OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into());
-        static ref TEST_MESSAGE: TestMessage = {
-            let mut test_message = TestMessage::new();
-            // initialize scalar (optional) fields
-            test_message.int_field = 80;
-            test_message.float_field = 100.0;
-            test_message.string_field = "Hello world".to_string();
-            test_message.enum_field = TestEnum::SOME.into();
-
-            // initialize nested field
-            let mut test_nested_message = TestNestedMessage::new();
-            test_nested_message.bool_field = true;
-            test_nested_message.repeated_i32s = vec![1, 2];
-            test_message.message_field = protobuf::MessageField::some(test_nested_message.clone());
-
-            // initialize repeated fields
-            test_message.repeated_bools = vec![true, true, false, true];
-            test_message.repeated_i64s = vec![3, 4, 5];
-            test_message.repeated_doubles = vec![
-                std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
-            test_message.repeated_enums = vec![
-                TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
-            test_message.repeated_messages = vec![
-                test_nested_message.clone(), test_nested_message];
-
-            test_message
-        };
-        static ref EMPTY_TEST_MESSAGE: TestMessage = TestMessage::new();
-    }
 
     fn provide(value: &NodeValue) -> Result<NodeValue, NodeError> {
         Ok(value.clone())
