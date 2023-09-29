@@ -32,14 +32,16 @@ pub trait NodeFactory {
         context: &NodeFactoryContext,
     ) -> Result<Vec<NodeValueType>, NodeError>;
 
-    /// Creates rust Nodes from protobuf Nodes.
+    /// Creates rust Nodes from protobuf Nodes,.
     /// Protobuf nodes use indices to represent left and right children.
     /// Rust nodes have a pointer to the actual children instead of an index.
+    /// Returns list of Nodes and their output value types. The two vectors have the
+    /// same length.
     fn create_nodes(
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<Vec<Arc<Node>>, NodeError>;
+    ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), NodeError>;
 }
 
 /// Provides necessary information for node validation and creation.
@@ -293,7 +295,7 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<Vec<Arc<Node>>, NodeError> {
+    ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), NodeError> {
         let n = proto_nodes.len();
         let mut visit_status = vec![VisitStatus::NotVisited; n];
         let mut node_value_types = vec![NodeValueType::None; n];
@@ -316,7 +318,7 @@ impl NodeFactory for NodeFactoryImpl {
                 msg: format!("expected to create {} nodes, but created {} nodes", n, nodes.len()),
             });
         }
-        Ok(nodes)
+        Ok((nodes, node_value_types))
     }
 }
 
@@ -830,12 +832,21 @@ mod tests {
         node_4.set_combination_node(and_node);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
+        let expected_types = vec![
+            NodeValueType::Int,
+            NodeValueType::Int,
+            NodeValueType::Bool,
+            NodeValueType::Bool,
+            NodeValueType::Bool,
+        ];
 
         // action
-        let res = node_factory.validate(&all_proto_nodes, &context);
+        let node_value_types = node_factory.validate(&all_proto_nodes, &context).unwrap();
 
         // assert
-        assert!(res.is_ok());
+        for (actual_type, expected_type) in node_value_types.into_iter().zip(expected_types) {
+            assert_eq!(actual_type, expected_type);
+        }
     }
 
     #[test]
@@ -847,7 +858,7 @@ mod tests {
         let all_proto_nodes = create_true_false_branch(op);
 
         // action
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context)?;
+        let (nodes, node_types) = node_factory.create_nodes(&all_proto_nodes, &context)?;
 
         // assert 1-1 correspondence between rust node and protobuf node
         for (rust_node, proto_node) in nodes.iter().zip(all_proto_nodes) {
@@ -882,6 +893,8 @@ mod tests {
                 }
             }
         }
+        // assert all nodes in this tree output boolean results
+        assert!(node_types.iter().all(|value_type| *value_type == NodeValueType::Bool));
         Ok(())
     }
 
@@ -893,10 +906,10 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context);
+        let res = node_factory.create_nodes(&all_proto_nodes, &context);
 
         // assert
-        assert!(matches!(nodes.err().unwrap(), NodeError::UnaryOperatorIncorrectChildren));
+        assert!(matches!(res.err().unwrap(), NodeError::UnaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -923,10 +936,10 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context);
+        let res = node_factory.create_nodes(&all_proto_nodes, &context);
 
         // assert
-        assert!(nodes.is_ok());
+        assert!(res.is_ok());
     }
 
     #[test]
@@ -953,10 +966,10 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context);
+        let res = node_factory.create_nodes(&all_proto_nodes, &context);
 
         // assert error because binary operator needs 2 children
-        assert!(matches!(nodes.err().unwrap(), NodeError::BinaryOperatorIncorrectChildren));
+        assert!(matches!(res.err().unwrap(), NodeError::BinaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -974,10 +987,10 @@ mod tests {
         let all_proto_nodes = vec![proto_node];
 
         // action
-        let nodes = node_factory.create_nodes(&all_proto_nodes, &context);
+        let res = node_factory.create_nodes(&all_proto_nodes, &context);
 
         // assert
-        assert!(matches!(nodes.err().unwrap(), NodeError::IndexOutOfBound { .. }));
+        assert!(matches!(res.err().unwrap(), NodeError::IndexOutOfBound { .. }));
     }
 
     #[test]

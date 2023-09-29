@@ -14,7 +14,7 @@ use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
 use sdv_ast::{
     DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError, Node,
-    NodeError, NodeFactory, NodeFactoryContext, NodeFactoryImpl, NodeValue,
+    NodeError, NodeFactory, NodeFactoryContext, NodeFactoryImpl, NodeValue, NodeValueType,
 };
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
@@ -231,7 +231,8 @@ where
             message_provider: Some(message_provider.clone()),
             descriptor_provider: Box::new(DescriptorProviderImpl {}),
         };
-        let expression_nodes = self.create_expression_nodes(config_proto, &node_factory_context)?;
+        let (expression_nodes, node_types) =
+            self.create_expression_nodes(config_proto, &node_factory_context)?;
 
         // Iterate over topologically sorted vector of publishers and triggers and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
@@ -289,6 +290,7 @@ where
             report_ready_callback: &self.report_ready_callback,
             file_descriptors: &file_descriptors,
             nodes: &expression_nodes,
+            node_types: &node_types,
         };
         let metrics_report_configs = config_proto
             .metrics_report_configs
@@ -502,7 +504,7 @@ where
         &self,
         config_proto: &MetricsConfigProto,
         context: &NodeFactoryContext,
-    ) -> Result<Vec<Arc<Node>>, MetricsConfigOrchestratorError> {
+    ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), MetricsConfigOrchestratorError> {
         self.node_factory
             .create_nodes(&config_proto.expression_nodes, context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
@@ -971,7 +973,7 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             context: &NodeFactoryContext,
-        ) -> Result<Vec<Arc<Node>>, NodeError> {
+        ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), NodeError> {
             if self.fail_create_nodes {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
@@ -982,8 +984,10 @@ mod tests {
                 .unwrap()
                 .push(context.message_provider.as_ref().unwrap().clone());
 
+            let size = proto_nodes.len();
             let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
-            Ok(vec![empty_node; proto_nodes.len()])
+            let node_type = NodeValueType::None;
+            Ok((vec![empty_node; size], vec![node_type; size]))
         }
     }
 

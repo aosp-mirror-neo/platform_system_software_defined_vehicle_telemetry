@@ -48,6 +48,7 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigg
     pub triggers: &'a HashMap<String, Arc<TTrigger>>,
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
+    pub node_types: &'a [NodeValueType],
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
@@ -91,7 +92,11 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 .message_builder
                 .as_ref()
                 .ok_or(MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet)?,
-            &MessageBuilderFactoryCreateContext::new(context.file_descriptors, context.nodes),
+            &MessageBuilderFactoryCreateContext::new(
+                context.file_descriptors,
+                context.nodes,
+                context.node_types,
+            ),
         )?;
         let triggers = metrics_report_config
             .trigger_names
@@ -195,6 +200,7 @@ mod tests {
                 triggers: &triggers,
                 file_descriptors: get_test_file_descriptors(),
                 nodes: get_test_nodes(),
+                node_types: get_test_node_types(),
             };
             self.create(report_config, &context)
         }
