@@ -220,25 +220,11 @@ message DeclarativeAggregation {
 
     // The latest published value.
     LATEST = 6;
-
-    // Custom aggregation specified by seed_message_builder and
-    // aggregation_message_builder.
-    CUSTOM = 1000;
   }
 
   // Required.
   // Type of aggregation performed with the data from the publisher.
   AggregationType aggregation_type = 3;
-
-  // Optional.
-  // The message builder used to generate the initial value of the aggregate.
-  // Required if aggregation_type is CUSTOM.
-  ProtoMessageBuilder seed_message_builder = 4;
-
-  // Optional.
-  // The message builder used to aggregate the values.
-  // Required if aggregation_type is CUSTOM.
-  ProtoMessageBuilder aggregation_message_builder = 5;
 }
 
 // Specifies a script that aggregates data from the activation context.
