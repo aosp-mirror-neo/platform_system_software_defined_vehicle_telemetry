@@ -21,18 +21,18 @@ pub(crate) trait TriggerFactory<
     fn create(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext<TPublisher, TTrigger>,
+        context: &TriggerFactoryCreateContext<TPublisher, TTrigger>,
     ) -> Result<Arc<TTrigger>, TriggerFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a trigger encapsulated object.
     fn validate(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext<TPublisher, TTrigger>,
+        context: &TriggerFactoryValidateContext,
     ) -> Result<(), TriggerFactoryError>;
 }
 
-pub(crate) struct TriggerFactoryContext<
+pub(crate) struct TriggerFactoryCreateContext<
     'a,
     Pub: Publisher = PublisherImpl,
     Trig: Trigger = TriggerImpl,
@@ -40,6 +40,10 @@ pub(crate) struct TriggerFactoryContext<
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub publishers: &'a HashMap<String, Arc<Pub>>,
     pub triggers: &'a HashMap<String, Arc<Trig>>,
+}
+
+pub(crate) struct TriggerFactoryValidateContext {
+    pub expression_nodes_count: usize,
 }
 
 #[derive(Error, Debug)]
@@ -61,7 +65,7 @@ impl TriggerFactory for TriggerFactoryImpl {
     fn create(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext,
+        context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
         Ok(Arc::new(TriggerImpl::new(
             trigger_proto.name.clone(),
@@ -74,11 +78,13 @@ impl TriggerFactory for TriggerFactoryImpl {
                 }
                 Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
                     TriggerFactoryImpl::verify_not_empty(&conditional_trigger.trigger_names)?;
-                    let selector_expression =
-                        TriggerFactoryImpl::get_conditional_trigger_expression(
-                            conditional_trigger,
-                            context.expression_nodes,
-                        )?;
+                    let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
+                    let selector_expression = context
+                        .expression_nodes
+                        .get(selector_node_index as usize)
+                        .ok_or(TriggerFactoryError::IncorrectNodeIndex {
+                            node_index: selector_node_index,
+                        })?;
                     TriggerType::Conditional {
                         triggers: conditional_trigger
                             .trigger_names
@@ -96,17 +102,19 @@ impl TriggerFactory for TriggerFactoryImpl {
     fn validate(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryContext,
+        context: &TriggerFactoryValidateContext,
     ) -> Result<(), TriggerFactoryError> {
         match &trigger_proto.trigger_type {
             Some(TriggerTypeProto::DataTrigger(_)) | Some(TriggerTypeProto::PeriodicTrigger(_)) => {
             }
             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
                 TriggerFactoryImpl::verify_not_empty(&conditional_trigger.trigger_names)?;
-                TriggerFactoryImpl::get_conditional_trigger_expression(
-                    conditional_trigger,
-                    context.expression_nodes,
-                )?;
+                let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
+                if selector_node_index as usize >= context.expression_nodes_count {
+                    return Err(TriggerFactoryError::IncorrectNodeIndex {
+                        node_index: selector_node_index,
+                    });
+                }
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
         };
@@ -119,16 +127,10 @@ impl TriggerFactoryImpl {
         TriggerFactoryImpl {}
     }
 
-    fn get_conditional_trigger_expression<'a>(
-        conditional_trigger_proto: &'a ConditionalTriggerProto,
-        nodes: &'a [Arc<Node>],
-    ) -> Result<&'a Arc<Node>, TriggerFactoryError> {
-        let selector_node_index = conditional_trigger_proto
-            .selector_node_index
-            .ok_or(TriggerFactoryError::MissingNodeIndex)?;
-        nodes
-            .get(selector_node_index as usize)
-            .ok_or(TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index })
+    fn get_selector_node_index(
+        conditional_trigger_proto: &ConditionalTriggerProto,
+    ) -> Result<u32, TriggerFactoryError> {
+        conditional_trigger_proto.selector_node_index.ok_or(TriggerFactoryError::MissingNodeIndex)
     }
 
     fn verify_not_empty(names: &[String]) -> Result<(), TriggerFactoryError> {
@@ -169,35 +171,6 @@ mod tests {
 
     fn create_node() -> Node {
         Node::ConstantLeaf { value: NodeValue::Bool(false) }
-    }
-
-    fn run_using_empty_factory_context<R>(
-        execute_func: impl FnOnce(&TriggerFactoryContext) -> R,
-    ) -> R {
-        run_using_factory_context(None, None, None, execute_func)
-    }
-
-    // Creates a TriggerFactoryContext with passed data and uses it to call `execute_func`.
-    // This is needed because TriggerFactoryContext contains borrows and it's impossible to have
-    // a function that creates and returns it - it can only be used in the function where it's
-    // created.
-    fn run_using_factory_context<R>(
-        publishers: Option<Vec<Arc<PublisherImpl>>>,
-        triggers: Option<Vec<Arc<TriggerImpl>>>,
-        nodes: Option<Vec<Arc<Node>>>,
-        execute_func: impl FnOnce(&TriggerFactoryContext) -> R,
-    ) -> R {
-        let expression_nodes = nodes.unwrap_or_default();
-        let publishers = publishers
-            .map_or(HashMap::new(), |val| val.into_hash_map(|publisher| publisher.name.clone()));
-        let triggers = triggers
-            .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
-        let context = TriggerFactoryContext {
-            expression_nodes: &expression_nodes,
-            publishers: &publishers,
-            triggers: &triggers,
-        };
-        execute_func(&context)
     }
 
     fn create_valid_data_trigger() -> (TriggerProto, Arc<PublisherImpl>) {
@@ -254,15 +227,64 @@ mod tests {
         trigger
     }
 
+    impl TriggerFactoryImpl {
+        // The following functions create a context with passed data and use it to call `create`
+        // or `validate`. This is needed because context structs contain borrows and it's impossible
+        // to have a function that creates and returns it - it can only be used in the function
+        // where it's created.
+        fn create_using_default_context(
+            &self,
+            trigger_proto: &TriggerProto,
+        ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+            self.create_using_context_with(trigger_proto, None, None, None)
+        }
+
+        fn create_using_context_with(
+            &self,
+            trigger_proto: &TriggerProto,
+            publishers: Option<Vec<Arc<PublisherImpl>>>,
+            triggers: Option<Vec<Arc<TriggerImpl>>>,
+            nodes: Option<Vec<Arc<Node>>>,
+        ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+            let expression_nodes = nodes.unwrap_or_default();
+            let publishers = publishers.map_or(HashMap::new(), |val| {
+                val.into_hash_map(|publisher| publisher.name.clone())
+            });
+            let triggers = triggers
+                .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
+            let context = TriggerFactoryCreateContext {
+                expression_nodes: &expression_nodes,
+                publishers: &publishers,
+                triggers: &triggers,
+            };
+            self.create(trigger_proto, &context)
+        }
+
+        fn validate_using_default_context(
+            &self,
+            trigger_proto: &TriggerProto,
+        ) -> Result<(), TriggerFactoryError> {
+            self.validate_using_context_with(trigger_proto, 0)
+        }
+
+        fn validate_using_context_with(
+            &self,
+            trigger_proto: &TriggerProto,
+            nodes_count: usize,
+        ) -> Result<(), TriggerFactoryError> {
+            let context = TriggerFactoryValidateContext { expression_nodes_count: nodes_count };
+            self.validate(trigger_proto, &context)
+        }
+    }
+
     #[test]
     fn create_data_trigger_success() {
         let factory = create_factory();
         let (trigger, publisher) = create_valid_data_trigger();
 
-        let res = run_using_factory_context(Some(vec![publisher.clone()]), None, None, |context| {
-            factory.create(&trigger, context)
-        })
-        .unwrap();
+        let res = factory
+            .create_using_context_with(&trigger, Some(vec![publisher.clone()]), None, None)
+            .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
         if let TriggerType::Data { publisher: res_publisher } = &res.trigger_type {
@@ -277,8 +299,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_valid_periodic_trigger();
 
-        let res =
-            run_using_empty_factory_context(|context| factory.create(&trigger, context)).unwrap();
+        let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
         if let TriggerType::Periodic { interval_ms } = res.trigger_type {
@@ -293,9 +314,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_no_parent_triggers();
 
-        let err = run_using_empty_factory_context(|context| factory.create(&trigger, context))
-            .err()
-            .unwrap();
+        let err = factory.create_using_default_context(&trigger).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::NoParentTriggers),
@@ -309,9 +328,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_missing_node_index();
 
-        let err = run_using_empty_factory_context(|context| factory.create(&trigger, context))
-            .err()
-            .unwrap();
+        let err = factory.create_using_default_context(&trigger).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::MissingNodeIndex),
@@ -325,9 +342,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_incorrect_node_index();
 
-        let err = run_using_empty_factory_context(|context| factory.create(&trigger, context))
-            .err()
-            .unwrap();
+        let err = factory.create_using_default_context(&trigger).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
@@ -343,13 +358,14 @@ mod tests {
 
         let node_0 = Arc::new(create_node());
         let node_1 = Arc::new(create_node());
-        let res = run_using_factory_context(
-            None,
-            parent_triggers.clone(),
-            Some(vec![node_0.clone(), node_1.clone()]),
-            |context| factory.create(&trigger, context),
-        )
-        .unwrap();
+        let res = factory
+            .create_using_context_with(
+                &trigger,
+                None,
+                parent_triggers.clone(),
+                Some(vec![node_0.clone(), node_1.clone()]),
+            )
+            .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
         if let TriggerType::Conditional { triggers, selector_expression } = &res.trigger_type {
@@ -368,10 +384,7 @@ mod tests {
         let factory = create_factory();
         let (trigger, publisher) = create_valid_data_trigger();
 
-        run_using_factory_context(Some(vec![publisher]), None, None, |context| {
-            factory.validate(&trigger, context)
-        })
-        .unwrap();
+        factory.create_using_context_with(&trigger, Some(vec![publisher]), None, None).unwrap();
     }
 
     #[test]
@@ -379,7 +392,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_valid_periodic_trigger();
 
-        run_using_empty_factory_context(|context| factory.validate(&trigger, context)).unwrap();
+        factory.validate_using_default_context(&trigger).unwrap();
     }
 
     #[test]
@@ -387,9 +400,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_no_parent_triggers();
 
-        let err = run_using_empty_factory_context(|context| factory.validate(&trigger, context))
-            .err()
-            .unwrap();
+        let err = factory.validate_using_default_context(&trigger).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::NoParentTriggers),
@@ -403,9 +414,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_missing_node_index();
 
-        let err = run_using_empty_factory_context(|context| factory.validate(&trigger, context))
-            .err()
-            .unwrap();
+        let err = factory.validate_using_default_context(&trigger).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::MissingNodeIndex),
@@ -419,9 +428,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_incorrect_node_index();
 
-        let err = run_using_empty_factory_context(|context| factory.validate(&trigger, context))
-            .err()
-            .unwrap();
+        let err = factory.validate_using_default_context(&trigger).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
@@ -433,14 +440,8 @@ mod tests {
     #[test]
     fn validate_conditional_trigger_success() {
         let factory = create_factory();
-        let (trigger, parent_triggers) = create_valid_conditional_trigger();
+        let (trigger, _) = create_valid_conditional_trigger();
 
-        run_using_factory_context(
-            None,
-            parent_triggers,
-            Some(vec![Arc::new(create_node())]),
-            |context| factory.create(&trigger, context),
-        )
-        .unwrap();
+        factory.validate_using_context_with(&trigger, 1).unwrap();
     }
 }
