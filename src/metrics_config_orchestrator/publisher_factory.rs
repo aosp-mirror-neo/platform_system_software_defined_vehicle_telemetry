@@ -3,7 +3,6 @@
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use sdv_ast::Node;
 use sdvtelemetry_proto_rust::metrics_configuration::{
-    declarative_aggregation::AggregationType,
     AggregationPublisher as AggregationPublisherProto,
     DeclarativeAggregation as DeclarativeAggregationProto,
     {publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto},
@@ -60,10 +59,6 @@ pub enum PublisherFactoryError {
     IncorrectNodeIndex { node_index: u32, field_name: String },
     #[error("Unknown aggregation type {aggregation_type} in declarative aggregation {field_name}")]
     UnknownAggregationType { aggregation_type: i32, field_name: String },
-    #[error("Seed expression is not set in custom declarative aggregation {field_name}")]
-    SeedExpressionNotSet { field_name: String },
-    #[error("Aggregation expression is not set in custom declarative aggregation {field_name}")]
-    AggregationExpressionNotSet { field_name: String },
     #[error("Field name {field_name} used more than once in declarative aggregation")]
     DuplicateFieldName { field_name: String },
     #[error("Unknown publisher type")]
@@ -209,40 +204,12 @@ impl PublisherFactoryImpl {
                         field_name: declarative_aggregation_proto.field_name.clone(),
                     })?;
 
-                let (seed_message_builder, aggregation_message_builder) = if aggregation_type
-                    == AggregationType::CUSTOM
-                {
-                    if declarative_aggregation_proto.seed_message_builder.is_none() {
-                        return Err(PublisherFactoryError::SeedExpressionNotSet {
-                            field_name: declarative_aggregation_proto.field_name.clone(),
-                        });
-                    }
-                    if declarative_aggregation_proto.aggregation_message_builder.is_none() {
-                        return Err(PublisherFactoryError::AggregationExpressionNotSet {
-                            field_name: declarative_aggregation_proto.field_name.clone(),
-                        });
-                    }
-                    (
-                        Some(declarative_aggregation_proto.seed_message_builder.clone().unwrap()),
-                        Some(
-                            declarative_aggregation_proto
-                                .aggregation_message_builder
-                                .clone()
-                                .unwrap(),
-                        ),
-                    )
-                } else {
-                    (None, None)
-                };
-
                 match acc.try_insert_value(
                     &declarative_aggregation_proto.field_name,
                     DeclarativeAggregation {
                         field_name: declarative_aggregation_proto.field_name.clone(),
                         selector_expression: selector_expression.clone(),
                         aggregation_type,
-                        seed_message_builder,
-                        aggregation_message_builder,
                     },
                 ) {
                     Ok(_) => Ok(acc),
@@ -261,13 +228,13 @@ mod tests {
     use async_trait::async_trait;
     use protobuf::{
         descriptor::{DescriptorProto, FieldDescriptorProto, FileDescriptorProto},
-        EnumOrUnknown, MessageDyn, MessageField,
+        EnumOrUnknown, MessageDyn,
     };
     use sdv_ast::NodeValue;
     use sdvtelemetry_proto_rust::metrics_configuration::{
+        declarative_aggregation::AggregationType,
         AggregationPublisher as AggregationPublisherProto,
-        DeclarativeAggregation as DeclarativeAggregationProto, ProtoMessageBuilder,
-        Publisher as PublisherProto,
+        DeclarativeAggregation as DeclarativeAggregationProto, Publisher as PublisherProto,
     };
     use std::collections::HashMap;
 
@@ -693,153 +660,6 @@ mod tests {
                     name => panic!("Unexpected field with name {}", name),
                 }
             }
-        } else {
-            panic!("Unexpected publisher type");
-        }
-    }
-
-    #[test]
-    fn create_aggregation_publisher_declarative_aggregation_no_custom_expressions_expressions_not_returned(
-    ) {
-        const TRIGGER_NAME: &str = "trigger";
-        const INTERVAL_MS: u64 = 42;
-        let factory = create_factory();
-
-        let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
-        let mut publisher = create_publisher(PUBLISHER_NAME);
-        let declarative_proto =
-            create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::AVG));
-        let aggregation_proto = set_aggregation_publisher(
-            &mut publisher,
-            &file_descriptor.messages().next().unwrap(),
-            vec![declarative_proto],
-        );
-        aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
-
-        let trigger = TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        );
-        let res = run_using_factory_context(
-            Some(vec![Arc::new(trigger)]),
-            Some(vec![Arc::new(create_node())]),
-            Some(vec![file_descriptor]),
-            |context| factory.create(&publisher, context),
-        )
-        .unwrap();
-
-        if let PublisherType::Aggregation { declarative_aggregations, .. } = &res.publisher_type {
-            assert_eq!(declarative_aggregations.len(), 1);
-            let aggregation = &declarative_aggregations[0];
-            assert!(aggregation.seed_message_builder.is_none());
-            assert!(aggregation.aggregation_message_builder.is_none());
-        } else {
-            panic!("Unexpected publisher type");
-        }
-    }
-
-    #[test]
-    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_seed_message_builder_fails(
-    ) {
-        let factory = create_factory();
-
-        let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
-        let mut publisher = create_publisher(PUBLISHER_NAME);
-        let declarative_proto =
-            create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
-        set_aggregation_publisher(
-            &mut publisher,
-            &file_descriptor.messages().next().unwrap(),
-            vec![declarative_proto],
-        );
-
-        let err = run_using_factory_context(
-            None,
-            Some(vec![Arc::new(create_node())]),
-            Some(vec![file_descriptor]),
-            |context| factory.create(&publisher, context),
-        )
-        .err()
-        .unwrap();
-
-        assert!(
-            matches!(err, PublisherFactoryError::SeedExpressionNotSet { ref field_name } if field_name == FIELD_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_no_aggregation_message_builder_fails(
-    ) {
-        let factory = create_factory();
-
-        let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
-        let mut publisher = create_publisher(PUBLISHER_NAME);
-        let mut declarative_proto =
-            create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
-        declarative_proto.seed_message_builder = MessageField::some(ProtoMessageBuilder::new());
-        set_aggregation_publisher(
-            &mut publisher,
-            &file_descriptor.messages().next().unwrap(),
-            vec![declarative_proto],
-        );
-
-        let err = run_using_factory_context(
-            None,
-            Some(vec![Arc::new(create_node())]),
-            Some(vec![file_descriptor]),
-            |context| factory.create(&publisher, context),
-        )
-        .err()
-        .unwrap();
-
-        assert!(
-            matches!(err, PublisherFactoryError::AggregationExpressionNotSet { ref field_name } if field_name == FIELD_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_aggregation_publisher_declarative_aggregation_custom_expressions_expressions_returned(
-    ) {
-        const TRIGGER_NAME: &str = "trigger";
-        const INTERVAL_MS: u64 = 42;
-        let factory = create_factory();
-
-        let file_descriptor = create_file_descriptor(&[FIELD_NAME]);
-        let mut publisher = create_publisher(PUBLISHER_NAME);
-        let mut declarative_proto =
-            create_declarative_aggregation(FIELD_NAME, Some(0), Some(AggregationType::CUSTOM));
-        declarative_proto.seed_message_builder = MessageField::some(ProtoMessageBuilder::new());
-        declarative_proto.aggregation_message_builder =
-            MessageField::some(ProtoMessageBuilder::new());
-
-        let aggregation_proto = set_aggregation_publisher(
-            &mut publisher,
-            &file_descriptor.messages().next().unwrap(),
-            vec![declarative_proto],
-        );
-        aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
-
-        let trigger = TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        );
-        let res = run_using_factory_context(
-            Some(vec![Arc::new(trigger)]),
-            Some(vec![Arc::new(create_node())]),
-            Some(vec![file_descriptor]),
-            |context| factory.create(&publisher, context),
-        )
-        .unwrap();
-
-        if let PublisherType::Aggregation { declarative_aggregations, .. } = &res.publisher_type {
-            assert_eq!(declarative_aggregations.len(), 1);
-            let aggregation = &declarative_aggregations[0];
-            assert!(aggregation.seed_message_builder.is_some());
-            assert!(aggregation.aggregation_message_builder.is_some());
         } else {
             panic!("Unexpected publisher type");
         }

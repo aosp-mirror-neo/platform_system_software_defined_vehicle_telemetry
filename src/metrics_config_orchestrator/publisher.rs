@@ -6,9 +6,7 @@ use async_trait::async_trait;
 use log::error;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_ast::Node;
-use sdvtelemetry_proto_rust::metrics_configuration::{
-    declarative_aggregation::AggregationType, ProtoMessageBuilder,
-};
+use sdvtelemetry_proto_rust::metrics_configuration::declarative_aggregation::AggregationType;
 use std::{
     collections::HashMap,
     fmt,
@@ -124,9 +122,6 @@ pub(crate) struct DeclarativeAggregation {
     pub(super) field_name: String,
     pub(super) selector_expression: Arc<Node>,
     pub(super) aggregation_type: AggregationType,
-    // TODO(b/293213911): Create new rust type and remove reference to protobuf message
-    pub(super) seed_message_builder: Option<ProtoMessageBuilder>,
-    pub(super) aggregation_message_builder: Option<ProtoMessageBuilder>,
 }
 
 impl Display for PublisherState {
