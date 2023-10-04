@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         descriptor_provider: Box::new(DescriptorProviderImpl {}),
     };
     match node_factory.create_nodes(&all_nodes, &node_factory_context) {
-        Ok(rust_nodes) => {
+        Ok((rust_nodes, _)) => {
             info!("All converted nodes = {:#?}", rust_nodes);
             for (i, node_ref) in rust_nodes.iter().enumerate() {
                 info!("index {} result = {:?}", i, node_ref.evaluate());
@@ -133,7 +133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     parse_and_store("5 / 2 - 5 % 2");
 
     match node_factory.create_nodes(parser.get_nodes(), &node_factory_context) {
-        Ok(rust_nodes) => {
+        Ok((rust_nodes, _)) => {
             for (idx, expr) in idx_to_expr.iter() {
                 let root_node = &rust_nodes[*idx as usize];
                 info!(
