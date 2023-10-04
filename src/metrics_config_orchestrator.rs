@@ -14,7 +14,7 @@ use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
 use sdv_ast::{
     DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError, Node,
-    NodeError, NodeFactory, NodeFactoryContext, NodeFactoryImpl, NodeValue, NodeValueType,
+    NodeError, NodeFactory, NodeFactoryContext, NodeFactoryImpl, NodeValueType,
 };
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
@@ -38,7 +38,8 @@ use metrics_report_generator_factory::{
 };
 use publisher::{Publisher, PublisherImpl};
 use publisher_factory::{
-    PublisherFactory, PublisherFactoryContext, PublisherFactoryError, PublisherFactoryImpl,
+    PublisherFactory, PublisherFactoryCreateContext, PublisherFactoryError, PublisherFactoryImpl,
+    PublisherFactoryValidateContext,
 };
 use trigger::{Trigger, TriggerImpl, TriggerSubscribeError, TriggerSubscriber};
 use trigger_factory::{
@@ -243,7 +244,7 @@ where
             config_proto,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
             |publisher_proto, publishers, triggers| {
-                let context = PublisherFactoryContext {
+                let context = PublisherFactoryCreateContext {
                     expression_nodes: &expression_nodes,
                     file_descriptors: &file_descriptors,
                     triggers,
@@ -395,21 +396,16 @@ where
             .validate(&config_proto.expression_nodes, &node_factory_context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
-        // Create a vector of empty nodes for validation purposes.
-        let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
-        let expression_nodes = vec![empty_node; config_proto.expression_nodes.len()];
-
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
 
         Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
-            |publisher_proto, _publishers, triggers| {
-                let context = PublisherFactoryContext {
-                    expression_nodes: &expression_nodes,
+            |publisher_proto, _publishers, _triggers| {
+                let context = PublisherFactoryValidateContext {
+                    expression_nodes_count: config_proto.expression_nodes.len(),
                     file_descriptors: &file_descriptors,
-                    triggers,
                 };
                 self.publisher_factory.validate(publisher_proto, &context).map_err(|e| {
                     MetricsConfigOrchestratorError::InvalidPublisherDefinition {
@@ -1035,7 +1031,7 @@ mod tests {
         fn create(
             &self,
             publisher_proto: &PublisherProto,
-            _context: &PublisherFactoryContext<MockTrigger>,
+            _context: &PublisherFactoryCreateContext<MockTrigger>,
         ) -> Result<Arc<MockPublisher>, PublisherFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(publisher_proto) {
@@ -1057,7 +1053,7 @@ mod tests {
         fn validate(
             &self,
             publisher_proto: &PublisherProto,
-            _context: &PublisherFactoryContext<MockTrigger>,
+            _context: &PublisherFactoryValidateContext,
         ) -> Result<(), PublisherFactoryError> {
             if let Some(callback) = &self.validate_callback {
                 if let Some(res) = callback(publisher_proto) {
