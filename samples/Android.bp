@@ -24,4 +24,20 @@ cc_binary {
     ],
 }
 
-//TODO: b/303110371: Create rust client app with new status listener design
+rust_binary {
+    name: "telemetry_rust_c_client",
+    srcs: [
+        "rust/telemetry_rust_c_client.rs",
+    ],
+    rustlibs: [
+        "libfutures",
+        "liblog_rust",
+        "libbinder_rs",
+        "liblogger",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+        "libsdv_telemetry_bindgen",
+        "libstatus_codes_bindgen",
+        "libtokio",
+    ],
+}

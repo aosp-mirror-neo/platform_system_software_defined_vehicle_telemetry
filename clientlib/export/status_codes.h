@@ -1,7 +1,9 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_STATUS_CODES_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_STATUS_CODES_H
 
-#include <cstdint>
+#include <stdint.h>
 
 enum class TelemetryServiceStatusCodes : int32_t {
 

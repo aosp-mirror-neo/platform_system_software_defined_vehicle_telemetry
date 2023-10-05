@@ -34,10 +34,10 @@ TelemetryService::TelemetryService() {
     cb_container_ = new CallbackContainer();
 
     mStatusListenerImpl_ = new StatusListenerImpl(cb_container_);
-    android::binder::Status err = binder_service_->setStatusListener(mStatusListenerImpl_);
+    binder_service_->setStatusListener(mStatusListenerImpl_);
 
     mReportReadyListener_ = new ReportReadyListenerImpl();
-    err = binder_service_->setReportReadyListener(mReportReadyListener_);
+    binder_service_->setReportReadyListener(mReportReadyListener_);
 
     ALOGI("TelemetryService Created");
 }
@@ -174,4 +174,4 @@ TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
     ALOGI("clearStatusListener from CPP %s", std::string(err.toString8()).c_str());
     return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
 }
-}
+}  // namespace android::sdv::telemetry
