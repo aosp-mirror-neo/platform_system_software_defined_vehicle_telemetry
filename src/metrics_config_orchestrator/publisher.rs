@@ -4,8 +4,7 @@ pub(super) mod service_adapter;
 
 use async_trait::async_trait;
 use log::error;
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdvtelemetry_proto_rust::metrics_configuration::declarative_aggregation::AggregationType;
+use protobuf::MessageDyn;
 use std::{
     collections::HashMap,
     fmt,
@@ -17,8 +16,7 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::collection_extension::HashMapExtension;
-use crate::expr::ast::Node;
-use crate::metrics_config_orchestrator::TriggerImpl;
+use crate::metrics_config_orchestrator::{message_builder::MessageBuilder, TriggerImpl};
 use service_adapter::{ServiceAdapter, ServiceAdapterError, ServiceSubscription};
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
@@ -110,18 +108,10 @@ pub(crate) enum PublisherType {
         service_subscription: Mutex<Option<ServiceSubscription>>,
     },
     Aggregation {
-        triggers: Vec<Arc<TriggerImpl>>,
-        message_descriptor: MessageDescriptor,
+        message_builder: Box<dyn MessageBuilder>,
         reset_on_get: bool,
-        declarative_aggregations: Vec<DeclarativeAggregation>,
+        triggers: Vec<Arc<TriggerImpl>>,
     },
-}
-
-#[allow(dead_code)]
-pub(crate) struct DeclarativeAggregation {
-    pub(super) field_name: String,
-    pub(super) selector_expression: Arc<Node>,
-    pub(super) aggregation_type: AggregationType,
 }
 
 impl Display for PublisherState {

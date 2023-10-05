@@ -72,11 +72,11 @@ pub enum MetricsReportGeneratorFactoryError {
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryImpl {
-    pub(super) message_builder_factory: Box<dyn MessageBuilderFactory>,
+    pub(super) message_builder_factory: Arc<dyn MessageBuilderFactory>,
 }
 
 impl MetricsReportGeneratorFactoryImpl {
-    pub fn new(message_builder_factory: Box<dyn MessageBuilderFactory>) -> Self {
+    pub fn new(message_builder_factory: Arc<dyn MessageBuilderFactory>) -> Self {
         MetricsReportGeneratorFactoryImpl { message_builder_factory }
     }
 }
@@ -238,7 +238,7 @@ mod tests {
     }
 
     fn create_factory() -> MetricsReportGeneratorFactoryImpl {
-        MetricsReportGeneratorFactoryImpl::new(Box::new(MockMessageBuilderFactory::new()))
+        MetricsReportGeneratorFactoryImpl::new(Arc::new(MockMessageBuilderFactory::new()))
     }
 
     fn create_config_with_invalid_trigger_name() -> MetricsReportConfig {
@@ -289,7 +289,7 @@ mod tests {
     fn create_proto_message_builder_factory_returns_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
         message_builder_factory.fail_create();
-        let factory = MetricsReportGeneratorFactoryImpl::new(Box::new(message_builder_factory));
+        let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
         let config = create_valid_config();
         let trigger = Arc::new(TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
@@ -371,7 +371,7 @@ mod tests {
     fn validate_proto_message_builder_factory_returns_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
         message_builder_factory.fail_validate();
-        let factory = MetricsReportGeneratorFactoryImpl::new(Box::new(message_builder_factory));
+        let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
         let config = create_valid_config();
 
         let err = factory
