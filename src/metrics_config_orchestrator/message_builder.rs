@@ -1,10 +1,15 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_ast::{Node, NodeError, ReflectRepeatedMutExt, ToReflectValueBox};
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
+
+use crate::expr::{
+    ast::Node,
+    node_errors::NodeError,
+    node_value::protobuf_reflection_extensions::{ReflectRepeatedMutExt, ToReflectValueBox},
+};
 
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.
@@ -81,12 +86,13 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use lazy_static::lazy_static;
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
-    use sdv_ast::NodeValue;
     use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use std::sync::Arc;
+
+    use super::*;
+    use crate::expr::node_value::NodeValue;
 
     lazy_static! {
         static ref REFLECT_EQ_MODE: ReflectEqMode = ReflectEqMode::default();

@@ -10,7 +10,7 @@ use sdvtelemetry_proto_rust::expression::{
     ConstantLeafNode, FieldLeafNode,
 };
 
-use crate::{node_errors::NodeError, DescriptorProvider};
+use crate::expr::{ast::DescriptorProvider, node_errors::NodeError};
 
 /// Used for cycle detection in the expression nodes.
 #[derive(Clone, PartialEq)]

@@ -54,7 +54,6 @@ rust_library {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
-        "libsdv_ast_traversal",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
@@ -88,7 +87,6 @@ rust_test_host {
         "libfutures",
         "liblazy_static",
         "libprotobuf",
-        "libsdv_ast_traversal",
         "libsdv_telem_test_proto",
         "libsdvtelemetry_proto_rust",
     ],

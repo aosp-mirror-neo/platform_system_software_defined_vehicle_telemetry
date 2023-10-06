@@ -5,7 +5,6 @@ pub(super) mod service_adapter;
 use async_trait::async_trait;
 use log::error;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_ast::Node;
 use sdvtelemetry_proto_rust::metrics_configuration::declarative_aggregation::AggregationType;
 use std::{
     collections::HashMap,
@@ -18,6 +17,7 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::collection_extension::HashMapExtension;
+use crate::expr::ast::Node;
 use crate::metrics_config_orchestrator::TriggerImpl;
 use service_adapter::{ServiceAdapter, ServiceAdapterError, ServiceSubscription};
 

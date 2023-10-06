@@ -4,13 +4,7 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-mod protobuf_reflection_extensions;
-
-use crate::node_errors::NodeError;
-use crate::node_value::protobuf_reflection_extensions::ToNodeValue;
-pub use crate::node_value::protobuf_reflection_extensions::{
-    ReflectRepeatedMutExt, ToReflectValueBox,
-};
+pub mod protobuf_reflection_extensions;
 
 use protobuf::{
     reflect::{ReflectFieldRef, ReflectValueRef},
@@ -22,6 +16,10 @@ use sdvtelemetry_proto_rust::expression::{
     },
     constant_leaf_node::Node_value as NodeValueProto,
     ConstantLeafNode as ConstantLeafNodeProto,
+};
+
+use crate::expr::{
+    node_errors::NodeError, node_value::protobuf_reflection_extensions::ToNodeValue,
 };
 
 const EPSILON: f32 = 1e-6;
@@ -510,11 +508,12 @@ impl NodeValue {
 #[cfg(test)]
 mod tests {
 
-    use super::*;
-    use crate::mock::*;
     use protobuf::Message;
     use sdvtelemetry_proto_rust::expression::ConstantLeafNode;
     use std::sync::Mutex;
+
+    use super::*;
+    use crate::expr::mock::*;
 
     fn provide(value: &NodeValue) -> Result<NodeValue, NodeError> {
         Ok(value.clone())

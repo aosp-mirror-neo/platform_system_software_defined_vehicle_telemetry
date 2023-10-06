@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::FileDescriptor;
-use sdv_ast::{Node, NodeValueType};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
     Trigger as TriggerProto,
@@ -12,6 +11,7 @@ use std::{
 };
 use thiserror::Error;
 
+use crate::expr::{ast::Node, ast_extensions::NodeValueType};
 use crate::metrics_config_orchestrator::{
     message_builder_factory::{
         MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,

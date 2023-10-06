@@ -1,6 +1,5 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use sdv_ast::Node;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
     Trigger as TriggerProto,
@@ -8,6 +7,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
+use crate::expr::ast::Node;
 use crate::metrics_config_orchestrator::{
     trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
@@ -144,11 +144,11 @@ impl TriggerFactoryImpl {
 
 #[cfg(test)]
 mod tests {
-    use sdv_ast::NodeValue;
     use std::collections::HashMap;
 
     use super::*;
     use crate::collection_extension::VecExtension;
+    use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::publisher::PublisherType;
     use crate::test_utils::ptr_eq;
 

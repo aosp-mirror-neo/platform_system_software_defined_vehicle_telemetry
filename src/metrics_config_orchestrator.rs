@@ -12,10 +12,6 @@ mod trigger_factory;
 use async_trait::async_trait;
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
-use sdv_ast::{
-    DescriptorProvider, DescriptorProviderError, MessageProvider, MessageProviderError, Node,
-    NodeError, NodeFactory, NodeFactoryContext, NodeFactoryImpl, NodeValueType,
-};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
@@ -29,6 +25,13 @@ use std::{
 use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
+use crate::expr::{
+    ast::{
+        DescriptorProvider, MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl,
+    },
+    ast_extensions::NodeValueType,
+    node_errors::{DescriptorProviderError, MessageProviderError, NodeError},
+};
 use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
@@ -784,7 +787,6 @@ where
 mod tests {
     use async_trait::async_trait;
     use protobuf::{well_known_types::wrappers::Int32Value, MessageDyn};
-    use sdv_ast::{Node, NodeValue, NodeValueType};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -799,6 +801,8 @@ mod tests {
     use tokio::{time, time::Duration};
 
     use super::*;
+    use crate::expr::ast_extensions::NodeValueType;
+    use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::publisher_factory::{

@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
-use sdv_ast::Node;
 use std::{
     collections::HashMap,
     fmt,
@@ -13,6 +12,7 @@ use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
 use crate::collection_extension::HashMapExtension;
+use crate::expr::ast::Node;
 use crate::metrics_config_orchestrator::{
     publisher::{PublisherSubscribeError, PublisherUnsubscribeError},
     Publisher,
@@ -285,13 +285,12 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::Int32Value;
-    use sdv_ast::NodeValue;
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::{sync::Notify, time};
 
-    use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
-
     use super::*;
+    use crate::expr::node_value::NodeValue;
+    use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
 
     const INTERVAL_MS: u64 = 10;
     const PUBLISHER_NAME: &str = "publisher";
