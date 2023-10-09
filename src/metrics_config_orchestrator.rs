@@ -248,8 +248,9 @@ where
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
             |publisher_proto, publishers, triggers| {
                 let context = PublisherFactoryCreateContext {
-                    expression_nodes: &expression_nodes,
                     file_descriptors: &file_descriptors,
+                    nodes: &expression_nodes,
+                    node_types: &node_types,
                     triggers,
                 };
                 self.publisher_factory.create(publisher_proto, &context).map_or_else(
@@ -389,11 +390,11 @@ where
             }
         }
 
+        // Validate expression nodes to ensure they are set up correctly.
         let node_factory_context = NodeFactoryContext {
             message_provider: None,
             descriptor_provider: Box::new(DescriptorProviderImpl {}),
         };
-        // Validate expression nodes to ensure they are set up correctly.
         let node_types = self
             .node_factory
             .validate(&config_proto.expression_nodes, &node_factory_context)
@@ -407,7 +408,7 @@ where
             config_proto,
             |publisher_proto, _publishers, _triggers| {
                 let context = PublisherFactoryValidateContext {
-                    expression_nodes_count: config_proto.expression_nodes.len(),
+                    node_types: &node_types,
                     file_descriptors: &file_descriptors,
                 };
                 self.publisher_factory.validate(publisher_proto, &context).map_err(|e| {
@@ -455,13 +456,14 @@ impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
+        let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(Box::new(
-                MessageBuilderFactoryImpl::new(),
-            )),
+            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
+                message_builder_factory.clone(),
+            ),
             node_factory: NodeFactoryImpl::new(),
-            publisher_factory: PublisherFactoryImpl::new(),
+            publisher_factory: PublisherFactoryImpl::new(message_builder_factory),
             trigger_factory: TriggerFactoryImpl::new(),
             report_ready_callback: Arc::new(report_ready_callback),
             phantom_generator: PhantomData,

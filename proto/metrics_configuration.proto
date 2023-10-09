@@ -156,89 +156,21 @@ message ServicePublisher {
   }
 }
 
-// When triggered performs aggregation based on declarations or runs the script
-// to perform aggregation, combines the results into a message and publishes it.
+// When triggered uses message builder to create a new message according
+// to its underlying aggregated field assignments and publishes it.
 message AggregationPublisher {
   // Required.
-  // The names of the triggers that specify when aggregation is performed.
+  // The names of the triggers that specify when a new message is published.
   repeated string trigger_names = 1;
-
-  // Required.
-  // Message type declared in the Metrics Configuration that is used to publish
-  // the message with the aggregated data. The message must have a field for
-  // each aggregated field and the field must fit the aggregation result.
-  string message_type_name = 2;
 
   // Optional.
   // Specifies whether the aggregated value is reset when the publisher data is
   // read into activation context.
-  bool reset_on_get = 3;
-
-  // Optional.
-  // Associated declarative aggregations.
-  // Must be empty if at least one script aggregation is specified.
-  repeated DeclarativeAggregation declarative_aggregations = 4;
-
-  // Optional.
-  // Associated script aggregations.
-  // Must be empty if at least one declarative aggregation is specified.
-  repeated ScriptAggregation script_aggregations = 5;
-}
-
-// Declaratively specifies how to aggregate data from the activation context.
-message DeclarativeAggregation {
-  // Required.
-  // The name of the field that stores aggregation result.
-  // Must be unique within AggregationPublisher.
-  string field_name = 1;
+  bool reset_on_get = 2;
 
   // Required.
-  // The index of the root node of the expression that converts data from
-  // publishers to a value. If the value is not numeric or a boolean,
-  // aggregation_type must be VECTOR, LATEST or CUSTOM. If a message from
-  // a publisher is not present in the activation context, the context will be
-  // populated with the latest published message.
-  optional uint32 selector_node_index = 2;
-
-  enum AggregationType {
-    AGGREGATION_TYPE_UNSPECIFIED = 0;
-
-    // Concatenation of values into a vector.
-    VECTOR = 1;
-
-    // Maximum numeric value.
-    MAX = 2;
-
-    // Minimum numeric value.
-    MIN = 3;
-
-    // Numeric average of all values.
-    AVG = 4;
-
-    // Count of values.
-    COUNT = 5;
-
-    // The latest published value.
-    LATEST = 6;
-  }
-
-  // Required.
-  // Type of aggregation performed with the data from the publisher.
-  AggregationType aggregation_type = 3;
-}
-
-// Specifies a script that aggregates data from the activation context.
-message ScriptAggregation {
-  // Required.
-  // The name of the fields that need to be extracted from the script data table
-  // and put into the aggregation result. Must be unique within
-  // AggregationPublisher.
-  repeated string field_names = 1;
-
-  // Required.
-  // Name of the function that aggregates data from the activation context.
-  // Must be defined in the script.
-  string handler_function_name = 2;
+  // Message builder that defines how published message is created.
+  ProtoMessageBuilder message_builder = 3;
 }
 
 // Specifies when and how data is combined into a Metrics Report to be reported
