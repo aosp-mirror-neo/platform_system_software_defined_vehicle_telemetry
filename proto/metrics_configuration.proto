@@ -264,6 +264,7 @@ message NetworkPublisherConfig {
 message ProtoMessageBuilder {
   // Required.
   // Type name of protobuf message that is created by the builder.
+  // Must start with a dot.
   string message_type = 1;
 
   // Instruction on how to set a single field.
@@ -273,11 +274,46 @@ message ProtoMessageBuilder {
     string field_name = 1;
 
     // Required.
-    // Index of root expression node whose evaluation output is the value of the field.
+    // Index of root expression node. The expression node's evaluation output
+    // is either directly used as the value of the field, or aggregated
+    // based on the aggregation type.
     uint32 expression_node_index = 2;
+
+    // Every time the field value is built, the node output can be aggregated
+    // with the past values of this field to produce a new field value.
+    enum AggregationType {
+      AGGREGATION_TYPE_UNSPECIFIED = 0;
+
+      // No aggregation is performed. The expression node's latest
+      // evaluation output will be used as the field value.
+      NO_AGGREGATION = 1;
+
+      // Concatenation of node evaluation outputs into a vector.
+      VECTOR = 2;
+
+      // Maximum numeric value of past and current node output value.
+      // Requires the expression node to evaluate to a numeric value.
+      MAX = 3;
+
+      // Minimum numeric value of past and current node output value.
+      // Requires the expression node to evaluate to a numeric value.
+      MIN = 4;
+
+      // Numeric average of all node output values.
+      // Requires the expression node to evaluate to a numeric value.
+      AVG = 5;
+
+      // Count is incremented by 1 every time the message is built.
+      COUNT = 6;
+    }
+
+    // Required.
+    // Type of aggregation performed on the field.
+    AggregationType aggregation_type = 3;
   }
 
   // Required.
   // Instructions on how to set the fields of the message.
+  // Each field can have a different type of aggregation.
   repeated FieldAssignment field_assignments = 2;
 }

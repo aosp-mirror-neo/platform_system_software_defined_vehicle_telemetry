@@ -1,6 +1,11 @@
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
-use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
-use std::{collections::HashMap, sync::Arc};
+use sdvtelemetry_proto_rust::metrics_configuration::{
+    proto_message_builder::field_assignment::AggregationType, ProtoMessageBuilder,
+};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 use thiserror::Error;
 
 use crate::{
@@ -9,7 +14,9 @@ use crate::{
         ast::Node,
         ast_extensions::{NodeValueType, NodeValueTypeExtension},
     },
-    metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderImpl},
+    metrics_config_orchestrator::message_builder::{
+        AggregatedFieldValue, MessageBuilder, MessageBuilderImpl,
+    },
 };
 
 /// Factory that validates MetricsConfig's ProtoMessageBuilder and creates
@@ -57,6 +64,10 @@ pub enum MessageBuilderFactoryError {
         "Field {field_name} of message {message_type} has incompatible value assignment: {msg}"
     )]
     IncompatibleFieldAssignment { field_name: String, message_type: String, msg: String },
+    #[error("Field {field_name} of message {message_type} has unrecognized aggregation type {i}")]
+    UnknownAggregationType { field_name: String, message_type: String, i: i32 },
+    #[error("Field {field_name} of message {message_type} did not specify aggregation type")]
+    AggregationTypeNotSet { field_name: String, message_type: String },
 }
 
 impl<'a> MessageBuilderFactoryCreateContext<'a> {
@@ -96,7 +107,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
         )?;
 
         // validation does not provide the nodes to the helper function
-        Self::map_field_assignments_to_node(
+        Self::map_field_assignments(
             proto_message_builder,
             &message_descriptor,
             None,
@@ -114,28 +125,27 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
             context.file_descriptors,
             &proto_message_builder.message_type,
         )?;
-        // maps field_name to Option<&Arc<Node>>
-        let map = Self::map_field_assignments_to_node(
+        // maps field_name to an optional tuple that is required for creating field values
+        let map = Self::map_field_assignments(
             proto_message_builder,
             &message_descriptor,
             Some(context.nodes),
             context.node_types,
         )?;
 
-        // convert HashMap<Key, Option<&Value>> into HashMap<Key, Value>
+        // convert the map into another hashmap that is accepted by MessageBuilderImpl's
+        // constructor
         let field_assignments = map
             .into_iter()
-            .map(|(field_name, node)| {
-                (
-                    field_name,
-                    node.expect(
-                        "All indices should be valid and all expression nodes should exist",
-                    )
-                    .clone(),
-                )
+            .map(|(field_name, node_and_aggregation_type_option)| {
+                let (node, aggregation_type) = node_and_aggregation_type_option.expect(
+                    "All field names should map to valid expression nodes and aggregation types",
+                );
+                // return new (key, value) pairs for the new hashmap
+                (field_name, Mutex::new(AggregatedFieldValue::new(aggregation_type, node)))
             })
             .collect();
-        Ok(Box::new(MessageBuilderImpl::new(message_descriptor.clone(), field_assignments)))
+        Ok(Box::new(MessageBuilderImpl::new(message_descriptor, field_assignments)))
     }
 }
 
@@ -162,18 +172,38 @@ impl MessageBuilderFactoryImpl {
 
     /// Helper function to map ProtoMessageBuilder's field assignment to Node, if the Nodes
     /// are provided. Otherwise this function only performs validation.
-    fn map_field_assignments_to_node<'a>(
+    ///
+    /// Returns a hashmap, where the key is the field_name, the value is an optional tuple
+    /// consisting of the expression node (if provided) and the aggregation type.
+    fn map_field_assignments<'a>(
         proto_message_builder: &'a ProtoMessageBuilder,
         message_descriptor: &'a MessageDescriptor,
         nodes: Option<&'a [Arc<Node>]>,
         node_types: &'a [NodeValueType],
-    ) -> Result<HashMap<String, Option<&'a Arc<Node>>>, MessageBuilderFactoryError> {
+    ) -> Result<HashMap<String, Option<(&'a Arc<Node>, AggregationType)>>, MessageBuilderFactoryError>
+    {
         let get_msg_type = || proto_message_builder.message_type.clone();
 
-        // maps field_name to Option<Arc<Node>>, the node evaluation output is the field value
-        let mut field_to_node_map = HashMap::new();
+        // maps field_name to an optional tuple (&Arc<Node>, AggregationType)
+        let mut field_assignments_map = HashMap::new();
         for field_assignment in &proto_message_builder.field_assignments {
             let get_field_name = || field_assignment.field_name.clone();
+
+            // validate the enum value is a known value
+            let aggregation_type = field_assignment.aggregation_type.enum_value().map_err(|i| {
+                MessageBuilderFactoryError::UnknownAggregationType {
+                    field_name: get_field_name(),
+                    message_type: get_msg_type(),
+                    i,
+                }
+            })?;
+
+            if aggregation_type == AggregationType::AGGREGATION_TYPE_UNSPECIFIED {
+                return Err(MessageBuilderFactoryError::AggregationTypeNotSet {
+                    field_name: get_field_name(),
+                    message_type: get_msg_type(),
+                });
+            }
 
             // validate the field value references a valid node index
             let node_type = node_types.get(field_assignment.expression_node_index as usize).ok_or(
@@ -200,6 +230,7 @@ impl MessageBuilderFactoryImpl {
                     }
                 })?;
 
+            // TODO: b/304597877 - Check compatibility using aggregation type & node type
             // validate this field's type is consistent with node evaluation output's type
             if field_type != *node_type {
                 return Err(MessageBuilderFactoryError::IncompatibleFieldAssignment {
@@ -213,17 +244,18 @@ impl MessageBuilderFactoryImpl {
             }
 
             // validate there is only 1 assignment for each field
-            field_to_node_map
+            field_assignments_map
                 .try_insert_value(
                     get_field_name(),
-                    Self::get_node(nodes, field_assignment.expression_node_index as usize),
+                    Self::get_node(nodes, field_assignment.expression_node_index as usize)
+                        .map(|node| (node, aggregation_type)),
                 ) // `try_insert_value` returns error if key already exists
                 .map_err(|_| MessageBuilderFactoryError::DuplicateFieldAssignment {
                     field_name: get_field_name(),
                     message_type: get_msg_type(),
                 })?;
         }
-        Ok(field_to_node_map)
+        Ok(field_assignments_map)
     }
 }
 
@@ -258,6 +290,7 @@ mod tests {
         let mut field_assignment = FieldAssignment::new();
         field_assignment.field_name = field_name.to_string();
         field_assignment.expression_node_index = node_index;
+        field_assignment.aggregation_type = AggregationType::NO_AGGREGATION.into();
         field_assignment
     }
 
@@ -283,6 +316,32 @@ mod tests {
         );
 
         assert!(factory.validate(&proto_message_builder, &context).is_ok());
+    }
+
+    #[test]
+    fn test_factory_validate_no_aggregation_type_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let node_types = vec![NodeValueType::Int];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            vec![{
+                let mut field_assignment = FieldAssignment::new();
+                field_assignment.field_name = INT_FIELD_NAME.to_string();
+                field_assignment.expression_node_index = 0;
+                // error - didn't set aggregation_type
+                field_assignment
+            }],
+        );
+
+        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::AggregationTypeNotSet { .. }),
+            "Unexpected error: {}",
+            err
+        );
     }
 
     #[test]
@@ -431,6 +490,32 @@ mod tests {
         );
 
         factory.create(&proto_message_builder, &context).unwrap();
+    }
+
+    #[test]
+    fn test_factory_create_no_aggregation_type_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let (nodes, node_types) = create_nodes_with_size(1);
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            vec![{
+                let mut field_assignment = FieldAssignment::new();
+                field_assignment.field_name = INT_FIELD_NAME.to_string();
+                field_assignment.expression_node_index = 0;
+                // error - didn't set aggregation_type
+                field_assignment
+            }],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::AggregationTypeNotSet { .. }),
+            "Unexpected error: {}",
+            err
+        );
     }
 
     #[test]
