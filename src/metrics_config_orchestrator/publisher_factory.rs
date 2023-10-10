@@ -79,24 +79,28 @@ impl PublisherFactory for PublisherFactoryImpl {
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
-        let name = publisher_proto.name.clone();
-        let publisher_type = match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => {
-                PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() }
-            }
+        let publisher_name = publisher_proto.name.clone();
+        let publisher = match &publisher_proto.publisher_type {
+            Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => PublisherImpl::new(
+                publisher_name,
+                PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() },
+            ),
             Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
                 return Ok(Arc::new(PublisherImpl::new_service_publisher(
-                    name,
+                    publisher_name,
                     service_publisher.service_name.clone(),
                     self.service_adapter.clone(),
                 )));
             }
-            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
-                self.create_aggregation_publisher(aggregation_publisher, context)?
-            }
+            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => self
+                .create_aggregation_publisher(
+                    publisher_name,
+                    aggregation_publisher_proto,
+                    context,
+                )?,
             _ => return Err(PublisherFactoryError::UnknownPublisherType),
         };
-        Ok(Arc::new(PublisherImpl::new(name, publisher_type)))
+        Ok(Arc::new(publisher))
     }
 
     fn validate(
@@ -133,9 +137,10 @@ impl PublisherFactoryImpl {
     /// Creates Aggregation Publisher struct based on the protobuf message and context.
     fn create_aggregation_publisher(
         &self,
+        publisher_name: String,
         aggregation_publisher_proto: &AggregationPublisherProto,
         context: &PublisherFactoryCreateContext,
-    ) -> Result<PublisherType, PublisherFactoryError> {
+    ) -> Result<PublisherImpl, PublisherFactoryError> {
         let message_builder = self.message_builder_factory.create(
             &aggregation_publisher_proto.message_builder,
             &MessageBuilderFactoryCreateContext {
@@ -144,15 +149,20 @@ impl PublisherFactoryImpl {
                 node_types: context.node_types,
             },
         )?;
-        Ok(PublisherType::Aggregation {
+        let triggers = aggregation_publisher_proto
+            .trigger_names
+            .iter()
+            .map(|trigger_name| {
+                context.triggers[trigger_name].clone() as Arc<dyn Trigger + Send + Sync>
+            })
+            .collect();
+        let publisher = PublisherImpl::new_aggregation_publisher(
+            publisher_name,
             message_builder,
-            triggers: aggregation_publisher_proto
-                .trigger_names
-                .iter()
-                .map(|trigger_name| context.triggers[trigger_name].clone())
-                .collect(),
-            reset_on_get: aggregation_publisher_proto.reset_on_get,
-        })
+            aggregation_publisher_proto.reset_on_get,
+            triggers,
+        );
+        Ok(publisher)
     }
 }
 
@@ -346,14 +356,11 @@ mod tests {
             factory.create_using_context_with(&publisher, Some(vec![trigger.clone()])).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        if let PublisherType::Aggregation {
-            message_builder: _,
-            triggers: res_triggers,
-            reset_on_get,
-        } = &res.publisher_type
+        if let PublisherType::Aggregation { triggers: res_triggers, reset_on_get, .. } =
+            &res.publisher_type
         {
             assert_eq!(res_triggers.len(), 1);
-            assert!(Arc::ptr_eq(&res_triggers[0], &trigger));
+            assert!(Arc::ptr_eq(&res_triggers[0], &(trigger as Arc<dyn Trigger + Send + Sync>)));
             assert!(reset_on_get);
         } else {
             panic!("Unexpected publisher type");

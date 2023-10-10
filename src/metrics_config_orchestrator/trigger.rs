@@ -76,7 +76,6 @@ pub(crate) enum TriggerSubscriber {
     PeriodicTrigger { name: String },
 }
 
-#[allow(dead_code)]
 pub(crate) struct TriggerImpl {
     pub(super) name: String,
     pub(super) trigger_type: TriggerType,
