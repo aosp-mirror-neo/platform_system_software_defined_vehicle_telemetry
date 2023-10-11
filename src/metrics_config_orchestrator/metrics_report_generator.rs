@@ -21,7 +21,7 @@ use crate::metrics_config_orchestrator::{
 };
 
 #[async_trait]
-pub(crate) trait MetricsReportGenerator {
+pub(crate) trait MetricsReportGenerator: Send + Sync {
     fn get_name(&self) -> &str;
 
     async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError>;
@@ -48,7 +48,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) config_version: u32,
     pub(super) report_incomplete: bool,
     pub(super) report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
-    pub(super) triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+    pub(super) triggers: Vec<Arc<dyn Trigger>>,
 
     is_active: AsyncMutex<bool>,
     report_number: AtomicU32,
@@ -123,7 +123,7 @@ impl MetricsReportGeneratorImpl {
         config_version: u32,
         report_incomplete: bool,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
-        triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+        triggers: Vec<Arc<dyn Trigger>>,
         message_builder: Box<dyn MessageBuilder>,
     ) -> Self {
         let subscriber = TriggerSubscriber::MetricsReportGenerator { name: name.clone() };

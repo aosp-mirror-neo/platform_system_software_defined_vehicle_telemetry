@@ -288,7 +288,7 @@ mod tests {
 
         assert_eq!(res.name, TRIGGER_NAME);
         if let TriggerType::Data { publisher: res_publisher } = &res.trigger_type {
-            assert!(ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher + Send + Sync>)));
+            assert!(ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher>)));
         } else {
             panic!("Unexpected trigger type");
         }
