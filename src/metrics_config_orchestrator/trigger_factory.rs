@@ -12,6 +12,7 @@ use crate::metrics_config_orchestrator::{
     trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 pub(crate) trait TriggerFactory<
     TPublisher: Publisher = PublisherImpl,
     TTrigger: Trigger = TriggerImpl,
@@ -32,6 +33,7 @@ pub(crate) trait TriggerFactory<
     ) -> Result<(), TriggerFactoryError>;
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 pub(crate) struct TriggerFactoryCreateContext<
     'a,
     Pub: Publisher = PublisherImpl,

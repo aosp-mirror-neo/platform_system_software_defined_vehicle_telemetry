@@ -21,6 +21,7 @@ use crate::metrics_config_orchestrator::{
     NodeValueType, Publisher, PublisherImpl, Trigger, TriggerImpl,
 };
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 pub(crate) trait PublisherFactory<
     TPublisher: Publisher = PublisherImpl,
     TTrigger: Trigger = TriggerImpl,
@@ -42,6 +43,7 @@ pub(crate) trait PublisherFactory<
     ) -> Result<(), PublisherFactoryError>;
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 pub(crate) struct PublisherFactoryCreateContext<'a, TTrigger: Trigger = TriggerImpl> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],

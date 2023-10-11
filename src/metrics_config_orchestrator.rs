@@ -111,6 +111,7 @@ pub enum MetricsConfigOrchestratorError {
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
+// TODO(b/304793694): refactor tests and remove generic parameters.
 pub(super) struct MetricsConfigOrchestratorImpl<
     TMetricsReportGenerator = MetricsReportGeneratorImpl,
     TMetricsReportGeneratorFactory = MetricsReportGeneratorFactoryImpl,
@@ -143,6 +144,7 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     phantom_generator: PhantomData<TMetricsReportGenerator>,
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 pub(super) struct MetricsConfig<
     TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
     TPublisher: Publisher = PublisherImpl,
@@ -156,6 +158,7 @@ pub(super) struct MetricsConfig<
     finish_trigger: Option<Arc<TTrigger>>,
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 struct MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
 where
     TMetricsReportGenerator: MetricsReportGenerator,
@@ -165,6 +168,7 @@ where
     metrics_config: OnceLock<Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>,
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 impl<TMetricsReportGenerator, TPublisher, TTrigger> MessageProvider
     for MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
 where
@@ -196,6 +200,7 @@ impl DescriptorProvider for DescriptorProviderImpl {
     }
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 #[async_trait]
 impl<
         TMetricsReportGenerator,
@@ -471,6 +476,7 @@ impl MetricsConfigOrchestratorImpl {
     }
 }
 
+// TODO(b/304793694): refactor tests and remove generic parameters.
 impl<
         TMetricsReportGenerator,
         TMetricsReportGeneratorFactory,
