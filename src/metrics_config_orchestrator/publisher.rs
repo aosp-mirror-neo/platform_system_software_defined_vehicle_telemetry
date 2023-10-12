@@ -27,7 +27,7 @@ const PUBLISHER_STATE_ACTIVE: &str = "Active";
 const PUBLISHER_STATE_DEACTIVATING: &str = "Deactivating";
 
 #[async_trait]
-pub(crate) trait Publisher {
+pub(crate) trait Publisher: Send + Sync {
     fn get_name(&self) -> &str;
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
 
@@ -115,7 +115,7 @@ pub(crate) enum PublisherType {
         message_builder: Box<dyn MessageBuilder>,
         reset_on_get: bool,
         trigger_subscriber: TriggerSubscriber,
-        triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+        triggers: Vec<Arc<dyn Trigger>>,
     },
 }
 
@@ -310,7 +310,7 @@ impl PublisherImpl {
         name: String,
         message_builder: Box<dyn MessageBuilder>,
         reset_on_get: bool,
-        triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+        triggers: Vec<Arc<dyn Trigger>>,
     ) -> Self {
         let trigger_subscriber = TriggerSubscriber::AggregationPublisher { name: name.clone() };
         let publisher_type = PublisherType::Aggregation {
@@ -502,7 +502,7 @@ mod tests {
     }
 
     fn create_inactive_aggregation_publisher(
-        triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+        triggers: Vec<Arc<dyn Trigger>>,
     ) -> Arc<PublisherImpl> {
         Arc::new(PublisherImpl::new_aggregation_publisher(
             PUBLISHER_NAME.to_owned(),
@@ -528,7 +528,7 @@ mod tests {
     }
 
     async fn create_active_aggregation_publisher(
-        triggers: Vec<Arc<dyn Trigger + Send + Sync>>,
+        triggers: Vec<Arc<dyn Trigger>>,
     ) -> Arc<PublisherImpl> {
         let publisher = create_inactive_aggregation_publisher(triggers);
 

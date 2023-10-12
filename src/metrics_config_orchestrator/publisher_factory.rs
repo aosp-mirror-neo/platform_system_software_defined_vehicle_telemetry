@@ -154,9 +154,7 @@ impl PublisherFactoryImpl {
         let triggers = aggregation_publisher_proto
             .trigger_names
             .iter()
-            .map(|trigger_name| {
-                context.triggers[trigger_name].clone() as Arc<dyn Trigger + Send + Sync>
-            })
+            .map(|trigger_name| context.triggers[trigger_name].clone() as Arc<dyn Trigger>)
             .collect();
         let publisher = PublisherImpl::new_aggregation_publisher(
             publisher_name,
@@ -362,7 +360,7 @@ mod tests {
             &res.publisher_type
         {
             assert_eq!(res_triggers.len(), 1);
-            assert!(Arc::ptr_eq(&res_triggers[0], &(trigger as Arc<dyn Trigger + Send + Sync>)));
+            assert!(Arc::ptr_eq(&res_triggers[0], &(trigger as Arc<dyn Trigger>)));
             assert!(reset_on_get);
         } else {
             panic!("Unexpected publisher type");

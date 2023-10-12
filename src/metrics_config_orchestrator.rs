@@ -172,9 +172,9 @@ where
 impl<TMetricsReportGenerator, TPublisher, TTrigger> MessageProvider
     for MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
 where
-    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync,
-    TPublisher: Publisher + Send + Sync,
-    TTrigger: Trigger + Send + Sync,
+    TMetricsReportGenerator: MetricsReportGenerator,
+    TPublisher: Publisher,
+    TTrigger: Trigger,
 {
     fn get_message(
         &self,
@@ -221,13 +221,13 @@ impl<
         TTriggerFactory,
     >
 where
-    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
+    TMetricsReportGenerator: MetricsReportGenerator + 'static,
     TMetricsReportGeneratorFactory:
         MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + Send + Sync + 'static,
     TNodeFactory: NodeFactory + Send + Sync + 'static,
-    TPublisher: Publisher + Send + Sync + 'static,
+    TPublisher: Publisher + 'static,
     TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Send + Sync + 'static,
-    TTrigger: Trigger + Sync + Send + 'static,
+    TTrigger: Trigger + 'static,
     TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Send + Sync + 'static,
 {
     async fn initialize_config(
@@ -496,13 +496,13 @@ impl<
         TTriggerFactory,
     >
 where
-    TMetricsReportGenerator: MetricsReportGenerator + Send + Sync + 'static,
+    TMetricsReportGenerator: MetricsReportGenerator + 'static,
     TMetricsReportGeneratorFactory:
         MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + 'static,
     TNodeFactory: NodeFactory + 'static,
-    TPublisher: Publisher + Send + Sync + 'static,
+    TPublisher: Publisher + 'static,
     TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + 'static,
-    TTrigger: Trigger + Send + Sync + 'static,
+    TTrigger: Trigger + 'static,
     TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + 'static,
 {
     // Private functions.

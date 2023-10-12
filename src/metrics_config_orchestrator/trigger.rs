@@ -19,7 +19,7 @@ use crate::metrics_config_orchestrator::{
 };
 
 #[async_trait]
-pub(crate) trait Trigger {
+pub(crate) trait Trigger: Send + Sync {
     /// Returns the name of the trigger.
     fn get_name(&self) -> &str;
 
@@ -90,7 +90,7 @@ pub(crate) struct TriggerImpl {
 
 #[allow(dead_code)]
 pub(crate) enum TriggerType {
-    Data { publisher: Arc<dyn Publisher + Send + Sync> },
+    Data { publisher: Arc<dyn Publisher> },
     Periodic { interval_ms: u64 },
     Conditional { triggers: Vec<Arc<TriggerImpl>>, selector_expression: Arc<Node> },
 }
