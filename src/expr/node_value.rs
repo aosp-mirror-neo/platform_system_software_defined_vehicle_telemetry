@@ -4,7 +4,7 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-pub mod protobuf_reflection_extensions;
+mod protobuf_reflection_extensions;
 
 use protobuf::{
     reflect::{ReflectFieldRef, ReflectValueRef},
@@ -163,6 +163,46 @@ impl NodeValue {
         }
         // recursively gets the field value from field names
         Self::extract_field_value(msg.as_ref(), fields)
+    }
+
+    /// Returns the bool value or a custom error message if NodeValue is not a bool.
+    pub fn get_bool(&self, err_provider: &impl Fn() -> NodeError) -> Result<bool, NodeError> {
+        if let NodeValue::Bool(val) = self {
+            return Ok(*val);
+        }
+        Err(err_provider())
+    }
+
+    /// Returns the int value or the provided error if NodeValue is not an int.
+    pub fn get_int(&self, err_provider: &impl Fn() -> NodeError) -> Result<i64, NodeError> {
+        Ok(match self {
+            NodeValue::Int32(val) => *val as i64,
+            NodeValue::Int64(val) => *val,
+            _ => return Err(err_provider()),
+        })
+    }
+
+    /// Returns the double value or error if NodeValue is not numeric.
+    pub fn get_double(&self, err_provider: &impl Fn() -> NodeError) -> Result<f64, NodeError> {
+        Ok(match self {
+            NodeValue::Int32(val) => *val as f64,
+            NodeValue::Int64(val) => *val as f64,
+            NodeValue::Float(val) => *val as f64,
+            NodeValue::Double(val) => *val,
+            _ => return Err(err_provider()),
+        })
+    }
+
+    /// Returns the Message value or the provided error if NodeValue is not a Message.
+    pub fn get_message(
+        &self,
+        err_provider: impl FnOnce() -> NodeError,
+    ) -> Result<&dyn MessageDyn, NodeError> {
+        if let NodeValue::Message(msg) = self {
+            Ok(msg.as_ref())
+        } else {
+            Err(err_provider())
+        }
     }
 
     // private functions and methods below
@@ -413,14 +453,6 @@ impl NodeValue {
         matches!(self, NodeValue::Bool(_))
     }
 
-    /// Returns the bool value or a custom error message if NodeValue is not a bool.
-    fn get_bool(&self, err_provider: &impl Fn() -> NodeError) -> Result<bool, NodeError> {
-        if let NodeValue::Bool(val) = self {
-            return Ok(*val);
-        }
-        Err(err_provider())
-    }
-
     /// Check if node holds a numeric value.
     fn is_numeric(&self) -> bool {
         matches!(
@@ -432,38 +464,6 @@ impl NodeValue {
     /// Check if node holds an integer value.
     fn is_int(&self) -> bool {
         matches!(self, NodeValue::Int32(_) | NodeValue::Int64(_))
-    }
-
-    /// Returns the int value or the provided error if NodeValue is not an int.
-    fn get_int(&self, err_provider: &impl Fn() -> NodeError) -> Result<i64, NodeError> {
-        Ok(match self {
-            NodeValue::Int32(val) => *val as i64,
-            NodeValue::Int64(val) => *val,
-            _ => return Err(err_provider()),
-        })
-    }
-
-    /// Returns the double value or error if NodeValue is not numeric.
-    fn get_double(&self, err_provider: &impl Fn() -> NodeError) -> Result<f64, NodeError> {
-        Ok(match self {
-            NodeValue::Int32(val) => *val as f64,
-            NodeValue::Int64(val) => *val as f64,
-            NodeValue::Float(val) => *val as f64,
-            NodeValue::Double(val) => *val,
-            _ => return Err(err_provider()),
-        })
-    }
-
-    /// Returns the Message value or the provided error if NodeValue is not a Message.
-    fn get_message(
-        &self,
-        err_provider: impl FnOnce() -> NodeError,
-    ) -> Result<&dyn MessageDyn, NodeError> {
-        if let NodeValue::Message(msg) = self {
-            Ok(msg.as_ref())
-        } else {
-            Err(err_provider())
-        }
     }
 
     /// Checks whether the node value is zero.
