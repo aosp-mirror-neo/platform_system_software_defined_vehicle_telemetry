@@ -105,7 +105,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 context
                     .triggers
                     .get(name)
-                    .map(|trigger| trigger.clone() as Arc<dyn Trigger + Send + Sync>)
+                    .map(|trigger| trigger.clone() as Arc<dyn Trigger>)
                     .ok_or_else(|| MetricsReportGeneratorFactoryError::InvalidTriggerName {
                         trigger_name: name.clone(),
                     })
@@ -336,7 +336,7 @@ mod tests {
         assert!(res.report_incomplete);
         assert_eq!(res.triggers.len(), 1);
         assert!(ptr_eq(&res.report_ready_callback, &report_ready_callback));
-        assert!(ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger + Send + Sync>)));
+        assert!(ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger>)));
     }
 
     #[test]
