@@ -1,15 +1,17 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+mod aggregation;
+
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::Mutex;
 use thiserror::Error;
 
 use crate::expr::{
-    ast::Node,
     node_errors::NodeError,
     node_value::protobuf_reflection_extensions::{ReflectRepeatedMutExt, ToReflectValueBox},
 };
+pub use aggregation::AggregatedFieldValue;
 
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.
@@ -21,7 +23,7 @@ pub(crate) struct MessageBuilderImpl {
     pub message_descriptor: MessageDescriptor,
 
     /// Maps field_name to the node whose evaluation output is the field value.
-    pub field_assignments: HashMap<String, Arc<Node>>,
+    pub field_assignments: HashMap<String, Mutex<AggregatedFieldValue>>,
 }
 
 #[derive(Error, Debug)]
@@ -39,7 +41,7 @@ pub enum MessageBuilderError {
 impl MessageBuilder for MessageBuilderImpl {
     fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
         let mut msg = self.message_descriptor.new_instance();
-        for (field_name, node) in self.field_assignments.iter() {
+        for (field_name, field_value_mutex) in self.field_assignments.iter() {
             let node_err_to_builder_err = |e| MessageBuilderError::FieldAssignmentError {
                 field_name: field_name.to_string(),
                 e,
@@ -50,8 +52,9 @@ impl MessageBuilder for MessageBuilderImpl {
                     message_type: self.message_descriptor.full_name().to_string(),
                 },
             )?;
+            let mut field_value = field_value_mutex.lock().unwrap();
             if field_descriptor.is_singular() {
-                let node_value = node.evaluate().map_err(node_err_to_builder_err)?;
+                let node_value = field_value.compute().map_err(node_err_to_builder_err)?;
                 field_descriptor.set_singular_field(
                     msg.as_mut(),
                     node_value
@@ -59,7 +62,7 @@ impl MessageBuilder for MessageBuilderImpl {
                         .map_err(node_err_to_builder_err)?,
                 );
             } else if field_descriptor.is_repeated() {
-                let node_value = node.evaluate().map_err(node_err_to_builder_err)?;
+                let node_value = field_value.compute().map_err(node_err_to_builder_err)?;
                 field_descriptor
                     .mut_repeated(msg.as_mut())
                     .push_node_value_content(&node_value)
@@ -75,7 +78,7 @@ impl MessageBuilder for MessageBuilderImpl {
 impl MessageBuilderImpl {
     pub fn new(
         message_descriptor: MessageDescriptor,
-        field_assignments: HashMap<String, Arc<Node>>,
+        field_assignments: HashMap<String, Mutex<AggregatedFieldValue>>,
     ) -> Self {
         MessageBuilderImpl { message_descriptor, field_assignments }
     }
@@ -89,10 +92,11 @@ mod tests {
     use lazy_static::lazy_static;
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
     use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+    use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::AggregationType;
     use std::sync::Arc;
 
     use super::*;
-    use crate::expr::node_value::NodeValue;
+    use crate::expr::{ast::Node, node_value::NodeValue};
 
     lazy_static! {
         static ref REFLECT_EQ_MODE: ReflectEqMode = ReflectEqMode::default();
@@ -122,7 +126,12 @@ mod tests {
     ) -> MessageBuilderImpl {
         let field_assignments = field_name_and_node_pairs
             .into_iter()
-            .map(|(field, node)| (field.to_string(), node))
+            .map(|(field, node)| {
+                (
+                    field.to_string(),
+                    Mutex::new(AggregatedFieldValue::new(AggregationType::NO_AGGREGATION, &node)),
+                )
+            })
             .collect::<HashMap<_, _>>();
         MessageBuilderImpl::new(message_descriptor, field_assignments)
     }
