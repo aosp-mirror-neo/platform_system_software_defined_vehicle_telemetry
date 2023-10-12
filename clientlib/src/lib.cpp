@@ -13,62 +13,76 @@ ServiceHolder* get_telemetry_service() {
     return reinterpret_cast<ServiceHolder*>(service);
 }
 
-void stop_telemetry_service(ServiceHolder* holder){
+int stop_telemetry_service(ServiceHolder* holder) {
     // Note: Kept for future use. In case variables need to be freed explicitly.
+    return 0;
 }
 
-void add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size) {
+int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size, void* listener,
+                       StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
                 reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
     std::vector<uint8_t> vec(metrics_config, metrics_config+size);
-    service->add_metrics_config(vec);
+    return static_cast<int>(service->add_metrics_config(vec, listener, cbFunc));
 }
 
-void activate_metrics_config(ServiceHolder* holder, const char* config_uuid) {
+int activate_metrics_config(ServiceHolder* holder, const char* config_uuid, void* listener,
+                            StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->activate_metrics_config(config_uuid);
+    return static_cast<int>(service->activate_metrics_config(config_uuid, listener, cbFunc));
 }
 
-void deactivate_metrics_config(ServiceHolder* holder, const char* config_uuid) {
+int deactivate_metrics_config(ServiceHolder* holder, const char* config_uuid, void* listener,
+                              StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->deactivate_metrics_config(config_uuid);
+    return static_cast<int>(service->deactivate_metrics_config(config_uuid, listener, cbFunc));
 }
 
-void remove_metrics_config(ServiceHolder* holder, const char* config_uuid) {
+int remove_metrics_config(ServiceHolder* holder, const char* config_uuid, void* listener,
+                          StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->remove_metrics_config(std::string(config_uuid));
+    return static_cast<int>(service->remove_metrics_config(config_uuid, listener, cbFunc));
 }
 
-void remove_all_metrics_configs(ServiceHolder* holder) {
+int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
+                               StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->remove_all_metrics_configs();
+    return static_cast<int>(service->remove_all_metrics_configs(listener, cbFunc));
 }
 
-void set_report_ready_listener(ServiceHolder* holder, void* listener,
-                               void (*cbFunc)(void*, const char*, int32_t)) {
+int set_report_ready_listener(ServiceHolder* holder, void* listener,
+                              StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
                 reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->set_report_ready_listener(listener, cbFunc);
+    return static_cast<int>(service->set_report_ready_listener(listener, cbFunc));
 }
 
-void clear_report_ready_listener(ServiceHolder* holder) {
+int clear_report_ready_listener(ServiceHolder* holder) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->clear_report_ready_listener();
+    return static_cast<int>(service->clear_report_ready_listener());
 }
 
-void set_status_listener(ServiceHolder* holder, void (*cbFunc)(int, const char*)) {
+int get_metrics_report(ServiceHolder* holder, int32_t report_number, const char* report_uuid,
+                       void* listener, GetReportCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->set_status_listener(cbFunc);
+    return static_cast<int>(
+            service->get_metrics_report(report_number, report_uuid, listener, cbFunc));
 }
 
-void clear_status_listener(ServiceHolder* holder) {
+int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    service->clear_status_listener();
+    return static_cast<int>(service->set_status_listener(listener, cbFunc));
+}
+
+int clear_status_listener(ServiceHolder* holder) {
+    android::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
+    return static_cast<int>(service->clear_status_listener());
 }

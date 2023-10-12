@@ -22,6 +22,7 @@ use std::sync::{Arc, Mutex};
 use crate::metrics_report_listener::MetricsReportListener;
 use async_trait::async_trait;
 use log::{error, info};
+use protobuf::Message;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::collections::HashMap;
 use std::fs::{self};
@@ -38,6 +39,8 @@ pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
+
+const GLOBAL_STATUS_LISTENER_API_CALL_ID: i32 = 0;
 
 fn get_error_code_and_message(err: ConfigError) -> (i32, String) {
     let err_code = match err {
@@ -231,10 +234,15 @@ impl SdvTelemetryService {
 
     /// Uses the listener object set by the client to send back status codes
     /// and error messages for API calls
-    pub fn send_status(&self, status_code: i32, status_message: &str) -> BinderResult<()> {
+    pub fn send_status(
+        &self,
+        api_call_id: i32,
+        status_code: i32,
+        status_message: &str,
+    ) -> BinderResult<()> {
         if let Ok(listener) = self.status_listener.lock() {
             if let Some(listener_ref) = listener.as_ref() {
-                let _ = listener_ref.deref().sendStatus(status_code, status_message);
+                let _ = listener_ref.deref().sendStatus(api_call_id, status_code, status_message);
             }
         }
         Ok(())
@@ -243,7 +251,7 @@ impl SdvTelemetryService {
 
 #[async_trait]
 impl ITelemetryServiceAsyncServer for SdvTelemetryService {
-    async fn addMetricsConfig(&self, metrics_config: &[u8]) -> BinderResult<()> {
+    async fn addMetricsConfig(&self, api_call_id: i32, metrics_config: &[u8]) -> BinderResult<()> {
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config).unwrap();
         info!("addMetricsConfig: {:?} of size: {}\n", config, metrics_config.len());
 
@@ -252,6 +260,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         {
             error!("Memory limit exceeded");
             return self.send_status(
+                api_call_id,
                 StatusCodes::ADD_METRICS_CONFIG_FAILED_MEMORY_LIMIT_EXCEEDED.0,
                 "Memory Limited exceeded",
             );
@@ -261,7 +270,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         if let Err(e) = self.metrics_config_orchestrator.validate_config(&config) {
             info!("Invalid Metric Config");
             let (err_code, err_msg) = get_error_code_and_message(e);
-            return self.send_status(err_code, &err_msg);
+            return self.send_status(api_call_id, err_code, &err_msg);
         }
 
         let bytes = metrics_config.to_vec();
@@ -275,6 +284,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 });
             }
             return self.send_status(
+                api_call_id,
                 StatusCodes::ADD_METRICS_CONFIG_FAILED_UNABLE_TO_PERSIST_CONFIG.0,
                 "Unable to write metric config to memory",
             );
@@ -288,10 +298,18 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.metrics_configs_store.lock().unwrap().insert(config.uuid.clone(), bytes.len());
         self.cur_persistent_config_store_size.fetch_add(bytes.len(), Ordering::SeqCst);
 
-        return self.send_status(StatusCodes::ADD_METRICS_CONFIG_SUCCEEDED.0, &config.uuid);
+        return self.send_status(
+            api_call_id,
+            StatusCodes::ADD_METRICS_CONFIG_SUCCEEDED.0,
+            &config.uuid,
+        );
     }
 
-    async fn activateMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
+    async fn activateMetricsConfig(
+        &self,
+        api_call_id: i32,
+        metrics_config_uuid: &str,
+    ) -> BinderResult<()> {
         info!("activateMetricsConfig: {:?} \n", metrics_config_uuid);
         let path = PathBuf::from(self.inactive_data_dir.clone() + "/" + metrics_config_uuid);
         if path.is_file() {
@@ -301,6 +319,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     let err_msg = format!("{:?}", e);
                     error!("{}", err_msg);
                     return self.send_status(
+                        api_call_id,
                         StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED_CONFIG_CORRUPTED.0,
                         &err_msg,
                     );
@@ -325,25 +344,41 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                         error!("An error occurred in removing corrupt config: {}", e)
                     });
                     let (err_code, err_msg) = get_error_code_and_message(e);
-                    return self.send_status(err_code, &err_msg);
+                    return self.send_status(api_call_id, err_code, &err_msg);
                 }
             }
         } else {
             let err_msg = format!("Config {} not found", metrics_config_uuid);
-            return self.send_status(StatusCodes::METRICS_CONFIG_DOES_NOT_EXISTS.0, &err_msg);
+            return self.send_status(
+                api_call_id,
+                StatusCodes::METRICS_CONFIG_DOES_NOT_EXIST.0,
+                &err_msg,
+            );
         }
 
-        self.send_status(StatusCodes::ACTIVATE_METRICS_CONFIG_SUCCEEDED.0, metrics_config_uuid)
+        self.send_status(
+            api_call_id,
+            StatusCodes::ACTIVATE_METRICS_CONFIG_SUCCEEDED.0,
+            metrics_config_uuid,
+        )
     }
 
-    async fn deactivateMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
+    async fn deactivateMetricsConfig(
+        &self,
+        api_call_id: i32,
+        metrics_config_uuid: &str,
+    ) -> BinderResult<()> {
         info!("deactivateMetricsConfig: {}", metrics_config_uuid);
 
         let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
         if res.is_err() {
             info!("Invalid Metric Config UUID");
             let err_msg = format!("Config {} not found", metrics_config_uuid);
-            return self.send_status(StatusCodes::METRICS_CONFIG_DOES_NOT_EXISTS.0, &err_msg);
+            return self.send_status(
+                api_call_id,
+                StatusCodes::METRICS_CONFIG_DOES_NOT_EXIST.0,
+                &err_msg,
+            );
         }
 
         let old_path = PathBuf::from(self.active_data_dir.clone() + "/" + metrics_config_uuid);
@@ -354,10 +389,18 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             .await
             .unwrap_or_else(|e| error!("An error occurred in renaming config: {}", e));
 
-        self.send_status(StatusCodes::DEACTIVATE_METRICS_CONFIG_SUCCEEDED.0, metrics_config_uuid)
+        self.send_status(
+            api_call_id,
+            StatusCodes::DEACTIVATE_METRICS_CONFIG_SUCCEEDED.0,
+            metrics_config_uuid,
+        )
     }
 
-    async fn removeMetricsConfig(&self, metrics_config_uuid: &str) -> BinderResult<()> {
+    async fn removeMetricsConfig(
+        &self,
+        api_call_id: i32,
+        metrics_config_uuid: &str,
+    ) -> BinderResult<()> {
         info!("removeMetricsConfig: {}", metrics_config_uuid);
         let uuid = String::from(metrics_config_uuid);
         let config_size = {
@@ -368,18 +411,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         if config_size == 0 {
             let err_msg = format!("Config {} not found", metrics_config_uuid);
             error!("{}", err_msg);
-            return self.send_status(StatusCodes::METRICS_CONFIG_DOES_NOT_EXISTS.0, &err_msg);
+            return self.send_status(
+                api_call_id,
+                StatusCodes::METRICS_CONFIG_DOES_NOT_EXIST.0,
+                &err_msg,
+            );
         }
 
         let active_config = {
             let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
             if let Err(err) = res {
                 if let ConfigError::InvalidConfigUuid { .. } = err {
-                    info!("UUID {} doesn't exist", uuid);
+                    info!("UUID {} doesn't exist or is inactive", uuid);
                     false
                 } else {
                     error!("Unknown Error in finishing Metric Config");
                     return self.send_status(
+                        api_call_id,
                         StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR.0,
                         "Unknown Error",
                     );
@@ -400,6 +448,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         if let Err(e) = file_io_utils::remove_file(&path).await {
             error!("An error occurred in removing file: {}", e);
             return self.send_status(
+                api_call_id,
                 StatusCodes::REMOVE_METRICS_CONFIG_FAILED_UNABLE_TO_REMOVE_CONFIG_FROM_MEMEORY.0,
                 &uuid,
             );
@@ -407,10 +456,10 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         self.cur_persistent_config_store_size.fetch_sub(config_size, Ordering::SeqCst);
 
-        self.send_status(StatusCodes::REMOVE_METRICS_CONFIG_SUCCEEDED.0, &uuid)
+        self.send_status(api_call_id, StatusCodes::REMOVE_METRICS_CONFIG_SUCCEEDED.0, &uuid)
     }
 
-    async fn removeAllMetricsConfigs(&self) -> BinderResult<()> {
+    async fn removeAllMetricsConfigs(&self, api_call_id: i32) -> BinderResult<()> {
         info!("removeAllMetricsConfigs");
 
         // remove all configs from active directory
@@ -445,6 +494,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         self.cur_persistent_config_store_size.store(0, Ordering::SeqCst);
         self.send_status(
+            api_call_id,
             StatusCodes::REMOVE_ALL_METRICS_CONFIGS_SUCCEEDED.0,
             "Successfully removed all configs",
         )
@@ -470,30 +520,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     )
                 },
             );
-        self.send_status(status_code, status_message)
-    }
-
-    async fn setReportListener(
-        &self,
-        listener: &Strong<dyn ITelemetryReportListener>,
-    ) -> BinderResult<()> {
-        info!("setReportListener");
-        let (status_code, status_message) =
-            self.metrics_report_listener.set_report_listener(listener).map_or_else(
-                |_| {
-                    (
-                        StatusCodes::SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS.0,
-                        "Report Ready Listener already exists",
-                    )
-                },
-                |_| {
-                    (
-                        StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
-                        "Report Ready Listener successfully added",
-                    )
-                },
-            );
-        self.send_status(status_code, status_message)
+        self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
     async fn setStatusListener(
@@ -504,7 +531,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             let mut guard = self.status_listener.lock().unwrap();
             if guard.is_none() {
                 *guard = Some(listener.clone());
-                (StatusCodes::SET_STATUS_LISTENER_SUCCEEDED.0, "Report listener successfully added")
+                (StatusCodes::SET_STATUS_LISTENER_SUCCEEDED.0, "Status listener successfully added")
             } else {
                 (
                     StatusCodes::SET_STATUS_LISTENER_FAILED_LISTENER_EXISTS.0,
@@ -512,30 +539,35 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 )
             }
         };
-        self.send_status(status_code, status_message)
+        self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
     #[allow(unused_variables)]
-    async fn getFinishedReport(
+    async fn getMetricsReport(
         &self,
-        metrics_report_uuid: &str,
         report_number: i32,
+        metrics_report_uuid: &str,
+        report_listener: &Strong<dyn ITelemetryReportListener>,
     ) -> BinderResult<()> {
-        info!("getFinishedReport: {}", metrics_report_uuid);
-        let (status_code, status_message) = self
-            .metrics_report_listener
-            .get_finished_report(metrics_report_uuid, report_number)
-            .map_or_else(
-                |_| {
-                    (
-                        StatusCodes::GET_FINISHED_REPORT_FAILED_LISTENER_NOT_SET.0,
-                        metrics_report_uuid,
-                    )
-                },
-                |_| (StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0, metrics_report_uuid),
+        info!("getMetricsReport: {}", metrics_report_uuid);
+        if let Ok(metrics_report) =
+            self.metrics_report_listener.get_metrics_report(report_number, metrics_report_uuid)
+        {
+            let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
+            let _ = report_listener.deref().onReport(
+                StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0,
+                metrics_report_uuid,
+                serialized_report,
             );
+        } else {
+            let _ = report_listener.deref().onReport(
+                StatusCodes::GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND.0,
+                metrics_report_uuid,
+                &[],
+            );
+        }
 
-        self.send_status(status_code, status_message)
+        Ok(())
     }
 
     async fn clearReportReadyListener(&self) -> BinderResult<()> {
@@ -552,24 +584,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 ),
             }
         };
-        self.send_status(status_code, status_message)
-    }
-
-    async fn clearReportListener(&self) -> BinderResult<()> {
-        info!("clearReportListener");
-        let (status_code, status_message) = {
-            match self.metrics_report_listener.clear_report_listener() {
-                Ok(()) => (
-                    StatusCodes::CLEAR_REPORT_LISTENER_SUCCEEDED.0,
-                    "Report listener successfully cleared",
-                ),
-                Err(_) => (
-                    StatusCodes::CLEAR_REPORT_LISTENER_FAILED_LISTENER_NOT_SET.0,
-                    "Report listener not set",
-                ),
-            }
-        };
-        self.send_status(status_code, status_message)
+        self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
     async fn clearStatusListener(&self) -> BinderResult<()> {
@@ -643,6 +658,8 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryReportListener {
+        status_code: Arc<Mutex<i32>>,
+        status_message: Arc<Mutex<String>>,
         num_on_result_calls: Arc<Mutex<i32>>,
         uuid: Arc<Mutex<String>>,
         report_number: Arc<Mutex<u32>>,
@@ -654,11 +671,21 @@ mod tests {
     impl MockTelemetryReportListener {
         fn new() -> Self {
             MockTelemetryReportListener {
+                status_code: Arc::new(Mutex::new(0)),
+                status_message: Arc::new(Mutex::new(String::new())),
                 num_on_result_calls: Arc::new(Mutex::new(0)),
-                report_number: Arc::new(Mutex::new(0)),
                 uuid: Arc::new(Mutex::new(String::new())),
+                report_number: Arc::new(Mutex::new(0)),
                 metrics_report: Arc::new(Mutex::new(None)),
             }
+        }
+
+        fn get_status_code(&self) -> i32 {
+            *self.status_code.lock().unwrap()
+        }
+
+        fn get_status_message(&self) -> String {
+            self.status_message.lock().unwrap().to_string()
         }
 
         fn get_num_on_result_calls(&self) -> i32 {
@@ -675,10 +702,19 @@ mod tests {
     }
 
     impl ITelemetryReportListener for MockTelemetryReportListener {
-        fn onResult(&self, serialized_report: &[u8]) -> BinderResult<()> {
+        fn onReport(
+            &self,
+            status_code: i32,
+            status_message: &str,
+            serialized_report: &[u8],
+        ) -> BinderResult<()> {
             let metrics_report: MetricsReport =
                 protobuf::Message::parse_from_bytes(serialized_report).unwrap();
 
+            let mut mut_status_code = self.status_code.lock().unwrap();
+            *mut_status_code = status_code;
+            let mut mut_status_message = self.status_message.lock().unwrap();
+            *mut_status_message = status_message.to_string();
             let mut num_on_result_calls = self.num_on_result_calls.lock().unwrap();
             *num_on_result_calls += 1;
             let mut report_number = self.report_number.lock().unwrap();
@@ -725,7 +761,7 @@ mod tests {
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, report_uuid: &str, metrics_report_number: i32) -> BinderResult<()> {
+        fn onReady(&self, metrics_report_number: i32, report_uuid: &str) -> BinderResult<()> {
             let mut num_calls = self.num_on_ready_report_calls.lock().unwrap();
             *num_calls += 1;
             let mut report_number = self.report_number.lock().unwrap();
@@ -763,7 +799,12 @@ mod tests {
     }
 
     impl ITelemetryStatusListener for MockTelemetryStatusListener {
-        fn sendStatus(&self, status_code: i32, _status_msg: &str) -> BinderResult<()> {
+        fn sendStatus(
+            &self,
+            _api_call_id: i32,
+            status_code: i32,
+            _status_msg: &str,
+        ) -> BinderResult<()> {
             let mut num_calls = self.num_send_status_calls.lock().unwrap();
             *num_calls += 1;
 
@@ -876,7 +917,7 @@ mod tests {
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);
 
-        let _ = test_environment.service.addMetricsConfig(&serialized_config).await;
+        let _ = test_environment.service.addMetricsConfig(-1, &serialized_config).await;
         assert_eq!(StatusCodes::ADD_METRICS_CONFIG_SUCCEEDED.0, test_environment.get_status_code());
         assert!(file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
@@ -898,11 +939,11 @@ mod tests {
         test_environment.set_mock_status_listener().await;
 
         let serialized_config = create_serialized_config(UUID);
-        test_environment.service.addMetricsConfig(&serialized_config).await.unwrap();
+        test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
-        let _ = test_environment.service.activateMetricsConfig(UUID).await;
+        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
         assert_eq!(
             StatusCodes::ACTIVATE_METRICS_CONFIG_SUCCEEDED.0,
             test_environment.get_status_code()
@@ -927,15 +968,15 @@ mod tests {
         test_environment.set_mock_status_listener().await;
 
         let serialized_config = create_serialized_config(UUID);
-        test_environment.service.addMetricsConfig(&serialized_config).await.unwrap();
+        test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
-        let _ = test_environment.service.activateMetricsConfig(UUID).await;
+        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
         assert!(new_file_path.is_file());
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
 
-        let _ = test_environment.service.deactivateMetricsConfig(UUID).await;
+        let _ = test_environment.service.deactivateMetricsConfig(-1, UUID).await;
         assert_eq!(
             StatusCodes::DEACTIVATE_METRICS_CONFIG_SUCCEEDED.0,
             test_environment.get_status_code()
@@ -959,15 +1000,15 @@ mod tests {
         test_environment.set_mock_status_listener().await;
 
         let serialized_config = create_serialized_config(UUID);
-        test_environment.service.addMetricsConfig(&serialized_config).await.unwrap();
+        test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
-        let _ = test_environment.service.activateMetricsConfig(UUID).await;
+        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
         assert!(new_file_path.is_file());
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
 
-        let _ = test_environment.service.removeMetricsConfig(UUID).await;
+        let _ = test_environment.service.removeMetricsConfig(-1, UUID).await;
         assert_eq!(1, test_environment.get_num_finish_config_calls());
         assert_eq!(
             StatusCodes::REMOVE_METRICS_CONFIG_SUCCEEDED.0,
@@ -1004,21 +1045,21 @@ mod tests {
         let serialized_config2 = create_serialized_config(UUID2);
 
         // Add configs
-        test_environment.service.addMetricsConfig(&serialized_config1).await.unwrap();
-        test_environment.service.addMetricsConfig(&serialized_config2).await.unwrap();
+        test_environment.service.addMetricsConfig(-1, &serialized_config1).await.unwrap();
+        test_environment.service.addMetricsConfig(-1, &serialized_config2).await.unwrap();
         assert!(old_file_path1.is_file());
         assert!(old_file_path2.is_file());
         assert_eq!(2, test_environment.get_num_validate_config_calls());
 
         // Activate configs
-        test_environment.service.activateMetricsConfig(UUID1).await.unwrap();
-        test_environment.service.activateMetricsConfig(UUID2).await.unwrap();
+        test_environment.service.activateMetricsConfig(-1, UUID1).await.unwrap();
+        test_environment.service.activateMetricsConfig(-1, UUID2).await.unwrap();
         assert!(new_file_path1.is_file());
         assert!(new_file_path2.is_file());
         assert_eq!(2, test_environment.get_num_initialize_config_calls());
 
         // Remove all configs
-        let _ = test_environment.service.removeAllMetricsConfigs().await;
+        let _ = test_environment.service.removeAllMetricsConfigs(-1).await;
         assert_eq!(
             StatusCodes::REMOVE_ALL_METRICS_CONFIGS_SUCCEEDED.0,
             test_environment.get_status_code()
@@ -1085,7 +1126,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_report_listener_and_check_on_ready_calls() {
+    async fn set_report_ready_listener_and_check_on_ready_calls() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         const REPORT_NUMBER: u32 = 42;
 
@@ -1111,7 +1152,7 @@ mod tests {
         );
 
         // Call onReady on report ready listener
-        let _ = report_ready_listener.onReady(UUID, REPORT_NUMBER.try_into().unwrap());
+        let _ = report_ready_listener.onReady(REPORT_NUMBER.try_into().unwrap(), UUID);
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID, &report_ready_listener.get_uuid());
@@ -1143,55 +1184,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn set_report_listener() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "set_report_listener";
-
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_status_listener().await;
-
-        let report_listener = MockTelemetryReportListener::new();
-
-        let binder_report_listener = BnTelemetryReportListener::new_binder(
-            report_listener.clone(),
-            BinderFeatures::default(),
-        );
-
-        let _ = test_environment.service.setReportListener(&binder_report_listener).await;
-
-        assert_eq!(
-            StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
-            test_environment.get_status_code()
-        );
-    }
-
-    #[tokio::test]
-    async fn set_multiple_report_listener_fails() {
-        const ROOT_PATH: &str = "set_multiple_report_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_status_listener().await;
-
-        let report_listener = BnTelemetryReportListener::new_binder(
-            MockTelemetryReportListener::new(),
-            BinderFeatures::default(),
-        );
-
-        let _ = test_environment.service.setReportListener(&report_listener).await;
-
-        assert_eq!(
-            StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
-            test_environment.get_status_code()
-        );
-
-        let _ = test_environment.service.setReportListener(&report_listener).await;
-        assert_eq!(
-            StatusCodes::SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS.0,
-            test_environment.get_status_code()
-        );
-    }
-
-    #[tokio::test]
     async fn set_status_listener_and_check_status_code() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1210,7 +1202,7 @@ mod tests {
         let _ = test_environment.service.setStatusListener(&binder_listener).await;
         assert_eq!(StatusCodes::SET_STATUS_LISTENER_SUCCEEDED.0, status_listener.get_status_code());
 
-        let _ = test_environment.service.addMetricsConfig(&serialized_config).await;
+        let _ = test_environment.service.addMetricsConfig(-1, &serialized_config).await;
 
         assert_eq!(2, status_listener.get_num_send_status_calls());
     }
@@ -1253,13 +1245,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_finished_report() {
+    async fn get_metrics_report() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         const REPORT_NUMBER: u32 = 42;
 
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "get_finished_report";
+        const ROOT_PATH: &str = "get_metrics_report";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_status_listener().await;
 
@@ -1289,13 +1281,6 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment.service.setReportListener(&binder_report_listener).await;
-
-        assert_eq!(
-            StatusCodes::SET_REPORT_LISTENER_SUCCEEDED.0,
-            test_environment.get_status_code()
-        );
-
         // Send report to metric report listener
         let mut report = MetricsReport::new();
         report.metrics_config_uuid = UUID.to_string();
@@ -1305,9 +1290,11 @@ mod tests {
         test_environment.service.metrics_report_listener.on_report_ready(report);
         let _ = test_environment
             .service
-            .getFinishedReport(UUID, REPORT_NUMBER.try_into().unwrap())
+            .getMetricsReport(REPORT_NUMBER.try_into().unwrap(), UUID, &binder_report_listener)
             .await;
 
+        assert_eq!(StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0, report_listener.get_status_code());
+        assert_eq!(UUID, report_listener.get_status_message());
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(1, report_listener.get_num_on_result_calls());
         assert_eq!(UUID, report_listener.get_uuid());

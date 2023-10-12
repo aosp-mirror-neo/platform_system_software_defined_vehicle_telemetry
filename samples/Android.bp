@@ -4,41 +4,16 @@ package {
     default_applicable_licenses: ["sdv_license"],
 }
 
-rust_binary {
-    name: "telemetry_rust_client",
-    srcs: [
-        "rust/telemetry_rust_client.rs",
-    ],
-    rustlibs: [
-        "liblog_rust",
-        "liblogger",
-        "libbinder_rs",
-        "android.sdv.telemetry-rust",
-        "libsdvtelemetry_proto_rust",
-        "libprotobuf",
-    ],
-}
-
-rust_binary {
-    name: "telemetry_rust_c_client",
-    srcs: [
-        "rust/telemetry_rust_c_client.rs",
-    ],
-    rustlibs: [
-        "liblog_rust",
-        "libbinder_rs",
-        "liblogger",
-        "libsdvtelemetry_proto_rust",
-        "libprotobuf",
-    ],
-    shared_libs: [
-        "libtelemetry_c",
-    ],
-}
-
 cc_binary {
     name: "telemetry_cpp_client",
-    srcs: ["cpp/telemetry_cpp_client.cpp"],
+    srcs: [
+        "cpp/telemetry_cpp_client.cpp",
+        "cpp/metrics_config_manager.cpp",
+        "cpp/metrics_report_manager.cpp",
+    ],
+    local_include_dirs: [
+        "cpp/include",
+    ],
     defaults: [
         "telemetry_defaults",
     ],
@@ -48,3 +23,5 @@ cc_binary {
         "liblog",
     ],
 }
+
+//TODO: b/303110371: Create rust client app with new status listener design

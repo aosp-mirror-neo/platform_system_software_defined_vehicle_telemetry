@@ -3,8 +3,14 @@
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_TELEMETRY_SERVICE_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_TELEMETRY_SERVICE_H
 
+#include "callback_container.h"
+#include "report_listener_impl.h"
+#include "report_ready_listener_impl.h"
+#include "status_listener_impl.h"
+
 #include <android-base/stringprintf.h>
 #include <android/sdv/telemetry/BnTelemetryService.h>
+#include <android/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <binder/IServiceManager.h>
 #include <utils/Log.h>
 
@@ -27,19 +33,31 @@ namespace android::sdv::telemetry {
 class TelemetryService {
 public:
     TelemetryService();
-    virtual ~TelemetryService();
 
-    void activate_metrics_config(const std::string& metricsConfigUuid);
-    void deactivate_metrics_config(const std::string& metricsConfigUuid);
-    void add_metrics_config(const std::vector<uint8_t>& metricConfig);
-    void remove_all_metrics_configs();
-    void remove_metrics_config(const std::string& metricsConfigUuid);
-    void set_report_ready_listener(void* listener, void (*cbFunc)(void*, const char*, int32_t));
-    void clear_report_ready_listener();
-    void set_status_listener(void (*cbFunc)(int, const char*));
-    void clear_status_listener();
+    TelemetryServiceStatusCodes activate_metrics_config(const std::string& metricsConfigUuid,
+                                                        void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes deactivate_metrics_config(const std::string& metricsConfigUuid,
+                                                          void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes add_metrics_config(const std::vector<uint8_t>& metricConfig,
+                                                   void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes remove_all_metrics_configs(void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes remove_metrics_config(const std::string& metricsConfigUuid,
+                                                      void* listener, CbFunction cbFunc);
+
+    TelemetryServiceStatusCodes set_report_ready_listener(void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes clear_report_ready_listener();
+    TelemetryServiceStatusCodes get_metrics_report(int32_t report_number, const char* report_uuid,
+                                                   void* listener,
+                                                   GetReportCallbackFunction cbFunc);
+    TelemetryServiceStatusCodes set_status_listener(void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes clear_status_listener();
 
 private:
+    std::atomic<int> api_id_;
+    android::sp<CallbackContainer> cb_container_;
+    android::sp<StatusListenerImpl> mStatusListenerImpl_;
+    android::sp<ReportReadyListenerImpl> mReportReadyListener_;
+
     // holds a reference to the binder service
     android::sp<android::sdv::telemetry::ITelemetryService> binder_service_;
 };
