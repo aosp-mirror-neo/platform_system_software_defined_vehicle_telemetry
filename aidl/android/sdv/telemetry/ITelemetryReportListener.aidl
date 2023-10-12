@@ -9,5 +9,6 @@ package android.sdv.telemetry;
  * @hide
  */
 oneway interface ITelemetryReportListener {
-    void onResult(in byte[] metricsReport);
+    void onReport(in int status_code, in @utf8InCpp String status_message,
+            in byte[] metricsReport);
 }

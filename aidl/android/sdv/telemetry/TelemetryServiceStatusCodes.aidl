@@ -23,11 +23,12 @@ enum TelemetryServiceStatusCodes {
     CLEAR_REPORT_READY_LISTENER_SUCCEEDED = 209,
     CLEAR_REPORT_LISTENER_SUCCEEDED = 210,
     CLEAR_STATUS_LISTENER_SUCCEEDED = 211,
+    API_CALL_SUCCESS = 212,
 
     /**
      * Common error messages during API calls
      */
-    METRICS_CONFIG_DOES_NOT_EXISTS = 400,
+    METRICS_CONFIG_DOES_NOT_EXIST = 400,
     METRICS_CONFIG_VERSION_TOO_OLD = 401,
 
     /**
@@ -93,12 +94,17 @@ enum TelemetryServiceStatusCodes {
     /**
      * Errors specific to get finished report
      */
-    GET_FINISHED_REPORT_FAILED_LISTENER_NOT_SET = 426,
-    GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND = 427,
+    GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND = 426,
+
+    /**
+     * Errors with params sent to API calls
+     */
+    API_CALL_FAILED_LISTENER_NOT_SET = 427,
+    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 428,
 
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined
      */
-    TELEMETRY_SERVICE_UNKNOWN_ERROR = 428,
+    TELEMETRY_SERVICE_UNKNOWN_ERROR = 499,
 
 }
