@@ -1,16 +1,16 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-mod aggregation;
 mod node_value_to_protobuf_reflection;
+mod value_aggregator;
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use thiserror::Error;
 
-use crate::expr::node_errors::NodeError;
-pub use aggregation::AggregatedFieldValue;
 use node_value_to_protobuf_reflection::{ReflectRepeatedMutExt, ToReflectValueBox};
+pub use value_aggregator::AggregationFactory;
+use value_aggregator::{AggregationError, ValueAggregator};
 
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.
@@ -22,50 +22,40 @@ pub(crate) struct MessageBuilderImpl {
     pub message_descriptor: MessageDescriptor,
 
     /// Maps field_name to the node whose evaluation output is the field value.
-    pub field_assignments: HashMap<String, Mutex<AggregatedFieldValue>>,
+    pub field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MessageBuilderError {
     #[error("Unable to assign value to field {field_name} because of: {e}")]
-    FieldAssignmentError { field_name: String, e: NodeError },
-    #[error(
-        "Validation should have verified all fields exist in the descriptor, \
-        however field {field_name} is not found in message {message_type}"
-    )]
-    FieldExistenceValidationError { field_name: String, message_type: String },
+    BadAggregation { field_name: String, e: AggregationError },
+    #[error("Cannot assign {value} to a repeated field")]
+    RepeatedFieldWrongAssignment { value: String },
+    #[error("Cannot convert {value} to a protobuf reflection of type {refl_type}")]
+    ValueToProtoConversionError { value: String, refl_type: String },
 }
 
 impl MessageBuilder for MessageBuilderImpl {
     fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
         let mut msg = self.message_descriptor.new_instance();
         for (field_name, field_value_mutex) in self.field_assignments.iter() {
-            let node_err_to_builder_err = |e| MessageBuilderError::FieldAssignmentError {
-                field_name: field_name.to_string(),
-                e,
-            };
-            let field_descriptor = self.message_descriptor.field_by_name(field_name).ok_or(
-                MessageBuilderError::FieldExistenceValidationError {
-                    field_name: field_name.to_string(),
-                    message_type: self.message_descriptor.full_name().to_string(),
-                },
-            )?;
+            let to_builder_err =
+                |e| MessageBuilderError::BadAggregation { field_name: field_name.to_string(), e };
+            let field_descriptor = self
+                .message_descriptor
+                .field_by_name(field_name)
+                .expect("All fields should have been validated to exist");
             let mut field_value = field_value_mutex.lock().unwrap();
             if field_descriptor.is_singular() {
-                let node_value = field_value.compute().map_err(node_err_to_builder_err)?;
+                let node_value = field_value.compute().map_err(to_builder_err)?;
                 field_descriptor.set_singular_field(
                     msg.as_mut(),
-                    node_value
-                        .to_reflect_value_box(&field_descriptor.singular_runtime_type())
-                        .map_err(node_err_to_builder_err)?,
+                    node_value.to_reflect_value_box(&field_descriptor.singular_runtime_type())?,
                 );
             } else if field_descriptor.is_repeated() {
-                let node_value = field_value.compute().map_err(node_err_to_builder_err)?;
-                field_descriptor
-                    .mut_repeated(msg.as_mut())
-                    .push_node_value_content(&node_value)
-                    .map_err(node_err_to_builder_err)?;
+                let node_value = field_value.compute().map_err(to_builder_err)?;
+                field_descriptor.mut_repeated(msg.as_mut()).push_node_value_content(&node_value)?;
             } else {
                 panic!("Validation should have ensured map fields are not allowed");
             }
@@ -77,7 +67,7 @@ impl MessageBuilder for MessageBuilderImpl {
 impl MessageBuilderImpl {
     pub fn new(
         message_descriptor: MessageDescriptor,
-        field_assignments: HashMap<String, Mutex<AggregatedFieldValue>>,
+        field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
     ) -> Self {
         MessageBuilderImpl { message_descriptor, field_assignments }
     }
@@ -91,11 +81,10 @@ mod tests {
     use lazy_static::lazy_static;
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
     use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
-    use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::AggregationType;
-    use std::sync::Arc;
 
     use super::*;
-    use crate::expr::{ast::Node, node_value::NodeValue};
+    use crate::expr::node_value::NodeValue;
+    use value_aggregator::mock::MockValueAggregator;
 
     lazy_static! {
         static ref REFLECT_EQ_MODE: ReflectEqMode = ReflectEqMode::default();
@@ -118,21 +107,22 @@ mod tests {
     const REPEATED_ENUM_FIELD_NAME: &str = "repeated_enums";
 
     /// Creates a MessageBuilderImpl struct object using the descriptor and
-    /// field_name + node pairs as field assignments.
+    /// field_name + node_value pairs as field assignments.
     fn create_message_builder(
         message_descriptor: MessageDescriptor,
-        field_name_and_node_pairs: Vec<(&str, Arc<Node>)>,
+        field_name_and_value_pairs: Vec<(&str, NodeValue)>,
     ) -> MessageBuilderImpl {
-        let field_assignments = field_name_and_node_pairs
+        let field_assignments = field_name_and_value_pairs
             .into_iter()
-            .map(|(field, node)| {
-                (
-                    field.to_string(),
-                    Mutex::new(AggregatedFieldValue::new(AggregationType::NO_AGGREGATION, &node)),
-                )
+            .map(|(field, value)| {
+                // the mocked field value aggregator always return the node value
+                // that was used to construct it.
+                let mock_aggregator: Box<dyn ValueAggregator> =
+                    Box::new(MockValueAggregator::new(value));
+                (field.to_string(), Mutex::new(mock_aggregator))
             })
-            .collect::<HashMap<_, _>>();
-        MessageBuilderImpl::new(message_descriptor, field_assignments)
+            .collect();
+        MessageBuilderImpl { message_descriptor, field_assignments }
     }
 
     #[test]
@@ -146,9 +136,9 @@ mod tests {
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
-                (INT_FIELD_NAME, Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) })),
-                (FLOAT_FIELD_NAME, Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.0) })),
-                (ENUM_FIELD_NAME, Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(1) })),
+                (INT_FIELD_NAME, NodeValue::Int32(5)),
+                (FLOAT_FIELD_NAME, NodeValue::Float(0.0)),
+                (ENUM_FIELD_NAME, NodeValue::Int32(1)),
             ],
         );
 
@@ -170,13 +160,8 @@ mod tests {
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
-                (INT_FIELD_NAME, Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(42) })),
-                (
-                    MESSAGE_FIELD_NAME,
-                    Arc::new(Node::ConstantLeaf {
-                        value: NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone())),
-                    }),
-                ),
+                (INT_FIELD_NAME, NodeValue::Int64(42)),
+                (MESSAGE_FIELD_NAME, NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone()))),
             ],
         );
 
@@ -205,22 +190,10 @@ mod tests {
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
-                (
-                    REPEATED_BOOL_FIELD_NAME,
-                    Arc::new(Node::ConstantLeaf { value: NodeValue::BoolList(booleans) }),
-                ),
-                (
-                    REPEATED_INT_FIELD_NAME,
-                    Arc::new(Node::ConstantLeaf { value: NodeValue::Int64List(integers) }),
-                ),
-                (
-                    REPEATED_DOUBLE_FIELD_NAME,
-                    Arc::new(Node::ConstantLeaf { value: NodeValue::DoubleList(doubles) }),
-                ),
-                (
-                    REPEATED_ENUM_FIELD_NAME,
-                    Arc::new(Node::ConstantLeaf { value: NodeValue::Int64List(enums) }),
-                ),
+                (REPEATED_BOOL_FIELD_NAME, NodeValue::BoolList(booleans)),
+                (REPEATED_INT_FIELD_NAME, NodeValue::Int64List(integers)),
+                (REPEATED_DOUBLE_FIELD_NAME, NodeValue::DoubleList(doubles)),
+                (REPEATED_ENUM_FIELD_NAME, NodeValue::Int64List(enums)),
             ],
         );
 
@@ -236,12 +209,34 @@ mod tests {
     fn test_build_node_value_incompatible_with_field_fails() {
         let builder = create_message_builder(
             TestMessage::descriptor(),
-            vec![(INT_FIELD_NAME, Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.5) }))],
+            vec![(INT_FIELD_NAME, NodeValue::Float(0.5))],
         );
 
         // action
         let res = builder.build();
 
-        assert!(matches!(res.err().unwrap(), MessageBuilderError::FieldAssignmentError { .. }));
+        assert!(matches!(
+            res.err().unwrap(),
+            MessageBuilderError::ValueToProtoConversionError { .. }
+        ));
+    }
+
+    #[test]
+    fn test_build_aggregated_field_value_compute_error_fails() {
+        let mut mock_aggregated_field_value = MockValueAggregator::new(NodeValue::None);
+        mock_aggregated_field_value.fail_compute();
+        let field_assignments = {
+            let mut map = HashMap::new();
+            let boxed_value: Box<dyn ValueAggregator> = Box::new(mock_aggregated_field_value);
+            map.insert(INT_FIELD_NAME.to_string(), Mutex::new(boxed_value));
+            map
+        };
+        let builder =
+            MessageBuilderImpl { message_descriptor: TestMessage::descriptor(), field_assignments };
+
+        // action
+        let res = builder.build();
+
+        assert!(matches!(res.err().unwrap(), MessageBuilderError::BadAggregation { .. }));
     }
 }
