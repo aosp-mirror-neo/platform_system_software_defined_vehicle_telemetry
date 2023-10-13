@@ -1,17 +1,16 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 mod aggregation;
+mod node_value_to_protobuf_reflection;
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::collections::HashMap;
 use std::sync::Mutex;
 use thiserror::Error;
 
-use crate::expr::{
-    node_errors::NodeError,
-    node_value::protobuf_reflection_extensions::{ReflectRepeatedMutExt, ToReflectValueBox},
-};
+use crate::expr::node_errors::NodeError;
 pub use aggregation::AggregatedFieldValue;
+use node_value_to_protobuf_reflection::{ReflectRepeatedMutExt, ToReflectValueBox};
 
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.
