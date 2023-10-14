@@ -68,6 +68,8 @@ pub enum MessageBuilderFactoryError {
     UnknownAggregationType { field_name: String, message_type: String, i: i32 },
     #[error("Field {field_name} of message {message_type} did not specify aggregation type")]
     AggregationTypeNotSet { field_name: String, message_type: String },
+    #[error("Cannot perform aggregation type {aggr_type} on node value type {node_type}")]
+    UnsupportedAggregation { aggr_type: String, node_type: String },
 }
 
 impl<'a> MessageBuilderFactoryCreateContext<'a> {
@@ -231,14 +233,16 @@ impl MessageBuilderFactoryImpl {
                 })?;
 
             // TODO: b/304597877 - Check compatibility using aggregation type & node type
-            // validate this field's type is consistent with node evaluation output's type
-            if field_type != *node_type {
+            // validate this field's type is consistent with the aggregated output's type
+            let aggregated_type = Self::get_aggregated_type(node_type, &aggregation_type)?;
+            if field_type != aggregated_type {
                 return Err(MessageBuilderFactoryError::IncompatibleFieldAssignment {
                     field_name: get_field_name(),
                     message_type: get_msg_type(),
                     msg: format!(
-                        "Field expects type {:?} but expression node's output type is {:?}",
-                        field_type, node_type
+                        "Field expects type {:?} but expression node's output type is {:?}, \
+                        and after aggregation, the type will be {:?}",
+                        field_type, node_type, aggregated_type,
                     ),
                 });
             }
@@ -257,6 +261,47 @@ impl MessageBuilderFactoryImpl {
         }
         Ok(field_assignments_map)
     }
+
+    fn get_aggregated_type(
+        node_type: &NodeValueType,
+        aggregation_type: &AggregationType,
+    ) -> Result<NodeValueType, MessageBuilderFactoryError> {
+        let err_provider = || {
+            Err(MessageBuilderFactoryError::UnsupportedAggregation {
+                aggr_type: format!("{:?}", aggregation_type),
+                node_type: format!("{:?}", node_type),
+            })
+        };
+        Ok(match aggregation_type {
+            AggregationType::AGGREGATION_TYPE_UNSPECIFIED => {
+                panic!("AggregationType should be validated to be set")
+            }
+            AggregationType::NO_AGGREGATION => node_type.clone(),
+            AggregationType::VECTOR => match node_type {
+                NodeValueType::Bool => NodeValueType::BoolList,
+                NodeValueType::Int => NodeValueType::IntList,
+                NodeValueType::Float => NodeValueType::FloatList,
+                _ => {
+                    return err_provider();
+                }
+            },
+            AggregationType::MAX | AggregationType::MIN => {
+                if matches!(node_type, NodeValueType::Int | NodeValueType::Float) {
+                    node_type.clone()
+                } else {
+                    return err_provider();
+                }
+            }
+            AggregationType::AVG => {
+                if matches!(node_type, NodeValueType::Int | NodeValueType::Float) {
+                    NodeValueType::Float
+                } else {
+                    return err_provider();
+                }
+            }
+            AggregationType::COUNT => NodeValueType::Int,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -274,6 +319,7 @@ mod tests {
     const TEST_MESSAGE_FULL_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const INT_FIELD_NAME: &str = "int_field";
     const FLOAT_FIELD_NAME: &str = "float_field";
+    const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const STRING_FIELD_NAME: &str = "string_field";
 
     fn create_test_file_descriptors() -> Vec<FileDescriptor> {
@@ -287,10 +333,22 @@ mod tests {
     }
 
     fn create_field_assignment_proto(field_name: &str, node_index: u32) -> FieldAssignment {
+        create_field_assignment_proto_with_aggregation(
+            field_name,
+            node_index,
+            AggregationType::NO_AGGREGATION,
+        )
+    }
+
+    fn create_field_assignment_proto_with_aggregation(
+        field_name: &str,
+        node_index: u32,
+        aggregation_type: AggregationType,
+    ) -> FieldAssignment {
         let mut field_assignment = FieldAssignment::new();
         field_assignment.field_name = field_name.to_string();
         field_assignment.expression_node_index = node_index;
-        field_assignment.aggregation_type = AggregationType::NO_AGGREGATION.into();
+        field_assignment.aggregation_type = aggregation_type.into();
         field_assignment
     }
 
@@ -479,6 +537,56 @@ mod tests {
     }
 
     #[test]
+    fn test_factory_validate_incompatible_node_and_aggregation_type_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let node_types = vec![NodeValueType::IntList];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // cannot apply VECTOR on IntList node outputs
+            vec![create_field_assignment_proto_with_aggregation(
+                REPEATED_INT_FIELD_NAME,
+                0,
+                AggregationType::VECTOR,
+            )],
+        );
+
+        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::UnsupportedAggregation { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_validate_field_has_incompatible_aggregated_output_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let node_types = vec![NodeValueType::Int];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // AVG will produce a float output, cannot assign float to int field
+            vec![create_field_assignment_proto_with_aggregation(
+                INT_FIELD_NAME,
+                0,
+                AggregationType::AVG,
+            )],
+        );
+
+        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::IncompatibleFieldAssignment { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
     fn test_factory_create_ok() {
         let factory = MessageBuilderFactoryImpl::new();
         let fds = create_test_file_descriptors();
@@ -641,6 +749,57 @@ mod tests {
             TEST_MESSAGE_FULL_NAME,
             // Some float field uses node at index 0 as its value assignment
             vec![create_field_assignment_proto(FLOAT_FIELD_NAME, 0)],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::IncompatibleFieldAssignment { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_create_incompatible_node_and_aggregation_type_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let node_types = vec![NodeValueType::IntList];
+        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Int32List(vec![]) })];
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // cannot apply VECTOR on IntList node outputs
+            vec![create_field_assignment_proto_with_aggregation(
+                REPEATED_INT_FIELD_NAME,
+                0,
+                AggregationType::VECTOR,
+            )],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::UnsupportedAggregation { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_create_field_has_incompatible_aggregated_output_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let (nodes, node_types) = create_nodes_with_size(1);
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // AVERAGE will produce a float output, cannot assign float to int field
+            vec![create_field_assignment_proto_with_aggregation(
+                INT_FIELD_NAME,
+                0,
+                AggregationType::AVG,
+            )],
         );
 
         let err = factory.create(&proto_message_builder, &context).err().unwrap();
