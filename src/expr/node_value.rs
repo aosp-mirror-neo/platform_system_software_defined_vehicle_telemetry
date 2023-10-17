@@ -215,6 +215,14 @@ impl NodeValue {
         }
     }
 
+    /// Check if node holds a numeric value.
+    pub fn is_numeric(&self) -> bool {
+        matches!(
+            self,
+            NodeValue::Int32(_) | NodeValue::Int64(_) | NodeValue::Float(_) | NodeValue::Double(_)
+        )
+    }
+
     // private functions and methods below
 
     /// Reads a field value from a protobuf message using the reflection.
@@ -461,14 +469,6 @@ impl NodeValue {
     /// Check if node holds a boolean value.
     fn is_bool(&self) -> bool {
         matches!(self, NodeValue::Bool(_))
-    }
-
-    /// Check if node holds a numeric value.
-    fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            NodeValue::Int32(_) | NodeValue::Int64(_) | NodeValue::Float(_) | NodeValue::Double(_)
-        )
     }
 
     /// Check if node holds an integer value.
