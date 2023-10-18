@@ -27,12 +27,13 @@ using the sdv_telemetry_service executable.
     launch_cvd
     # Expect tons of logs finishing by "Virtual device booted successfully"
     ```
-2. Start a new terminal, switch to root, start logcat
+2. Start a new terminal, switch to root, push the metric config binary file and start logcat
 
     ```bash
     adb root
     # Expected "restarting adbd as root"
     # Expect the root terminal "#"
+    adb push <path_to_file> <path_on_device>
     adb logcat
     ```
 
@@ -62,7 +63,7 @@ using the sdv_telemetry_service executable.
         ```bash
         adb shell
         # Expect the root terminal "#"
-        telemetry_cpp_client
+        telemetry_cpp_client <path_on_device>
         # Expect no output
         # In the previous terminal with logcat expect logs with logtag
         # "CPPClient" and "SdvTelemetryService"
@@ -73,17 +74,8 @@ using the sdv_telemetry_service executable.
         ```bash
         adb shell
         # Expect the root terminal "#"
-        telemetry_rust_client
+        telemetry_rust_c_client <path_on_device>
         # Expect "Getting service android.sdv.telemetry.ITelemetryService"
-        # In the previous terminal with logcat expect logs with logtag
-        # "telemetry_rust_client" and "SdvTelemetryService"
-        ```
-    3. Start a new terminal and run rust c client application
-
-        ```bash
-        adb shell
-        # Expect the root terminal "#"
-        telemetry_rust_c_client
         # In the previous terminal with logcat expect logs with logtag
         # "telemetry_rust_c_client" and "SdvTelemetryService"
         ```

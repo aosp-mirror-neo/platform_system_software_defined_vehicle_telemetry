@@ -60,6 +60,8 @@ ServiceHolder* get_telemetry_service();
  * stop telemetry service is called.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int stop_telemetry_service(ServiceHolder* holder);
 
@@ -76,6 +78,8 @@ int stop_telemetry_service(ServiceHolder* holder);
  * @param listener pointer to listener passed back to client when callback function is triggered
  * @param cbFunc pointer to callback function. callback function is called to share the status of
  * the API call
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size, void* listener,
                        StatusCallbackFunction cbFunc);
@@ -92,6 +96,8 @@ int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t si
  * @param listener pointer to listener passed back to client when callback function is triggered
  * @param cbFunc pointer to callback function. callback function is called to share the status of
  * the API call
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int activate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
                             StatusCallbackFunction cbFunc);
@@ -108,6 +114,8 @@ int activate_metrics_config(ServiceHolder* holder, const char* uuid, void* liste
  * @param listener pointer to listener passed back to client when callback function is triggered
  * @param cbFunc pointer to callback function. callback function is called to share the status of
  * the API call
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int deactivate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
                               StatusCallbackFunction cbFunc);
@@ -122,6 +130,8 @@ int deactivate_metrics_config(ServiceHolder* holder, const char* uuid, void* lis
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
  * @param uuid UUID of the metrics config that needs to be removed.
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int remove_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
                           StatusCallbackFunction cbFunc);
@@ -138,6 +148,8 @@ int remove_metrics_config(ServiceHolder* holder, const char* uuid, void* listene
  * @param listener pointer to listener passed back to client when callback function is triggered
  * @param cbFunc pointer to callback function. callback function is called to share the status of
  * the API call
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
                                StatusCallbackFunction cbFunc);
@@ -153,6 +165,8 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
  * cbFunc takes a void pointer which points to the report listener sent to the telemetry
  * service by the client app and a const char* uuid which identifies the metrics config that
  * produced a report as params.
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int set_report_ready_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc);
 
@@ -165,6 +179,7 @@ int set_report_ready_listener(ServiceHolder* holder, void* listener, StatusCallb
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
  *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int clear_report_ready_listener(ServiceHolder* holder);
 
@@ -179,6 +194,8 @@ int clear_report_ready_listener(ServiceHolder* holder);
  * @param listener Reference to report listener object.
  * @param cbFunc pointer to callback function. Callback function is used to send the metrics report
  * as a byte array along with the size of the report, and the report listener object passed.
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int get_metrics_report(ServiceHolder* holder, int32_t report_number, const char* report_uuid,
                        void* listener, GetReportCallbackFunction cbFunc);
@@ -191,6 +208,8 @@ int get_metrics_report(ServiceHolder* holder, int32_t report_number, const char*
  * @param holder An opaque pointer holding a reference to the telemetry_service
  * @param cbFunc Function pointer for the cbFunc that gets called when after an API call. The
  * cbFunc takes an int status_code and a const char* status_message as params.
+ *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc);
 
@@ -204,6 +223,7 @@ int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFun
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
  *
+ * @return an integer status code that validates the parameters provided to the API
  */
 int clear_status_listener(ServiceHolder* holder);
 
