@@ -15,7 +15,7 @@ use crate::{
         ast_extensions::{NodeValueType, NodeValueTypeExtension},
     },
     metrics_config_orchestrator::message_builder::{
-        AggregatedFieldValue, MessageBuilder, MessageBuilderImpl,
+        AggregationFactory, MessageBuilder, MessageBuilderImpl,
     },
 };
 
@@ -135,18 +135,20 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
             context.node_types,
         )?;
 
-        // convert the map into another hashmap that is accepted by MessageBuilderImpl's
-        // constructor
+        // iterate through raw assignments to build ValueAggregator's
         let field_assignments = map
             .into_iter()
             .map(|(field_name, node_and_aggregation_type_option)| {
                 let (node, aggregation_type) = node_and_aggregation_type_option.expect(
                     "All field names should map to valid expression nodes and aggregation types",
                 );
-                // return new (key, value) pairs for the new hashmap
-                (field_name, Mutex::new(AggregatedFieldValue::new(aggregation_type, node)))
+                let aggregated_field_value =
+                    Mutex::new(AggregationFactory::create(aggregation_type, node));
+                // hashmap key = field_name, value = aggregated_field_value
+                (field_name, aggregated_field_value)
             })
             .collect();
+
         Ok(Box::new(MessageBuilderImpl::new(message_descriptor, field_assignments)))
     }
 }

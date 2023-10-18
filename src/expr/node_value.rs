@@ -17,6 +17,7 @@ use sdvtelemetry_proto_rust::expression::{
     constant_leaf_node::Node_value as NodeValueProto,
     ConstantLeafNode as ConstantLeafNodeProto,
 };
+use std::error::Error;
 
 use crate::expr::{
     node_errors::NodeError, node_value::protobuf_reflection_extensions::ToNodeValue,
@@ -166,7 +167,10 @@ impl NodeValue {
     }
 
     /// Returns the bool value or a custom error message if NodeValue is not a bool.
-    pub fn get_bool(&self, err_provider: &impl Fn() -> NodeError) -> Result<bool, NodeError> {
+    pub fn get_bool<E>(&self, err_provider: &impl Fn() -> E) -> Result<bool, E>
+    where
+        E: Error,
+    {
         if let NodeValue::Bool(val) = self {
             return Ok(*val);
         }
@@ -174,7 +178,10 @@ impl NodeValue {
     }
 
     /// Returns the int value or the provided error if NodeValue is not an int.
-    pub fn get_int(&self, err_provider: &impl Fn() -> NodeError) -> Result<i64, NodeError> {
+    pub fn get_int<E>(&self, err_provider: &impl Fn() -> E) -> Result<i64, E>
+    where
+        E: Error,
+    {
         Ok(match self {
             NodeValue::Int32(val) => *val as i64,
             NodeValue::Int64(val) => *val,
@@ -183,7 +190,10 @@ impl NodeValue {
     }
 
     /// Returns the double value or error if NodeValue is not numeric.
-    pub fn get_double(&self, err_provider: &impl Fn() -> NodeError) -> Result<f64, NodeError> {
+    pub fn get_double<E>(&self, err_provider: &impl Fn() -> E) -> Result<f64, E>
+    where
+        E: Error,
+    {
         Ok(match self {
             NodeValue::Int32(val) => *val as f64,
             NodeValue::Int64(val) => *val as f64,
@@ -194,10 +204,10 @@ impl NodeValue {
     }
 
     /// Returns the Message value or the provided error if NodeValue is not a Message.
-    pub fn get_message(
-        &self,
-        err_provider: impl FnOnce() -> NodeError,
-    ) -> Result<&dyn MessageDyn, NodeError> {
+    pub fn get_message<E>(&self, err_provider: impl FnOnce() -> E) -> Result<&dyn MessageDyn, E>
+    where
+        E: Error,
+    {
         if let NodeValue::Message(msg) = self {
             Ok(msg.as_ref())
         } else {
