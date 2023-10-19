@@ -57,6 +57,8 @@ pub enum TriggerFactoryError {
     MissingNodeIndex,
     #[error("Incorrect conditional trigger node index {node_index}")]
     IncorrectNodeIndex { node_index: u32 },
+    #[error("Unknown change type {change_type}")]
+    UnknownChangeType { change_type: i32 },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
 }
@@ -69,36 +71,39 @@ impl TriggerFactory for TriggerFactoryImpl {
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
-        Ok(Arc::new(TriggerImpl::new(
-            trigger_proto.name.clone(),
-            match &trigger_proto.trigger_type {
-                Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
-                    publisher: context.publishers[&data_trigger.publisher_name].clone(),
-                },
-                Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => {
-                    TriggerType::Periodic { interval_ms: periodic_trigger.interval_ms }
-                }
-                Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
-                    TriggerFactoryImpl::verify_not_empty(&conditional_trigger.trigger_names)?;
-                    let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
-                    let selector_expression = context
-                        .expression_nodes
-                        .get(selector_node_index as usize)
-                        .ok_or(TriggerFactoryError::IncorrectNodeIndex {
-                            node_index: selector_node_index,
-                        })?;
-                    TriggerType::Conditional {
-                        triggers: conditional_trigger
-                            .trigger_names
-                            .iter()
-                            .map(|name| context.triggers[name].clone())
-                            .collect(),
-                        selector_expression: selector_expression.clone(),
-                    }
-                }
-                _ => return Err(TriggerFactoryError::UnknownTriggerType),
+        let trigger_name = trigger_proto.name.clone();
+        let trigger_type = match &trigger_proto.trigger_type {
+            Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
+                publisher: context.publishers[&data_trigger.publisher_name].clone(),
             },
-        )))
+            Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => {
+                TriggerType::Periodic { interval_ms: periodic_trigger.interval_ms }
+            }
+            Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
+                TriggerFactoryImpl::verify_not_empty(&conditional_trigger.trigger_names)?;
+                let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
+                let selector_expression =
+                    context.expression_nodes.get(selector_node_index as usize).ok_or(
+                        TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
+                    )?;
+                let triggers = conditional_trigger
+                    .trigger_names
+                    .iter()
+                    .map(|name| context.triggers[name].clone() as Arc<dyn Trigger>)
+                    .collect();
+                return Ok(Arc::new(TriggerImpl::new_conditional_trigger(
+                    trigger_name,
+                    conditional_trigger.change_type.enum_value().map_err(|value| {
+                        TriggerFactoryError::UnknownChangeType { change_type: value }
+                    })?,
+                    triggers,
+                    selector_expression.clone(),
+                )));
+            }
+            _ => return Err(TriggerFactoryError::UnknownTriggerType),
+        };
+
+        Ok(Arc::new(TriggerImpl::new(trigger_name, trigger_type)))
     }
 
     fn validate(
@@ -146,6 +151,7 @@ impl TriggerFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use sdvtelemetry_proto_rust::metrics_configuration::conditional_trigger::ChangeType;
     use std::collections::HashMap;
 
     use super::*;
@@ -210,6 +216,7 @@ mod tests {
     fn create_valid_conditional_trigger() -> (TriggerProto, Option<Vec<Arc<TriggerImpl>>>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
+        conditional_trigger.change_type = ChangeType::ALL.into();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
@@ -370,12 +377,18 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Conditional { triggers, selector_expression } = &res.trigger_type {
-            assert_eq!(triggers.len(), 1);
-            assert!(Arc::ptr_eq(&triggers[0], &parent_triggers.unwrap()[0]));
+        if let TriggerType::Conditional { change_type, selector_expression, triggers, .. } =
+            &res.trigger_type
+        {
+            assert!(matches!(change_type, ChangeType::ALL));
             // selector_expression should match the node at index 0
             assert!(Arc::ptr_eq(selector_expression, &node_0));
-            assert!(!Arc::ptr_eq(selector_expression, &node_1))
+            assert!(!Arc::ptr_eq(selector_expression, &node_1));
+            assert_eq!(triggers.len(), 1);
+            assert!(Arc::ptr_eq(
+                &triggers[0],
+                &(parent_triggers.unwrap()[0].clone() as Arc<dyn Trigger>)
+            ));
         } else {
             panic!("Unexpected trigger type");
         }

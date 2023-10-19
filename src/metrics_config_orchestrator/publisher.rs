@@ -156,6 +156,7 @@ impl Publisher for PublisherImpl {
                     let self_clone = self.clone();
                     let callback_map_reference = Arc::downgrade(&callback_map);
                     if let Err(err) = trigger
+                        .clone()
                         .subscribe(
                             trigger_subscriber,
                             Box::new(move || {

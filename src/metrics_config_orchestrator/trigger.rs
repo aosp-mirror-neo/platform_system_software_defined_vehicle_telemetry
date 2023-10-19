@@ -1,21 +1,28 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use async_trait::async_trait;
+use log::error;
 use protobuf::MessageDyn;
+use sdvtelemetry_proto_rust::{
+    expression::combination_node::{Operator, RelationalOperator},
+    metrics_configuration::conditional_trigger::ChangeType,
+};
 use std::{
     collections::HashMap,
     fmt,
     marker::{Send, Sync},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
-use crate::collection_extension::HashMapExtension;
-use crate::expr::ast::Node;
 use crate::metrics_config_orchestrator::{
     publisher::{PublisherSubscribeError, PublisherUnsubscribeError},
     Publisher,
+};
+use crate::{
+    collection_extension::HashMapExtension,
+    expr::{ast::Node, node_value::NodeValue},
 };
 
 #[async_trait]
@@ -28,7 +35,7 @@ pub(crate) trait Trigger: Send + Sync {
     /// First subscription activates the trigger.
     /// The callback mustn't block because it's executed on the trigger thread.
     async fn subscribe(
-        &self,
+        self: Arc<Self>,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
     ) -> Result<(), TriggerSubscribeError>;
@@ -69,11 +76,11 @@ pub enum TriggerUnsubscribeError {
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(crate) enum TriggerSubscriber {
     AggregationPublisher { name: String },
+    ConditionalTrigger { name: String },
     MetricsConfigStart,
     MetricsConfigEnd,
     MetricsConfigFinish,
     MetricsReportGenerator { name: String },
-    PeriodicTrigger { name: String },
 }
 
 pub(crate) struct TriggerImpl {
@@ -82,7 +89,7 @@ pub(crate) struct TriggerImpl {
 
     // The map of functions that need to be called when the trigger fires.
     // The first subscription to TriggerImpl creates a new map and activates underlying trigger
-    // type, passing a reference the map. Last unsubscription removes the map and deactivates
+    // type, passing a reference to the map. Last unsubscription removes the map and deactivates
     // underlying trigger type.
     callback_map:
         AsyncMutex<Arc<AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>>>,
@@ -90,9 +97,19 @@ pub(crate) struct TriggerImpl {
 
 #[allow(dead_code)]
 pub(crate) enum TriggerType {
-    Data { publisher: Arc<dyn Publisher> },
-    Periodic { interval_ms: u64 },
-    Conditional { triggers: Vec<Arc<TriggerImpl>>, selector_expression: Arc<Node> },
+    Data {
+        publisher: Arc<dyn Publisher>,
+    },
+    Periodic {
+        interval_ms: u64,
+    },
+    Conditional {
+        change_type: ChangeType,
+        maybe_previous_value: Mutex<Option<NodeValue>>,
+        selector_expression: Arc<Node>,
+        subscriber: TriggerSubscriber,
+        triggers: Vec<Arc<dyn Trigger>>,
+    },
 }
 
 impl fmt::Display for TriggerSubscriber {
@@ -101,13 +118,15 @@ impl fmt::Display for TriggerSubscriber {
             TriggerSubscriber::AggregationPublisher { name } => {
                 write!(f, "Aggregation Publisher {}", name)
             }
+            TriggerSubscriber::ConditionalTrigger { name } => {
+                write!(f, "Periodic Trigger {}", name)
+            }
             TriggerSubscriber::MetricsConfigStart => write!(f, "Metrics Config Start"),
             TriggerSubscriber::MetricsConfigEnd => write!(f, "Metrics Config End"),
             TriggerSubscriber::MetricsConfigFinish => write!(f, "Metrics Config Finish"),
             TriggerSubscriber::MetricsReportGenerator { name } => {
                 write!(f, "Metrics Report Generator {}", name)
             }
-            TriggerSubscriber::PeriodicTrigger { name } => write!(f, "Periodic Trigger {}", name),
         }
     }
 }
@@ -119,7 +138,7 @@ impl Trigger for TriggerImpl {
     }
 
     async fn subscribe(
-        &self,
+        self: Arc<Self>,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
     ) -> Result<(), TriggerSubscribeError> {
@@ -186,8 +205,27 @@ impl TriggerImpl {
         }
     }
 
+    pub(super) fn new_conditional_trigger(
+        name: String,
+        change_type: ChangeType,
+        triggers: Vec<Arc<dyn Trigger>>,
+        selector_expression: Arc<Node>,
+    ) -> Self {
+        let subscriber = TriggerSubscriber::ConditionalTrigger { name: name.clone() };
+        Self::new(
+            name,
+            TriggerType::Conditional {
+                change_type,
+                maybe_previous_value: None.into(),
+                triggers,
+                selector_expression,
+                subscriber,
+            },
+        )
+    }
+
     async fn activate(
-        &self,
+        self: Arc<Self>,
         callbacks_container: Arc<
             AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,
         >,
@@ -206,7 +244,42 @@ impl TriggerImpl {
             TriggerType::Periodic { interval_ms } => {
                 tokio::spawn(Self::call_periodically(*interval_ms, callbacks_container));
             }
-            TriggerType::Conditional { .. } => unimplemented!(),
+            TriggerType::Conditional { change_type, subscriber, triggers, .. } => {
+                let operator = match change_type {
+                    ChangeType::CHANGE_TYPE_UNSPECIFIED => {
+                        panic!("Change type for trigger {} is not specified", self.name)
+                    }
+                    ChangeType::RISING_EDGE => {
+                        Operator::RelationalOperator(RelationalOperator::GT.into())
+                    }
+                    ChangeType::FALLING_EDGE => {
+                        Operator::RelationalOperator(RelationalOperator::LT.into())
+                    }
+                    ChangeType::ALL => {
+                        Operator::RelationalOperator(RelationalOperator::NOT_EQ.into())
+                    }
+                };
+                for trigger in triggers {
+                    let self_clone = self.clone();
+                    let callbacks_container_clone = callbacks_container.clone();
+                    let operator_clone = operator.clone();
+                    if let Err(err) = trigger
+                        .clone()
+                        .subscribe(
+                            subscriber,
+                            Box::new(move || {
+                                self_clone.on_parent_trigger_fired(
+                                    &callbacks_container_clone,
+                                    &operator_clone,
+                                )
+                            }),
+                        )
+                        .await
+                    {
+                        error!("Error when trying to activate trigger {} for conditional trigger {}: {}.", trigger.get_name(), self.name, err);
+                    }
+                }
+            }
         };
         Ok(())
     }
@@ -276,6 +349,54 @@ impl TriggerImpl {
             Self::fire_trigger(&callbacks_container_clone).await;
         });
     }
+
+    fn on_parent_trigger_fired(
+        self: &Arc<Self>,
+        callbacks_container: &Arc<
+            AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,
+        >,
+        operator: &Operator,
+    ) {
+        let TriggerType::Conditional { maybe_previous_value, selector_expression, .. } =
+            &self.trigger_type
+        else {
+            panic!("Unexpected trigger type");
+        };
+
+        let node_value = match selector_expression.evaluate() {
+            Ok(value) => value,
+            Err(err) => {
+                error!(
+                    "Error when performing expression evaluation for trigger {}: {}",
+                    self.name, err
+                );
+                return;
+            }
+        };
+
+        // Extract previous value and save current value.
+        let local_maybe_previous_value =
+            maybe_previous_value.lock().unwrap().replace(node_value.clone());
+
+        // Perform comparison or return if this is the first value.
+        if let Some(previous_value) = local_maybe_previous_value {
+            let result = node_value.operate(operator, || Ok(previous_value)).unwrap();
+            if let NodeValue::Bool(bool_result) = result {
+                if !bool_result {
+                    return;
+                }
+            } else {
+                panic!("Relational operator evaluation returned non-bool result {:?}", result);
+            }
+        } else {
+            return;
+        }
+
+        let callbacks_container_clone = callbacks_container.clone();
+        tokio::spawn(async move {
+            Self::fire_trigger(&callbacks_container_clone).await;
+        });
+    }
 }
 
 #[cfg(test)]
@@ -288,10 +409,14 @@ mod tests {
     use tokio::{sync::Notify, time};
 
     use super::*;
-    use crate::expr::node_value::NodeValue;
-    use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
+    use crate::expr::mock::MockMessageProvider;
+    use crate::metrics_config_orchestrator::{
+        publisher::mock::MockPublisher, trigger::mock::MockTrigger,
+    };
+    use crate::test_utils::with_timeout;
 
     const INTERVAL_MS: u64 = 10;
+    const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const TRIGGER_NAME: &str = "trigger";
 
@@ -316,8 +441,12 @@ mod tests {
         }
     }
 
-    fn create_node() -> Node {
-        Node::ConstantLeaf { value: NodeValue::Bool(false) }
+    fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {
+        Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_owned(),
+            fields: vec![field_name],
+            message_provider,
+        }
     }
 
     fn create_valid_data_trigger(publisher: Arc<MockPublisher>) -> TriggerImpl {
@@ -345,9 +474,10 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_already_subscribed_fails() {
-        let trigger = create_valid_periodic_trigger();
+        let trigger = Arc::new(create_valid_periodic_trigger());
 
         trigger
+            .clone()
             .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
             .await
             .unwrap();
@@ -372,7 +502,7 @@ mod tests {
                 data_trigger_name: TRIGGER_NAME.to_owned(),
             })
         });
-        let trigger = create_valid_data_trigger(Arc::new(publisher));
+        let trigger = Arc::new(create_valid_data_trigger(Arc::new(publisher)));
 
         let err = trigger
             .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
@@ -394,7 +524,7 @@ mod tests {
     #[tokio::test]
     async fn subscribe_to_data_trigger_subscribes_to_publisher() {
         let publisher = Arc::new(create_valid_mock_publisher());
-        let trigger = create_valid_data_trigger(publisher.clone());
+        let trigger = Arc::new(create_valid_data_trigger(publisher.clone()));
         let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = callback_listener.clone();
 
@@ -408,18 +538,19 @@ mod tests {
 
         publisher.fire_new_message(&Int32Value::new()).await;
 
-        callback_listener.callback_notify.notified().await;
+        with_timeout(callback_listener.callback_notify.notified()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_immediately_unsubscribe_doesnt_fire() {
-        let trigger = create_valid_periodic_trigger();
+        let trigger = Arc::new(create_valid_periodic_trigger());
         let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = callback_listener.clone();
 
         trigger
+            .clone()
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move || callback_listener_clone.on_callback_fired()),
@@ -436,12 +567,13 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_fires_twice() {
-        let trigger = create_valid_periodic_trigger();
+        let trigger = Arc::new(create_valid_periodic_trigger());
         let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = callback_listener.clone();
 
         // Subscribe to trigger.
         trigger
+            .clone()
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move || callback_listener_clone.on_callback_fired()),
@@ -450,8 +582,8 @@ mod tests {
             .unwrap();
 
         // Wait for trigger to fire twice.
-        callback_listener.callback_notify.notified().await;
-        callback_listener.callback_notify.notified().await;
+        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.callback_notify.notified()).await;
 
         // Unsubscribe from trigger.
         trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.unwrap();
@@ -483,7 +615,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscribe_to_periodic_trigger_one_async_loop() {
-        let mut trigger = create_valid_periodic_trigger();
+        let trigger = Arc::new(create_valid_periodic_trigger());
         let callback_listener1 = Arc::new(CallbackListener::new());
         let callback_listener1_clone = callback_listener1.clone();
         let callback_listener2 = Arc::new(CallbackListener::new());
@@ -491,6 +623,7 @@ mod tests {
 
         // Subscribe to trigger.
         trigger
+            .clone()
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move || callback_listener1_clone.on_callback_fired()),
@@ -499,11 +632,13 @@ mod tests {
             .unwrap();
 
         // Increase interval so that new async loops won't generate messages any time soon.
+        let mut trigger = Arc::into_inner(trigger).unwrap();
         if let TriggerType::Periodic { interval_ms } = &mut trigger.trigger_type {
             *interval_ms = 100 * INTERVAL_MS;
         } else {
             panic!("Unexpected trigger type");
         }
+        let trigger = Arc::new(trigger);
 
         // Create another subscription.
         trigger
@@ -515,29 +650,193 @@ mod tests {
             .unwrap();
 
         // Wait for trigger to fire once.
-        callback_listener1.callback_notify.notified().await;
-        callback_listener2.callback_notify.notified().await;
+        with_timeout(callback_listener1.callback_notify.notified()).await;
+        with_timeout(callback_listener2.callback_notify.notified()).await;
 
         // Verify that both subscriptions were notified.
         assert_eq!(callback_listener1.get_fired_count(), 1);
         assert_eq!(callback_listener2.get_fired_count(), 1);
     }
 
-    #[should_panic]
     #[tokio::test]
-    async fn subscribe_to_conditional_trigger_panics() {
-        let trigger = TriggerImpl::new(
+    async fn subscribe_to_conditional_trigger_subscribes_to_parents() {
+        let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let parent_trigger2 = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = Arc::new(TriggerImpl::new_conditional_trigger(
             TRIGGER_NAME.to_owned(),
-            TriggerType::Conditional {
-                triggers: vec![],
-                selector_expression: Arc::new(create_node()),
-            },
-        );
+            ChangeType::ALL,
+            vec![parent_trigger1.clone(), parent_trigger2.clone()],
+            Arc::new(create_field_node("value".to_owned(), message_provider.clone())),
+        ));
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_listener_clone = callback_listener.clone();
 
         trigger
-            .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.on_callback_fired()),
+            )
             .await
             .unwrap();
+
+        let mut msg1 = Box::new(Int32Value::new());
+        msg1.value = 1;
+        let mut msg2 = Box::new(Int32Value::new());
+        msg2.value = 2;
+
+        // Set the first message and fire the first parent trigger.
+        message_provider.set_next_result(Ok(Some(msg1)));
+        parent_trigger1.fire().await;
+
+        // Set a different message and fire the second parent trigger.
+        message_provider.set_next_result(Ok(Some(msg2)));
+        parent_trigger2.fire().await;
+
+        // Wait for trigger to fire once.
+        with_timeout(callback_listener.callback_notify.notified()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_conditional_trigger_filters_changes() {
+        let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = Arc::new(TriggerImpl::new_conditional_trigger(
+            TRIGGER_NAME.to_owned(),
+            ChangeType::ALL,
+            vec![parent_trigger.clone()],
+            Arc::new(create_field_node("value".to_owned(), message_provider.clone())),
+        ));
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_listener_clone = callback_listener.clone();
+        trigger
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.on_callback_fired()),
+            )
+            .await
+            .unwrap();
+
+        let mut msg1 = Box::new(Int32Value::new());
+        msg1.value = 1;
+        let mut msg2 = Box::new(Int32Value::new());
+        msg2.value = 2;
+
+        // Fire parent trigger three times with the message changing once.
+        message_provider.set_next_result(Ok(Some(msg1)));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg2.clone())));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg2)));
+        parent_trigger.fire().await;
+
+        // Wait for trigger to fire once.
+        with_timeout(callback_listener.callback_notify.notified()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_conditional_trigger_filters_falling_edge() {
+        let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = Arc::new(TriggerImpl::new_conditional_trigger(
+            TRIGGER_NAME.to_owned(),
+            ChangeType::FALLING_EDGE,
+            vec![parent_trigger.clone()],
+            Arc::new(create_field_node("value".to_owned(), message_provider.clone())),
+        ));
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_listener_clone = callback_listener.clone();
+        trigger
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.on_callback_fired()),
+            )
+            .await
+            .unwrap();
+
+        let mut msg1 = Box::new(Int32Value::new());
+        msg1.value = 1;
+        let mut msg2 = Box::new(Int32Value::new());
+        msg2.value = 2;
+
+        // Fire parent trigger three times.
+        // The first change is the rising edge and the second change is the falling edge.
+        message_provider.set_next_result(Ok(Some(msg1.clone())));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg2)));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg1)));
+        parent_trigger.fire().await;
+
+        // Wait for trigger to fire once.
+        with_timeout(callback_listener.callback_notify.notified()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_conditional_trigger_filters_rising_edge() {
+        let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = Arc::new(TriggerImpl::new_conditional_trigger(
+            TRIGGER_NAME.to_owned(),
+            ChangeType::RISING_EDGE,
+            vec![parent_trigger.clone()],
+            Arc::new(create_field_node("value".to_owned(), message_provider.clone())),
+        ));
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_listener_clone = callback_listener.clone();
+        trigger
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || callback_listener_clone.on_callback_fired()),
+            )
+            .await
+            .unwrap();
+
+        let mut msg1 = Box::new(Int32Value::new());
+        msg1.value = 1;
+        let mut msg2 = Box::new(Int32Value::new());
+        msg2.value = 2;
+
+        // Fire parent trigger three times.
+        // The first change is the falling edge and the second change is the rising edge.
+        message_provider.set_next_result(Ok(Some(msg2.clone())));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg1)));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg2)));
+        parent_trigger.fire().await;
+
+        // Wait for trigger to fire once.
+        with_timeout(callback_listener.callback_notify.notified()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
     #[tokio::test]
@@ -561,9 +860,10 @@ mod tests {
                 data_trigger_name: TRIGGER_NAME.to_owned(),
             })
         });
-        let trigger = create_valid_data_trigger(Arc::new(publisher));
+        let trigger = Arc::new(create_valid_data_trigger(Arc::new(publisher)));
 
         trigger
+            .clone()
             .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
             .await
             .unwrap();

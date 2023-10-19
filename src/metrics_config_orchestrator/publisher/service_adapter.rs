@@ -200,7 +200,6 @@ pub(super) mod tests {
 
     const INTERVAL_MS: u64 = 10;
     const SERVICE_NAME: &str = "test_service";
-    const TIMEOUT_MS: u64 = 60;
 
     lazy_static! {
         static ref VALUE_FIELD_DESCRIPTOR: FieldDescriptor =
@@ -240,8 +239,8 @@ pub(super) mod tests {
             )
             .await;
 
-        assert_eq!(with_timeout(rx.recv(), TIMEOUT_MS).await, Some(1));
-        assert_eq!(with_timeout(rx.recv(), TIMEOUT_MS).await, Some(2));
+        assert_eq!(with_timeout(rx.recv()).await, Some(1));
+        assert_eq!(with_timeout(rx.recv()).await, Some(2));
     }
 
     #[tokio::test]
@@ -279,8 +278,8 @@ pub(super) mod tests {
             .await;
 
         // Verify that both subscriptions are notified.
-        assert_eq!(with_timeout(rx1, TIMEOUT_MS).await.unwrap(), 1);
-        assert_eq!(with_timeout(rx2, TIMEOUT_MS).await.unwrap(), 1);
+        assert_eq!(with_timeout(rx1).await.unwrap(), 1);
+        assert_eq!(with_timeout(rx2).await.unwrap(), 1);
     }
 
     #[tokio::test]
@@ -356,7 +355,7 @@ pub(super) mod tests {
             )
             .await;
         subscription_holder.lock().unwrap().replace(subscription);
-        with_timeout(notify.notified(), TIMEOUT_MS).await;
+        with_timeout(notify.notified()).await;
 
         // Verify that subscription has been consumed by the unsubscribe call.
         assert!(subscription_holder.lock().unwrap().is_none())

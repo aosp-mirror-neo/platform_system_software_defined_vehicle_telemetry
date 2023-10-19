@@ -13,7 +13,7 @@ use pass_through_aggregator::PassThroughAggregator;
 use vector_aggregator::VectorAggregator;
 
 #[cfg(test)]
-pub mod mock;
+pub(crate) mod mock;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

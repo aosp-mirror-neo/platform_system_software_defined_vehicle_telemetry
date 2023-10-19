@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use async_trait::async_trait;
+use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{Trigger, TriggerSubscribeError, TriggerSubscriber, TriggerUnsubscribeError};
@@ -24,7 +25,7 @@ impl Trigger for MockTrigger {
     }
 
     async fn subscribe(
-        &self,
+        self: Arc<Self>,
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
     ) -> Result<(), TriggerSubscribeError> {
@@ -96,11 +97,11 @@ impl MockTrigger {
     fn verify_subscriber(&self, subscriber: &TriggerSubscriber) {
         assert!(self.expected_subscribers.iter().any(|other| match subscriber {
             TriggerSubscriber::AggregationPublisher { name } => matches!(other, TriggerSubscriber::AggregationPublisher { name: other_name } if name == other_name),
+            TriggerSubscriber::ConditionalTrigger { name } => matches!(other, TriggerSubscriber::ConditionalTrigger { name: other_name } if name == other_name),
             TriggerSubscriber::MetricsConfigStart => matches!(other, TriggerSubscriber::MetricsConfigStart),
             TriggerSubscriber::MetricsConfigEnd => matches!(other, TriggerSubscriber::MetricsConfigEnd),
             TriggerSubscriber::MetricsConfigFinish => matches!(other, TriggerSubscriber::MetricsConfigFinish),
             TriggerSubscriber::MetricsReportGenerator { name } => matches!(other, TriggerSubscriber::MetricsReportGenerator { name: other_name } if name == other_name),
-            TriggerSubscriber::PeriodicTrigger { name } => matches!(other, TriggerSubscriber::PeriodicTrigger { name: other_name } if name == other_name),
         }), "Subscriber {} wasn't expected", subscriber);
     }
 }
