@@ -113,3 +113,23 @@ rust_test_host {
     },
     auto_gen_config: true,
 }
+
+rust_bindgen {
+    name: "libsdv_telemetry_bindgen",
+    crate_name: "sdv_telemetry_bindgen",
+    wrapper_src: "clientlib/export/lib.h",
+    source_stem: "bindings",
+    shared_libs: [
+        "libtelemetry_c",
+    ],
+
+}
+
+rust_bindgen {
+    name: "libstatus_codes_bindgen",
+    crate_name: "status_codes_bindgen",
+    wrapper_src: "clientlib/export/status_codes.h",
+    cpp_std: "gnu++17",
+    source_stem: "bindings",
+
+}

@@ -15,7 +15,7 @@ void ReportReadyListenerImpl::set_report_ready_listener(void* cbObject,
 android::binder::Status ReportReadyListenerImpl::onReady(int32_t report_number,
                                                          const std::string& metricConfigUuid) {
     const char* configUuid = metricConfigUuid.c_str();
-    ALOGD("onReady %s", configUuid);
+    ALOGD("onReady %s report number: %d", configUuid, report_number);
     cbFuncPtr_(clientCb_, report_number, configUuid);
     return android::binder::Status::ok();
 }

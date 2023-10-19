@@ -542,7 +542,6 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
-    #[allow(unused_variables)]
     async fn getMetricsReport(
         &self,
         report_number: i32,
