@@ -1,3 +1,4 @@
+mod count_aggregator;
 mod node_value_extension;
 mod pass_through_aggregator;
 mod vector_aggregator;
@@ -7,6 +8,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::expr::{ast::Node, node_errors::NodeError, node_value::NodeValue};
+use count_aggregator::CountAggregator;
 use pass_through_aggregator::PassThroughAggregator;
 use vector_aggregator::VectorAggregator;
 
@@ -46,7 +48,7 @@ impl AggregationFactory {
             AggregationType::MAX => todo!(),
             AggregationType::MIN => todo!(),
             AggregationType::AVG => todo!(),
-            AggregationType::COUNT => todo!(),
+            AggregationType::COUNT => Box::new(CountAggregator::new()),
         }
     }
 }
