@@ -1,4 +1,7 @@
+mod avg_aggregator;
 mod count_aggregator;
+mod max_aggregator;
+mod min_aggregator;
 mod node_value_extension;
 mod pass_through_aggregator;
 mod vector_aggregator;
@@ -8,7 +11,10 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::expr::{ast::Node, node_errors::NodeError, node_value::NodeValue};
+use avg_aggregator::AvgAggregator;
 use count_aggregator::CountAggregator;
+use max_aggregator::MaxAggregator;
+use min_aggregator::MinAggregator;
 use pass_through_aggregator::PassThroughAggregator;
 use vector_aggregator::VectorAggregator;
 
@@ -27,6 +33,8 @@ pub enum AggregationError {
     VectorInitializationError { value: String },
     #[error("Append has incompatible types. List is {list} and value to append is {value}")]
     VectorAppendTypeMismatch { list: String, value: String },
+    #[error("Numeric aggregation requires expressions to output numeric values, but the value is {value}")]
+    NumericAggregationTypeMismatch { value: String },
 }
 
 /// Aggregation types should implement this trait and perform the corresponding
@@ -45,9 +53,9 @@ impl AggregationFactory {
             }
             AggregationType::NO_AGGREGATION => Box::new(PassThroughAggregator::new(node)),
             AggregationType::VECTOR => Box::new(VectorAggregator::new(node)),
-            AggregationType::MAX => todo!(),
-            AggregationType::MIN => todo!(),
-            AggregationType::AVG => todo!(),
+            AggregationType::MAX => Box::new(MaxAggregator::new(node)),
+            AggregationType::MIN => Box::new(MinAggregator::new(node)),
+            AggregationType::AVG => Box::new(AvgAggregator::new(node)),
             AggregationType::COUNT => Box::new(CountAggregator::new()),
         }
     }

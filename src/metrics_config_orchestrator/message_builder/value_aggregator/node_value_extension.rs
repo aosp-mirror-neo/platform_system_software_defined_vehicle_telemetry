@@ -1,3 +1,5 @@
+use sdvtelemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
+
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::AggregationError;
 
@@ -8,6 +10,17 @@ pub trait NodeValueExtension {
 
     // Appends a single value into an existing list.
     fn push(&mut self, value: &NodeValue) -> Result<(), AggregationError>;
+
+    // Returns true if self is less than other.
+    fn is_less_than(&self, other: &NodeValue) -> Result<bool, AggregationError>;
+
+    // Update the running average after learning the new sample.
+    // Caller must be a NodeValue::Double.
+    fn update_running_average(
+        &mut self,
+        n: u32,
+        new_value: &NodeValue,
+    ) -> Result<(), AggregationError>;
 }
 
 impl NodeValueExtension for NodeValue {
@@ -50,6 +63,37 @@ impl NodeValueExtension for NodeValue {
                 v.push(value.get_double(&err_provider)?);
             }
             _ => panic!("push() should never be called on non-list: {:?}", self),
+        }
+        Ok(())
+    }
+
+    fn is_less_than(&self, other: &NodeValue) -> Result<bool, AggregationError> {
+        let other_clone = other.clone();
+        if let NodeValue::Bool(res) = self
+            .operate(&Operator::RelationalOperator(RelationalOperator::LT.into()), move || {
+                Ok(other_clone)
+            })?
+        {
+            Ok(res)
+        } else {
+            panic!("Relational operation LT should produce a boolean output");
+        }
+    }
+
+    fn update_running_average(
+        &mut self,
+        n: u32,
+        new_value: &NodeValue,
+    ) -> Result<(), AggregationError> {
+        let new_sample = new_value.get_double(&|| {
+            AggregationError::NumericAggregationTypeMismatch { value: format!("{:?}", new_value) }
+        })?;
+        if let NodeValue::Double(avg) = self {
+            let n = n as f64;
+            let sum = *avg * n;
+            *avg = (sum + new_sample) / (n + 1.0)
+        } else {
+            panic!("update_running_average() should never be called on non-double");
         }
         Ok(())
     }
