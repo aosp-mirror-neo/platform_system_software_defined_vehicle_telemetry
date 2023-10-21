@@ -538,6 +538,7 @@ where
         if let Some(start_trigger) = &config.start_trigger {
             let mut config_clone = Some(config.clone());
             start_trigger
+                .clone()
                 .subscribe(
                     &TriggerSubscriber::MetricsConfigStart,
                     Box::new(move || {
@@ -703,6 +704,7 @@ where
             if let Some(end_trigger) = &config.end_trigger {
                 let mut config_clone = Some(config.clone());
                 if let Err(err) = end_trigger
+                    .clone()
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigEnd,
                         Box::new(move || {
@@ -725,6 +727,7 @@ where
             if let Some(finish_trigger) = &config.finish_trigger {
                 let config_clone = config.clone();
                 if let Err(err) = finish_trigger
+                    .clone()
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigFinish,
                         Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
