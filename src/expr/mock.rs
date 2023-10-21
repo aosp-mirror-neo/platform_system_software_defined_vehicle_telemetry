@@ -4,7 +4,7 @@ use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessag
 use sdvtelemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
 };
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use crate::expr::{
     ast::{DescriptorProvider, MessageProvider},
@@ -90,14 +90,19 @@ lazy_static! {
 }
 
 pub struct MockMessageProvider {
-    pub result_provider: Option<
-        Box<dyn Fn() -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> + Send + Sync>,
-    >,
+    pub next_result: Mutex<Option<Result<Option<Box<dyn MessageDyn>>, MessageProviderError>>>,
 }
 
 impl MockMessageProvider {
     pub fn new() -> Self {
-        MockMessageProvider { result_provider: None }
+        MockMessageProvider { next_result: None.into() }
+    }
+
+    pub fn set_next_result(
+        &self,
+        result: Result<Option<Box<dyn MessageDyn>>, MessageProviderError>,
+    ) {
+        self.next_result.lock().unwrap().replace(result);
     }
 }
 
@@ -106,8 +111,8 @@ impl MessageProvider for MockMessageProvider {
         &self,
         _publisher_name: &str,
     ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-        if let Some(provider) = &self.result_provider {
-            provider()
+        if let Some(result) = self.next_result.lock().unwrap().take() {
+            result
         } else {
             Ok(Some(Box::new(TEST_MESSAGE.clone())))
         }

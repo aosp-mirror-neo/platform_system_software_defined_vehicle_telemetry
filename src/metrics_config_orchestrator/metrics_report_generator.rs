@@ -74,6 +74,7 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         for trigger in &self.triggers {
             let self_clone = self.clone();
             if let Err(err) = trigger
+                .clone()
                 .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
                 .await
             {

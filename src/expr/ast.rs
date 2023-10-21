@@ -1245,14 +1245,10 @@ mod tests {
 
     #[test]
     fn test_evaluate_message_provider_invalid_publisher_name_fails() {
-        let mut message_provider = MockMessageProvider::new();
-        message_provider.result_provider =
-            Some(Box::new(|| Err(MessageProviderError::InvalidPublisherName)));
-        let node = Node::FieldLeaf {
-            publisher_name: String::default(),
-            fields: vec![],
-            message_provider: Arc::new(message_provider),
-        };
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider.set_next_result(Err(MessageProviderError::InvalidPublisherName));
+        let node =
+            Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
         let err = node.evaluate().err().unwrap();
 
@@ -1261,13 +1257,10 @@ mod tests {
 
     #[test]
     fn test_evaluate_no_provided_message_returns_none() {
-        let mut message_provider = MockMessageProvider::new();
-        message_provider.result_provider = Some(Box::new(|| Ok(None)));
-        let node = Node::FieldLeaf {
-            publisher_name: String::default(),
-            fields: vec![],
-            message_provider: Arc::new(message_provider),
-        };
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider.set_next_result(Ok(None));
+        let node =
+            Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
         let res = node.evaluate().unwrap();
 

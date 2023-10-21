@@ -12,9 +12,12 @@ pub(crate) fn ptr_eq<T: ?Sized>(left: &Arc<T>, right: &Arc<T>) -> bool {
     Arc::as_ptr(left) == Arc::as_ptr(right)
 }
 
-pub(crate) async fn with_timeout<T>(future: impl Future<Output = T>, timeout_millis: u64) -> T {
+/// Awaits specified future with a timeout of 150 seconds.
+/// The function is used in tests to halt the test instead of timing out the whole test suite.
+/// TODO(b/243397516): remove this workaround once Rust tooling is fixed.
+pub(crate) async fn with_timeout<T>(future: impl Future<Output = T>) -> T {
     tokio::select! {
         result = future => result,
-        _ = time::sleep(Duration::from_millis(timeout_millis)) => panic!("Test timed out"),
+        _ = time::sleep(Duration::from_secs(150)) => panic!("Test timed out"),
     }
 }
