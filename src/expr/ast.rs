@@ -344,12 +344,11 @@ impl Node {
                 // evaluate left branch recursively
                 let left_val = match left {
                     Some(left) => left.evaluate(),
-                    None => Err(NodeError::InternalError {
-                        msg: "Incorrect Node! Node construction should have verified that \
-                            every non-leaf Node has a left child, but evaluate() encountered \
-                            a node without left child"
-                            .to_string(),
-                    }),
+                    None => panic!(
+                        "Incorrect Node! Node construction should have verified that \
+                        every non-leaf Node has a left child, but evaluate() encountered \
+                        a node without left child"
+                    ),
                 }?; // `?` returns early if error
 
                 // If unary operator, then operates on self.
@@ -359,14 +358,17 @@ impl Node {
                     Some(right) => right.evaluate(),
                     None => {
                         if operator.is_unary_operator() {
-                            return Ok(NodeValue::None);
-                        }
-                        Err(NodeError::InternalError {
-                            msg: "Incorrect Node! Node construction should have verified that \
+                            panic!(
+                                "When the operator is unary, NodeValue should not invoke \
+                                right operand's provider function"
+                            );
+                        } else {
+                            panic!(
+                                "Incorrect Node! Node construction should have verified that \
                                 nodes with binary operator specify two children, but evaluate() \
                                 encountered a node with binary operator but no right child"
-                                .to_string(),
-                        })
+                            );
+                        }
                     }
                 })
             }
@@ -1229,17 +1231,18 @@ mod tests {
 
     #[test]
     fn test_evaluate_incompatible_types_should_fail() {
+        let zero_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) });
         let true_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) });
         let lt_node = Arc::new(Node::Combination {
             operator: OperatorProto::RelationalOperator(RelationalOperator::LT.into()),
-            left: Some(true_node.clone()),
+            left: Some(zero_node),
             right: Some(true_node),
         });
 
-        // expr is "True < True"
+        // expr is "0 < True"
         let result = lt_node.evaluate();
 
-        // True cannot be less than True
+        // 0 cannot be less than True
         assert!(matches!(result.err().unwrap(), NodeError::ComparisonOperatorIncomptaibleOperands));
     }
 

@@ -36,8 +36,12 @@ mod tests {
 
     #[test]
     fn test_compute_node_evaluation_error_fails() {
-        let bad_node =
-            Arc::new(Node::Combination { operator: OP_ADD.clone(), left: None, right: None });
+        let true_val = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) });
+        let bad_node = Arc::new(Node::Combination {
+            operator: OP_ADD.clone(),
+            left: Some(true_val.clone()),
+            right: Some(true_val),
+        });
         let mut bad_value = PassThroughAggregator::new(&bad_node);
 
         let res = bad_value.compute();
