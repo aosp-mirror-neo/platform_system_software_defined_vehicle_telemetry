@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdvtelemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
 };

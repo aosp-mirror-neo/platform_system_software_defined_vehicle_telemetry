@@ -1,11 +1,11 @@
 rust_protobuf {
-    name: "libsdv_telem_test_proto",
+    name: "libsdv_telemetry_test_proto",
     host_supported: true,
-    crate_name: "sdv_telem_test_proto",
+    crate_name: "sdv_telemetry_test_proto",
     protos: ["test_message.proto"],
     proto_flags: [
         "-I external/protobuf/src",
     ],
-    source_stem: "sdv_telem_test_proto",
+    source_stem: "sdv_telemetry_test_proto",
     use_protobuf3: true,
 }

@@ -26,3 +26,24 @@ aidl_interface {
         },
     },
 }
+
+aidl_interface {
+    name: "android.sdv.telemetry.configurable_publisher",
+    srcs: [
+        "android/sdv/telemetry/configurable_publisher/*.aidl",
+    ],
+    vendor_available: false,
+    unstable: true,
+    host_supported: true,
+    backend: {
+        java: {
+            enabled: false,
+        },
+        rust: {
+            enabled: true,
+        },
+        cpp: {
+            enabled: true,
+        },
+    },
+}

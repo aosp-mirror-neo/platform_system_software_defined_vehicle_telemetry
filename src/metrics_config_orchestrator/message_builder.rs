@@ -84,7 +84,7 @@ pub(crate) mod mock;
 mod tests {
     use lazy_static::lazy_static;
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
-    use sdv_telem_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+    use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 
     use super::*;
     use crate::expr::node_value::NodeValue;

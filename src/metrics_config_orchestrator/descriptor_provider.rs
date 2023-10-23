@@ -81,7 +81,7 @@ impl DescriptorProviderImpl {
 #[cfg(test)]
 mod tests {
     use protobuf::MessageFull;
-    use sdv_telem_test_proto::test_message::{TestMessage, TestNestedMessage};
+    use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::metrics_configuration::{
         publisher::Publisher_type as PublisherTypeProto, AggregationPublisher, ProtoMessageBuilder,
     };

@@ -28,7 +28,6 @@ rust_defaults {
         "librand",
         "libtokio",
         "libthiserror",
-        "android.sdv.telemetry-rust",
         "libsdv_log_rust",
     ],
 }
@@ -55,6 +54,27 @@ rust_library {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
+        "android.sdv.telemetry-rust",
+        "libsdv_telemetry_configurable_publisher",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_configurable_publisher",
+    crate_name: "sdv_telemetry_configurable_publisher",
+    defaults: ["telemetry@rust_defaults"],
+    host_supported: true,
+    srcs: [
+        "src/configurable_publisher_registry_service.rs",
+    ],
+    rustlibs: [
+        "android.sdv.telemetry.configurable_publisher-rust",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
     ],
@@ -71,6 +91,9 @@ rust_binary {
         "src/main.rs",
     ],
     rustlibs: [
+        "android.sdv.telemetry.configurable_publisher-rust",
+        "android.sdv.telemetry-rust",
+        "libsdv_telemetry_configurable_publisher",
         "libsdv_telemetry",
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
@@ -85,10 +108,13 @@ rust_test_host {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
+        "android.sdv.telemetry-rust",
+        "android.sdv.telemetry.configurable_publisher-rust",
         "libfutures",
         "liblazy_static",
         "libprotobuf",
-        "libsdv_telem_test_proto",
+        "libsdv_telemetry_configurable_publisher",
+        "libsdv_telemetry_test_proto",
         "libsdvtelemetry_proto_rust",
     ],
     proc_macros: [
