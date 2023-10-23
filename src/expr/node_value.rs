@@ -382,20 +382,30 @@ impl NodeValue {
                     &err_provider,
                 )
             }
-            RelationalOperator::GT => {
-                self.apply_numeric(other, |a, b| a > b, |a, b| a > b, &err_provider)
-            }
-            RelationalOperator::GT_OR_EQ => self.apply_numeric(
+            RelationalOperator::GT => self.apply_generic_operation(
                 other,
+                |a, b| a & !b,
+                |a, b| a > b,
+                |a, b| a > b,
+                &err_provider,
+            ),
+            RelationalOperator::GT_OR_EQ => self.apply_generic_operation(
+                other,
+                |a, b| a >= b,
                 |a, b| a >= b,
                 |a, b| a >= b || approximately_equal(a, b),
                 &err_provider,
             ),
-            RelationalOperator::LT => {
-                self.apply_numeric(other, |a, b| a < b, |a, b| a < b, &err_provider)
-            }
-            RelationalOperator::LT_OR_EQ => self.apply_numeric(
+            RelationalOperator::LT => self.apply_generic_operation(
                 other,
+                |a, b| !a & b,
+                |a, b| a < b,
+                |a, b| a < b,
+                &err_provider,
+            ),
+            RelationalOperator::LT_OR_EQ => self.apply_generic_operation(
+                other,
+                |a, b| a <= b,
                 |a, b| a <= b,
                 |a, b| a <= b || approximately_equal(a, b),
                 &err_provider,
@@ -494,23 +504,37 @@ impl NodeValue {
     /// Applies the provided function on two numeric NodeValues based on
     /// the numeric type (integer or floating point).
     /// Returns an error if the NodeValues are not numeric types.
-    fn apply_numeric<IF, FF, R>(
+    fn apply_numeric<R>(
         &self,
         other: &NodeValue,
-        int_func: IF,
-        float_func: FF,
+        int_func: impl FnOnce(i64, i64) -> R,
+        float_func: impl FnOnce(f64, f64) -> R,
         err_provider: &impl Fn() -> NodeError,
-    ) -> Result<R, NodeError>
-    where
-        IF: FnOnce(i64, i64) -> R,
-        FF: FnOnce(f64, f64) -> R,
-    {
+    ) -> Result<R, NodeError> {
         if self.is_int() && other.is_int() {
             Ok(int_func(self.get_int(err_provider)?, other.get_int(err_provider)?))
         } else if self.is_numeric() && other.is_numeric() {
             Ok(float_func(self.get_double(err_provider)?, other.get_double(err_provider)?))
         } else {
             Err(err_provider())
+        }
+    }
+
+    /// Applies the provided function on two NodeValues based on their types,
+    /// supported generic types are booleans, integers or floating points.
+    /// Returns an error if the NodeValues are not one of those types.
+    fn apply_generic_operation<R>(
+        &self,
+        other: &NodeValue,
+        bool_func: impl FnOnce(bool, bool) -> R,
+        int_func: impl FnOnce(i64, i64) -> R,
+        float_func: impl FnOnce(f64, f64) -> R,
+        err_provider: &impl Fn() -> NodeError,
+    ) -> Result<R, NodeError> {
+        if self.is_bool() && other.is_bool() {
+            Ok(bool_func(self.get_bool(err_provider)?, other.get_bool(err_provider)?))
+        } else {
+            self.apply_numeric(other, int_func, float_func, err_provider)
         }
     }
 }
@@ -913,9 +937,19 @@ mod tests {
         let false_val = NodeValue::Bool(false);
 
         // !true = false
-        assert_eq!(true_val.operate(&OP_NOT, || Ok(NodeValue::None))?, NodeValue::Bool(false));
+        assert_eq!(
+            true_val.operate(&OP_NOT, || panic!(
+                "Unary operator should not call right operand provider"
+            ))?,
+            NodeValue::Bool(false)
+        );
         // !false = true
-        assert_eq!(false_val.operate(&OP_NOT, || Ok(NodeValue::None))?, NodeValue::Bool(true));
+        assert_eq!(
+            false_val.operate(&OP_NOT, || panic!(
+                "Unary operator should not call right operand provider"
+            ))?,
+            NodeValue::Bool(true)
+        );
         Ok(())
     }
 
@@ -1097,7 +1131,9 @@ mod tests {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
+        let false_val = NodeValue::Bool(false);
 
+        assert_eq!(true_val.operate(&OP_GT, || provide(&false_val))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_GT, || provide(&five))?, NodeValue::Bool(false));
         assert_eq!(five.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(true));
@@ -1114,6 +1150,7 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
+        assert_eq!(true_val.operate(&OP_GT_OR_EQ, || provide(&true_val))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&five))?, NodeValue::Bool(false));
         assert_eq!(five.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
@@ -1129,7 +1166,9 @@ mod tests {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
+        let false_val = NodeValue::Bool(false);
 
+        assert_eq!(true_val.operate(&OP_LT, || provide(&false_val))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_LT, || provide(&five))?, NodeValue::Bool(true));
         assert_eq!(five.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
@@ -1146,6 +1185,7 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
+        assert_eq!(true_val.operate(&OP_LT_OR_EQ, || provide(&true_val))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&five))?, NodeValue::Bool(true));
         assert_eq!(five.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(false));
