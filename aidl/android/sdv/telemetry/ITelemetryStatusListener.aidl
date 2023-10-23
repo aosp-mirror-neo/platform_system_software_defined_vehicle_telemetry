@@ -13,5 +13,5 @@ oneway interface ITelemetryStatusListener {
      * runtime error.
      */
     void sendStatus(
-            in int api_call_id, in int status_code, in @utf8InCpp String status_message);
+            in int apiCallId, in int statusCode, in @utf8InCpp String statusMessage);
 }
