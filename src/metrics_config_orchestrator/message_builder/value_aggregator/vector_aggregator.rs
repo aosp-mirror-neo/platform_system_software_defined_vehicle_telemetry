@@ -21,6 +21,9 @@ impl VectorAggregator {
 impl ValueAggregator for VectorAggregator {
     fn compute(&mut self) -> Result<NodeValue, AggregationError> {
         let latest_value = self.node.evaluate()?;
+        if latest_value.is_none() {
+            return Ok(latest_value);
+        }
         if let Some(existing_vec) = &mut self.current_vec {
             existing_vec.push(&latest_value)?;
             Ok(existing_vec.clone())
@@ -74,6 +77,16 @@ mod tests {
             // assert
             assert_eq!(res, NodeValue::DoubleList(expected_vec));
         }
+    }
+
+    #[test]
+    fn test_compute_handles_none_value() {
+        let mut aggregator =
+            VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
+
+        let res = aggregator.compute().unwrap();
+
+        assert_eq!(res, NodeValue::None);
     }
 
     #[test]

@@ -21,6 +21,9 @@ impl MaxAggregator {
 impl ValueAggregator for MaxAggregator {
     fn compute(&mut self) -> Result<NodeValue, AggregationError> {
         let latest_value = self.node.evaluate()?;
+        if latest_value.is_none() {
+            return Ok(latest_value);
+        }
         if !latest_value.is_numeric() {
             panic!(
                 "Validation should have ensured that MAX aggregation type \
@@ -87,6 +90,16 @@ mod tests {
             max_aggregator.node =
                 Arc::new(Node::ConstantLeaf { value: NodeValue::Float(node_outputs[i + 1]) });
         }
+    }
+
+    #[test]
+    fn test_compute_handles_none_value() {
+        let mut aggregator =
+            MaxAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
+
+        let res = aggregator.compute().unwrap();
+
+        assert_eq!(res, NodeValue::None);
     }
 
     #[test]
