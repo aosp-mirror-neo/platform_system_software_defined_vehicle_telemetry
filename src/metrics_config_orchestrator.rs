@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+mod descriptor_provider;
 mod message_builder;
 mod message_builder_factory;
 mod metrics_report_generator;
@@ -11,7 +12,7 @@ mod trigger_factory;
 
 use async_trait::async_trait;
 use log::{error, warn};
-use protobuf::{reflect::FileDescriptor, well_known_types::wrappers::Int32Value, MessageDyn};
+use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
@@ -26,12 +27,11 @@ use thiserror::Error;
 
 use crate::collection_extension::HashMapExtension;
 use crate::expr::{
-    ast::{
-        DescriptorProvider, MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl,
-    },
+    ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl},
     ast_extensions::NodeValueType,
-    node_errors::{DescriptorProviderError, MessageProviderError, NodeError},
+    node_errors::{MessageProviderError, NodeError},
 };
+use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};
 use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
@@ -107,6 +107,11 @@ pub enum MetricsConfigOrchestratorError {
     UnableToActivateStartTrigger {
         #[from]
         error: TriggerSubscribeError,
+    },
+    #[error("Unable to create DescriptorProvider because of an invalid publisher: {error}")]
+    InvalidPublisherAndDescriptorCombination {
+        #[from]
+        error: DescriptorProviderConstructorError,
     },
 }
 
@@ -187,19 +192,6 @@ where
     }
 }
 
-struct DescriptorProviderImpl {}
-
-impl DescriptorProvider for DescriptorProviderImpl {
-    fn get_descriptor(
-        &self,
-        _publisher_name: &str,
-    ) -> Result<protobuf::reflect::MessageDescriptor, DescriptorProviderError> {
-        // service publisher publishing mocked data of Int32Value message
-        let msg = Int32Value::new();
-        Ok(msg.descriptor_dyn())
-    }
-}
-
 // TODO(b/304793694): refactor tests and remove generic parameters.
 #[async_trait]
 impl<
@@ -234,20 +226,24 @@ where
         &self,
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
+        // Build the provided proto file descriptors
+        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
+        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
+
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl { metrics_config: OnceLock::new() });
         let node_factory_context = NodeFactoryContext {
             message_provider: Some(message_provider.clone()),
-            descriptor_provider: Box::new(DescriptorProviderImpl {}),
+            descriptor_provider: Box::new(DescriptorProviderImpl::new(
+                &file_descriptors,
+                &config_proto.publishers,
+            )?),
         };
         let (expression_nodes, node_types) =
             self.create_expression_nodes(config_proto, &node_factory_context)?;
 
         // Iterate over topologically sorted vector of publishers and triggers and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
-        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
-
         let (publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
@@ -395,10 +391,17 @@ where
             }
         }
 
+        // Build the provided proto file descriptors
+        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
+        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
+
         // Validate expression nodes to ensure they are set up correctly.
         let node_factory_context = NodeFactoryContext {
             message_provider: None,
-            descriptor_provider: Box::new(DescriptorProviderImpl {}),
+            descriptor_provider: Box::new(DescriptorProviderImpl::new(
+                &file_descriptors,
+                &config_proto.publishers,
+            )?),
         };
         let node_types = self
             .node_factory
@@ -406,9 +409,6 @@ where
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
-        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
-
         Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
             |publisher_proto, _publishers, _triggers| {
@@ -797,13 +797,15 @@ where
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use protobuf::{well_known_types::wrappers::Int32Value, MessageDyn};
+    use protobuf::{
+        descriptor::FileDescriptorProto, well_known_types::wrappers::Int32Value, MessageDyn,
+    };
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
         MetricsConfig as MetricsConfigProto, MetricsReportConfig,
-        PeriodicTrigger as PeriodicTriggerProto, Publisher as PublisherProto,
+        PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Publisher as PublisherProto,
         ServicePublisher as ServicePublisherProto, SignalPublisher as SignalPublisherProto,
         Trigger as TriggerProto,
     };
@@ -814,6 +816,7 @@ mod tests {
     use super::*;
     use crate::expr::ast_extensions::NodeValueType;
     use crate::expr::node_value::NodeValue;
+    use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::publisher_factory::{
@@ -842,6 +845,7 @@ mod tests {
     const SERVICE_PUBLISHER_NAME: &str = "ServicePublisher1";
     const SOME_PUBLISHER_NAME: &str = "Publisher1";
     const SOME_TRIGGER_NAME: &str = "Trigger1";
+    const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
     struct MockMetricsReportGenerator {
@@ -1170,6 +1174,11 @@ mod tests {
         }
     }
 
+    fn create_test_file_descriptor_protos() -> Vec<FileDescriptorProto> {
+        let fds = get_test_file_descriptors();
+        fds.iter().map(|fd| fd.proto()).cloned().collect()
+    }
+
     fn create_valid_config_with_publisher() -> MetricsConfigProto {
         let mut publisher = PublisherProto::new();
         publisher.name = SOME_PUBLISHER_NAME.to_owned();
@@ -1265,9 +1274,13 @@ mod tests {
         trigger2.set_conditional_trigger(conditional_trigger);
         let mut aggregation_publisher = AggregationPublisherProto::new();
         aggregation_publisher.trigger_names.push(trigger2.name.clone());
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
         publisher.set_aggregation_publisher(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
+        config.descriptor_protos = create_test_file_descriptor_protos();
         config.publishers.push(publisher);
         config.triggers.push(trigger1);
         config.triggers.push(trigger2);
@@ -1280,9 +1293,13 @@ mod tests {
 
         let mut aggregation_publisher = AggregationPublisherProto::new();
         aggregation_publisher.trigger_names.push(INVALID_TRIGGER_NAME.to_owned());
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
         publisher.set_aggregation_publisher(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
+        config.descriptor_protos = create_test_file_descriptor_protos();
         config.publishers.push(publisher);
         config
     }
@@ -1341,10 +1358,14 @@ mod tests {
 
         let mut aggregation_publisher = AggregationPublisherProto::new();
         aggregation_publisher.trigger_names.push(trigger2.name.clone());
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
         publisher2.set_aggregation_publisher(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
+        config.descriptor_protos = create_test_file_descriptor_protos();
         config.publishers.push(publisher1);
         config.publishers.push(publisher2);
         config.triggers.push(trigger1);

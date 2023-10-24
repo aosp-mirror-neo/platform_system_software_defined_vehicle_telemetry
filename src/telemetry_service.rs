@@ -80,6 +80,9 @@ fn get_error_code_and_message(err: ConfigError) -> (i32, String) {
         ConfigError::UnableToActivateStartTrigger { .. } => {
             StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED_UNABLE_TO_ACTIVATE_START_TRIGGER
         }
+        ConfigError::InvalidPublisherAndDescriptorCombination { .. } => {
+            StatusCodes::ADD_METRICS_CONFIG_FAILED_INVALID_PUBLISHER_DEFINITION
+        }
     };
 
     (err_code.0, err.to_string())
