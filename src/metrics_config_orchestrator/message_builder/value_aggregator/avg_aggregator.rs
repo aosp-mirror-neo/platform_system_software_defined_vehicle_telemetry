@@ -23,6 +23,9 @@ impl AvgAggregator {
 impl ValueAggregator for AvgAggregator {
     fn compute(&mut self) -> Result<NodeValue, AggregationError> {
         let latest_value = self.node.evaluate()?;
+        if latest_value.is_none() {
+            return Ok(latest_value);
+        }
         if !latest_value.is_numeric() {
             panic!(
                 "Validation should have ensured that avg aggregation type \
@@ -81,6 +84,16 @@ mod tests {
             avg_aggregator.node =
                 Arc::new(Node::ConstantLeaf { value: NodeValue::Float(node_outputs[i + 1]) });
         }
+    }
+
+    #[test]
+    fn test_compute_handles_none_value() {
+        let mut aggregator =
+            AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
+
+        let res = aggregator.compute().unwrap();
+
+        assert_eq!(res, NodeValue::None);
     }
 
     #[test]

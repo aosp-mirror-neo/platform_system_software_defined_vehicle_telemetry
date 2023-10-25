@@ -39,22 +39,26 @@ pub enum MessageBuilderError {
 impl MessageBuilder for MessageBuilderImpl {
     fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
         let mut msg = self.message_descriptor.new_instance();
-        for (field_name, field_value_mutex) in self.field_assignments.iter() {
+        for (field_name, field_aggregator_mutex) in self.field_assignments.iter() {
             let to_builder_err =
                 |e| MessageBuilderError::BadAggregation { field_name: field_name.to_string(), e };
             let field_descriptor = self
                 .message_descriptor
                 .field_by_name(field_name)
                 .expect("All fields should have been validated to exist");
-            let mut field_value = field_value_mutex.lock().unwrap();
+            let mut field_aggregator = field_aggregator_mutex.lock().unwrap();
+            let node_value = field_aggregator.compute().map_err(to_builder_err)?;
+            // if node_value is none, skip populating this field
+            if node_value.is_none() {
+                // TODO: b/307547570 - properly handle absent values
+                continue;
+            }
             if field_descriptor.is_singular() {
-                let node_value = field_value.compute().map_err(to_builder_err)?;
                 field_descriptor.set_singular_field(
                     msg.as_mut(),
                     node_value.to_reflect_value_box(&field_descriptor.singular_runtime_type())?,
                 );
             } else if field_descriptor.is_repeated() {
-                let node_value = field_value.compute().map_err(to_builder_err)?;
                 field_descriptor.mut_repeated(msg.as_mut()).push_node_value_content(&node_value)?;
             } else {
                 panic!("Validation should have ensured map fields are not allowed");
@@ -195,6 +199,25 @@ mod tests {
                 (REPEATED_DOUBLE_FIELD_NAME, NodeValue::DoubleList(doubles)),
                 (REPEATED_ENUM_FIELD_NAME, NodeValue::Int64List(enums)),
             ],
+        );
+
+        // action
+        let res = builder.build()?;
+
+        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
+        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        Ok(())
+    }
+
+    #[test]
+    fn test_build_handles_none_value_ok() -> Result<(), MessageBuilderError> {
+        let mut expected_message = TestMessage::new();
+        expected_message.int_field = 5;
+
+        // create MessageBuilderImpl struct object, this is the subject of the test
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            vec![(INT_FIELD_NAME, NodeValue::Int32(5)), (FLOAT_FIELD_NAME, NodeValue::None)],
         );
 
         // action

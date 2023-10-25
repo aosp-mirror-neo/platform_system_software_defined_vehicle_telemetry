@@ -130,6 +130,10 @@ impl NodeValue {
         op: &OperatorProto,
         get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError>,
     ) -> Result<NodeValue, NodeError> {
+        // None occurs when message is missing or incomplete, and None propagates up.
+        if self.is_none() {
+            return Ok(self.clone());
+        }
         match op {
             OperatorProto::ArithmeticOperator(op) => self.handle_arithmetic(
                 &op.enum_value().map_err(|i| NodeError::UnknownOperator {
@@ -215,6 +219,11 @@ impl NodeValue {
         }
     }
 
+    /// Check if node value is none.
+    pub fn is_none(&self) -> bool {
+        matches!(self, NodeValue::None)
+    }
+
     /// Check if node holds a numeric value.
     pub fn is_numeric(&self) -> bool {
         matches!(
@@ -286,16 +295,31 @@ impl NodeValue {
                 if !(self.get_bool(&err_provider)?) {
                     return Ok(self.clone());
                 }
-                self.get_bool(&err_provider)? && get_right_operand()?.get_bool(&err_provider)?
+                let right = get_right_operand()?;
+                // None occurs when message is missing or incomplete, and None propagates up.
+                if right.is_none() {
+                    return Ok(right.clone());
+                }
+                self.get_bool(&err_provider)? && right.get_bool(&err_provider)?
             }
             LogicalOperator::OR => {
                 if self.get_bool(&err_provider)? {
                     return Ok(self.clone());
                 }
-                self.get_bool(&err_provider)? || get_right_operand()?.get_bool(&err_provider)?
+                let right = get_right_operand()?;
+                // None occurs when message is missing or incomplete, and None propagates up.
+                if right.is_none() {
+                    return Ok(right.clone());
+                }
+                self.get_bool(&err_provider)? || right.get_bool(&err_provider)?
             }
             LogicalOperator::XOR => {
-                self.get_bool(&err_provider)? != get_right_operand()?.get_bool(&err_provider)?
+                let right = get_right_operand()?;
+                // None occurs when message is missing or incomplete, and None propagates up.
+                if right.is_none() {
+                    return Ok(right.clone());
+                }
+                self.get_bool(&err_provider)? != right.get_bool(&err_provider)?
             }
             LogicalOperator::NOT => !self.get_bool(&err_provider)?,
         }))
@@ -307,6 +331,10 @@ impl NodeValue {
         op: &ArithmeticOperator,
         other: &NodeValue,
     ) -> Result<NodeValue, NodeError> {
+        // None occurs when message is missing or incomplete, and None propagates up.
+        if other.is_none() {
+            return Ok(other.clone());
+        }
         let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
         // assert that both operands are numeric types
         if !self.is_numeric() || !other.is_numeric() {
@@ -363,6 +391,10 @@ impl NodeValue {
         op: &RelationalOperator,
         other: &NodeValue,
     ) -> Result<NodeValue, NodeError> {
+        // None occurs when message is missing or incomplete, and None propagates up.
+        if other.is_none() {
+            return Ok(other.clone());
+        }
         let err_provider = || NodeError::ComparisonOperatorIncomptaibleOperands;
         Ok(NodeValue::Bool(match op {
             RelationalOperator::EQ => {
@@ -821,6 +853,7 @@ mod tests {
     fn test_operate_logical_and() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
+        let none_val = NodeValue::None;
 
         // true && true = true
         assert_eq!(true_val.operate(&OP_AND, || provide(&true_val))?, NodeValue::Bool(true));
@@ -828,6 +861,8 @@ mod tests {
         assert_eq!(true_val.operate(&OP_AND, || provide(&false_val))?, NodeValue::Bool(false));
         // false && false = false
         assert_eq!(false_val.operate(&OP_AND, || provide(&false_val))?, NodeValue::Bool(false));
+        // true && None = None
+        assert_eq!(true_val.operate(&OP_AND, || provide(&none_val))?, NodeValue::None);
         Ok(())
     }
 
@@ -871,6 +906,7 @@ mod tests {
     fn test_operate_logical_or() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
+        let none_val = NodeValue::None;
 
         // true || true = true
         assert_eq!(true_val.operate(&OP_OR, || provide(&true_val))?, NodeValue::Bool(true));
@@ -878,6 +914,8 @@ mod tests {
         assert_eq!(true_val.operate(&OP_OR, || provide(&false_val))?, NodeValue::Bool(true));
         // false || false = false
         assert_eq!(false_val.operate(&OP_OR, || provide(&false_val))?, NodeValue::Bool(false));
+        // false || None = None
+        assert_eq!(false_val.operate(&OP_OR, || provide(&none_val))?, NodeValue::None);
         Ok(())
     }
 
@@ -921,6 +959,7 @@ mod tests {
     fn test_operate_logical_xor() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
+        let none_val = NodeValue::None;
 
         // true XOR true = false
         assert_eq!(true_val.operate(&OP_XOR, || provide(&true_val))?, NodeValue::Bool(false));
@@ -928,6 +967,8 @@ mod tests {
         assert_eq!(true_val.operate(&OP_XOR, || provide(&false_val))?, NodeValue::Bool(true));
         // false XOR false = false
         assert_eq!(false_val.operate(&OP_XOR, || provide(&false_val))?, NodeValue::Bool(false));
+        // false || None = None
+        assert_eq!(false_val.operate(&OP_XOR, || provide(&none_val))?, NodeValue::None);
         Ok(())
     }
 
@@ -966,6 +1007,17 @@ mod tests {
             int_val.operate(&OP_ADD, || provide(&true_val)).err().unwrap(),
             NodeError::ArithmeticOperatorIncompatibleOperands
         ));
+    }
+
+    #[test]
+    fn test_operate_arithmetic_propagates_up_none_values() {
+        let int_val = NodeValue::Int32(1);
+        let none_val = NodeValue::None;
+
+        // 1 + None = None
+        assert_eq!(int_val.operate(&OP_ADD, || provide(&none_val)).unwrap(), NodeValue::None);
+        // None + 1 = None
+        assert_eq!(none_val.operate(&OP_ADD, || provide(&int_val)).unwrap(), NodeValue::None);
     }
 
     #[test]
@@ -1092,6 +1144,17 @@ mod tests {
             NodeValue::Double(expected)
         );
         Ok(())
+    }
+
+    #[test]
+    fn test_operate_relational_propagates_up_none_values() {
+        let int_val = NodeValue::Int32(1);
+        let none_val = NodeValue::None;
+
+        // 1 > None = None
+        assert_eq!(int_val.operate(&OP_GT, || provide(&none_val)).unwrap(), NodeValue::None);
+        // None > 1 = None
+        assert_eq!(none_val.operate(&OP_GT, || provide(&int_val)).unwrap(), NodeValue::None);
     }
 
     #[test]
