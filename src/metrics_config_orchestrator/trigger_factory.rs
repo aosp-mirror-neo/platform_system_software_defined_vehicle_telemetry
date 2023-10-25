@@ -51,6 +51,8 @@ pub(crate) struct TriggerFactoryValidateContext {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum TriggerFactoryError {
+    #[error("Trigger name not set")]
+    NameNotSet,
     #[error("No parent triggers set for conditional trigger")]
     NoParentTriggers,
     #[error("Required field selector_node_index is not set for conditional trigger")]
@@ -71,6 +73,7 @@ impl TriggerFactory for TriggerFactoryImpl {
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+        Self::verify_name_set(trigger_proto)?;
         let trigger_name = trigger_proto.name.clone();
         let trigger_type = match &trigger_proto.trigger_type {
             Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
@@ -80,7 +83,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                 TriggerType::Periodic { interval_ms: periodic_trigger.interval_ms }
             }
             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
-                TriggerFactoryImpl::verify_not_empty(&conditional_trigger.trigger_names)?;
+                TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
                 let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
                 let selector_expression =
                     context.expression_nodes.get(selector_node_index as usize).ok_or(
@@ -111,11 +114,12 @@ impl TriggerFactory for TriggerFactoryImpl {
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryValidateContext,
     ) -> Result<(), TriggerFactoryError> {
+        Self::verify_name_set(trigger_proto)?;
         match &trigger_proto.trigger_type {
             Some(TriggerTypeProto::DataTrigger(_)) | Some(TriggerTypeProto::PeriodicTrigger(_)) => {
             }
             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
-                TriggerFactoryImpl::verify_not_empty(&conditional_trigger.trigger_names)?;
+                TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
                 let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
                 if selector_node_index as usize >= context.expression_nodes_count {
                     return Err(TriggerFactoryError::IncorrectNodeIndex {
@@ -140,7 +144,15 @@ impl TriggerFactoryImpl {
         conditional_trigger_proto.selector_node_index.ok_or(TriggerFactoryError::MissingNodeIndex)
     }
 
-    fn verify_not_empty(names: &[String]) -> Result<(), TriggerFactoryError> {
+    fn verify_name_set(trigger_proto: &TriggerProto) -> Result<(), TriggerFactoryError> {
+        if trigger_proto.name.is_empty() {
+            Err(TriggerFactoryError::NameNotSet)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn verify_has_parent_triggers(names: &[String]) -> Result<(), TriggerFactoryError> {
         if names.is_empty() {
             Err(TriggerFactoryError::NoParentTriggers)
         } else {
@@ -287,6 +299,15 @@ mod tests {
     }
 
     #[test]
+    fn create_no_name_fails() {
+        let factory = create_factory();
+
+        let err = factory.create_using_default_context(&TriggerProto::new()).err().unwrap();
+
+        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+    }
+
+    #[test]
     fn create_data_trigger_success() {
         let factory = create_factory();
         let (trigger, publisher) = create_valid_data_trigger();
@@ -392,6 +413,15 @@ mod tests {
         } else {
             panic!("Unexpected trigger type");
         }
+    }
+
+    #[test]
+    fn validate_no_name_fails() {
+        let factory = create_factory();
+
+        let err = factory.validate_using_default_context(&TriggerProto::new()).err().unwrap();
+
+        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
 
     #[test]
