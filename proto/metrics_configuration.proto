@@ -100,23 +100,37 @@ message ConditionalTrigger {
 
   // Required.
   // The index of the root node of the expression that uses data from publishers
-  // and returns a value. If `change_type` is not ALL, the value must be of
+  // and returns a value. If `change_type` is not ALL_CHANGES, the value must be of
   // numeric type or a boolean. If a message from a publisher is not present in
   // the activation context, the context will be populated with the latest
   // published message.
   optional uint32 selector_node_index = 2;
 
-  // Type of value change.
-  enum ChangeType {
+  // Defines when conditional trigger should fire depending on the expression evaluation result.
+  enum ConditionType {
+    // Condition type is not specified.
+    // Conditional triggers associated with this type are invalid.
     CHANGE_TYPE_UNSPECIFIED = 0;
+
+    // Fires if the new value is greater than the previous value.
     RISING_EDGE = 1;
+
+    // Fires if the new value is less than the previous value.
     FALLING_EDGE = 2;
-    ALL = 3;
+
+    // Fires if the new value is different from the previous value.
+    ALL_CHANGES = 3;
+
+    // Fires if the condition evaluates to true or a non-zero numeric value.
+    IS_TRUE = 4;
+
+    // Fires if the condition evaluates to false or a zero numeric value.
+    IS_FALSE = 5;
   }
 
   // Required.
-  // The type of the value change that causes the trigger to fire.
-  ChangeType change_type = 3;
+  // Associated condition type.
+  ConditionType condition_type = 3;
 }
 
 // Publishes messages and stores the latest published message.

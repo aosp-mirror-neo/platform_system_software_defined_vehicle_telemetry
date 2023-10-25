@@ -57,8 +57,8 @@ pub enum TriggerFactoryError {
     MissingNodeIndex,
     #[error("Incorrect conditional trigger node index {node_index}")]
     IncorrectNodeIndex { node_index: u32 },
-    #[error("Unknown change type {change_type}")]
-    UnknownChangeType { change_type: i32 },
+    #[error("Unknown change type {condition_type}")]
+    UnknownConditionType { condition_type: i32 },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
 }
@@ -93,8 +93,8 @@ impl TriggerFactory for TriggerFactoryImpl {
                     .collect();
                 return Ok(Arc::new(TriggerImpl::new_conditional_trigger(
                     trigger_name,
-                    conditional_trigger.change_type.enum_value().map_err(|value| {
-                        TriggerFactoryError::UnknownChangeType { change_type: value }
+                    conditional_trigger.condition_type.enum_value().map_err(|value| {
+                        TriggerFactoryError::UnknownConditionType { condition_type: value }
                     })?,
                     triggers,
                     selector_expression.clone(),
@@ -151,7 +151,7 @@ impl TriggerFactoryImpl {
 
 #[cfg(test)]
 mod tests {
-    use sdvtelemetry_proto_rust::metrics_configuration::conditional_trigger::ChangeType;
+    use sdvtelemetry_proto_rust::metrics_configuration::conditional_trigger::ConditionType;
     use std::collections::HashMap;
 
     use super::*;
@@ -216,7 +216,7 @@ mod tests {
     fn create_valid_conditional_trigger() -> (TriggerProto, Option<Vec<Arc<TriggerImpl>>>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
-        conditional_trigger.change_type = ChangeType::ALL.into();
+        conditional_trigger.condition_type = ConditionType::ALL_CHANGES.into();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
@@ -377,10 +377,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Conditional { change_type, selector_expression, triggers, .. } =
+        if let TriggerType::Conditional { condition_type, selector_expression, triggers, .. } =
             &res.trigger_type
         {
-            assert!(matches!(change_type, ChangeType::ALL));
+            assert!(matches!(condition_type, ConditionType::ALL_CHANGES));
             // selector_expression should match the node at index 0
             assert!(Arc::ptr_eq(selector_expression, &node_0));
             assert!(!Arc::ptr_eq(selector_expression, &node_1));

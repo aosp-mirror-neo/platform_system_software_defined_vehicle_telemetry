@@ -20,6 +20,7 @@ rust_defaults {
     name: "telemetry@rust_defaults",
     defaults: ["sdv@rust_defaults"],
     rustlibs: [
+        "libanyhow",
         "liblog_rust",
         "liblogger",
         "libbinder_rs",
