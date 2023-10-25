@@ -232,6 +232,21 @@ impl NodeValue {
         )
     }
 
+    /// Checks whether the node value is zero.
+    pub fn is_zero(&self) -> Result<bool, NodeError> {
+        Ok(match self {
+            NodeValue::Int32(val) => *val == 0,
+            NodeValue::Int64(val) => *val == 0,
+            NodeValue::Float(val) => (*val).abs() < EPSILON,
+            NodeValue::Double(val) => (*val).abs() < EPSILON.into(),
+            _ => {
+                return Err(NodeError::InternalError {
+                    msg: format!("is_zero() invoked on non-numeric NodeValue: {:?}", self),
+                })
+            }
+        })
+    }
+
     // private functions and methods below
 
     /// Reads a field value from a protobuf message using the reflection.
@@ -516,21 +531,6 @@ impl NodeValue {
     /// Check if node holds an integer value.
     fn is_int(&self) -> bool {
         matches!(self, NodeValue::Int32(_) | NodeValue::Int64(_))
-    }
-
-    /// Checks whether the node value is zero.
-    fn is_zero(&self) -> Result<bool, NodeError> {
-        Ok(match self {
-            NodeValue::Int32(val) => *val == 0,
-            NodeValue::Int64(val) => *val == 0,
-            NodeValue::Float(val) => (*val).abs() < EPSILON,
-            NodeValue::Double(val) => (*val).abs() < EPSILON.into(),
-            _ => {
-                return Err(NodeError::InternalError {
-                    msg: format!("is_zero() invoked on non-numeric NodeValue: {:?}", self),
-                })
-            }
-        })
     }
 
     /// Applies the provided function on two numeric NodeValues based on
