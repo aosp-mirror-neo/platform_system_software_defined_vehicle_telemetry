@@ -192,6 +192,7 @@ message AggregationPublisher {
 message MetricsReportConfig {
   // Required.
   // The name of the metrics report config.
+  // Must not be an empty string.
   string name = 1;
 
   // Optional.

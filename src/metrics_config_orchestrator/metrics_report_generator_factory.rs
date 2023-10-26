@@ -60,6 +60,8 @@ pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MetricsReportGeneratorFactoryError {
+    #[error("MetricsReportConfig doesn't have a name")]
+    NameNotSet,
     #[error("Trigger name {trigger_name} is invalid")]
     InvalidTriggerName { trigger_name: String },
     #[error("MetricsReportConfig contains invalid ProtoMessageBuilder: {e}")]
@@ -87,6 +89,10 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext,
     ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
+        // Verify that the name is set.
+        Self::verify_name_set(metrics_report_config)?;
+
+        // Create message builder.
         let message_builder = self.message_builder_factory.create(
             metrics_report_config
                 .message_builder
@@ -98,6 +104,8 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 context.node_types,
             ),
         )?;
+
+        // Retrieve associated triggers.
         let triggers = metrics_report_config
             .trigger_names
             .iter()
@@ -111,6 +119,8 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                     })
             })
             .collect::<Result<_, _>>()?;
+
+        // Create and return a new report generator.
         Ok(Arc::new(MetricsReportGeneratorImpl::new(
             metrics_report_config.name.clone(),
             context.config_proto.uuid.clone(),
@@ -127,7 +137,10 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryValidateContext,
     ) -> Result<(), MetricsReportGeneratorFactoryError> {
-        // validate protobuf message builder is valid
+        // Verify that the name is set.
+        Self::verify_name_set(metrics_report_config)?;
+
+        // Validate message builder protobuf message.
         self.message_builder_factory.validate(
             metrics_report_config
                 .message_builder
@@ -139,7 +152,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             ),
         )?;
 
-        // validate trigger names for this report config exist
+        // Verify that trigger names for this report config exist.
         let names_set =
             context.trigger_protos.iter().map(|proto| &proto.name).collect::<HashSet<_>>();
         metrics_report_config.trigger_names.iter().try_for_each(|name| {
@@ -151,6 +164,17 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 })
             }
         })
+    }
+}
+
+impl MetricsReportGeneratorFactoryImpl {
+    fn verify_name_set(
+        metrics_report_config: &MetricsReportConfig,
+    ) -> Result<(), MetricsReportGeneratorFactoryError> {
+        if metrics_report_config.name.is_empty() {
+            return Err(MetricsReportGeneratorFactoryError::NameNotSet);
+        }
+        Ok(())
     }
 }
 
@@ -241,8 +265,19 @@ mod tests {
         MetricsReportGeneratorFactoryImpl::new(Arc::new(MockMessageBuilderFactory::new()))
     }
 
+    fn create_config_with_invalid_name() -> MetricsReportConfig {
+        MetricsReportConfig::new()
+    }
+
+    fn create_config_without_message_builder() -> MetricsReportConfig {
+        let mut config = MetricsReportConfig::new();
+        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        config
+    }
+
     fn create_config_with_invalid_trigger_name() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
+        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
         config.trigger_names.push(TRIGGER_NAME.to_owned());
         config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
         config
@@ -258,6 +293,34 @@ mod tests {
     }
 
     #[test]
+    fn create_invalid_name_fails() {
+        let factory = create_factory();
+        let config = create_config_with_invalid_name();
+
+        let err = factory.create_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_no_message_builder_fails() {
+        let factory = create_factory();
+        let config = create_config_without_message_builder();
+
+        let err = factory.create_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn create_invalid_trigger_name_fails() {
         let factory = create_factory();
         let config = create_config_with_invalid_trigger_name();
@@ -266,20 +329,6 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_config_has_no_proto_message_builder_fails() {
-        let factory = create_factory();
-        let config = MetricsReportConfig::new();
-
-        let err = factory.create_using_empty_context(&config).err().unwrap();
-
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
             "Unexpected error: {:?}",
             err
         );
@@ -340,6 +389,34 @@ mod tests {
     }
 
     #[test]
+    fn validate_invalid_name_fails() {
+        let factory = create_factory();
+        let config = create_config_with_invalid_name();
+
+        let err = factory.validate_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_no_message_builder_fails() {
+        let factory = create_factory();
+        let config = create_config_without_message_builder();
+
+        let err = factory.validate_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn validate_invalid_trigger_name_fails() {
         let factory = create_factory();
         let config = create_config_with_invalid_trigger_name();
@@ -348,20 +425,6 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_config_has_no_proto_message_builder_fails() {
-        let factory = create_factory();
-        let config = MetricsReportConfig::new();
-
-        let err = factory.validate_using_empty_context(&config).err().unwrap();
-
-        assert!(
-            matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
             "Unexpected error: {:?}",
             err
         );
