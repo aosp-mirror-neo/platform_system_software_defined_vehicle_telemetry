@@ -56,6 +56,8 @@ pub enum MessageBuilderFactoryError {
     FieldNotFound { field_name: String, message_type: String },
     #[error("Multiple assignments found for field {field_name} in message {message_type}")]
     DuplicateFieldAssignment { field_name: String, message_type: String },
+    #[error("Required field selector_node_index is not set for conditional trigger")]
+    MissingNodeIndex,
     #[error("Field assignment for {field_name} is an expression node at invalid index {i}")]
     InvalidNodeIndex { field_name: String, i: u32 },
     #[error("Field {field_name} of message {message_type} has unsupported type")]
@@ -210,10 +212,13 @@ impl MessageBuilderFactoryImpl {
             }
 
             // validate the field value references a valid node index
-            let node_type = node_types.get(field_assignment.expression_node_index as usize).ok_or(
+            let node_index = field_assignment
+                .expression_node_index
+                .ok_or(MessageBuilderFactoryError::MissingNodeIndex)?;
+            let node_type = node_types.get(node_index as usize).ok_or(
                 MessageBuilderFactoryError::InvalidNodeIndex {
                     field_name: get_field_name(),
-                    i: field_assignment.expression_node_index,
+                    i: node_index,
                 },
             )?;
 
@@ -253,8 +258,7 @@ impl MessageBuilderFactoryImpl {
             field_assignments_map
                 .try_insert_value(
                     get_field_name(),
-                    Self::get_node(nodes, field_assignment.expression_node_index as usize)
-                        .map(|node| (node, aggregation_type)),
+                    Self::get_node(nodes, node_index as usize).map(|node| (node, aggregation_type)),
                 ) // `try_insert_value` returns error if key already exists
                 .map_err(|_| MessageBuilderFactoryError::DuplicateFieldAssignment {
                     field_name: get_field_name(),
@@ -342,6 +346,12 @@ mod tests {
         )
     }
 
+    fn create_field_assignment_proto_without_node_index() -> FieldAssignment {
+        let mut field_assignment = FieldAssignment::new();
+        field_assignment.aggregation_type = AggregationType::NO_AGGREGATION.into();
+        field_assignment
+    }
+
     fn create_field_assignment_proto_with_aggregation(
         field_name: &str,
         node_index: u32,
@@ -349,7 +359,7 @@ mod tests {
     ) -> FieldAssignment {
         let mut field_assignment = FieldAssignment::new();
         field_assignment.field_name = field_name.to_string();
-        field_assignment.expression_node_index = node_index;
+        field_assignment.expression_node_index = Some(node_index);
         field_assignment.aggregation_type = aggregation_type.into();
         field_assignment
     }
@@ -389,7 +399,7 @@ mod tests {
             vec![{
                 let mut field_assignment = FieldAssignment::new();
                 field_assignment.field_name = INT_FIELD_NAME.to_string();
-                field_assignment.expression_node_index = 0;
+                field_assignment.expression_node_index = Some(0);
                 // error - didn't set aggregation_type
                 field_assignment
             }],
@@ -420,6 +430,27 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_validate_field_assignment_node_index_not_set_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let node_types = vec![];
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // field assignment requires node at index 20
+            vec![create_field_assignment_proto_without_node_index()],
+        );
+
+        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::MissingNodeIndex { .. }),
             "Unexpected error: {}",
             err
         );
@@ -613,7 +644,7 @@ mod tests {
             vec![{
                 let mut field_assignment = FieldAssignment::new();
                 field_assignment.field_name = INT_FIELD_NAME.to_string();
-                field_assignment.expression_node_index = 0;
+                field_assignment.expression_node_index = Some(0);
                 // error - didn't set aggregation_type
                 field_assignment
             }],
@@ -644,6 +675,28 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_factory_create_field_assignment_node_index_not_set_fails() {
+        let factory = MessageBuilderFactoryImpl::new();
+        let fds = create_test_file_descriptors();
+        let nodes = vec![];
+        let node_types = vec![];
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes, &node_types);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME,
+            // field assignment requires node at index 20
+            vec![create_field_assignment_proto_without_node_index()],
+        );
+
+        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+
+        assert!(
+            matches!(err, MessageBuilderFactoryError::MissingNodeIndex { .. }),
             "Unexpected error: {}",
             err
         );

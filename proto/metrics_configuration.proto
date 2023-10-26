@@ -291,7 +291,7 @@ message ProtoMessageBuilder {
     // Index of root expression node. The expression node's evaluation output
     // is either directly used as the value of the field, or aggregated
     // based on the aggregation type.
-    uint32 expression_node_index = 2;
+    optional uint32 expression_node_index = 2;
 
     // Every time the field value is built, the node output can be aggregated
     // with the past values of this field to produce a new field value.
