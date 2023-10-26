@@ -65,7 +65,7 @@ message MetricsConfig {
 message Trigger {
   // Required.
   // The name of the trigger. Must be unique across all publishers and triggers
-  // in the Metrics Configuration.
+  // in the Metrics Configuration. Must not be an empty string.
   string name = 1;
 
   oneof trigger_type {
@@ -139,7 +139,7 @@ message ConditionalTrigger {
 message Publisher {
   // Required.
   // The name of the publisher. Must be unique across all publishers and
-  // triggers in the Metrics Configuration.
+  // triggers in the Metrics Configuration. Must not be an empty string.
   string name = 1;
 
   oneof publisher_type {

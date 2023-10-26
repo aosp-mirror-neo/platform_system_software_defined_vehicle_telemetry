@@ -59,6 +59,8 @@ pub(crate) struct PublisherFactoryValidateContext<'a> {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherFactoryError {
+    #[error("Publisher name not set")]
+    NameNotSet,
     #[error("Unknown message type {message_type} set for aggregation publisher")]
     UnknownMessageType { message_type: String },
     #[error("AggregationPublisher contains invalid ProtoMessageBuilder: {e}")]
@@ -81,6 +83,7 @@ impl PublisherFactory for PublisherFactoryImpl {
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
+        Self::verify_name_set(publisher_proto)?;
         let publisher_name = publisher_proto.name.clone();
         let publisher = match &publisher_proto.publisher_type {
             Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => PublisherImpl::new(
@@ -110,6 +113,7 @@ impl PublisherFactory for PublisherFactoryImpl {
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryValidateContext,
     ) -> Result<(), PublisherFactoryError> {
+        Self::verify_name_set(publisher_proto)?;
         match &publisher_proto.publisher_type {
             Some(PublisherTypeProto::SignalPublisher(_))
             | Some(PublisherTypeProto::ServicePublisher(_)) => (),
@@ -163,6 +167,14 @@ impl PublisherFactoryImpl {
             triggers,
         );
         Ok(publisher)
+    }
+
+    fn verify_name_set(publisher_proto: &PublisherProto) -> Result<(), PublisherFactoryError> {
+        if publisher_proto.name.is_empty() {
+            Err(PublisherFactoryError::NameNotSet)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -303,6 +315,15 @@ mod tests {
     }
 
     #[test]
+    fn create_no_name_fails() {
+        let factory = create_default_factory();
+
+        let err = factory.create_using_default_context(&PublisherProto::new()).err().unwrap();
+
+        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+    }
+
+    #[test]
     fn create_signal_publisher_success() {
         let factory = create_default_factory();
         let publisher = create_valid_signal_publisher();
@@ -365,6 +386,15 @@ mod tests {
         } else {
             panic!("Unexpected publisher type");
         }
+    }
+
+    #[test]
+    fn validate_no_name_fails() {
+        let factory = create_default_factory();
+
+        let err = factory.validate_using_default_context(&PublisherProto::new()).err().unwrap();
+
+        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
 
     #[test]
