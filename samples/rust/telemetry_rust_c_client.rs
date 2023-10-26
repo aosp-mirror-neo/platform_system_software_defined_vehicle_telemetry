@@ -70,31 +70,43 @@ async fn main() -> Result<(), binder::Status> {
         );
     }
 
+    let config_name;
     let mut config_manager = MetricsConfigManager::new(service);
     let mut report_manager = MetricsReportManager::new(service);
 
-    let (status, message) = config_manager.as_mut().add_metrics_config(&serialized_config).await;
+    let add_config_res = config_manager.as_mut().add_metrics_config(&serialized_config).await;
 
-    let activate_successful = if status {
-        config_manager.as_mut().activate_metrics_config(&message).await
-    } else {
-        error!("Error in adding config: {}", message);
-        return Ok(());
+    let activate_config_res = match add_config_res {
+        Ok(message) => {
+            config_name = message.clone();
+            config_manager.as_mut().activate_metrics_config(&message).await
+        }
+        Err(e) => {
+            error!("Error in adding config: {}", e);
+            return Ok(());
+        }
     };
 
-    let metrics_report = if activate_successful {
-        report_manager.as_mut().get_metrics_report().await.unwrap()
-    } else {
-        error!("Error in activating config");
-        return Ok(());
+    let metrics_report = match activate_config_res {
+        Ok(_) => report_manager.as_mut().get_metrics_report().await.unwrap(),
+        Err(e) => {
+            error!("Error in activating config: {}", e);
+            return Ok(());
+        }
     };
 
     info!("Report received: {:?}", metrics_report);
 
-    let remove_config_status = config_manager.as_mut().remove_metrics_config(&message).await;
+    let remove_config_res = config_manager.as_mut().remove_metrics_config(&config_name).await;
 
-    if remove_config_status {
-        info!("Successfully removed config");
+    match remove_config_res {
+        Ok(_) => {
+            info!("Successfully removed config");
+        }
+        Err(e) => {
+            error!("Error in removing config: {}", e);
+            return Ok(());
+        }
     }
 
     Ok(())
