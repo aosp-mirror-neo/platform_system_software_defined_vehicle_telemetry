@@ -56,8 +56,8 @@ pub enum MessageBuilderFactoryError {
     FieldNotFound { field_name: String, message_type: String },
     #[error("Multiple assignments found for field {field_name} in message {message_type}")]
     DuplicateFieldAssignment { field_name: String, message_type: String },
-    #[error("Required field selector_node_index is not set for conditional trigger")]
-    MissingNodeIndex,
+    #[error("Required field selector_node_index is not set for field assignment {field_name}")]
+    MissingNodeIndex { field_name: String },
     #[error("Field assignment for {field_name} is an expression node at invalid index {i}")]
     InvalidNodeIndex { field_name: String, i: u32 },
     #[error("Field {field_name} of message {message_type} has unsupported type")]
@@ -212,9 +212,9 @@ impl MessageBuilderFactoryImpl {
             }
 
             // validate the field value references a valid node index
-            let node_index = field_assignment
-                .expression_node_index
-                .ok_or(MessageBuilderFactoryError::MissingNodeIndex)?;
+            let node_index = field_assignment.expression_node_index.ok_or(
+                MessageBuilderFactoryError::MissingNodeIndex { field_name: get_field_name() },
+            )?;
             let node_type = node_types.get(node_index as usize).ok_or(
                 MessageBuilderFactoryError::InvalidNodeIndex {
                     field_name: get_field_name(),
