@@ -23,6 +23,10 @@ message TestMessage {
   repeated double repeated_doubles = 8;
   repeated TestEnum repeated_enums = 9;
   repeated TestNestedMessage repeated_messages = 10;
+
+  // Optional fields
+  optional bool optional_bool_field = 11;
+  optional int64 optional_int64_field = 12;
 }
 
 message TestNestedMessage {
