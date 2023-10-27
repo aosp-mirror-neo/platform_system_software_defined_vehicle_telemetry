@@ -2,14 +2,26 @@
 
 //! Helper functions for converting protobuf reflection types into NodeValue.
 
-use protobuf::reflect::{
-    ReflectFieldRef, ReflectRepeatedRef, ReflectValueRef, RuntimeType as ProtobufRuntimeType,
+use protobuf::{
+    reflect::{
+        FieldDescriptor, MessageDescriptor, ReflectFieldRef, ReflectRepeatedRef, ReflectValueRef,
+        RuntimeType as ProtobufRuntimeType,
+    },
+    MessageDyn,
 };
 
 use crate::expr::{node_errors::NodeError, node_value::NodeValue};
 
+pub trait MessageDescriptorExt {
+    fn get_field_value(
+        &self,
+        field_descriptor: &FieldDescriptor,
+        msg: &dyn MessageDyn,
+    ) -> Result<NodeValue, NodeError>;
+}
+
 /// Implementing type will be able to convert itself into a NodeValue.
-pub trait ToNodeValue {
+trait ToNodeValue {
     fn to_node_value(&self) -> Result<NodeValue, NodeError>;
 }
 
@@ -24,14 +36,41 @@ trait ReflectRepeatedRefExt {
     ) -> Result<Vec<T>, NodeError>;
 }
 
-/// An optional protobuf field can be converted into a NodeValue.
-impl ToNodeValue for ReflectFieldRef<'_> {
-    fn to_node_value(&self) -> Result<NodeValue, NodeError> {
-        match &self {
+impl MessageDescriptorExt for MessageDescriptor {
+    fn get_field_value(
+        &self,
+        field_descriptor: &FieldDescriptor,
+        msg: &dyn MessageDyn,
+    ) -> Result<NodeValue, NodeError> {
+        match field_descriptor.get_reflect(msg) {
             // `optional` or singular protobuf field
             ReflectFieldRef::Optional(singular_field) => match singular_field.value() {
                 Some(field_value) => field_value.to_node_value(),
-                None => Ok(NodeValue::None),
+                // "None" has different meanings based on whether a field is explicitly
+                // marked as optional
+                None => {
+                    let field_full_name = field_descriptor.full_name();
+                    let mut proto3_optional = false;
+                    // proto3 optional fields will have a "synthetic oneof descriptor"
+                    for oneof_descriptor in self.all_oneofs() {
+                        // if a oneof descriptor exists for this field, this field is
+                        // explicitly marked as "optional"
+                        if oneof_descriptor
+                            .fields()
+                            .any(|field| field.full_name() == field_full_name)
+                        {
+                            proto3_optional = true;
+                            break;
+                        }
+                    }
+                    // proto3 optional fields track field presence, so "None" means field not set
+                    if proto3_optional {
+                        Ok(NodeValue::None)
+                    } else {
+                        // otherwise rust protobuf encodes default value as "None"
+                        get_default_node_value_from_type(&field_descriptor.singular_runtime_type())
+                    }
+                }
             },
             // `repeated` protobuf field
             ReflectFieldRef::Repeated(repeated_field) => repeated_field.to_node_value(),
@@ -155,4 +194,23 @@ impl ReflectRepeatedRefExt for ReflectRepeatedRef<'_> {
         // apply `transform_func` to each element in the repeated_field
         self.into_iter().map(transform_func).collect()
     }
+}
+
+fn get_default_node_value_from_type(
+    runtime_type: &ProtobufRuntimeType,
+) -> Result<NodeValue, NodeError> {
+    Ok(match runtime_type {
+        ProtobufRuntimeType::I32 => NodeValue::Int32(0),
+        ProtobufRuntimeType::I64 => NodeValue::Int64(0),
+        ProtobufRuntimeType::U32 => NodeValue::Int64(0),
+        ProtobufRuntimeType::U64 => NodeValue::Int64(0),
+        ProtobufRuntimeType::F32 => NodeValue::Float(0.0),
+        ProtobufRuntimeType::F64 => NodeValue::Double(0.0),
+        ProtobufRuntimeType::Bool => NodeValue::Bool(false),
+        ProtobufRuntimeType::Enum(_) => NodeValue::Int32(0),
+        ProtobufRuntimeType::Message(_) => NodeValue::None,
+        _ => {
+            return Err(NodeError::UnsupportedSingularFieldType);
+        }
+    })
 }

@@ -405,11 +405,10 @@ impl TriggerImpl {
 
     /// Returns true if the current value is a true boolean or a non-zero numeric value.
     fn is_true(current_value: &NodeValue) -> anyhow::Result<bool> {
-        match current_value {
-            NodeValue::Bool(boolean) => Ok(*boolean),
-            // TODO(b/307608368): Remove None match once default values are no longer reported as None
-            NodeValue::None => Ok(false),
-            _ => Ok(current_value.is_zero().map(|is_zero| !is_zero)?),
+        if let NodeValue::Bool(boolean) = current_value {
+            Ok(*boolean)
+        } else {
+            Ok(current_value.is_zero().map(|is_zero| !is_zero)?)
         }
     }
 
