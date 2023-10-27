@@ -443,7 +443,6 @@ mod tests {
         let context = MessageBuilderFactoryValidateContext::new(&fds, &node_types);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
-            // field assignment requires node at index 20
             vec![create_field_assignment_proto_without_node_index()],
         );
 
@@ -689,7 +688,6 @@ mod tests {
         let context = MessageBuilderFactoryCreateContext::new(&fds, &nodes, &node_types);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
-            // field assignment requires node at index 20
             vec![create_field_assignment_proto_without_node_index()],
         );
 
