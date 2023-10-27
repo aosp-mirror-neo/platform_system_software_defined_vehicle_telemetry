@@ -50,19 +50,10 @@ impl MessageDescriptorExt for MessageDescriptor {
                 // marked as optional
                 None => {
                     let field_full_name = field_descriptor.full_name();
-                    let mut proto3_optional = false;
                     // proto3 optional fields will have a "synthetic oneof descriptor"
-                    for oneof_descriptor in self.all_oneofs() {
-                        // if a oneof descriptor exists for this field, this field is
-                        // explicitly marked as "optional"
-                        if oneof_descriptor
-                            .fields()
-                            .any(|field| field.full_name() == field_full_name)
-                        {
-                            proto3_optional = true;
-                            break;
-                        }
-                    }
+                    let proto3_optional = self.all_oneofs().any(|oneof| {
+                        oneof.fields().any(|field| field.full_name() == field_full_name)
+                    });
                     // proto3 optional fields track field presence, so "None" means field not set
                     if proto3_optional {
                         Ok(NodeValue::None)
