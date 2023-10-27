@@ -20,7 +20,7 @@ use sdvtelemetry_proto_rust::expression::{
 use std::error::Error;
 
 use crate::expr::{
-    node_errors::NodeError, node_value::protobuf_reflection_extensions::ToNodeValue,
+    node_errors::NodeError, node_value::protobuf_reflection_extensions::MessageDescriptorExt,
 };
 
 const EPSILON: f32 = 1e-6;
@@ -261,16 +261,15 @@ impl NodeValue {
                 field_name: field_name.clone(),
                 message_name: msg_descriptor.name().to_string(),
             })?;
-        let field_value = field_descriptor.get_reflect(msg);
 
         // Base case for recursion: one field is provided, simply read the value
         if fields.len() == 1 {
-            return field_value.to_node_value();
+            return msg_descriptor.get_field_value(&field_descriptor, msg);
         }
 
         // If fields length > 1, get nested field values iff the value is a single protobuf message,
         // otherwise return error
-        if let ReflectFieldRef::Optional(singular_field) = field_value {
+        if let ReflectFieldRef::Optional(singular_field) = field_descriptor.get_reflect(msg) {
             match singular_field.value() {
                 Some(nested_value) => {
                     if let ReflectValueRef::Message(msg) = nested_value {
@@ -574,7 +573,8 @@ impl NodeValue {
 #[cfg(test)]
 mod tests {
 
-    use protobuf::Message;
+    use protobuf::reflect::ReflectEqMode;
+    use sdv_telem_test_proto::test_message::{TestEnum, TestMessage};
     use sdvtelemetry_proto_rust::expression::ConstantLeafNode;
     use std::sync::Mutex;
 
@@ -631,18 +631,13 @@ mod tests {
     fn test_extract_value_no_field_names_ok() -> Result<(), NodeError> {
         // setup
         let msg = TEST_MESSAGE.clone();
-        let expected_msg_bytes =
-            msg.write_to_bytes().unwrap_or_else(|_| panic!("Failed to serialize TestMessage"));
 
         // action
-        let node_value = NodeValue::extract_value(Box::new(msg), &[])?;
+        let node_value = NodeValue::extract_value(Box::new(msg.clone()), &[])?;
 
         // assert
         if let NodeValue::Message(node_msg) = node_value {
-            let bytes = node_msg
-                .write_to_bytes_dyn()
-                .unwrap_or_else(|_| panic!("Failed to serialize NodeValue's protobuf message"));
-            assert_eq!(bytes, expected_msg_bytes);
+            assert!(node_msg.reflect_eq_dyn(&msg, &ReflectEqMode::default()));
         } else {
             panic!("Expect Message variant of NodeValue, got {:?}", node_value);
         }
@@ -650,12 +645,71 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_field_not_set_ok() -> Result<(), NodeError> {
-        let field_names = ["int_field".to_string()];
-
+    fn test_extract_value_explicitly_optional_field_not_set_returns_none() -> Result<(), NodeError>
+    {
         assert_eq!(
-            NodeValue::extract_value(Box::new(EMPTY_TEST_MESSAGE.clone()), &field_names)?,
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["optional_bool_field".to_string()]
+            )?,
             NodeValue::None
+        );
+        assert_eq!(
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["optional_int64_field".to_string()]
+            )?,
+            NodeValue::None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_value_primitive_field_not_set_uses_default_values() -> Result<(), NodeError> {
+        assert_eq!(
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["int_field".to_string()]
+            )?,
+            NodeValue::Int32(0)
+        );
+        assert_eq!(
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["float_field".to_string()]
+            )?,
+            NodeValue::Float(0.0)
+        );
+        assert_eq!(
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["enum_field".to_string()]
+            )?,
+            NodeValue::Int32(0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_value_message_field_not_set_returns_none() -> Result<(), NodeError> {
+        assert_eq!(
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["message_field".to_string()]
+            )?,
+            NodeValue::None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_value_repeated_field_not_set_returns_empty_list() -> Result<(), NodeError> {
+        assert_eq!(
+            NodeValue::extract_value(
+                Box::new(EMPTY_TEST_MESSAGE.clone()),
+                &["repeated_bools".to_string()]
+            )?,
+            NodeValue::BoolList(vec![])
         );
         Ok(())
     }
@@ -694,7 +748,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_field_value_message_field_ok() -> Result<(), NodeError> {
+    fn test_extract_value_message_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["message_field".to_string()];
         let expected_value = NodeValue::Message(Box::new(msg.message_field.clone().unwrap()));
@@ -704,6 +758,33 @@ mod tests {
 
         // assert
         assert_eq!(node_value, expected_value);
+        Ok(())
+    }
+
+    #[test]
+    fn test_extract_value_field_has_default_value_ok() -> Result<(), NodeError> {
+        let mut msg = TestMessage::new();
+        msg.int_field = 0;
+        msg.float_field = 0.0;
+        msg.enum_field = TestEnum::NONE.into(); // this enum is equal to int 0
+        msg.optional_bool_field = Some(false);
+
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg.clone()), &["int_field".to_string()])?,
+            NodeValue::Int32(0)
+        );
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg.clone()), &["float_field".to_string()])?,
+            NodeValue::Float(0.0)
+        );
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg.clone()), &["enum_field".to_string()])?,
+            NodeValue::Int32(0)
+        );
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg.clone()), &["optional_bool_field".to_string()])?,
+            NodeValue::Bool(false)
+        );
         Ok(())
     }
 
