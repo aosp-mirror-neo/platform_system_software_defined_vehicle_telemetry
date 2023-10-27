@@ -271,6 +271,7 @@ where
             |trigger_proto, publishers, triggers| {
                 let context = TriggerFactoryCreateContext {
                     expression_nodes: &expression_nodes,
+                    node_types: &node_types,
                     publishers,
                     triggers,
                 };
@@ -425,9 +426,7 @@ where
                 Ok(())
             },
             |trigger_proto, _publishers, _triggers| {
-                let context = TriggerFactoryValidateContext {
-                    expression_nodes_count: config_proto.expression_nodes.len(),
-                };
+                let context = TriggerFactoryValidateContext { node_types: &node_types };
                 self.trigger_factory.validate(trigger_proto, &context).map_err(|e| {
                     MetricsConfigOrchestratorError::InvalidTriggerDefinition {
                         trigger_name: trigger_proto.name.clone(),
