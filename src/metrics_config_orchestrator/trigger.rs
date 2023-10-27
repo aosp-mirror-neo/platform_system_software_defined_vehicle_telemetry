@@ -71,6 +71,8 @@ pub enum TriggerUnsubscribeError {
         #[from]
         error: PublisherUnsubscribeError,
     },
+    #[error("Unable to fully unsubscribe from underlying triggers: {errors:?}")]
+    ParentTriggerUnsubscribeErrors { errors: Vec<(String, TriggerUnsubscribeError)> },
 }
 
 #[allow(dead_code)]
@@ -308,8 +310,22 @@ impl TriggerImpl {
 
     /// Performs deactivation operations specific to each trigger type.
     async fn deactivate(&self) -> Result<(), TriggerUnsubscribeError> {
-        if let TriggerType::Data { publisher } = &self.trigger_type {
-            publisher.unsubscribe(&self.name).await?;
+        match &self.trigger_type {
+            TriggerType::Data { publisher } => publisher.unsubscribe(&self.name).await?,
+            TriggerType::Conditional { subscriber, triggers, .. } => {
+                let mut errors = Vec::new();
+
+                for trigger in triggers {
+                    if let Err(err) = trigger.unsubscribe(subscriber).await {
+                        errors.push((trigger.get_name().to_owned(), err));
+                    }
+                }
+
+                if !errors.is_empty() {
+                    return Err(TriggerUnsubscribeError::ParentTriggerUnsubscribeErrors { errors });
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1011,6 +1027,46 @@ mod tests {
         if let TriggerUnsubscribeError::PublisherUnsubscribeError { error } = &err {
             assert!(
                 matches!(error, PublisherUnsubscribeError::NotSubscribed { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
+                "Unexpected inner error: {:?}",
+                error
+            );
+        } else {
+            panic!("Unexpected error: {:?}", err);
+        }
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_from_conditional_trigger_unsubscribe_returns_error_fails() {
+        let mut parent_trigger = MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        );
+        parent_trigger.set_unsubscribe_callback(|_| {
+            Some(TriggerUnsubscribeError::NotSubscribed {
+                subscriber_name: TriggerSubscriber::MetricsConfigEnd.to_string(),
+            })
+        });
+        let trigger = Arc::new(TriggerImpl::new_conditional_trigger(
+            TRIGGER_NAME.to_owned(),
+            ConditionType::ALL_CHANGES,
+            vec![Arc::new(parent_trigger)],
+            Arc::new(Node::ConstantLeaf { value: NodeValue::None }),
+        ));
+
+        trigger
+            .clone()
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, create_empty_fn_box())
+            .await
+            .unwrap();
+        let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.err().unwrap();
+
+        if let TriggerUnsubscribeError::ParentTriggerUnsubscribeErrors { errors } = &err {
+            // Verify that the error details are valid.
+            assert_eq!(errors.len(), 1);
+            let (name, error) = &errors[0];
+            assert_eq!(name, PARENT_TRIGGER_NAME);
+            assert!(
+                matches!(error, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigEnd.to_string() ),
                 "Unexpected inner error: {:?}",
                 error
             );
