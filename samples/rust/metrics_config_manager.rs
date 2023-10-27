@@ -50,7 +50,7 @@ extern "C" fn on_config_activated(
         c_str.to_str().unwrap().to_string()
     };
 
-    if let Some(sender) = config_manager.add_config_sender.take() {
+    if let Some(sender) = config_manager.activate_config_sender.take() {
         let _ = sender.send((
             status_code
                 == status_codes::TelemetryServiceStatusCodes_ACTIVATE_METRICS_CONFIG_SUCCEEDED,
@@ -76,7 +76,7 @@ extern "C" fn on_config_removed(
         c_str.to_str().unwrap().to_string()
     };
 
-    if let Some(sender) = config_manager.add_config_sender.take() {
+    if let Some(sender) = config_manager.remove_config_sender.take() {
         let _ = sender.send((
             status_code
                 == status_codes::TelemetryServiceStatusCodes_REMOVE_METRICS_CONFIG_SUCCEEDED,
@@ -89,8 +89,8 @@ extern "C" fn on_config_removed(
 pub struct MetricsConfigManager {
     service: *mut rust_to_c::ServiceHolder,
     add_config_sender: Option<oneshot::Sender<(bool, String)>>,
-    activate_config_sender: Option<oneshot::Sender<bool>>,
-    remove_config_sender: Option<oneshot::Sender<bool>>,
+    activate_config_sender: Option<oneshot::Sender<(bool, String)>>,
+    remove_config_sender: Option<oneshot::Sender<(bool, String)>>,
     _pin: PhantomPinned,
 }
 
@@ -108,7 +108,7 @@ impl MetricsConfigManager {
     pub async fn add_metrics_config(
         self: Pin<&mut Self>,
         serialized_config: &[u8],
-    ) -> (bool, String) {
+    ) -> Result<String, String> {
         // SAFETY: This function is always safe to call.
         let mut_ref = unsafe { self.get_unchecked_mut() };
 
@@ -129,15 +129,24 @@ impl MetricsConfigManager {
         }
 
         match add_config_receiver.await {
-            Ok((status, message)) => (status, message),
+            Ok((status, message)) => {
+                if status {
+                    Ok(message)
+                } else {
+                    Err(message)
+                }
+            }
             Err(e) => {
                 error!("Error: {}", e);
-                (false, e.to_string())
+                Err(e.to_string())
             }
         }
     }
 
-    pub async fn activate_metrics_config(self: Pin<&mut Self>, config_uuid: &str) -> bool {
+    pub async fn activate_metrics_config(
+        self: Pin<&mut Self>,
+        config_uuid: &str,
+    ) -> Result<String, String> {
         // SAFETY: This function is always safe to call.
         let mut_ref = unsafe { self.get_unchecked_mut() };
 
@@ -158,15 +167,24 @@ impl MetricsConfigManager {
         }
 
         match activate_config_receiver.await {
-            Ok(status) => status,
+            Ok((status, message)) => {
+                if status {
+                    Ok(message)
+                } else {
+                    Err(message)
+                }
+            }
             Err(e) => {
                 error!("Error: {}", e);
-                false
+                Err(e.to_string())
             }
         }
     }
 
-    pub async fn remove_metrics_config(self: Pin<&mut Self>, config_uuid: &str) -> bool {
+    pub async fn remove_metrics_config(
+        self: Pin<&mut Self>,
+        config_uuid: &str,
+    ) -> Result<String, String> {
         // SAFETY: This function is always safe to call.
         let mut_ref = unsafe { self.get_unchecked_mut() };
 
@@ -187,10 +205,16 @@ impl MetricsConfigManager {
         }
 
         match remove_config_receiver.await {
-            Ok(status) => status,
+            Ok((status, message)) => {
+                if status {
+                    Ok(message)
+                } else {
+                    Err(message)
+                }
+            }
             Err(e) => {
                 error!("Error: {}", e);
-                false
+                Err(e.to_string())
             }
         }
     }
