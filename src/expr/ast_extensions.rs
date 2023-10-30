@@ -36,16 +36,16 @@ pub enum NodeValueType {
 }
 
 impl NodeValueType {
-    fn is_bool(&self) -> bool {
+    pub fn is_bool(&self) -> bool {
         matches!(self, NodeValueType::Bool)
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        self.is_int() || matches!(self, NodeValueType::Float)
     }
 
     fn is_int(&self) -> bool {
         matches!(self, NodeValueType::Int)
-    }
-
-    fn is_numeric(&self) -> bool {
-        matches!(self, NodeValueType::Int | NodeValueType::Float)
     }
 
     // returns true iff `self` is a list type, and `other` is a singular & compatible
