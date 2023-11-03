@@ -415,7 +415,7 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::Int32Value;
-    use sdv_telem_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::{
         future,
         sync::{

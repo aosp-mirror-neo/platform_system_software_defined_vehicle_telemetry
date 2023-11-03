@@ -1,6 +1,6 @@
 use super::{MessageBuilder, MessageBuilderError};
 use protobuf::MessageDyn;
-use sdv_telem_test_proto::test_message::TestMessage;
+use sdv_telemetry_test_proto::test_message::TestMessage;
 
 /// The builder will build a TestMessage defined in `src/test_utils/test_message.proto`
 #[derive(Clone)]

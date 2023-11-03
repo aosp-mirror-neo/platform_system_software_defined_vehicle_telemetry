@@ -19,6 +19,8 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::{
 use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use std::sync::{Arc, Mutex};
 
+use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistry;
+
 use crate::metrics_report_listener::MetricsReportListener;
 use async_trait::async_trait;
 use log::{error, info};
@@ -108,7 +110,11 @@ impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
-    pub async fn new(root_path: &str, config_store_size: usize) -> Option<Self> {
+    pub async fn new(
+        root_path: &str,
+        config_store_size: usize,
+        configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
+    ) -> Option<Self> {
         let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
             (
                 format!("{}/{}", root_path, ACTIVE_CONFIG_DATA_DIR),
@@ -125,9 +131,10 @@ impl SdvTelemetryService {
         let listener = metrics_report_listener.clone(); // Clone the Arc to share ownership
 
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
-        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(move |report| {
-            listener.on_report_ready(report)
-        }));
+        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(
+            configurable_publisher_registry,
+            move |report| listener.on_report_ready(report),
+        ));
 
         let mut num_active_configs = 0;
         let mut num_inactive_configs = 0;
@@ -149,8 +156,13 @@ impl SdvTelemetryService {
                     };
 
                     // bytes now contains the contents of the file
-                    let config: MetricsConfig =
-                        protobuf::Message::parse_from_bytes(&bytes).unwrap();
+                    let config: MetricsConfig = match protobuf::Message::parse_from_bytes(&bytes) {
+                        Ok(cfg) => cfg,
+                        Err(_) => {
+                            error!("Error in reading {} config from memory", path.display());
+                            continue;
+                        }
+                    };
                     let uuid = &config.uuid;
 
                     // Validates and initializes metrics config
@@ -255,7 +267,17 @@ impl SdvTelemetryService {
 #[async_trait]
 impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn addMetricsConfig(&self, api_call_id: i32, metrics_config: &[u8]) -> BinderResult<()> {
-        let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config).unwrap();
+        let config: MetricsConfig = match protobuf::Message::parse_from_bytes(metrics_config) {
+            Ok(cfg) => cfg,
+            Err(_) => {
+                error!("Error in parsing config");
+                return self.send_status(
+                    api_call_id,
+                    StatusCodes::ADD_METRICS_CONFIG_FAILED_CONFIG_PARSE_ERROR.0,
+                    "Unable to parse metric config",
+                );
+            }
+        };
         info!("addMetricsConfig: {:?} of size: {}\n", config, metrics_config.len());
 
         if metrics_config.len() + self.cur_persistent_config_store_size.load(Ordering::SeqCst)
@@ -320,7 +342,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 Ok(data) => data,
                 Err(e) => {
                     let err_msg = format!("{:?}", e);
-                    error!("{}", err_msg);
+
                     return self.send_status(
                         api_call_id,
                         StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED_CONFIG_CORRUPTED.0,
@@ -330,7 +352,18 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             };
 
             // bytes now contains the contents of the file
-            let config: MetricsConfig = protobuf::Message::parse_from_bytes(&bytes).unwrap();
+            let config: MetricsConfig = match protobuf::Message::parse_from_bytes(&bytes) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    let err_msg = format!("{:?}", e);
+                    error!("{}", err_msg);
+                    return self.send_status(
+                        api_call_id,
+                        StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED_CONFIG_CORRUPTED.0,
+                        &err_msg,
+                    );
+                }
+            };
             let uuid = &config.uuid;
 
             // Initializes metrics config
@@ -603,18 +636,59 @@ mod test_utils;
 mod tests {
     extern crate protobuf;
     use super::*;
+    use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
+        IConfigurablePublisher::IConfigurablePublisher, PublisherInfo::PublisherInfo,
+    };
+    use android_sdv_telemetry_configurable_publisher::binder::Strong;
     use android_sdv_telemetry::aidl::android::sdv::telemetry::{
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
         ITelemetryStatusListener::BnTelemetryStatusListener,
     };
-
     use binder::BinderFeatures;
     use protobuf::Message;
+    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistryError;
+    use sdv_telemetry_configurable_publisher::subscriber::Subscriber;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
+
+    struct MockConfigurablePublisherRegistryImpl {
+        num_subscribe_calls: Arc<Mutex<i32>>,
+        num_register_calls: Arc<Mutex<i32>>,
+    }
+
+    impl MockConfigurablePublisherRegistryImpl {
+        fn new(num_subscribe_calls: Arc<Mutex<i32>>, num_register_calls: Arc<Mutex<i32>>) -> Self {
+            MockConfigurablePublisherRegistryImpl { num_subscribe_calls, num_register_calls }
+        }
+    }
+
+    #[async_trait]
+    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistryImpl {
+        async fn subscribe(
+            &self,
+            _service_name: String,
+            _topic_name: String,
+            _subscriber: Box<dyn Subscriber>,
+            _configuration: Option<&[u8]>,
+        ) -> Result<(), ConfigurablePublisherRegistryError> {
+            let mut num_calls = self.num_subscribe_calls.lock().unwrap();
+            *num_calls += 1;
+            Ok(())
+        }
+
+        async fn register_publisher(
+            &self,
+            _publisher_info: &PublisherInfo,
+            _callback: &Strong<dyn IConfigurablePublisher>,
+        ) -> Result<(), ConfigurablePublisherRegistryError> {
+            let mut num_calls = self.num_register_calls.lock().unwrap();
+            *num_calls += 1;
+            Ok(())
+        }
+    }
 
     struct MockMetricsConfigOrchestratorImpl {
         num_initialize_config_calls: Arc<Mutex<i32>>,
@@ -710,8 +784,12 @@ mod tests {
             status_message: &str,
             serialized_report: &[u8],
         ) -> BinderResult<()> {
+            // bytes now contains the contents of the file
             let metrics_report: MetricsReport =
-                protobuf::Message::parse_from_bytes(serialized_report).unwrap();
+                match protobuf::Message::parse_from_bytes(serialized_report) {
+                    Ok(report) => report,
+                    Err(_) => return Err(binder::StatusCode::BAD_VALUE.into()),
+                };
 
             let mut mut_status_code = self.status_code.lock().unwrap();
             *mut_status_code = status_code;
@@ -833,10 +911,16 @@ mod tests {
             let num_finish_config_calls = Arc::new(Mutex::new(0));
             let num_validate_config_calls = Arc::new(Mutex::new(0));
 
-            let mut service =
-                SdvTelemetryService::new(dir_path.as_str(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB)
-                    .await
-                    .unwrap();
+            let mut service = SdvTelemetryService::new(
+                dir_path.as_str(),
+                MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+                Arc::new(MockConfigurablePublisherRegistryImpl::new(
+                    Arc::new(Mutex::new(0)),
+                    Arc::new(Mutex::new(0)),
+                )),
+            )
+            .await
+            .unwrap();
             service.metrics_config_orchestrator = Box::new(MockMetricsConfigOrchestratorImpl::new(
                 num_initialize_config_calls.clone(),
                 num_finish_config_calls.clone(),

@@ -74,8 +74,13 @@ extern "C" fn on_report_received(
 
     // SAFETY: This function is always safe to call
     let byte_slice = unsafe { slice::from_raw_parts(report, size) };
-    let metrics_report =
-        MetricsReport::parse_from_bytes(byte_slice).expect("Failed to parse Report");
+    let metrics_report = match MetricsReport::parse_from_bytes(byte_slice) {
+        Ok(report) => report,
+        Err(e) => {
+            error!("Error in parsing report {}", e);
+            return;
+        }
+    };
 
     let _ = report_manager.get_report_sender.try_send(Ok(metrics_report));
 }

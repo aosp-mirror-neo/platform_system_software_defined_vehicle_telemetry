@@ -177,7 +177,7 @@ mod test {
     use crate::metrics_config_orchestrator::{
         message_builder::mock::MockMessageBuilder, trigger::mock::MockTrigger,
     };
-    use sdv_telem_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
