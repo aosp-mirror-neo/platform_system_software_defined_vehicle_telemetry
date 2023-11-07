@@ -10,16 +10,12 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
     PublisherInfo::PublisherInfo,
 };
 use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
-
-use configurable_publisher_registry::{
-    ConfigurablePublisherRegistry, ConfigurablePublisherRegistryImpl,
-};
-
 use async_trait::async_trait;
 use binder::Status;
 use log::info;
-use std::fmt::Debug;
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
+
+use configurable_publisher_registry::ConfigurablePublisherRegistryImpl;
 
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
 /// preserving the content as far as possible.

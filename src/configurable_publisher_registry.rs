@@ -13,7 +13,7 @@ use async_trait::async_trait;
 use binder::BinderFeatures;
 use log::error;
 use protobuf::descriptor::FileDescriptorProto;
-use protobuf::reflect::FileDescriptor;
+use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -32,12 +32,6 @@ pub trait ConfigurablePublisherRegistry: Send + Sync {
         subscriber: Box<dyn Subscriber>,
         configuration: Option<&[u8]>,
     ) -> Result<(), ConfigurablePublisherRegistryError>;
-
-    async fn register_publisher(
-        &self,
-        publisher_info: &PublisherInfo,
-        callback: &Strong<dyn IConfigurablePublisher>,
-    ) -> Result<(), ConfigurablePublisherRegistryError>;
 }
 
 #[derive(Error, Debug)]
@@ -53,16 +47,25 @@ pub enum ConfigurablePublisherRegistryError {
     )]
     PublisherAlreadyExists { service_name: String, topic_name: String },
     /// Parsing error
-    #[error("Unable to parse publisher file descriptor proto")]
-    FileDescriptorProtoParseError,
+    #[error("Unable to parse publisher file descriptor proto: {error}")]
+    FileDescriptorProtoParseError {
+        #[from]
+        error: protobuf::Error,
+    },
+    #[error("Message type {message_type_name} is not defined in the file descriptor")]
+    InvalidMessageTypeName { message_type_name: String },
 }
 
 /// This struct is defined to implement ConfigurablePublisherRegistry trait.
 pub struct ConfigurablePublisherRegistryImpl {
-    /// Hashmap to store publishers info.
-    publisher_info_store: Mutex<HashMap<(String, String), (String, FileDescriptor)>>,
-    /// Hashmap to store configurable publishers that can be subscriber to.
-    publisher_store: Mutex<HashMap<(String, String), Strong<dyn IConfigurablePublisher>>>,
+    /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
+    publisher_entries: Mutex<HashMap<(String, String), PublisherEntry>>,
+}
+
+/// Publisher registry entry.
+pub struct PublisherEntry {
+    message_descriptor: MessageDescriptor,
+    publisher: Strong<dyn IConfigurablePublisher>,
 }
 
 impl Default for ConfigurablePublisherRegistryImpl {
@@ -81,62 +84,26 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
         subscriber: Box<dyn Subscriber>,
         configuration: Option<&[u8]>,
     ) -> Result<(), ConfigurablePublisherRegistryError> {
-        let publisher = {
-            let publisher_map = self.publisher_store.lock().unwrap();
-            match publisher_map.get(&(service_name.clone(), topic_name.clone())) {
-                Some(v) => v.clone(),
+        let (message_descriptor, publisher) = {
+            let key = (service_name, topic_name);
+            match self.publisher_entries.lock().unwrap().get(&key) {
+                Some(entry) => (entry.message_descriptor.clone(), entry.publisher.clone()),
                 None => {
+                    let (service_name, topic_name) = key;
                     return Err(ConfigurablePublisherRegistryError::PublisherNotFound {
                         service_name,
                         topic_name,
-                    })
+                    });
                 }
             }
         };
 
-        let listener_wrapper =
-            BnSubscriber::new_binder(SubscriberWrapper::new(subscriber), BinderFeatures::default());
+        let listener_wrapper = BnSubscriber::new_binder(
+            SubscriberWrapper::new(message_descriptor, subscriber),
+            BinderFeatures::default(),
+        );
 
         let _ = publisher.subscribe(&listener_wrapper, configuration);
-
-        Ok(())
-    }
-
-    async fn register_publisher(
-        &self,
-        publisher_info: &PublisherInfo,
-        callback: &Strong<dyn IConfigurablePublisher>,
-    ) -> Result<(), ConfigurablePublisherRegistryError> {
-        let publisher_info_proto: FileDescriptorProto =
-            match protobuf::Message::parse_from_bytes(&publisher_info.fileDescriptorProto) {
-                Ok(proto) => proto,
-                Err(_) => {
-                    error!("Error in parsing file descriptor proto");
-                    return Err(ConfigurablePublisherRegistryError::FileDescriptorProtoParseError);
-                }
-            };
-        let file_descriptor = FileDescriptor::new_dynamic(publisher_info_proto, &[]).unwrap();
-        {
-            let mut publisher_info_map = self.publisher_info_store.lock().unwrap();
-            match publisher_info_map
-                .entry((publisher_info.serviceName.clone(), publisher_info.topicName.clone()))
-            {
-                Entry::Occupied(_) => {
-                    return Err(ConfigurablePublisherRegistryError::PublisherAlreadyExists {
-                        service_name: publisher_info.serviceName.clone(),
-                        topic_name: publisher_info.topicName.clone(),
-                    })
-                }
-                Entry::Vacant(v) => {
-                    v.insert((publisher_info.messageTypeName.clone(), file_descriptor));
-                }
-            }
-        }
-
-        self.publisher_store.lock().unwrap().insert(
-            (publisher_info.serviceName.clone(), publisher_info.topicName.clone()),
-            callback.clone(),
-        );
 
         Ok(())
     }
@@ -145,9 +112,40 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
 impl ConfigurablePublisherRegistryImpl {
     /// Instantiates an instance of ConfigurablePublisherRegistryImpl
     pub fn new() -> Self {
-        ConfigurablePublisherRegistryImpl {
-            publisher_info_store: Mutex::new(HashMap::new()),
-            publisher_store: Mutex::new(HashMap::new()),
+        ConfigurablePublisherRegistryImpl { publisher_entries: HashMap::new().into() }
+    }
+
+    pub async fn register_publisher(
+        &self,
+        publisher_info: &PublisherInfo,
+        publisher: &Strong<dyn IConfigurablePublisher>,
+    ) -> Result<(), ConfigurablePublisherRegistryError> {
+        let publisher_info_proto: FileDescriptorProto =
+            protobuf::Message::parse_from_bytes(&publisher_info.fileDescriptorProto)?;
+        let file_descriptor = FileDescriptor::new_dynamic(publisher_info_proto, &[])?;
+        let message_descriptor = file_descriptor
+            .message_by_full_name(&publisher_info.messageTypeName)
+            .ok_or_else(|| ConfigurablePublisherRegistryError::InvalidMessageTypeName {
+                message_type_name: publisher_info.messageTypeName.clone(),
+            })?;
+
+        match self
+            .publisher_entries
+            .lock()
+            .unwrap()
+            .entry((publisher_info.serviceName.clone(), publisher_info.topicName.clone()))
+        {
+            Entry::Occupied(_) => {
+                return Err(ConfigurablePublisherRegistryError::PublisherAlreadyExists {
+                    service_name: publisher_info.serviceName.clone(),
+                    topic_name: publisher_info.topicName.clone(),
+                })
+            }
+            Entry::Vacant(v) => {
+                v.insert(PublisherEntry { message_descriptor, publisher: publisher.clone() });
+            }
         }
+
+        Ok(())
     }
 }
