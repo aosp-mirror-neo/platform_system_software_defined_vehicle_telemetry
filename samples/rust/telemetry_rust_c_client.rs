@@ -1,16 +1,19 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 //! Binary for testing Telemetry service.
-
 mod metrics_config_manager;
 mod metrics_report_manager;
 
 extern crate protobuf;
 
+use futures::future::join_all;
 use log::{error, info, Level};
+use std::collections::HashSet;
 use std::env;
 use std::ffi::CStr;
 use std::fs;
+use std::pin::Pin;
+use std::sync::Arc;
 
 use crate::metrics_config_manager::MetricsConfigManager;
 use crate::metrics_report_manager::MetricsReportManager;
@@ -33,20 +36,45 @@ extern "C" fn on_status(
     info!("Status code: {} status message: {}", status_code, msg);
 }
 
+async fn process_config(
+    path: String,
+    config_manager: Arc<Pin<Box<MetricsConfigManager>>>,
+) -> Option<String> {
+    // Read binary into a vector
+    let serialized_config = fs::read(path).unwrap();
+
+    let config_name;
+    let add_config_res = config_manager.add_metrics_config(&serialized_config).await;
+
+    let activate_config_res = match add_config_res {
+        Ok(message) => {
+            config_name = message.clone();
+            config_manager.activate_metrics_config(&message).await
+        }
+        Err(e) => {
+            error!("Error in adding config: {}", e);
+            return None;
+        }
+    };
+
+    match activate_config_res {
+        Ok(_) => Some(config_name),
+        Err(e) => {
+            error!("Error in activating config: {}", e);
+            None
+        }
+    }
+}
+
 /// Communicate with the telemetry service.
 #[tokio::main]
 async fn main() -> Result<(), binder::Status> {
     let args = env::args().collect::<Vec<_>>();
 
     if args.len() < 2 {
-        eprintln!("Usage: {} <path_to_binary_file>", args[0]);
+        eprintln!("Usage: {} <path_to_binary_file1> <path_to_binary_file2> ...", args[0]);
         return Ok(());
     }
-
-    let path = &args[1];
-
-    // Read binary into a vector
-    let serialized_config = fs::read(path).unwrap();
 
     binder::ProcessState::start_thread_pool();
     let _init_success = logger::init(
@@ -62,50 +90,50 @@ async fn main() -> Result<(), binder::Status> {
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
     // SAFETY: This function is always safe to call.
     unsafe {
-        service = rust_to_c::get_telemetry_service();
+        service = rust_to_c::get_telemetry_service() as usize;
         rust_to_c::set_status_listener(
-            service,
+            service as *mut rust_to_c::ServiceHolder,
             &mut service as *mut _ as *mut std::ffi::c_void,
             Some(on_status),
         );
     }
 
-    let config_name;
-    let mut config_manager = MetricsConfigManager::new(service);
     let mut report_manager = MetricsReportManager::new(service);
+    let config_manager = Arc::new(MetricsConfigManager::new(service));
 
-    let add_config_res = config_manager.as_mut().add_metrics_config(&serialized_config).await;
+    let mut add_config_futures = Vec::with_capacity(args.len() - 1);
 
-    let activate_config_res = match add_config_res {
-        Ok(message) => {
-            config_name = message.clone();
-            config_manager.as_mut().activate_metrics_config(&message).await
-        }
-        Err(e) => {
-            error!("Error in adding config: {}", e);
-            return Ok(());
-        }
-    };
+    let config_paths: Vec<String> = args.iter().skip(1).cloned().collect();
+    for path in config_paths {
+        add_config_futures.push(process_config(path, config_manager.clone()));
+    }
 
-    let metrics_report = match activate_config_res {
-        Ok(_) => report_manager.as_mut().get_metrics_report().await.unwrap(),
-        Err(e) => {
-            error!("Error in activating config: {}", e);
-            return Ok(());
-        }
-    };
+    let add_config_results = join_all(add_config_futures).await;
+    let mut active_configs = HashSet::new();
 
-    info!("Report received: {:?}", metrics_report);
+    // Collect all activated configs
+    for res in add_config_results.into_iter().flatten() {
+        info!("Config added successfully: {}", res.clone());
+        active_configs.insert(res);
+    }
 
-    let remove_config_res = config_manager.as_mut().remove_metrics_config(&config_name).await;
-
-    match remove_config_res {
-        Ok(_) => {
-            info!("Successfully removed config");
-        }
-        Err(e) => {
-            error!("Error in removing config: {}", e);
-            return Ok(());
+    while !active_configs.is_empty() {
+        let metrics_report = report_manager.as_mut().get_metrics_report().await.unwrap();
+        info!("Report received: {:?}", metrics_report);
+        if active_configs.contains(&metrics_report.metrics_config_uuid) {
+            let remove_config_res = config_manager
+                .as_ref()
+                .remove_metrics_config(&metrics_report.metrics_config_uuid)
+                .await;
+            match remove_config_res {
+                Ok(_) => {
+                    info!("Successfully removed config");
+                    active_configs.remove(&metrics_report.metrics_config_uuid);
+                }
+                Err(e) => {
+                    error!("Error in removing config: {}", e);
+                }
+            }
         }
     }
 
