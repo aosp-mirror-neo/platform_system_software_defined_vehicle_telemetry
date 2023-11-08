@@ -636,10 +636,6 @@ mod test_utils;
 mod tests {
     extern crate protobuf;
     use super::*;
-    use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
-        IConfigurablePublisher::IConfigurablePublisher, PublisherInfo::PublisherInfo,
-    };
-    use android_sdv_telemetry_configurable_publisher::binder::Strong;
     use android_sdv_telemetry::aidl::android::sdv::telemetry::{
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
@@ -651,17 +647,17 @@ mod tests {
     use sdv_telemetry_configurable_publisher::subscriber::Subscriber;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
+    use std::sync::atomic::{AtomicU32, Ordering};
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
 
     struct MockConfigurablePublisherRegistryImpl {
-        num_subscribe_calls: Arc<Mutex<i32>>,
-        num_register_calls: Arc<Mutex<i32>>,
+        num_subscribe_calls: AtomicU32,
     }
 
     impl MockConfigurablePublisherRegistryImpl {
-        fn new(num_subscribe_calls: Arc<Mutex<i32>>, num_register_calls: Arc<Mutex<i32>>) -> Self {
-            MockConfigurablePublisherRegistryImpl { num_subscribe_calls, num_register_calls }
+        fn new() -> Self {
+            MockConfigurablePublisherRegistryImpl { num_subscribe_calls: AtomicU32::new(0) }
         }
     }
 
@@ -674,18 +670,7 @@ mod tests {
             _subscriber: Box<dyn Subscriber>,
             _configuration: Option<&[u8]>,
         ) -> Result<(), ConfigurablePublisherRegistryError> {
-            let mut num_calls = self.num_subscribe_calls.lock().unwrap();
-            *num_calls += 1;
-            Ok(())
-        }
-
-        async fn register_publisher(
-            &self,
-            _publisher_info: &PublisherInfo,
-            _callback: &Strong<dyn IConfigurablePublisher>,
-        ) -> Result<(), ConfigurablePublisherRegistryError> {
-            let mut num_calls = self.num_register_calls.lock().unwrap();
-            *num_calls += 1;
+            self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -914,10 +899,7 @@ mod tests {
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-                Arc::new(MockConfigurablePublisherRegistryImpl::new(
-                    Arc::new(Mutex::new(0)),
-                    Arc::new(Mutex::new(0)),
-                )),
+                Arc::new(MockConfigurablePublisherRegistryImpl::new()),
             )
             .await
             .unwrap();
