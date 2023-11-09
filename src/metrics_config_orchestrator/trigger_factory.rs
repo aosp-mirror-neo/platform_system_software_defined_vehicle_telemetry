@@ -368,11 +368,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Data { publisher: res_publisher } = &res.trigger_type {
-            assert!(ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher>)));
-        } else {
+        let TriggerType::Data { publisher: res_publisher } = &res.trigger_type else {
             panic!("Unexpected trigger type");
-        }
+        };
+        assert!(ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher>)));
     }
 
     #[test]
@@ -383,11 +382,10 @@ mod tests {
         let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Periodic { interval_ms } = res.trigger_type {
-            assert_eq!(interval_ms, INTERVAL);
-        } else {
+        let TriggerType::Periodic { interval_ms } = res.trigger_type else {
             panic!("Unexpected trigger type");
-        }
+        };
+        assert_eq!(interval_ms, INTERVAL);
     }
 
     #[test]
@@ -496,21 +494,20 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        if let TriggerType::Conditional { condition_type, selector_expression, triggers, .. } =
+        let TriggerType::Conditional { condition_type, selector_expression, triggers, .. } =
             &res.trigger_type
-        {
-            assert!(matches!(condition_type, ConditionType::ALL_CHANGES));
-            // selector_expression should match the node at index 0
-            assert!(Arc::ptr_eq(selector_expression, &node_0));
-            assert!(!Arc::ptr_eq(selector_expression, &node_1));
-            assert_eq!(triggers.len(), 1);
-            assert!(Arc::ptr_eq(
-                &triggers[0],
-                &(parent_triggers.unwrap()[0].clone() as Arc<dyn Trigger>)
-            ));
-        } else {
+        else {
             panic!("Unexpected trigger type");
-        }
+        };
+        assert!(matches!(condition_type, ConditionType::ALL_CHANGES));
+        // selector_expression should match the node at index 0
+        assert!(Arc::ptr_eq(selector_expression, &node_0));
+        assert!(!Arc::ptr_eq(selector_expression, &node_1));
+        assert_eq!(triggers.len(), 1);
+        assert!(Arc::ptr_eq(
+            &triggers[0],
+            &(parent_triggers.unwrap()[0].clone() as Arc<dyn Trigger>)
+        ));
     }
 
     #[test]

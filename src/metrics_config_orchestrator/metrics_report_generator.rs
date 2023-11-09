@@ -334,15 +334,14 @@ mod test {
         generator.activate().await.unwrap();
         let err = generator.deactivate().await.err().unwrap();
 
-        if let MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors } = &err {
-            assert_eq!(unsubscribe_errors.len(), 1);
-            assert!(
-                matches!(&unsubscribe_errors[0], TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
-                "Unexpected inner error: {:?}",
-                unsubscribe_errors[0]
-            );
-        } else {
+        let MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors } = &err else {
             panic!("Unexpected error: {:?}", err);
-        }
+        };
+        assert_eq!(unsubscribe_errors.len(), 1);
+        assert!(
+            matches!(&unsubscribe_errors[0], TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
+            "Unexpected inner error: {:?}",
+            unsubscribe_errors[0]
+        );
     }
 }

@@ -703,19 +703,18 @@ mod tests {
 
         let err = publisher.deactivate().await.err().unwrap();
 
-        if let PublisherDeactivateError::TriggerUnsubscribeErrors { errors } = &err {
-            assert_eq!(errors.len(), 2);
-            let (trigger_name, error) = &errors[0];
-            assert_eq!(trigger_name, TRIGGER_NAME);
-            assert!(
-                matches!(error, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == DATA_TRIGGER_NAME)
-            );
-            let (trigger_name, error) = &errors[1];
-            assert_eq!(trigger_name, DATA_TRIGGER_NAME);
-            assert!(matches!(error, TriggerUnsubscribeError::PublisherUnsubscribeError { .. }));
-        } else {
+        let PublisherDeactivateError::TriggerUnsubscribeErrors { errors } = &err else {
             panic!("Unexpected error: {}", err);
-        }
+        };
+        assert_eq!(errors.len(), 2);
+        let (trigger_name, error) = &errors[0];
+        assert_eq!(trigger_name, TRIGGER_NAME);
+        assert!(
+            matches!(error, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == DATA_TRIGGER_NAME)
+        );
+        let (trigger_name, error) = &errors[1];
+        assert_eq!(trigger_name, DATA_TRIGGER_NAME);
+        assert!(matches!(error, TriggerUnsubscribeError::PublisherUnsubscribeError { .. }));
     }
 
     #[tokio::test]

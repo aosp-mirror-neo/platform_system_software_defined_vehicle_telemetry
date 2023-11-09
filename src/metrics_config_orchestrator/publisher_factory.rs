@@ -331,11 +331,10 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        if let PublisherType::Signal { signal_name } = &res.publisher_type {
-            assert_eq!(signal_name, SIGNAL_NAME);
-        } else {
+        let PublisherType::Signal { signal_name } = &res.publisher_type else {
             panic!("Unexpected publisher type");
-        }
+        };
+        assert_eq!(signal_name, SIGNAL_NAME);
     }
 
     #[tokio::test]
@@ -346,14 +345,13 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        if let PublisherType::Service { service_name, service_adapter: _, service_subscription } =
+        let PublisherType::Service { service_name, service_adapter: _, service_subscription } =
             &res.publisher_type
-        {
-            assert_eq!(service_name, SERVICE_NAME);
-            assert!(service_subscription.lock().unwrap().is_none());
-        } else {
+        else {
             panic!("Unexpected publisher type");
-        }
+        };
+        assert_eq!(service_name, SERVICE_NAME);
+        assert!(service_subscription.lock().unwrap().is_none());
     }
 
     #[test]
@@ -377,15 +375,14 @@ mod tests {
             factory.create_using_context_with(&publisher, Some(vec![trigger.clone()])).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        if let PublisherType::Aggregation { triggers: res_triggers, reset_on_get, .. } =
+        let PublisherType::Aggregation { triggers: res_triggers, reset_on_get, .. } =
             &res.publisher_type
-        {
-            assert_eq!(res_triggers.len(), 1);
-            assert!(Arc::ptr_eq(&res_triggers[0], &(trigger as Arc<dyn Trigger>)));
-            assert!(reset_on_get);
-        } else {
+        else {
             panic!("Unexpected publisher type");
-        }
+        };
+        assert_eq!(res_triggers.len(), 1);
+        assert!(Arc::ptr_eq(&res_triggers[0], &(trigger as Arc<dyn Trigger>)));
+        assert!(reset_on_get);
     }
 
     #[test]
