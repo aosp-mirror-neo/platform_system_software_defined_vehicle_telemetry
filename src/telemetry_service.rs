@@ -15,16 +15,11 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::{
     ITelemetryStatusListener::ITelemetryStatusListener,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
-
 use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
-use std::sync::{Arc, Mutex};
-
-use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistry;
-
-use crate::metrics_report_listener::MetricsReportListener;
 use async_trait::async_trait;
 use log::{error, info};
 use protobuf::Message;
+use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::collections::HashMap;
 use std::fs::{self};
@@ -32,12 +27,14 @@ use std::marker::{Send, Sync};
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
+use crate::metrics_report_listener::MetricsReportListener;
+
+pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 use metrics_config_orchestrator::{
     MetricsConfigOrchestratorError as ConfigError, MetricsConfigOrchestratorImpl,
 };
-
-pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
 
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -634,43 +631,42 @@ mod test_utils;
 
 #[cfg(test)]
 mod tests {
-    extern crate protobuf;
-    use super::*;
     use android_sdv_telemetry::aidl::android::sdv::telemetry::{
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
         ITelemetryStatusListener::BnTelemetryStatusListener,
     };
     use binder::BinderFeatures;
-    use protobuf::Message;
-    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistryError;
-    use sdv_telemetry_configurable_publisher::subscriber::Subscriber;
-    use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
-    use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use protobuf::reflect::MessageDescriptor;
+    use protobuf::{Message, MessageDyn};
+    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
+    use sdvtelemetry_proto_rust::metrics_configuration::{
+        MetricsConfig as MetricsConfigProto, MetricsReport,
+    };
+
+    use super::*;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
 
-    struct MockConfigurablePublisherRegistryImpl {
-        num_subscribe_calls: AtomicU32,
-    }
-
-    impl MockConfigurablePublisherRegistryImpl {
-        fn new() -> Self {
-            MockConfigurablePublisherRegistryImpl { num_subscribe_calls: AtomicU32::new(0) }
-        }
-    }
+    struct MockConfigurablePublisherRegistry {}
 
     #[async_trait]
-    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistryImpl {
+    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
+        fn get_message_descriptor(
+            &self,
+            _service_name: String,
+            _topic_name: String,
+        ) -> Option<MessageDescriptor> {
+            None
+        }
+
         async fn subscribe(
             &self,
             _service_name: String,
             _topic_name: String,
-            _subscriber: Box<dyn Subscriber>,
+            _subscriber: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
             _configuration: Option<&[u8]>,
-        ) -> Result<(), ConfigurablePublisherRegistryError> {
-            self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
+        ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
             Ok(())
         }
     }
@@ -899,7 +895,7 @@ mod tests {
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-                Arc::new(MockConfigurablePublisherRegistryImpl::new()),
+                Arc::new(MockConfigurablePublisherRegistry {}),
             )
             .await
             .unwrap();

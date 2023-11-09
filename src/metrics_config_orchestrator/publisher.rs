@@ -1,7 +1,5 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-pub(super) mod service_adapter;
-
 use async_trait::async_trait;
 use log::error;
 use protobuf::MessageDyn;
@@ -16,10 +14,14 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::collection_extension::HashMapExtension;
-use crate::metrics_config_orchestrator::{
-    message_builder::MessageBuilder, trigger::TriggerUnsubscribeError, Trigger, TriggerSubscriber,
+use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
+use crate::metrics_config_orchestrator::service_adapter::{
+    ServiceAdapter, ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError,
+    ServiceSubscription,
 };
-use service_adapter::{ServiceAdapter, ServiceAdapterError, ServiceSubscription};
+use crate::metrics_config_orchestrator::trigger::{
+    Trigger, TriggerSubscriber, TriggerUnsubscribeError,
+};
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
 const PUBLISHER_STATE_ACTIVATING: &str = "Activating";
@@ -47,6 +49,11 @@ pub(crate) trait Publisher: Send + Sync {
 pub(crate) enum PublisherActivateError {
     #[error("Unable to activate publisher: it's in {state} state")]
     InvalidState { state: String },
+    #[error("Service adapter failed to process subscription request: {error}")]
+    ServiceAdapterError {
+        #[from]
+        error: ServiceAdapterSubscribeError,
+    },
 }
 
 #[derive(Error, Debug)]
@@ -59,7 +66,7 @@ pub(crate) enum PublisherDeactivateError {
     #[error("Service adapter failed to process unsubscription request: {error}")]
     ServiceAdapterError {
         #[from]
-        error: ServiceAdapterError,
+        error: ServiceAdapterUnsubscribeError,
     },
     #[error("Unable to fully unsubscribe from underlying triggers: {errors:?}")]
     TriggerUnsubscribeErrors { errors: Vec<(String, TriggerUnsubscribeError)> },
@@ -108,6 +115,7 @@ pub(crate) enum PublisherType {
     },
     Service {
         service_name: String,
+        topic_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         service_subscription: Mutex<Option<ServiceSubscription>>,
     },
@@ -173,7 +181,12 @@ impl Publisher for PublisherImpl {
                     }
                 }
             }
-            PublisherType::Service { service_name, service_adapter, service_subscription } => {
+            PublisherType::Service {
+                service_name,
+                topic_name,
+                service_adapter,
+                service_subscription,
+            } => {
                 if service_subscription.lock().unwrap().is_some() {
                     panic!("Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
                 }
@@ -183,12 +196,13 @@ impl Publisher for PublisherImpl {
                 let subscription = service_adapter
                     .subscribe(
                         service_name,
+                        topic_name,
                         Box::new(move |msg| {
                             self_clone
                                 .on_service_publisher_new_message(&callback_map_reference, msg)
                         }),
                     )
-                    .await;
+                    .await?;
 
                 let mut subscription_container = service_subscription.lock().unwrap();
                 if subscription_container.is_some() {
@@ -326,12 +340,14 @@ impl PublisherImpl {
     pub(super) fn new_service_publisher(
         name: String,
         service_name: String,
+        topic_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     ) -> Self {
         Self::new(
             name,
             PublisherType::Service {
                 service_name,
+                topic_name,
                 service_adapter,
                 service_subscription: None.into(),
             },
@@ -416,81 +432,20 @@ pub(crate) mod mock;
 mod tests {
     use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use std::{
-        future,
-        sync::{
-            atomic::{AtomicU32, Ordering},
-            Arc,
-        },
-    };
-    use tokio::sync::{oneshot, Notify};
+    use std::sync::Arc;
+    use tokio::sync::oneshot;
 
     use super::*;
     use crate::metrics_config_orchestrator::{
-        message_builder::mock::MockMessageBuilder, trigger::mock::MockTrigger,
+        message_builder::mock::MockMessageBuilder, service_adapter::mock::MockServiceAdapter,
+        trigger::mock::MockTrigger,
     };
 
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
+    const TOPIC_NAME: &str = "topic";
     const TRIGGER_NAME: &str = "trigger";
-
-    struct MockServiceAdapter {
-        // Block subscribe call to keep publisher in the Subscribing state.
-        block_subscribe: bool,
-        // Block unsubscribe call to keep publisher in the Unsubscribing state.
-        block_unsubscribe: bool,
-        num_unsubscribe_calls: AtomicU32,
-        new_message_callback:
-            AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
-        notify_subscribing: Arc<Notify>,
-        notify_unsubscribing: Arc<Notify>,
-    }
-
-    #[async_trait]
-    impl ServiceAdapter for MockServiceAdapter {
-        async fn subscribe(
-            &self,
-            _service_name: &str,
-            new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-        ) -> ServiceSubscription {
-            self.new_message_callback.lock().await.replace(new_message_callback);
-            if self.block_subscribe {
-                self.notify_subscribing.notify_one();
-                future::pending::<()>().await;
-            }
-            ServiceSubscription { service_name: String::default(), subscription_id: u32::MAX }
-        }
-
-        async fn unsubscribe(
-            &self,
-            _subscription: ServiceSubscription,
-        ) -> Result<(), ServiceAdapterError> {
-            self.num_unsubscribe_calls.fetch_add(1, Ordering::Release);
-            if self.block_unsubscribe {
-                self.notify_unsubscribing.notify_one();
-                future::pending::<()>().await;
-            }
-            Ok(())
-        }
-    }
-
-    impl MockServiceAdapter {
-        fn new() -> Self {
-            MockServiceAdapter {
-                block_subscribe: false,
-                block_unsubscribe: false,
-                new_message_callback: None.into(),
-                notify_subscribing: Notify::new().into(),
-                notify_unsubscribing: Notify::new().into(),
-                num_unsubscribe_calls: AtomicU32::new(0),
-            }
-        }
-
-        async fn publish_new_message(&self, message: &dyn MessageDyn) {
-            self.new_message_callback.lock().await.as_mut().unwrap()(message);
-        }
-    }
 
     fn create_inactive_service_publisher(
         service_adapter: Option<Arc<MockServiceAdapter>>,
@@ -498,6 +453,7 @@ mod tests {
         Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
+            TOPIC_NAME.to_owned(),
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
         ))
     }
@@ -673,7 +629,7 @@ mod tests {
 
         publisher.deactivate().await.unwrap();
 
-        assert_eq!(service_adapter.num_unsubscribe_calls.load(Ordering::Acquire), 1);
+        assert_eq!(service_adapter.get_num_unsubscribe_calls(), 1);
     }
 
     #[tokio::test]
