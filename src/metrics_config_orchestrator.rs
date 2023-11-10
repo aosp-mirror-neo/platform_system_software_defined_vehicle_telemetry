@@ -1596,20 +1596,19 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
-        if let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+        let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
             report_config_name,
             factory_error,
         } = err
-        {
-            assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
-            assert!(
-                matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-                "Unexpected error: {:?}",
-                factory_error
-            );
-        } else {
+        else {
             panic!("Unexpected error: {:?}", err);
-        }
+        };
+        assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
+        assert!(
+            matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
+            "Unexpected error: {:?}",
+            factory_error
+        );
     }
 
     #[tokio::test]
@@ -1714,15 +1713,14 @@ mod tests {
 
         let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
-        if let MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } = &err {
-            assert!(
-                matches!(&error, TriggerSubscribeError::DuplicateSubscription { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
-                "Unexpected inner error: {:?}",
-                error
-            );
-        } else {
+        let MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } = &err else {
             panic!("Unexpected error: {:?}", err)
-        }
+        };
+        assert!(
+            matches!(&error, TriggerSubscribeError::DuplicateSubscription { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
+            "Unexpected inner error: {:?}",
+            error
+        );
     }
 
     #[tokio::test]
@@ -2075,20 +2073,19 @@ mod tests {
 
         let err = orchestrator.validate_config(&config).err().unwrap();
 
-        if let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+        let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
             report_config_name,
             factory_error,
         } = err
-        {
-            assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
-            assert!(
-                matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-                "Unexpected error: {:?}",
-                factory_error
-            );
-        } else {
+        else {
             panic!("Unexpected error: {:?}", err);
-        }
+        };
+        assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
+        assert!(
+            matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
+            "Unexpected error: {:?}",
+            factory_error
+        );
     }
 
     #[test]

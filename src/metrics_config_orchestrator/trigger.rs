@@ -606,15 +606,14 @@ mod tests {
             .err()
             .unwrap();
 
-        if let TriggerSubscribeError::PublisherSubscribeError { error } = &err {
-            assert!(
-                matches!(error, PublisherSubscribeError::DuplicateSubscription { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
-                "Unexpected inner error: {:?}",
-                error
-            );
-        } else {
+        let TriggerSubscribeError::PublisherSubscribeError { error } = &err else {
             panic!("Unexpected error: {:?}", err);
-        }
+        };
+        assert!(
+            matches!(error, PublisherSubscribeError::DuplicateSubscription { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
+            "Unexpected inner error: {:?}",
+            error
+        );
     }
 
     #[tokio::test]
@@ -1023,15 +1022,14 @@ mod tests {
             .unwrap();
         let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.err().unwrap();
 
-        if let TriggerUnsubscribeError::PublisherUnsubscribeError { error } = &err {
-            assert!(
-                matches!(error, PublisherUnsubscribeError::NotSubscribed { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
-                "Unexpected inner error: {:?}",
-                error
-            );
-        } else {
+        let TriggerUnsubscribeError::PublisherUnsubscribeError { error } = &err else {
             panic!("Unexpected error: {:?}", err);
-        }
+        };
+        assert!(
+            matches!(error, PublisherUnsubscribeError::NotSubscribed { data_trigger_name } if data_trigger_name == TRIGGER_NAME),
+            "Unexpected inner error: {:?}",
+            error
+        );
     }
 
     #[tokio::test]
@@ -1059,18 +1057,17 @@ mod tests {
             .unwrap();
         let err = trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await.err().unwrap();
 
-        if let TriggerUnsubscribeError::ParentTriggerUnsubscribeErrors { errors } = &err {
-            // Verify that the error details are valid.
-            assert_eq!(errors.len(), 1);
-            let (name, error) = &errors[0];
-            assert_eq!(name, PARENT_TRIGGER_NAME);
-            assert!(
-                matches!(error, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigEnd.to_string() ),
-                "Unexpected inner error: {:?}",
-                error
-            );
-        } else {
+        let TriggerUnsubscribeError::ParentTriggerUnsubscribeErrors { errors } = &err else {
             panic!("Unexpected error: {:?}", err);
-        }
+        };
+        // Verify that the error details are valid.
+        assert_eq!(errors.len(), 1);
+        let (name, error) = &errors[0];
+        assert_eq!(name, PARENT_TRIGGER_NAME);
+        assert!(
+            matches!(error, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == &TriggerSubscriber::MetricsConfigEnd.to_string() ),
+            "Unexpected inner error: {:?}",
+            error
+        );
     }
 }
