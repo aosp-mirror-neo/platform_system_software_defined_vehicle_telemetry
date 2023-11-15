@@ -8,6 +8,7 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
 use android_sdv_telemetry_configurable_publisher::binder::Strong;
 use async_trait::async_trait;
 use binder::BinderFeatures;
+use binder_tokio::TokioRuntime;
 use log::error;
 use protobuf::MessageDyn;
 use protobuf::descriptor::FileDescriptorProto;
@@ -18,6 +19,7 @@ use std::fmt::Debug;
 use std::marker::{Send, Sync};
 use std::sync::Mutex;
 use thiserror::Error;
+use tokio::runtime::Builder;
 
 use crate::subscriber::SubscriberImpl;
 
@@ -121,8 +123,11 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
             }
         };
 
-        let listener_wrapper = BnSubscriber::new_binder(
+        let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+
+        let listener_wrapper = BnSubscriber::new_async_binder(
             SubscriberImpl::new(message_descriptor, callback),
+            TokioRuntime(runtime),
             BinderFeatures::default(),
         );
 

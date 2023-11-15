@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+#![allow(dead_code)]
 use log::error;
 use sdv_telemetry_bindgen as rust_to_c;
 use status_codes_bindgen as status_codes;

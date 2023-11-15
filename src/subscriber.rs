@@ -1,8 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 #![allow(missing_docs)]
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
+use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriberAsyncServer;
 use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult};
+use async_trait::async_trait;
 use binder::Status;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 
@@ -14,8 +15,9 @@ pub struct SubscriberImpl {
 
 impl Interface for SubscriberImpl {}
 
-impl ISubscriber for SubscriberImpl {
-    fn sendData(&self, data: &[u8]) -> BinderResult<()> {
+#[async_trait]
+impl ISubscriberAsyncServer for SubscriberImpl {
+    async fn sendData(&self, data: &[u8]) -> BinderResult<()> {
         let message = self.message_descriptor.parse_from_bytes(data).map_err(|err| {
             Status::new_service_specific_error_str(
                 -1,
@@ -46,15 +48,15 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn subscriber_wrapper_send_data_invalid_message_fails() {
+    #[tokio::test]
+    async fn subscriber_wrapper_send_data_invalid_message_fails() {
         let wrapper = SubscriberImpl::new(Int32Value::descriptor(), Box::new(|_| {}));
 
-        assert!(wrapper.sendData(&[0xFF]).err().is_some());
+        assert!(wrapper.sendData(&[0xFF]).await.err().is_some());
     }
 
-    #[test]
-    fn subscriber_wrapper_send_data_success() {
+    #[tokio::test]
+    async fn subscriber_wrapper_send_data_success() {
         let num_calls = Arc::new(AtomicU32::new(0));
         let num_calls_clone = num_calls.clone();
         let wrapper = SubscriberImpl::new(
@@ -64,7 +66,7 @@ mod tests {
             }),
         );
 
-        wrapper.sendData(&Int32Value::new().write_to_bytes().unwrap()).unwrap();
+        wrapper.sendData(&Int32Value::new().write_to_bytes().unwrap()).await.unwrap();
 
         assert_eq!(num_calls.load(Ordering::SeqCst), 1);
     }
