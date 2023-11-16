@@ -510,10 +510,8 @@ mod tests {
         }
     }
 
-    fn empty_fn() {}
-
     fn create_empty_fn_box() -> Box<dyn FnMut() + Send + Sync> {
-        Box::new(empty_fn)
+        Box::new(|| {})
     }
 
     fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {

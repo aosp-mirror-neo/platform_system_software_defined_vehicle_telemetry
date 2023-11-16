@@ -6,12 +6,10 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
     PublisherInfo::PublisherInfo,
 };
 use android_sdv_telemetry_configurable_publisher::binder::Strong;
-
-use crate::subscriber::{Subscriber, SubscriberWrapper};
-
 use async_trait::async_trait;
 use binder::BinderFeatures;
 use log::error;
+use protobuf::MessageDyn;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use std::collections::hash_map::Entry;
@@ -21,32 +19,46 @@ use std::marker::{Send, Sync};
 use std::sync::Mutex;
 use thiserror::Error;
 
+use crate::subscriber::SubscriberImpl;
+
 /// Interface used to register publishers and subscribe to registered publishers
 #[async_trait]
 pub trait ConfigurablePublisherRegistry: Send + Sync {
-    /// subscribes to non-sdv aware publishers
+    /// Returns message descriptor of the specified topic published by the specified service.
+    fn get_message_descriptor(
+        &self,
+        service_name: String,
+        topic_name: String,
+    ) -> Option<MessageDescriptor>;
+
+    /// Subscribes specified callback to the new messages from the specified topic
+    /// with certain configuration, if provided.
     async fn subscribe(
         &self,
         service_name: String,
         topic_name: String,
-        subscriber: Box<dyn Subscriber>,
+        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ConfigurablePublisherRegistryError>;
+    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError>;
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-/// List of errors when using ConfigurablePublisherRegistryImpl
-pub enum ConfigurablePublisherRegistryError {
-    /// publisher with given service and topic name not found
-    #[error("publisher with given service and signal name not found {service_name} {topic_name}")]
-    PublisherNotFound { service_name: String, topic_name: String },
-    /// publisher with given service and topic name already exists
-    #[error(
-        "publisher with given service and signal name already exists {service_name} {topic_name}"
-    )]
-    PublisherAlreadyExists { service_name: String, topic_name: String },
-    /// Parsing error
+pub enum ConfigurablePublisherRegistrySubscribeError {
+    #[error("Topic {topic_name} is not registered for publisher {service_name}")]
+    TopicNotFound { service_name: String, topic_name: String },
+    #[error("Unable to subscribe to the topic: {error}")]
+    SubscriptionFailed {
+        #[from]
+        error: binder::Status,
+    },
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub enum ConfigurablePublisherRegistryRegisterError {
+    #[error("Topic {topic_name} is already registered by service {service_name}")]
+    TopicAlreadyExists { service_name: String, topic_name: String },
     #[error("Unable to parse publisher file descriptor proto: {error}")]
     FileDescriptorProtoParseError {
         #[from]
@@ -76,21 +88,32 @@ impl Default for ConfigurablePublisherRegistryImpl {
 
 #[async_trait]
 impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
-    /// subscribes to the non-sdv publisher with the given service and topic name
+    fn get_message_descriptor(
+        &self,
+        service_name: String,
+        topic_name: String,
+    ) -> Option<MessageDescriptor> {
+        self.publisher_entries
+            .lock()
+            .unwrap()
+            .get(&(service_name, topic_name))
+            .map(|entry| entry.message_descriptor.clone())
+    }
+
     async fn subscribe(
         &self,
         service_name: String,
         topic_name: String,
-        subscriber: Box<dyn Subscriber>,
+        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ConfigurablePublisherRegistryError> {
+    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
         let (message_descriptor, publisher) = {
             let key = (service_name, topic_name);
             match self.publisher_entries.lock().unwrap().get(&key) {
                 Some(entry) => (entry.message_descriptor.clone(), entry.publisher.clone()),
                 None => {
                     let (service_name, topic_name) = key;
-                    return Err(ConfigurablePublisherRegistryError::PublisherNotFound {
+                    return Err(ConfigurablePublisherRegistrySubscribeError::TopicNotFound {
                         service_name,
                         topic_name,
                     });
@@ -99,11 +122,11 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
         };
 
         let listener_wrapper = BnSubscriber::new_binder(
-            SubscriberWrapper::new(message_descriptor, subscriber),
+            SubscriberImpl::new(message_descriptor, callback),
             BinderFeatures::default(),
         );
 
-        let _ = publisher.subscribe(&listener_wrapper, configuration);
+        publisher.subscribe(&listener_wrapper, configuration)?;
 
         Ok(())
     }
@@ -119,13 +142,13 @@ impl ConfigurablePublisherRegistryImpl {
         &self,
         publisher_info: &PublisherInfo,
         publisher: &Strong<dyn IConfigurablePublisher>,
-    ) -> Result<(), ConfigurablePublisherRegistryError> {
+    ) -> Result<(), ConfigurablePublisherRegistryRegisterError> {
         let publisher_info_proto: FileDescriptorProto =
             protobuf::Message::parse_from_bytes(&publisher_info.fileDescriptorProto)?;
         let file_descriptor = FileDescriptor::new_dynamic(publisher_info_proto, &[])?;
         let message_descriptor = file_descriptor
             .message_by_full_name(&publisher_info.messageTypeName)
-            .ok_or_else(|| ConfigurablePublisherRegistryError::InvalidMessageTypeName {
+            .ok_or_else(|| ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName {
                 message_type_name: publisher_info.messageTypeName.clone(),
             })?;
 
@@ -136,7 +159,7 @@ impl ConfigurablePublisherRegistryImpl {
             .entry((publisher_info.serviceName.clone(), publisher_info.topicName.clone()))
         {
             Entry::Occupied(_) => {
-                return Err(ConfigurablePublisherRegistryError::PublisherAlreadyExists {
+                return Err(ConfigurablePublisherRegistryRegisterError::TopicAlreadyExists {
                     service_name: publisher_info.serviceName.clone(),
                     topic_name: publisher_info.topicName.clone(),
                 })

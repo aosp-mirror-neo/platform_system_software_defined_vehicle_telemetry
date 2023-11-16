@@ -6,6 +6,7 @@ mod metrics_report_generator;
 mod metrics_report_generator_factory;
 mod publisher;
 mod publisher_factory;
+mod service_adapter;
 mod trigger;
 mod trigger_factory;
 
@@ -31,6 +32,7 @@ use crate::expr::{
     ast_extensions::NodeValueType,
     node_errors::{MessageProviderError, NodeError},
 };
+
 use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};
 use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
@@ -44,6 +46,7 @@ use publisher_factory::{
     PublisherFactory, PublisherFactoryCreateContext, PublisherFactoryError, PublisherFactoryImpl,
     PublisherFactoryValidateContext,
 };
+use service_adapter::ServiceAdapterImpl;
 use trigger::{Trigger, TriggerImpl, TriggerSubscribeError, TriggerSubscriber};
 use trigger_factory::{
     TriggerFactory, TriggerFactoryCreateContext, TriggerFactoryError, TriggerFactoryImpl,
@@ -143,7 +146,7 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     trigger_factory: TTriggerFactory,
 
     /// Used to fetch data from non-sdv aware publishers
-    _registry: Arc<dyn ConfigurablePublisherRegistry>,
+    configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
@@ -240,6 +243,7 @@ where
             descriptor_provider: Box::new(DescriptorProviderImpl::new(
                 &file_descriptors,
                 &config_proto.publishers,
+                &self.configurable_publisher_registry,
             )?),
         };
         let (expression_nodes, node_types) =
@@ -405,6 +409,7 @@ where
             descriptor_provider: Box::new(DescriptorProviderImpl::new(
                 &file_descriptors,
                 &config_proto.publishers,
+                &self.configurable_publisher_registry,
             )?),
         };
         let node_types = self
@@ -461,18 +466,20 @@ where
 
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
-        registry: Arc<dyn ConfigurablePublisherRegistry>,
+        configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
+        let service_adapter =
+            Arc::new(ServiceAdapterImpl::new(configurable_publisher_registry.clone()));
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            _registry: registry,
+            configurable_publisher_registry,
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
                 message_builder_factory.clone(),
             ),
             node_factory: NodeFactoryImpl::new(),
-            publisher_factory: PublisherFactoryImpl::new(message_builder_factory),
+            publisher_factory: PublisherFactoryImpl::new(message_builder_factory, service_adapter),
             trigger_factory: TriggerFactoryImpl::new(),
             report_ready_callback: Arc::new(report_ready_callback),
             phantom_generator: PhantomData,
@@ -801,11 +808,11 @@ where
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use protobuf::{
-        descriptor::FileDescriptorProto, well_known_types::wrappers::Int32Value, MessageDyn,
-    };
-    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistryError;
-    use sdv_telemetry_configurable_publisher::subscriber::Subscriber;
+    use protobuf::descriptor::FileDescriptorProto;
+    use protobuf::reflect::MessageDescriptor;
+    use protobuf::well_known_types::wrappers::Int32Value;
+    use protobuf::{MessageDyn, MessageFull};
+    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -816,10 +823,7 @@ mod tests {
         Trigger as TriggerProto,
     };
     use std::collections::HashMap;
-    use std::sync::{
-        atomic::{AtomicU32, Ordering},
-        Mutex,
-    };
+    use std::sync::Mutex;
     use tokio::{time, time::Duration};
 
     use super::*;
@@ -856,6 +860,29 @@ mod tests {
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+    struct MockConfigurablePublisherRegistry {}
+
+    #[async_trait]
+    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
+        fn get_message_descriptor(
+            &self,
+            _service_name: String,
+            _topic_name: String,
+        ) -> Option<MessageDescriptor> {
+            Some(Int32Value::descriptor())
+        }
+
+        async fn subscribe(
+            &self,
+            _service_name: String,
+            _topic_name: String,
+            _callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+            _configuration: Option<&[u8]>,
+        ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
+            Ok(())
+        }
+    }
 
     struct MockMetricsReportGenerator {
         name: String,
@@ -1169,35 +1196,11 @@ mod tests {
         }
     }
 
-    struct MockConfigurablePublisherRegistryImpl {
-        num_subscribe_calls: AtomicU32,
-    }
-
-    impl MockConfigurablePublisherRegistryImpl {
-        fn new() -> Self {
-            MockConfigurablePublisherRegistryImpl { num_subscribe_calls: AtomicU32::new(0) }
-        }
-    }
-
-    #[async_trait]
-    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistryImpl {
-        async fn subscribe(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-            _subscriber: Box<dyn Subscriber>,
-            _configuration: Option<&[u8]>,
-        ) -> Result<(), ConfigurablePublisherRegistryError> {
-            self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
-
     impl MockedMetricsConfigOrchestratorImpl<'_> {
         fn new() -> Self {
             MetricsConfigOrchestratorImpl {
                 configs: Mutex::new(HashMap::new()),
-                _registry: Arc::new(MockConfigurablePublisherRegistryImpl::new()),
+                configurable_publisher_registry: Arc::new(MockConfigurablePublisherRegistry {}),
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),

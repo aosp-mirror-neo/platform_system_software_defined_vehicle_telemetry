@@ -6,21 +6,15 @@ use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as 
 use binder::Status;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 
-/// Interface used to send data from a registered publisher to its subscriber
-pub trait Subscriber: Send + Sync {
-    /// sends data to instance of Subscriber
-    fn send_data(&self, data: Box<dyn MessageDyn>);
-}
-
-/// Wrapper from Subscriber and implements ISubscriber interface
-pub struct SubscriberWrapper {
+/// Implementation of ISubscriber interface that calls associated callback on a new message.
+pub struct SubscriberImpl {
     message_descriptor: MessageDescriptor,
-    subscriber: Box<dyn Subscriber>,
+    callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
 }
 
-impl Interface for SubscriberWrapper {}
+impl Interface for SubscriberImpl {}
 
-impl ISubscriber for SubscriberWrapper {
+impl ISubscriber for SubscriberImpl {
     fn sendData(&self, data: &[u8]) -> BinderResult<()> {
         let message = self.message_descriptor.parse_from_bytes(data).map_err(|err| {
             Status::new_service_specific_error_str(
@@ -28,14 +22,17 @@ impl ISubscriber for SubscriberWrapper {
                 Some(format!("Unable to parse message bytes: {:?}", err)),
             )
         })?;
-        self.subscriber.send_data(message);
+        (self.callback)(message);
         Ok(())
     }
 }
 
-impl SubscriberWrapper {
-    pub fn new(message_descriptor: MessageDescriptor, subscriber: Box<dyn Subscriber>) -> Self {
-        SubscriberWrapper { message_descriptor, subscriber }
+impl SubscriberImpl {
+    pub fn new(
+        message_descriptor: MessageDescriptor,
+        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+    ) -> Self {
+        SubscriberImpl { message_descriptor, callback }
     }
 }
 
@@ -49,43 +46,26 @@ mod tests {
 
     use super::*;
 
-    #[derive(Clone)]
-    struct MockSubscriber {
-        num_calls: Arc<AtomicU32>,
-    }
-
-    impl Subscriber for MockSubscriber {
-        fn send_data(&self, _data: Box<dyn MessageDyn>) {
-            self.num_calls.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    impl MockSubscriber {
-        fn new() -> Self {
-            MockSubscriber { num_calls: AtomicU32::new(0).into() }
-        }
-
-        fn get_num_calls(&self) -> u32 {
-            self.num_calls.load(Ordering::SeqCst)
-        }
-    }
-
     #[test]
     fn subscriber_wrapper_send_data_invalid_message_fails() {
-        let wrapper =
-            SubscriberWrapper::new(Int32Value::descriptor(), Box::new(MockSubscriber::new()));
+        let wrapper = SubscriberImpl::new(Int32Value::descriptor(), Box::new(|_| {}));
 
         assert!(wrapper.sendData(&[0xFF]).err().is_some());
     }
 
     #[test]
     fn subscriber_wrapper_send_data_success() {
-        let subscriber = MockSubscriber::new();
-        let wrapper =
-            SubscriberWrapper::new(Int32Value::descriptor(), Box::new(subscriber.clone()));
+        let num_calls = Arc::new(AtomicU32::new(0));
+        let num_calls_clone = num_calls.clone();
+        let wrapper = SubscriberImpl::new(
+            Int32Value::descriptor(),
+            Box::new(move |_| {
+                num_calls_clone.fetch_add(1, Ordering::SeqCst);
+            }),
+        );
 
         wrapper.sendData(&Int32Value::new().write_to_bytes().unwrap()).unwrap();
 
-        assert_eq!(subscriber.get_num_calls(), 1);
+        assert_eq!(num_calls.load(Ordering::SeqCst), 1);
     }
 }
