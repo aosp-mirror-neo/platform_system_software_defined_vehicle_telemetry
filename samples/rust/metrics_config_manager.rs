@@ -3,7 +3,7 @@
 use log::error;
 use sdv_telemetry_bindgen as rust_to_c;
 use status_codes_bindgen as status_codes;
-use std::ffi::{CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use tokio::sync::oneshot;
@@ -14,7 +14,7 @@ extern "C" fn on_config_added(
     status_msg: *const std::ffi::c_char,
 ) {
     // SAFETY: This function is always safe to call
-    let config_manager = unsafe { &mut *(listener as *mut MetricsConfigManager) };
+    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(bool, String)>) };
 
     // SAFETY: This function is always safe to call
     let msg = unsafe {
@@ -25,12 +25,10 @@ extern "C" fn on_config_added(
         c_str.to_str().unwrap().to_string()
     };
 
-    if let Some(sender) = config_manager.add_config_sender.take() {
-        let _ = sender.send((
-            status_code == status_codes::TelemetryServiceStatusCodes_ADD_METRICS_CONFIG_SUCCEEDED,
-            msg,
-        ));
-    }
+    let _ = sender.send((
+        status_code == status_codes::TelemetryServiceStatusCodes_ADD_METRICS_CONFIG_SUCCEEDED,
+        msg,
+    ));
 }
 
 extern "C" fn on_config_activated(
@@ -39,7 +37,7 @@ extern "C" fn on_config_activated(
     status_msg: *const std::ffi::c_char,
 ) {
     // SAFETY: This function is always safe to call
-    let config_manager = unsafe { &mut *(listener as *mut MetricsConfigManager) };
+    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(bool, String)>) };
 
     // SAFETY: This function is always safe to call
     let msg = unsafe {
@@ -50,13 +48,10 @@ extern "C" fn on_config_activated(
         c_str.to_str().unwrap().to_string()
     };
 
-    if let Some(sender) = config_manager.activate_config_sender.take() {
-        let _ = sender.send((
-            status_code
-                == status_codes::TelemetryServiceStatusCodes_ACTIVATE_METRICS_CONFIG_SUCCEEDED,
-            msg,
-        ));
-    }
+    let _ = sender.send((
+        status_code == status_codes::TelemetryServiceStatusCodes_ACTIVATE_METRICS_CONFIG_SUCCEEDED,
+        msg,
+    ));
 }
 
 extern "C" fn on_config_removed(
@@ -65,7 +60,7 @@ extern "C" fn on_config_removed(
     status_msg: *const std::ffi::c_char,
 ) {
     // SAFETY: This function is always safe to call
-    let config_manager = unsafe { &mut *(listener as *mut MetricsConfigManager) };
+    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(bool, String)>) };
 
     // SAFETY: This function is always safe to call
     let msg = unsafe {
@@ -76,54 +71,37 @@ extern "C" fn on_config_removed(
         c_str.to_str().unwrap().to_string()
     };
 
-    if let Some(sender) = config_manager.remove_config_sender.take() {
-        let _ = sender.send((
-            status_code
-                == status_codes::TelemetryServiceStatusCodes_REMOVE_METRICS_CONFIG_SUCCEEDED,
-            msg,
-        ));
-    }
+    let _ = sender.send((
+        status_code == status_codes::TelemetryServiceStatusCodes_REMOVE_METRICS_CONFIG_SUCCEEDED,
+        msg,
+    ));
 }
 
+#[derive(Clone)]
 #[repr(C)]
 pub struct MetricsConfigManager {
-    service: *mut rust_to_c::ServiceHolder,
-    add_config_sender: Option<oneshot::Sender<(bool, String)>>,
-    activate_config_sender: Option<oneshot::Sender<(bool, String)>>,
-    remove_config_sender: Option<oneshot::Sender<(bool, String)>>,
+    service: usize,
     _pin: PhantomPinned,
 }
 
 impl MetricsConfigManager {
-    pub fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
-        Box::pin(MetricsConfigManager {
-            service,
-            add_config_sender: None,
-            activate_config_sender: None,
-            remove_config_sender: None,
-            _pin: PhantomPinned,
-        })
+    pub fn new(service: usize) -> Pin<Box<Self>> {
+        Box::pin(MetricsConfigManager { service, _pin: PhantomPinned })
     }
 
-    pub async fn add_metrics_config(
-        self: Pin<&mut Self>,
-        serialized_config: &[u8],
-    ) -> Result<String, String> {
-        // SAFETY: This function is always safe to call.
-        let mut_ref = unsafe { self.get_unchecked_mut() };
-
+    pub async fn add_metrics_config(&self, serialized_config: &[u8]) -> Result<String, String> {
         let (add_config_sender, add_config_receiver) = oneshot::channel();
-        mut_ref.add_config_sender = Some(add_config_sender);
+        let sender_wrapper = Box::new(add_config_sender);
 
         // Unsafe block needed to be able to call C API functions
         // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
         // SAFETY: This function is always safe to call.
         unsafe {
             rust_to_c::add_metrics_config(
-                mut_ref.service,
+                self.service as *mut rust_to_c::ServiceHolder,
                 serialized_config.as_ptr() as *mut u8,
                 serialized_config.len(),
-                mut_ref as *mut _ as *mut std::ffi::c_void,
+                Box::into_raw(sender_wrapper) as *mut c_void,
                 Some(on_config_added),
             );
         }
@@ -143,15 +121,9 @@ impl MetricsConfigManager {
         }
     }
 
-    pub async fn activate_metrics_config(
-        self: Pin<&mut Self>,
-        config_uuid: &str,
-    ) -> Result<String, String> {
-        // SAFETY: This function is always safe to call.
-        let mut_ref = unsafe { self.get_unchecked_mut() };
-
+    pub async fn activate_metrics_config(&self, config_uuid: &str) -> Result<String, String> {
         let (activate_config_sender, activate_config_receiver) = oneshot::channel();
-        mut_ref.activate_config_sender = Some(activate_config_sender);
+        let sender_wrapper = Box::new(activate_config_sender);
 
         let uuid_cstring = CString::new(config_uuid).unwrap();
         // Unsafe block needed to be able to call C API functions
@@ -159,9 +131,9 @@ impl MetricsConfigManager {
         // SAFETY: This function is always safe to call.
         unsafe {
             rust_to_c::activate_metrics_config(
-                mut_ref.service,
+                self.service as *mut rust_to_c::ServiceHolder,
                 uuid_cstring.as_ptr(),
-                mut_ref as *mut _ as *mut std::ffi::c_void,
+                Box::into_raw(sender_wrapper) as *mut c_void,
                 Some(on_config_activated),
             );
         }
@@ -181,15 +153,9 @@ impl MetricsConfigManager {
         }
     }
 
-    pub async fn remove_metrics_config(
-        self: Pin<&mut Self>,
-        config_uuid: &str,
-    ) -> Result<String, String> {
-        // SAFETY: This function is always safe to call.
-        let mut_ref = unsafe { self.get_unchecked_mut() };
-
+    pub async fn remove_metrics_config(&self, config_uuid: &str) -> Result<String, String> {
         let (remove_config_sender, remove_config_receiver) = oneshot::channel();
-        mut_ref.remove_config_sender = Some(remove_config_sender);
+        let sender_wrapper = Box::new(remove_config_sender);
 
         let uuid_cstring = CString::new(config_uuid).unwrap();
         // Unsafe block needed to be able to call C API functions
@@ -197,9 +163,9 @@ impl MetricsConfigManager {
         // SAFETY: This function is always safe to call.
         unsafe {
             rust_to_c::remove_metrics_config(
-                mut_ref.service,
+                self.service as *mut rust_to_c::ServiceHolder,
                 uuid_cstring.as_ptr(),
-                mut_ref as *mut _ as *mut std::ffi::c_void,
+                Box::into_raw(sender_wrapper) as *mut c_void,
                 Some(on_config_removed),
             );
         }
