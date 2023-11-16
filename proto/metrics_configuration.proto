@@ -158,11 +158,16 @@ message SignalPublisher {
 
 // Publishes messages from a customizable external service.
 message ServicePublisher {
-  // Optional.
-  // Identification of the service in the service discovery.
+  // Required.
+  // Unique service name.
   string service_name = 1;
 
   // Required.
+  // The name of the topic that is published by the service.
+  // Must be unique within the service.
+  string topic_name = 2;
+
+  // Optional.
   // Service-specific configuration.
   oneof option {
     NetworkPublisherConfig network_publisher_config = 10000;
