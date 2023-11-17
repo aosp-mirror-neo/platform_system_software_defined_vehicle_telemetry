@@ -214,7 +214,7 @@ mod tests {
             report_ready_callback: Option<Arc<dyn Fn(MetricsReport) + Send + Sync>>,
             triggers: Option<Vec<Arc<TriggerImpl>>>,
         ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
-            let metrics_config_proto = metrics_config_proto.unwrap_or_else(MetricsConfigProto::new);
+            let metrics_config_proto = metrics_config_proto.unwrap_or_default();
             let report_ready_callback = report_ready_callback.unwrap_or_else(|| Arc::new(|_| {}));
             let triggers = triggers
                 .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
