@@ -10,10 +10,10 @@ mod service_adapter;
 mod trigger;
 mod trigger_factory;
 
+// External dependencies.
 use async_trait::async_trait;
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, MessageDyn};
-use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
@@ -26,13 +26,16 @@ use std::{
 };
 use thiserror::Error;
 
+// Crate dependencies.
 use crate::collection_extension::HashMapExtension;
+use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use crate::expr::{
     ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl},
     ast_extensions::NodeValueType,
     node_errors::{MessageProviderError, NodeError},
 };
 
+// Child module dependencies.
 use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};
 use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
@@ -812,7 +815,6 @@ mod tests {
     use protobuf::reflect::MessageDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::{MessageDyn, MessageFull};
-    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -827,6 +829,7 @@ mod tests {
     use tokio::{time, time::Duration};
 
     use super::*;
+    use crate::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
     use crate::expr::ast_extensions::NodeValueType;
     use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;

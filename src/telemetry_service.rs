@@ -3,11 +3,13 @@
 //! This module implements the ITelemetryService AIDL interface
 
 mod collection_extension;
+mod configurable_publisher_registry;
 mod expr;
 mod file_io_utils;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
 
+// External dependencies.
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
@@ -19,7 +21,6 @@ use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use async_trait::async_trait;
 use log::{error, info};
 use protobuf::Message;
-use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::collections::HashMap;
 use std::fs::{self};
@@ -29,12 +30,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::metrics_report_listener::MetricsReportListener;
-
-pub use metrics_config_orchestrator::MetricsConfigOrchestrator;
+// Child module dependencies.
+pub use configurable_publisher_registry::{
+    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
+};
+use metrics_config_orchestrator::MetricsConfigOrchestrator;
 use metrics_config_orchestrator::{
     MetricsConfigOrchestratorError as ConfigError, MetricsConfigOrchestratorImpl,
 };
+use metrics_report_listener::MetricsReportListener;
 
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -639,12 +643,12 @@ mod tests {
     use binder::BinderFeatures;
     use protobuf::reflect::MessageDescriptor;
     use protobuf::{Message, MessageDyn};
-    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         MetricsConfig as MetricsConfigProto, MetricsReport,
     };
 
     use super::*;
+    use crate::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
 

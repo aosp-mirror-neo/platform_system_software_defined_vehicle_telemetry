@@ -55,9 +55,8 @@ rust_library {
     ],
     rustlibs: [
         "android.sdv.telemetry-rust",
-        "libsdv_telemetry_configurable_publisher",
-        "libsdvtelemetry_proto_rust",
         "libprotobuf",
+        "libsdvtelemetry_proto_rust",
     ],
     proc_macros: [
         "libasync_trait",
@@ -76,6 +75,7 @@ rust_library {
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
         "libprotobuf",
+        "libsdv_telemetry",
     ],
     proc_macros: [
         "libasync_trait",
@@ -111,7 +111,6 @@ rust_test_host {
         "libfutures",
         "liblazy_static",
         "libprotobuf",
-        "libsdv_telemetry_configurable_publisher",
         "libsdv_telemetry_test_proto",
         "libsdvtelemetry_proto_rust",
     ],
@@ -148,6 +147,7 @@ rust_test_host {
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
         "libprotobuf",
+        "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
     ],
     proc_macros: [
