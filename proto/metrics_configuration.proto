@@ -40,7 +40,7 @@ message MetricsConfig {
 
   // Optional.
   // Expression nodes that are available in the Metrics Configuration.
-  repeated expr.Node expression_nodes = 7;
+  repeated Node expression_nodes = 7;
 
   // Optional.
   // Configurations of metrics reports that are to be generated.
