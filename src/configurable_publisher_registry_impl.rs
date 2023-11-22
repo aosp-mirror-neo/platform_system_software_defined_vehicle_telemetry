@@ -22,7 +22,7 @@ use crate::subscriber_service::SubscriberService;
 /// ConfigurablePublisherRegistry that maintains the list of publishers in memory.
 pub struct ConfigurablePublisherRegistryImpl {
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
-    publisher_entries: Mutex<HashMap<(String, String), PublisherEntry>>,
+    publisher_entries: Mutex<HashMap<String, HashMap<String, PublisherEntry>>>,
 }
 
 /// Publisher registry entry.
@@ -49,36 +49,23 @@ pub enum ConfigurablePublisherRegistryRegisterError {
 impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
     fn get_message_descriptor(
         &self,
-        service_name: String,
-        topic_name: String,
-    ) -> Option<MessageDescriptor> {
-        self.publisher_entries
-            .lock()
-            .unwrap()
-            .get(&(service_name, topic_name))
-            .map(|entry| entry.message_descriptor.clone())
+        service_name: &str,
+        topic_name: &str,
+    ) -> Result<MessageDescriptor, ConfigurablePublisherRegistrySubscribeError> {
+        self.visit_entry(service_name, topic_name, |entry| entry.message_descriptor.clone())
     }
 
     async fn subscribe(
         &self,
-        service_name: String,
-        topic_name: String,
+        service_name: &str,
+        topic_name: &str,
         callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
     ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
-        let (message_descriptor, publisher) = {
-            let key = (service_name, topic_name);
-            match self.publisher_entries.lock().unwrap().get(&key) {
-                Some(entry) => (entry.message_descriptor.clone(), entry.publisher.clone()),
-                None => {
-                    let (service_name, topic_name) = key;
-                    return Err(ConfigurablePublisherRegistrySubscribeError::TopicNotFound {
-                        service_name,
-                        topic_name,
-                    });
-                }
-            }
-        };
+        let (message_descriptor, publisher) =
+            self.visit_entry(service_name, topic_name, |entry| {
+                (entry.message_descriptor.clone(), entry.publisher.clone())
+            })?;
 
         let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
 
@@ -120,23 +107,53 @@ impl ConfigurablePublisherRegistryImpl {
                 message_type_name: publisher_info.messageTypeName.clone(),
             })?;
 
-        match self
-            .publisher_entries
-            .lock()
-            .unwrap()
-            .entry((publisher_info.serviceName.clone(), publisher_info.topicName.clone()))
-        {
-            Entry::Occupied(_) => {
-                return Err(ConfigurablePublisherRegistryRegisterError::TopicAlreadyExists {
-                    service_name: publisher_info.serviceName.clone(),
-                    topic_name: publisher_info.topicName.clone(),
-                })
+        match self.publisher_entries.lock().unwrap().entry(publisher_info.serviceName.clone()) {
+            Entry::Occupied(mut o) => {
+                match o.get_mut().entry(publisher_info.topicName.clone()) {
+                    Entry::Occupied(_) => {
+                        return Err(
+                            ConfigurablePublisherRegistryRegisterError::TopicAlreadyExists {
+                                service_name: publisher_info.serviceName.clone(),
+                                topic_name: publisher_info.topicName.clone(),
+                            },
+                        );
+                    }
+                    Entry::Vacant(v) => {
+                        v.insert(PublisherEntry {
+                            message_descriptor,
+                            publisher: publisher.clone(),
+                        });
+                    }
+                };
             }
             Entry::Vacant(v) => {
-                v.insert(PublisherEntry { message_descriptor, publisher: publisher.clone() });
+                v.insert(HashMap::from([(
+                    publisher_info.topicName.clone(),
+                    PublisherEntry { message_descriptor, publisher: publisher.clone() },
+                )]));
             }
         }
 
         Ok(())
+    }
+
+    fn visit_entry<T>(
+        &self,
+        service_name: &str,
+        topic_name: &str,
+        visitor: impl FnOnce(&PublisherEntry) -> T,
+    ) -> Result<T, ConfigurablePublisherRegistrySubscribeError> {
+        let publisher_entries_lock = self.publisher_entries.lock().unwrap();
+        let entry = publisher_entries_lock
+            .get(service_name)
+            .ok_or_else(|| ConfigurablePublisherRegistrySubscribeError::ServiceNotFound {
+                service_name: service_name.to_owned(),
+            })?
+            .get(topic_name)
+            .ok_or_else(|| ConfigurablePublisherRegistrySubscribeError::TopicNotFound {
+                service_name: service_name.to_owned(),
+                topic_name: topic_name.to_owned(),
+            })?;
+        Ok(visitor(entry))
     }
 }
