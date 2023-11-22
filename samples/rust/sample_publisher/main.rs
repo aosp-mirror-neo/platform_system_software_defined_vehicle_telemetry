@@ -1,0 +1,68 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+//! Binary for testing configurable publishers
+
+#![allow(missing_docs)]
+
+mod configurable_publisher;
+mod configurable_publisher_service;
+
+use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
+    IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
+    PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry
+};
+use android_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
+use configurable_publisher_proto::sample_publisher;
+use configurable_publisher_proto::sample_publisher::SampleMessage;
+use crate::configurable_publisher::ConfigurablePublisher;
+use crate::configurable_publisher_service::ConfigurablePublisherService;
+
+use log::info;
+use protobuf::{Message, MessageFull};
+use std::sync::Arc;
+use tokio::sync::Notify;
+
+pub fn connect() -> Result<binder::Strong<dyn IConfigurablePublisherRegistry>, binder::StatusCode> {
+    binder::get_interface(
+        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor(),
+    )
+}
+
+#[tokio::main]
+async fn main() -> Result<(), binder::Status> {
+    info!("Starting thread pool");
+    binder::ProcessState::start_thread_pool();
+    // fetch the binder service
+    let service = connect().expect("Failed to connect to IConfigurablePublisherRegistry");
+
+    let file_descriptor = sample_publisher::file_descriptor();
+    let file_descriptor_proto = file_descriptor.proto();
+    let descriptor = SampleMessage::descriptor();
+
+    info!("Creating publisher");
+    let notify_subscribed = Arc::new(Notify::new());
+    let publisher = Arc::new(ConfigurablePublisher::new(notify_subscribed.clone()));
+
+    let publisher_wrapper = ConfigurablePublisherService { publisher: publisher.clone() };
+
+    let publisher_info = PublisherInfo {
+        serviceName: "SampleService".to_string(),
+        topicName: "SampleData".to_string(),
+        fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
+        messageTypeName: format!(".{}", descriptor.full_name()),
+    };
+
+    let binder_publisher =
+        BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
+
+    info!("Registering publisher");
+    let _ = service.registerPublisher(&publisher_info, &binder_publisher);
+
+    info!("Waiting for subscription");
+    notify_subscribed.notified().await;
+
+    info!("Publishing data");
+    publisher.publish_data_randomly(1000, 1000).await;
+
+    Ok(())
+}

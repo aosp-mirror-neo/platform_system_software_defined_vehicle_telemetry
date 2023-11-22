@@ -27,7 +27,7 @@ cc_binary {
 rust_binary {
     name: "telemetry_rust_c_client",
     srcs: [
-        "rust/telemetry_rust_c_client.rs",
+        "rust/telemetry_client/telemetry_rust_c_client.rs",
     ],
     rustlibs: [
         "libfutures",
@@ -38,6 +38,39 @@ rust_binary {
         "libprotobuf",
         "libsdv_telemetry_bindgen",
         "libstatus_codes_bindgen",
+        "libtokio",
+    ],
+}
+
+rust_protobuf {
+    name: "libconfigurable_publisher_proto",
+    host_supported: true,
+    crate_name: "configurable_publisher_proto",
+    protos: [
+        "rust/sample_publisher/sample_publisher.proto",
+    ],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "configurable_publisher_source",
+    use_protobuf3: true,
+}
+
+rust_binary {
+    name: "telemetry_sample_publisher",
+    srcs: [
+        "rust/sample_publisher/main.rs",
+    ],
+    rustlibs: [
+        "android.sdv.telemetry.configurable_publisher-rust",
+        "libbinder_rs",
+        "libconfigurable_publisher_proto",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
         "libtokio",
     ],
 }

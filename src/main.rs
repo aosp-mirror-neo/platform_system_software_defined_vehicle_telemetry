@@ -29,7 +29,7 @@ static ROOT_DIR: &str = "/data/local/tmp";
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
 
-    // Create Data Collector
+    // Create Configurable Publishers
 
     let configurable_publisher_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     let configurable_publisher = Arc::new(ConfigurablePublisherRegistryImpl::new());
