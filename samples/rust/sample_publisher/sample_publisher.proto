@@ -1,0 +1,8 @@
+
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+syntax = "proto3";
+
+message SampleMessage {
+  int32 sample_data = 1;
+}
