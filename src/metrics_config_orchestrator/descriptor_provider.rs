@@ -100,17 +100,15 @@ impl DescriptorProviderImpl {
 
 #[cfg(test)]
 mod tests {
-    use async_trait::async_trait;
     use protobuf::reflect::MessageDescriptor;
-    use protobuf::{MessageDyn, MessageFull};
+    use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::metrics_configuration::{
         publisher::Publisher_type as PublisherTypeProto, AggregationPublisher, ProtoMessageBuilder,
     };
-    use std::sync::Mutex;
 
     use super::*;
-    use crate::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
+    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
 
     const PUBLISHER_1: &str = "pub_1";
@@ -121,31 +119,6 @@ mod tests {
     const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestNestedMessage";
 
-    struct MockConfigurablePublisherRegistry {
-        next_descriptor: Mutex<Option<MessageDescriptor>>,
-    }
-
-    #[async_trait]
-    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
-        fn get_message_descriptor(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-        ) -> Option<MessageDescriptor> {
-            self.next_descriptor.lock().unwrap().take()
-        }
-
-        async fn subscribe(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-            _callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-            _configuration: Option<&[u8]>,
-        ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
-            Ok(())
-        }
-    }
-
     fn create_default_publisher_registry() -> Arc<dyn ConfigurablePublisherRegistry> {
         create_publisher_registry(None)
     }
@@ -153,7 +126,7 @@ mod tests {
     fn create_publisher_registry(
         next_descriptor: Option<MessageDescriptor>,
     ) -> Arc<dyn ConfigurablePublisherRegistry> {
-        Arc::new(MockConfigurablePublisherRegistry { next_descriptor: next_descriptor.into() })
+        Arc::new(MockConfigurablePublisherRegistry::new(next_descriptor))
     }
 
     fn create_aggregation_publisher_with_no_proto_message_builder(

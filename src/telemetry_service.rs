@@ -641,39 +641,15 @@ mod tests {
         ITelemetryStatusListener::BnTelemetryStatusListener,
     };
     use binder::BinderFeatures;
-    use protobuf::reflect::MessageDescriptor;
-    use protobuf::{Message, MessageDyn};
+    use protobuf::Message;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         MetricsConfig as MetricsConfigProto, MetricsReport,
     };
 
     use super::*;
-    use crate::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
+    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
-
-    struct MockConfigurablePublisherRegistry {}
-
-    #[async_trait]
-    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
-        fn get_message_descriptor(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-        ) -> Option<MessageDescriptor> {
-            None
-        }
-
-        async fn subscribe(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-            _subscriber: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-            _configuration: Option<&[u8]>,
-        ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
-            Ok(())
-        }
-    }
 
     struct MockMetricsConfigOrchestratorImpl {
         num_initialize_config_calls: Arc<Mutex<i32>>,
@@ -899,7 +875,7 @@ mod tests {
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-                Arc::new(MockConfigurablePublisherRegistry {}),
+                Arc::new(MockConfigurablePublisherRegistry::default()),
             )
             .await
             .unwrap();

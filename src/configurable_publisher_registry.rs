@@ -43,3 +43,6 @@ pub enum ConfigurablePublisherRegistrySubscribeError {
         error: binder::Status,
     },
 }
+
+#[cfg(test)]
+pub(crate) mod mock;
