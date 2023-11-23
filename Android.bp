@@ -193,3 +193,7 @@ rust_bindgen {
     source_stem: "bindings",
 
 }
+
+build = [
+    "sdv-binary-pdk.bp"
+]
