@@ -5,7 +5,6 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
 use android_sdv_telemetry_configurable_publisher::binder::Strong;
 use async_trait::async_trait;
 use binder::BinderFeatures;
-use binder_tokio::TokioRuntime;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
@@ -13,11 +12,14 @@ use sdv_telemetry::{ConfigurablePublisherRegistry, ConfigurablePublisherRegistry
 use std::collections::{hash_map::Entry, HashMap};
 use std::fmt::Debug;
 use std::sync::Mutex;
-use tokio::runtime::Builder;
 use thiserror::Error;
+use tokio::sync::mpsc;
 
 // Crate dependencies.
 use crate::subscriber_service::SubscriberService;
+
+// Arbitrarily chosen buffer cpaacity
+const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
 /// ConfigurablePublisherRegistry that maintains the list of publishers in memory.
 pub struct ConfigurablePublisherRegistryImpl {
@@ -67,11 +69,16 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
                 (entry.message_descriptor.clone(), entry.publisher.clone())
             })?;
 
-        let runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+        let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
 
-        let listener_wrapper = BnSubscriber::new_async_binder(
-            SubscriberService::new(message_descriptor, callback),
-            TokioRuntime(runtime),
+        tokio::spawn(async move {
+            while let Some(message) = rx.recv().await {
+                (callback)(message);
+            }
+        });
+
+        let listener_wrapper = BnSubscriber::new_binder(
+            SubscriberService::new(message_descriptor, tx),
             BinderFeatures::default(),
         );
 
