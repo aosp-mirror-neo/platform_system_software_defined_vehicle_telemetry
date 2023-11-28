@@ -41,7 +41,7 @@ use metrics_report_generator_factory::{
     MetricsReportGeneratorFactoryError, MetricsReportGeneratorFactoryImpl,
     MetricsReportGeneratorFactoryValidateContext,
 };
-use publisher::{Publisher, PublisherImpl};
+use publisher::{Publisher, PublisherActivateError, PublisherImpl};
 use publisher_factory::{
     PublisherFactory, PublisherFactoryCreateContext, PublisherFactoryError, PublisherFactoryImpl,
     PublisherFactoryValidateContext,
@@ -111,6 +111,8 @@ pub enum MetricsConfigOrchestratorError {
         #[from]
         error: TriggerSubscribeError,
     },
+    #[error("Unable to activate publisher {publisher_name}: {error}")]
+    UnableToActivatePublisher { publisher_name: String, error: PublisherActivateError },
     #[error("Unable to create DescriptorProvider because of an invalid publisher: {error}")]
     InvalidPublisherAndDescriptorCombination {
         #[from]
@@ -364,13 +366,9 @@ where
         for publisher_name in ordered_publisher_names {
             // Activating publishers one by one. In theory, it should be possible to also spawn
             // activation tasks in parallel as an optimization.
-            if let Err(err) = config.publishers[&publisher_name].clone().activate().await {
-                error!(
-                    "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
-                        The publisher won't notify about new messages and any attempts to get its data will fail.",
-                        publisher_name, config.uuid, err
-                );
-            }
+            config.publishers[&publisher_name].clone().activate().await.map_err(|error| {
+                MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error }
+            })?;
         }
 
         // Activate start trigger, if set.
@@ -1694,6 +1692,34 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialize_config_publisher_doesnt_activate_fails() {
+        // Setup mock factory.
+        let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
+        publisher_mock.set_activate_callback(move |_| {
+            Some(PublisherActivateError::InvalidState { state: String::default() })
+        });
+
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
+
+        // Create MetricsConfig proto.
+        let mut publisher = PublisherProto::new();
+        publisher.name = SOME_PUBLISHER_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.publishers.push(publisher);
+
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::InvalidState { .. })),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
     async fn initialize_config_start_trigger_doesnt_activate_fails() {
         const SUBSCRIBER_NAME: &str = "subscriber";
 
@@ -1777,7 +1803,8 @@ mod tests {
 
         let factory_calls_clone = factory_calls.clone();
         publisher_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()));
+            None
         });
 
         let mut report_generator_mock =
@@ -1867,20 +1894,23 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let activate_calls_clone = activate_calls.clone();
         aggregation_publisher1_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned())
+            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            None
         });
 
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let activate_calls_clone = activate_calls.clone();
         service_publisher_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned())
+            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            None
         });
 
         let mut aggregation_publisher2_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME_2.to_owned());
         let activate_calls_clone = activate_calls.clone();
         aggregation_publisher2_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned())
+            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            None
         });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();

@@ -54,52 +54,53 @@ enum class TelemetryServiceStatusCodes : int32_t {
      */
     ACTIVATE_METRICS_CONFIG_FAILED_CONFIG_CORRUPTED = 417,
     ACTIVATE_METRICS_CONFIG_FAILED_UNABLE_TO_ACTIVATE_START_TRIGGER = 418,
+    ACTIVATE_METRICS_CONFIG_FAILED_UNABLE_TO_ACTIVATE_PUBLISHER = 419,
 
     /**
      * Errors specific to remove metrics config
      */
-    REMOVE_METRICS_CONFIG_FAILED_UNABLE_TO_REMOVE_CONFIG_FROM_MEMEORY = 419,
+    REMOVE_METRICS_CONFIG_FAILED_UNABLE_TO_REMOVE_CONFIG_FROM_MEMEORY = 420,
 
     /**
      * Errors specific to set report ready listener
      */
-    SET_REPORT_READY_LISTENER_FAILED_LISTENER_EXISTS = 420,
+    SET_REPORT_READY_LISTENER_FAILED_LISTENER_EXISTS = 421,
 
     /**
      * Errors specific to set report ready listener
      */
-    SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS = 421,
+    SET_REPORT_LISTENER_FAILED_LISTENER_EXISTS = 422,
 
     /**
      * Errors specific to set status listener
      */
-    SET_STATUS_LISTENER_FAILED_LISTENER_EXISTS = 422,
+    SET_STATUS_LISTENER_FAILED_LISTENER_EXISTS = 423,
 
     /**
      * Errors specific to clear report ready listener
      */
-    CLEAR_REPORT_READY_LISTENER_FAILED_LISTENER_NOT_SET = 423,
+    CLEAR_REPORT_READY_LISTENER_FAILED_LISTENER_NOT_SET = 424,
 
     /**
      * Errors specific to clear report listener
      */
-    CLEAR_REPORT_LISTENER_FAILED_LISTENER_NOT_SET = 424,
+    CLEAR_REPORT_LISTENER_FAILED_LISTENER_NOT_SET = 425,
 
     /**
      * Errors specific to clear status listener
      */
-    CLEAR_STATUS_LISTENER_FAILED_LISTENER_NOT_SET = 425,
+    CLEAR_STATUS_LISTENER_FAILED_LISTENER_NOT_SET = 426,
 
     /**
      * Errors specific to get finished report
      */
-    GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND = 426,
+    GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND = 427,
 
     /**
      * Errors with params sent to API calls
      */
-    API_CALL_FAILED_LISTENER_NOT_SET = 427,
-    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 428,
+    API_CALL_FAILED_LISTENER_NOT_SET = 428,
+    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 429,
 
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined

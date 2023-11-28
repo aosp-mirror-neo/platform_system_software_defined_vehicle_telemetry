@@ -46,7 +46,7 @@ pub(crate) trait Publisher: Send + Sync {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub(crate) enum PublisherActivateError {
+pub enum PublisherActivateError {
     #[error("Unable to activate publisher: it's in {state} state")]
     InvalidState { state: String },
     #[error("Service adapter failed to process subscription request: {error}")]

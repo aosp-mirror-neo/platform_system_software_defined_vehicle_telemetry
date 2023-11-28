@@ -15,7 +15,7 @@ pub(crate) struct MockPublisher {
     pub latest_message: Option<Box<dyn MessageDyn>>,
 
     name: String,
-    activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
+    activate_callback: Option<Box<dyn Fn(&str) -> Option<PublisherActivateError> + Send + Sync>>,
     new_message_callback:
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
     subscribe_callback: Option<Box<dyn Fn() -> Option<PublisherSubscribeError> + Send + Sync>>,
@@ -34,7 +34,9 @@ impl Publisher for MockPublisher {
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
         if let Some(callback) = &self.activate_callback {
-            callback(&self.name);
+            if let Some(error) = callback(&self.name) {
+                return Err(error);
+            }
         }
 
         Ok(())
@@ -93,7 +95,7 @@ impl MockPublisher {
 
     pub(crate) fn set_activate_callback(
         &mut self,
-        callback: impl Fn(&str) + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<PublisherActivateError> + Send + Sync + 'static,
     ) {
         self.activate_callback.replace(Box::new(callback));
     }
