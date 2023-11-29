@@ -459,7 +459,7 @@ mod tests {
 
         // assert
         assert_eq!(index, 2);
-        assert_eq!(parser.get_nodes().clone(), expected_nodes);
+        assert_eq!(parser.get_nodes(), expected_nodes);
         Ok(())
     }
 
@@ -495,7 +495,7 @@ mod tests {
 
         // assert
         assert_eq!(index, 2);
-        assert_eq!(parser.get_nodes().clone(), expected_nodes);
+        assert_eq!(parser.get_nodes(), expected_nodes);
         Ok(())
     }
 
@@ -541,7 +541,7 @@ mod tests {
 
         // assert
         assert_eq!(index, 3);
-        assert_eq!(parser.get_nodes().clone(), expected_nodes);
+        assert_eq!(parser.get_nodes(), expected_nodes);
         Ok(())
     }
 
