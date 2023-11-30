@@ -251,6 +251,8 @@ where
 
         // Iterate over topologically sorted vector of publishers and triggers and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
+        // Store topologically sorted list of publisher names in order to activate them in the topological order.
+        let mut ordered_publisher_names = vec![];
         let (publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
@@ -261,6 +263,7 @@ where
                     node_types: &node_types,
                     triggers,
                 };
+                ordered_publisher_names.push(publisher_proto.name.clone());
                 self.publisher_factory.create(publisher_proto, &context).map_or_else(
                     |factory_error| {
                         Err(MetricsConfigOrchestratorError::InvalidPublisherDefinition {
@@ -358,14 +361,14 @@ where
             .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
         // Activate publishers.
-        for publisher in config.publishers.values() {
+        for publisher_name in ordered_publisher_names {
             // Activating publishers one by one. In theory, it should be possible to also spawn
             // activation tasks in parallel as an optimization.
-            if let Err(err) = publisher.clone().activate().await {
+            if let Err(err) = config.publishers[&publisher_name].clone().activate().await {
                 error!(
                     "Error when trying to activate publisher {} for Metrics Configuration {}: {}.\
                         The publisher won't notify about new messages and any attempts to get its data will fail.",
-                    publisher.get_name(), config.uuid, err
+                        publisher_name, config.uuid, err
                 );
             }
         }
@@ -568,12 +571,12 @@ where
     /// and try to fold the sorted list using provided functions.
     fn try_fold_topoligically_sorted_publishers_triggers(
         config_proto: &MetricsConfigProto,
-        publisher_func: impl Fn(
+        mut publisher_func: impl FnMut(
             &PublisherProto,
             &mut HashMap<String, Arc<TPublisher>>,
             &HashMap<String, Arc<TTrigger>>,
         ) -> Result<(), MetricsConfigOrchestratorError>,
-        trigger_func: impl Fn(
+        mut trigger_func: impl FnMut(
             &TriggerProto,
             &HashMap<String, Arc<TPublisher>>,
             &mut HashMap<String, Arc<TTrigger>>,
@@ -1847,6 +1850,95 @@ mod tests {
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
+    }
+
+    #[tokio::test]
+    async fn initialize_config_activates_publishers_topologically() {
+        // The names of the publishers set up in a way that alphabetic sorting
+        // will never sort them topologically.
+        const AGGREGATION_PUBLISHER_NAME_2: &str = "000_publisher";
+        const AGGREGATION_DATA_TRIGGER_NAME: &str = "aggregation_data_trigger";
+        const SERVICE_DATA_TRIGGER_NAME: &str = "service_data_trigger_name";
+
+        // Setup mocks and call tracker.
+        let activate_calls = Arc::new(Mutex::new(vec![]));
+
+        let mut aggregation_publisher1_mock =
+            MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
+        let activate_calls_clone = activate_calls.clone();
+        aggregation_publisher1_mock.set_activate_callback(move |name| {
+            activate_calls_clone.lock().unwrap().push(name.to_owned())
+        });
+
+        let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
+        let activate_calls_clone = activate_calls.clone();
+        service_publisher_mock.set_activate_callback(move |name| {
+            activate_calls_clone.lock().unwrap().push(name.to_owned())
+        });
+
+        let mut aggregation_publisher2_mock =
+            MockPublisher::new(AGGREGATION_PUBLISHER_NAME_2.to_owned());
+        let activate_calls_clone = activate_calls.clone();
+        aggregation_publisher2_mock.set_activate_callback(move |name| {
+            activate_calls_clone.lock().unwrap().push(name.to_owned())
+        });
+
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator.publisher_factory.add_publishers(vec![
+            Arc::new(aggregation_publisher1_mock),
+            Arc::new(service_publisher_mock),
+            Arc::new(aggregation_publisher2_mock),
+        ]);
+
+        // Setup config protobuf messages with the following dependencies:
+        // Aggregation publisher 2 -> Aggregation data trigger -> Aggregation publisher 1 ->
+        // Service data trigger -> Service publisher.
+        let mut service_publisher = PublisherProto::new();
+        service_publisher.name = SERVICE_PUBLISHER_NAME.to_owned();
+        service_publisher.mut_service_publisher();
+
+        let mut service_data_trigger = TriggerProto::new();
+        service_data_trigger.name = SERVICE_DATA_TRIGGER_NAME.to_owned();
+        service_data_trigger.mut_data_trigger().publisher_name = service_publisher.name.clone();
+
+        let mut aggregation_publisher1 = PublisherProto::new();
+        aggregation_publisher1.name = AGGREGATION_PUBLISHER_NAME.to_owned();
+        let aggregation_publisher = aggregation_publisher1.mut_aggregation_publisher();
+        aggregation_publisher.message_builder.mut_or_insert_default().message_type =
+            TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.trigger_names.push(service_data_trigger.name.clone());
+
+        let mut aggregation_data_trigger = TriggerProto::new();
+        aggregation_data_trigger.name = AGGREGATION_DATA_TRIGGER_NAME.to_owned();
+        aggregation_data_trigger.mut_data_trigger().publisher_name =
+            aggregation_publisher1.name.clone();
+
+        let mut aggregation_publisher2 = PublisherProto::new();
+        aggregation_publisher2.name = AGGREGATION_PUBLISHER_NAME_2.to_owned();
+        let aggregation_publisher = aggregation_publisher2.mut_aggregation_publisher();
+        aggregation_publisher.message_builder.mut_or_insert_default().message_type =
+            TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.trigger_names.push(aggregation_data_trigger.name.clone());
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.descriptor_protos = create_test_file_descriptor_protos();
+        config.publishers.push(aggregation_publisher2);
+        config.publishers.push(aggregation_publisher1);
+        config.publishers.push(service_publisher);
+        config.triggers.push(aggregation_data_trigger);
+        config.triggers.push(service_data_trigger);
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Verify that service publisher was activated first.
+        let expected_activations = vec![
+            SERVICE_PUBLISHER_NAME.to_owned(),
+            AGGREGATION_PUBLISHER_NAME.to_owned(),
+            AGGREGATION_PUBLISHER_NAME_2.to_owned(),
+        ];
+        assert_eq!(*activate_calls.lock().unwrap(), expected_activations);
     }
 
     #[test]
