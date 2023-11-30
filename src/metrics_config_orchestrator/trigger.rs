@@ -280,9 +280,7 @@ impl TriggerImpl {
                         )
                     },
                     ConditionType::IS_TRUE => |current_value, _| Self::is_true(current_value),
-                    ConditionType::IS_FALSE => {
-                        |current_value, _| Self::is_true(current_value).map(|is_true| !is_true)
-                    }
+                    ConditionType::IS_FALSE => |current_value, _| Self::is_false(current_value),
                 };
                 for trigger in triggers {
                     let self_clone = self.clone();
@@ -403,13 +401,28 @@ impl TriggerImpl {
         }
     }
 
+    /// Returns true if the current value is a false boolean or a zero numeric value.
+    fn is_false(current_value: &NodeValue) -> anyhow::Result<bool> {
+        let res = match current_value {
+            NodeValue::Bool(boolean) => !*boolean,
+            NodeValue::None => false,
+            // If the value is not a bool or None, it's numeric.
+            // Otherwise validation would fail.
+            numeric_value => numeric_value.is_zero()?,
+        };
+        Ok(res)
+    }
+
     /// Returns true if the current value is a true boolean or a non-zero numeric value.
     fn is_true(current_value: &NodeValue) -> anyhow::Result<bool> {
-        if let NodeValue::Bool(boolean) = current_value {
-            Ok(*boolean)
-        } else {
-            Ok(current_value.is_zero().map(|is_zero| !is_zero)?)
-        }
+        let res = match current_value {
+            NodeValue::Bool(boolean) => *boolean,
+            NodeValue::None => false,
+            // If the value is not a bool or None, it's numeric.
+            // Otherwise validation would fail.
+            numeric_value => !numeric_value.is_zero()?,
+        };
+        Ok(res)
     }
 
     /// A callback to handle a new message published by the data trigger's associated publisher.
@@ -879,7 +892,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_to_conditional_trigger_filters_true() {
+    async fn subscribe_to_conditional_trigger_is_true_filters_true() {
         let (message_provider, parent_trigger, callback_listener) =
             setup_subscribed_conditional_trigger(ConditionType::IS_TRUE).await;
 
@@ -907,7 +920,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_to_conditional_trigger_filters_false() {
+    async fn subscribe_to_conditional_trigger_is_false_filters_false() {
         let (message_provider, parent_trigger, callback_listener) =
             setup_subscribed_conditional_trigger(ConditionType::IS_FALSE).await;
 
@@ -935,7 +948,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_to_conditional_trigger_filters_non_zero() {
+    async fn subscribe_to_conditional_trigger_is_true_filters_non_zero() {
         let (message_provider, parent_trigger, callback_listener) =
             setup_subscribed_conditional_trigger(ConditionType::IS_TRUE).await;
 
@@ -963,7 +976,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_to_conditional_trigger_filters_zero() {
+    async fn subscribe_to_conditional_trigger_is_false_filters_zero() {
         let (message_provider, parent_trigger, callback_listener) =
             setup_subscribed_conditional_trigger(ConditionType::IS_FALSE).await;
 
@@ -981,6 +994,56 @@ mod tests {
         parent_trigger.fire().await;
 
         message_provider.set_next_result(Ok(Some(msg0)));
+        parent_trigger.fire().await;
+
+        // Wait for trigger to fire twice.
+        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.callback_notify.notified()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_conditional_trigger_is_true_filters_none() {
+        let (message_provider, parent_trigger, callback_listener) =
+            setup_subscribed_conditional_trigger(ConditionType::IS_TRUE).await;
+
+        let mut msg = Box::new(Int32Value::new());
+        msg.value = 1;
+
+        // Fire parent trigger three times: [None, 1, 1].
+        // This is to verify it filters out None and lets repeated non-zeroes go through.
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg.clone())));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg)));
+        parent_trigger.fire().await;
+
+        // Wait for trigger to fire twice.
+        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.callback_notify.notified()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn subscribe_to_conditional_trigger_is_false_filters_none() {
+        let (message_provider, parent_trigger, callback_listener) =
+            setup_subscribed_conditional_trigger(ConditionType::IS_FALSE).await;
+
+        let mut msg = Box::new(Int32Value::new());
+        msg.value = 0;
+
+        // Fire parent trigger three times: [None, 0, 0].
+        // This is to verify it filters out None and lets repeated zero go through.
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg.clone())));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_result(Ok(Some(msg)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
