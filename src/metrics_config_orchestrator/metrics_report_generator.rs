@@ -3,7 +3,9 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
-use sdvtelemetry_proto_rust::metrics_configuration::{metrics_report::ReportReason, MetricsReport};
+use sdvtelemetry_proto_rust::metrics_configuration::{
+    metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
+};
 use std::{
     marker::{Send, Sync},
     sync::{
@@ -51,7 +53,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) triggers: Vec<Arc<dyn Trigger>>,
 
     is_active: AsyncMutex<bool>,
-    report_number: AtomicU32,
+    report_number: Arc<AtomicU32>,
     subscriber: TriggerSubscriber,
     message_builder: Box<dyn MessageBuilder>,
 }
@@ -119,24 +121,25 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
 
 impl MetricsReportGeneratorImpl {
     pub(super) fn new(
-        name: String,
+        metrics_report_config: &MetricsReportConfig,
         config_uuid: String,
         config_version: u32,
-        report_incomplete: bool,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
+        report_number: &Arc<AtomicU32>,
         triggers: Vec<Arc<dyn Trigger>>,
         message_builder: Box<dyn MessageBuilder>,
     ) -> Self {
-        let subscriber = TriggerSubscriber::MetricsReportGenerator { name: name.clone() };
+        let subscriber =
+            TriggerSubscriber::MetricsReportGenerator { name: metrics_report_config.name.clone() };
         MetricsReportGeneratorImpl {
-            name,
+            name: metrics_report_config.name.clone(),
             config_uuid,
             config_version,
-            report_incomplete,
+            report_incomplete: metrics_report_config.report_incomplete,
             report_ready_callback,
             triggers,
             is_active: false.into(),
-            report_number: 1.into(),
+            report_number: report_number.clone(),
             subscriber,
             message_builder,
         }
@@ -189,13 +192,34 @@ mod test {
         static ref MOCK_MESSAGE_BUILDER: MockMessageBuilder = MockMessageBuilder::new();
     }
 
+    fn create_report_config_proto() -> MetricsReportConfig {
+        let mut config = MetricsReportConfig::new();
+        config.name = REPORT_CONFIG_NAME.to_owned();
+        config.report_incomplete = true;
+        config
+    }
+
     fn create_generator() -> MetricsReportGeneratorImpl {
         MetricsReportGeneratorImpl::new(
-            REPORT_CONFIG_NAME.to_owned(),
+            &create_report_config_proto(),
             CONFIG_UUID.to_owned(),
             CONFIG_VERSION,
-            true,
             NOOP_REPORT_READY_CALLBACK.clone(),
+            &Arc::new(AtomicU32::new(1)),
+            vec![],
+            Box::new(MOCK_MESSAGE_BUILDER.clone()),
+        )
+    }
+
+    fn create_generator_with_report_number(
+        report_number: &Arc<AtomicU32>,
+    ) -> MetricsReportGeneratorImpl {
+        MetricsReportGeneratorImpl::new(
+            &create_report_config_proto(),
+            CONFIG_UUID.to_owned(),
+            CONFIG_VERSION,
+            NOOP_REPORT_READY_CALLBACK.clone(),
+            report_number,
             vec![],
             Box::new(MOCK_MESSAGE_BUILDER.clone()),
         )
@@ -269,6 +293,40 @@ mod test {
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
         // as built by MockMessageBuilder
         assert!(report.report_data.is::<TestMessage>());
+    }
+
+    #[tokio::test]
+    async fn on_trigger_fired_creates_report_on_synchronized_report_numbers() {
+        let trigger_1 = Arc::new(create_trigger());
+        let trigger_2 = Arc::new(create_trigger());
+        let report_number = Arc::new(AtomicU32::new(1));
+
+        let mut generator_1 = create_generator_with_report_number(&report_number);
+        let (tx_1, mut rx_1) = watch::channel(None);
+        generator_1.report_ready_callback =
+            Arc::new(move |report| tx_1.send(Some(report)).unwrap());
+        generator_1.triggers.push(trigger_1.clone());
+        Arc::new(generator_1).activate().await.unwrap();
+
+        let mut generator_2 = create_generator_with_report_number(&report_number);
+        let (tx_2, mut rx_2) = watch::channel(None);
+        generator_2.report_ready_callback =
+            Arc::new(move |report| tx_2.send(Some(report)).unwrap());
+        generator_2.triggers.push(trigger_2.clone());
+        Arc::new(generator_2).activate().await.unwrap();
+
+        // Fire different triggers to make sure report number is synchroninzed and incremented.
+        trigger_1.fire().await;
+        rx_1.changed().await.unwrap();
+        trigger_2.fire().await;
+        rx_2.changed().await.unwrap();
+
+        let report_container = rx_1.borrow();
+        let report_1 = report_container.as_ref().unwrap();
+        assert_eq!(report_1.report_number, 1);
+        let report_container = rx_2.borrow();
+        let report_2 = report_container.as_ref().unwrap();
+        assert_eq!(report_2.report_number, 2);
     }
 
     #[tokio::test]

@@ -22,7 +22,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::{
     collections::HashMap,
     marker::{PhantomData, Sync},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{atomic::AtomicU32, Arc, Mutex, OnceLock},
 };
 use thiserror::Error;
 
@@ -313,6 +313,7 @@ where
             file_descriptors: &file_descriptors,
             nodes: &expression_nodes,
             node_types: &node_types,
+            report_number: AtomicU32::new(1).into(),
         };
         let metrics_report_configs = config_proto
             .metrics_report_configs
