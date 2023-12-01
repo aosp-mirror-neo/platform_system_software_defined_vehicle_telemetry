@@ -1,7 +1,6 @@
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::empty::Empty;
 use protobuf::MessageFull;
-use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
 };
@@ -9,6 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError};
 
 #[derive(Error, Debug)]
@@ -103,7 +103,6 @@ mod tests {
     use async_trait::async_trait;
     use protobuf::reflect::MessageDescriptor;
     use protobuf::{MessageDyn, MessageFull};
-    use sdv_telemetry_configurable_publisher::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::metrics_configuration::{
         publisher::Publisher_type as PublisherTypeProto, AggregationPublisher, ProtoMessageBuilder,
@@ -111,6 +110,7 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
+    use crate::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
 
     const PUBLISHER_1: &str = "pub_1";

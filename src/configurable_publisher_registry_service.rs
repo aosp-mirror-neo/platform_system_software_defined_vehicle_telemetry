@@ -2,25 +2,31 @@
 
 //! This module implements the IConfigurablePublisherRegistry AIDL interface
 
-pub mod configurable_publisher_registry;
-pub mod subscriber;
+mod configurable_publisher_registry_impl;
+mod subscriber_service;
 
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
-    IConfigurablePublisherRegistry::IConfigurablePublisherRegistryAsyncServer, IConfigurablePublisher::IConfigurablePublisher,
-    PublisherInfo::PublisherInfo,
-};
+// External dependencies.
+use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{IConfigurablePublisherRegistry::IConfigurablePublisherRegistryAsyncServer, IConfigurablePublisher::IConfigurablePublisher, PublisherInfo::PublisherInfo};
 use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
 use async_trait::async_trait;
 use binder::Status;
 use log::info;
-use std::{fmt::Debug, sync::Arc};
+use std::fmt::Debug;
+use std::sync::Arc;
 
-use configurable_publisher_registry::ConfigurablePublisherRegistryImpl;
+// Child module dependencies.
+pub use configurable_publisher_registry_impl::ConfigurablePublisherRegistryImpl;
+
+/// Implementation of IConfigurablePublisherRegistryAsyncServer binder interface
+/// that uses ConfigurablePublisherRegistryImpl to maintain the registry in memory.
+pub struct ConfigurablePublisherRegistryService {
+    configurable_publisher_registry: Arc<ConfigurablePublisherRegistryImpl>,
+}
 
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
 /// preserving the content as far as possible.
 /// Also log the error if there is one.
-pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
+fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
     result.map_err(|e| {
         let message = format!("{:?}", e);
         info!("Returning binder error: {}", &message);
@@ -28,40 +34,31 @@ pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
     })
 }
 
-/// This struct is used as a wrapper around ConfigurablePublisherRegistryImpl so that Arc<ConfigurablePublisherRegistryImpl>
-/// can be shared with multiple services. Implements IConfigurablePublisherRegistryAsyncServer and registered
-/// as a binder service.
-pub struct ConfigurablePublisherRegistryService {
-    configurable_publisher_registry: Arc<ConfigurablePublisherRegistryImpl>,
-}
-
 impl Interface for ConfigurablePublisherRegistryService {}
-
-impl ConfigurablePublisherRegistryService {
-    /// Returns in instance of ConfigurablePublisherRegistryService
-    pub async fn new(registry: Arc<ConfigurablePublisherRegistryImpl>) -> Self {
-        Self { configurable_publisher_registry: registry }
-    }
-}
 
 #[async_trait]
 impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistryService {
     async fn registerPublisher(
         &self,
         publisher_info: &PublisherInfo,
-        callback: &Strong<dyn IConfigurablePublisher>,
+        publisher: &Strong<dyn IConfigurablePublisher>,
     ) -> BinderResult<()> {
         info!(
             "Registering publisher with telemetry service with topic {}",
             publisher_info.topicName
         );
-        let res =
-            self.configurable_publisher_registry.register_publisher(publisher_info, callback).await;
+        let res = self
+            .configurable_publisher_registry
+            .register_publisher(publisher_info, publisher)
+            .await;
 
-        if res.is_err() {
-            return to_binder_result(res);
-        }
+        to_binder_result(res)
+    }
+}
 
-        Ok(())
+impl ConfigurablePublisherRegistryService {
+    /// Instantiates an instance of ConfigurablePublisherRegistryService
+    pub fn new(configurable_publisher_registry: Arc<ConfigurablePublisherRegistryImpl>) -> Self {
+        ConfigurablePublisherRegistryService { configurable_publisher_registry }
     }
 }

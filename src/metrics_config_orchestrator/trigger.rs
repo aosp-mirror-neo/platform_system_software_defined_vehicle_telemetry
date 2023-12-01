@@ -441,7 +441,7 @@ impl TriggerImpl {
     /// A callback to handle a fire event from conditional trigger's associated parent trigger.
     /// Passes the result of expression evaluation and the previous value holder to
     /// condition_checker and fires the trigger if it returns true.
-    pub fn on_conditional_trigger_parent_trigger_fired(
+    fn on_conditional_trigger_parent_trigger_fired(
         self: &Arc<Self>,
         callbacks_container: &Arc<
             AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>,

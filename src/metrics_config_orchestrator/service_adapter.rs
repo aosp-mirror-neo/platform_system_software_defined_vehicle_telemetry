@@ -2,15 +2,16 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
-use sdv_telemetry_configurable_publisher::configurable_publisher_registry::{
-    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
-};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
+
+use crate::configurable_publisher_registry::{
+    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
+};
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
