@@ -41,7 +41,7 @@ pub(crate) struct ServiceSubscription {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub(crate) enum ServiceAdapterSubscribeError {
+pub enum ServiceAdapterSubscribeError {
     #[error("Unable to perform subscription: {error}")]
     SubscriptionFailed {
         #[from]
