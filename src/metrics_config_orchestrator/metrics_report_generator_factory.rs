@@ -7,7 +7,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    sync::Arc,
+    sync::{atomic::AtomicU32, Arc},
 };
 use thiserror::Error;
 
@@ -49,6 +49,7 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigg
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [NodeValueType],
+    pub report_number: Arc<AtomicU32>,
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
@@ -122,11 +123,11 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
 
         // Create and return a new report generator.
         Ok(Arc::new(MetricsReportGeneratorImpl::new(
-            metrics_report_config.name.clone(),
+            metrics_report_config,
             context.config_proto.uuid.clone(),
             context.config_proto.version,
-            metrics_report_config.report_incomplete,
             context.report_ready_callback.clone(),
+            &context.report_number,
             triggers,
             message_builder,
         )))
@@ -225,6 +226,7 @@ mod tests {
                 file_descriptors: get_test_file_descriptors(),
                 nodes: get_test_nodes(),
                 node_types: get_test_node_types(),
+                report_number: AtomicU32::new(1).into(),
             };
             self.create(report_config, &context)
         }
