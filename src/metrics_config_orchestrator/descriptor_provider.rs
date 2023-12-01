@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
+use crate::configurable_publisher_registry::{
+    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
+};
 use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError};
 
 #[derive(Error, Debug)]
@@ -21,8 +23,11 @@ pub enum DescriptorProviderConstructorError {
     use missing message descriptor of type {msg_type}"
     )]
     MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("No service publisher is registered for service {service_name} topic {topic_name}")]
-    NoServicePublisherRegistration { service_name: String, topic_name: String },
+    #[error("Unable to get service metadata from the registry: {error}")]
+    PublisherRegistryError {
+        #[from]
+        error: ConfigurablePublisherRegistrySubscribeError,
+    },
 }
 
 pub struct DescriptorProviderImpl {
@@ -54,17 +59,10 @@ impl DescriptorProviderImpl {
                 let descriptor = match &publisher.publisher_type {
                     Some(PublisherTypeProto::SignalPublisher(_)) => Empty::descriptor(),
                     Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
-                        configurable_publisher_registry
-                            .get_message_descriptor(
-                                service_publisher_proto.service_name.clone(),
-                                service_publisher_proto.topic_name.clone(),
-                            )
-                            .ok_or_else(|| {
-                                DescriptorProviderConstructorError::NoServicePublisherRegistration {
-                                    service_name: service_publisher_proto.service_name.clone(),
-                                    topic_name: service_publisher_proto.topic_name.clone(),
-                                }
-                            })?
+                        configurable_publisher_registry.get_message_descriptor(
+                            &service_publisher_proto.service_name,
+                            &service_publisher_proto.topic_name,
+                        )?
                     }
                     Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
                         let message_builder =
@@ -172,7 +170,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            matches!(&err, DescriptorProviderConstructorError::NoServicePublisherRegistration { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME),
+            matches!(&err, DescriptorProviderConstructorError::PublisherRegistryError { .. }),
             "Unexpected error: {:?}",
             err
         );
