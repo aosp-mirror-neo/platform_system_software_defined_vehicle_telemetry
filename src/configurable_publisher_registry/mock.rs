@@ -23,16 +23,20 @@ pub(crate) struct MockConfigurablePublisherRegistry {
 impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
     fn get_message_descriptor(
         &self,
-        _service_name: String,
-        _topic_name: String,
-    ) -> Option<MessageDescriptor> {
-        self.next_descriptor.lock().unwrap().take()
+        service_name: &str,
+        _topic_name: &str,
+    ) -> Result<MessageDescriptor, ConfigurablePublisherRegistrySubscribeError> {
+        self.next_descriptor.lock().unwrap().take().ok_or_else(|| {
+            ConfigurablePublisherRegistrySubscribeError::ServiceNotFound {
+                service_name: service_name.to_owned(),
+            }
+        })
     }
 
     async fn subscribe(
         &self,
-        service_name: String,
-        topic_name: String,
+        service_name: &str,
+        topic_name: &str,
         subscriber: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
     ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
@@ -42,7 +46,10 @@ impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
             return Err(err);
         }
 
-        self.subscribers.lock().unwrap().insert((service_name, topic_name), subscriber);
+        self.subscribers
+            .lock()
+            .unwrap()
+            .insert((service_name.to_owned(), topic_name.to_owned()), subscriber);
         Ok(())
     }
 }

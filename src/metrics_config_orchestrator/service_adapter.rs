@@ -107,8 +107,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 // Create a new subscription to messages from publisher in the registry.
                 self.publisher_registry
                     .subscribe(
-                        service_name.to_owned(),
-                        topic_name.to_owned(),
+                        service_name,
+                        topic_name,
                         Box::new(move |msg| Self::on_new_message(msg, &subscriptions_container)),
                         None,
                     )
