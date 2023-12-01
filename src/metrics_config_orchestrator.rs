@@ -813,8 +813,7 @@ where
 mod tests {
     use async_trait::async_trait;
     use protobuf::descriptor::FileDescriptorProto;
-    use protobuf::reflect::MessageDescriptor;
-    use protobuf::well_known_types::wrappers::Int32Value;
+    use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::{MessageDyn, MessageFull};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
@@ -830,7 +829,7 @@ mod tests {
     use tokio::{time, time::Duration};
 
     use super::*;
-    use crate::configurable_publisher_registry::ConfigurablePublisherRegistrySubscribeError;
+    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
     use crate::expr::ast_extensions::NodeValueType;
     use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
@@ -864,29 +863,6 @@ mod tests {
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
-    struct MockConfigurablePublisherRegistry {}
-
-    #[async_trait]
-    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
-        fn get_message_descriptor(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-        ) -> Option<MessageDescriptor> {
-            Some(Int32Value::descriptor())
-        }
-
-        async fn subscribe(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-            _callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-            _configuration: Option<&[u8]>,
-        ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
-            Ok(())
-        }
-    }
 
     struct MockMetricsReportGenerator {
         name: String,
@@ -1204,7 +1180,9 @@ mod tests {
         fn new() -> Self {
             MetricsConfigOrchestratorImpl {
                 configs: Mutex::new(HashMap::new()),
-                configurable_publisher_registry: Arc::new(MockConfigurablePublisherRegistry {}),
+                configurable_publisher_registry: Arc::new(
+                    MockConfigurablePublisherRegistry::new_with_descriptor(Empty::descriptor()),
+                ),
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),

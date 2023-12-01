@@ -198,15 +198,14 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 pub(super) mod tests {
-    use async_trait::async_trait;
     use lazy_static::lazy_static;
-    use protobuf::reflect::{FieldDescriptor, MessageDescriptor};
+    use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageFull;
-    use std::sync::Mutex;
     use tokio::sync::mpsc;
 
     use super::*;
+    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
     use crate::test_utils::with_timeout;
 
     const SERVICE_NAME: &str = "service";
@@ -218,75 +217,12 @@ pub(super) mod tests {
             Int32Value::descriptor().field_by_name("value").unwrap();
     }
 
-    struct MockConfigurablePublisherRegistry {
-        // When set, the error will be returned on the next call to subscribe.
-        next_error: Mutex<Option<ConfigurablePublisherRegistrySubscribeError>>,
-        // The number of times subscribe function of the mock was called.
-        num_subscribe_calls: AtomicU32,
-        // The map of provided subscriber functions.
-        subscribers:
-            Mutex<HashMap<(String, String), Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
-    }
-
-    #[async_trait]
-    impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
-        fn get_message_descriptor(
-            &self,
-            _service_name: String,
-            _topic_name: String,
-        ) -> Option<MessageDescriptor> {
-            None
-        }
-
-        async fn subscribe(
-            &self,
-            service_name: String,
-            topic_name: String,
-            subscriber: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-            _configuration: Option<&[u8]>,
-        ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
-            self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
-
-            if let Some(err) = self.next_error.lock().unwrap().take() {
-                return Err(err);
-            }
-
-            self.subscribers.lock().unwrap().insert((service_name, topic_name), subscriber);
-            Ok(())
-        }
-    }
-
-    impl MockConfigurablePublisherRegistry {
-        fn new() -> Self {
-            MockConfigurablePublisherRegistry {
-                next_error: None.into(),
-                num_subscribe_calls: AtomicU32::new(0),
-                subscribers: HashMap::new().into(),
-            }
-        }
-
-        fn get_num_subscribe_calls(&self) -> u32 {
-            self.num_subscribe_calls.load(Ordering::SeqCst)
-        }
-
-        fn notify_subscriber(
-            &self,
-            service_name: String,
-            topic_name: String,
-            message: Box<dyn MessageDyn>,
-        ) {
-            (self.subscribers.lock().unwrap().get(&(service_name, topic_name)).as_ref().unwrap())(
-                message,
-            );
-        }
-    }
-
     fn create_empty_fn_box() -> Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync> {
         Box::new(|_| {})
     }
 
     fn create_default_service_adapter() -> ServiceAdapterImpl {
-        ServiceAdapterImpl::new(Arc::new(MockConfigurablePublisherRegistry::new()))
+        ServiceAdapterImpl::new(Arc::new(MockConfigurablePublisherRegistry::default()))
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
@@ -299,7 +235,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_registry_returns_error_fails() {
-        let registry = MockConfigurablePublisherRegistry::new();
+        let registry = MockConfigurablePublisherRegistry::default();
         registry.next_error.lock().unwrap().replace(
             ConfigurablePublisherRegistrySubscribeError::TopicNotFound {
                 service_name: SERVICE_NAME.to_owned(),
@@ -327,7 +263,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_different_topics_subscribes_to_registry() {
-        let registry = Arc::new(MockConfigurablePublisherRegistry::new());
+        let registry = Arc::new(MockConfigurablePublisherRegistry::default());
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg1 = Box::new(Int32Value::new());
@@ -371,7 +307,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_same_topic_subscribes_to_registry() {
-        let registry = Arc::new(MockConfigurablePublisherRegistry::new());
+        let registry = Arc::new(MockConfigurablePublisherRegistry::default());
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
