@@ -11,8 +11,7 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryService::{
 use rustutils::system_properties::PropertyWatcher;
 use sdv_telemetry::SdvTelemetryService;
 use sdv_telemetry_configurable_publisher::{
-    configurable_publisher_registry::ConfigurablePublisherRegistryImpl,
-    ConfigurablePublisherRegistryService,
+    ConfigurablePublisherRegistryImpl, ConfigurablePublisherRegistryService,
 };
 
 use binder_tokio::TokioRuntime;
@@ -31,10 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create Configurable Publishers
 
-    let configurable_publisher_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
-    let configurable_publisher = Arc::new(ConfigurablePublisherRegistryImpl::new());
-    let configurable_publisher_service = configurable_publisher_runtime
-        .block_on(ConfigurablePublisherRegistryService::new(configurable_publisher.clone()));
+    let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistryImpl::new());
 
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
     let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap_or("1".to_string());
@@ -47,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry_service = match telemetry_runtime.block_on(SdvTelemetryService::new(
         ROOT_DIR,
         configured_size * SIZE_MB,
-        configurable_publisher,
+        configurable_publisher_registry.clone(),
     )) {
         Some(telemetry_service) => telemetry_service,
         None => {
@@ -71,6 +67,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor();
 
     println!("Adding {configurable_publisher_registry_descriptor} service to binder");
+    let configurable_publisher_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
+    let configurable_publisher_service =
+        ConfigurablePublisherRegistryService::new(configurable_publisher_registry);
     let configurable_publisher_binder = BnConfigurablePublisherRegistry::new_async_binder(
         configurable_publisher_service,
         TokioRuntime(configurable_publisher_runtime),

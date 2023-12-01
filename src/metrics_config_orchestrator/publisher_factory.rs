@@ -54,6 +54,7 @@ pub(crate) struct PublisherFactoryValidateContext<'a> {
     pub node_types: &'a [NodeValueType],
 }
 
+#[allow(dead_code)]
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherFactoryError {

@@ -8,15 +8,15 @@ use binder::Status;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 
 /// Implementation of ISubscriber interface that calls associated callback on a new message.
-pub struct SubscriberImpl {
+pub struct SubscriberService {
     message_descriptor: MessageDescriptor,
     callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
 }
 
-impl Interface for SubscriberImpl {}
+impl Interface for SubscriberService {}
 
 #[async_trait]
-impl ISubscriberAsyncServer for SubscriberImpl {
+impl ISubscriberAsyncServer for SubscriberService {
     async fn sendData(&self, data: &[u8]) -> BinderResult<()> {
         let message = self.message_descriptor.parse_from_bytes(data).map_err(|err| {
             Status::new_service_specific_error_str(
@@ -29,12 +29,12 @@ impl ISubscriberAsyncServer for SubscriberImpl {
     }
 }
 
-impl SubscriberImpl {
+impl SubscriberService {
     pub fn new(
         message_descriptor: MessageDescriptor,
         callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> Self {
-        SubscriberImpl { message_descriptor, callback }
+        SubscriberService { message_descriptor, callback }
     }
 }
 
@@ -50,7 +50,7 @@ mod tests {
 
     #[tokio::test]
     async fn subscriber_wrapper_send_data_invalid_message_fails() {
-        let wrapper = SubscriberImpl::new(Int32Value::descriptor(), Box::new(|_| {}));
+        let wrapper = SubscriberService::new(Int32Value::descriptor(), Box::new(|_| {}));
 
         assert!(wrapper.sendData(&[0xFF]).await.err().is_some());
     }
@@ -59,7 +59,7 @@ mod tests {
     async fn subscriber_wrapper_send_data_success() {
         let num_calls = Arc::new(AtomicU32::new(0));
         let num_calls_clone = num_calls.clone();
-        let wrapper = SubscriberImpl::new(
+        let wrapper = SubscriberService::new(
             Int32Value::descriptor(),
             Box::new(move |_| {
                 num_calls_clone.fetch_add(1, Ordering::SeqCst);
