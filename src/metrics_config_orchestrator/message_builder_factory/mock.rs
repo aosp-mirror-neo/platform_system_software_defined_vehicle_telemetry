@@ -1,6 +1,6 @@
 use lazy_static::lazy_static;
-use protobuf::{reflect::FileDescriptor, MessageFull};
-use sdv_telemetry_test_proto::test_message::TestMessage;
+use protobuf::reflect::FileDescriptor;
+use sdv_telemetry_test_proto::test_message;
 use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use std::sync::Arc;
 
@@ -12,10 +12,8 @@ use crate::expr::{ast::Node, ast_extensions::NodeValueType, node_value::NodeValu
 use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
 
 lazy_static! {
-    static ref FILE_DESCRIPTORS: Vec<FileDescriptor> = {
-        let fd_proto = TestMessage::descriptor().file_descriptor_proto().clone();
-        vec![FileDescriptor::new_dynamic(fd_proto, &[]).unwrap()]
-    };
+    static ref FILE_DESCRIPTORS: Vec<FileDescriptor> =
+        vec![test_message::file_descriptor().clone()];
     static ref NODES: Vec<Arc<Node>> = {
         let node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
         vec![node; 3]
