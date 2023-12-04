@@ -4,8 +4,8 @@
 
 #![allow(missing_docs)]
 
-mod configurable_publisher;
-mod configurable_publisher_service;
+mod random_integer_publisher;
+mod random_integer_publisher_service;
 
 use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
@@ -14,8 +14,8 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
 use android_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
 use configurable_publisher_proto::sample_publisher;
 use configurable_publisher_proto::sample_publisher::SampleMessage;
-use crate::configurable_publisher::ConfigurablePublisher;
-use crate::configurable_publisher_service::ConfigurablePublisherService;
+use crate::random_integer_publisher::RandomIntegerPublisher;
+use crate::random_integer_publisher_service::RandomIntegerPublisherService;
 
 use log::info;
 use protobuf::{Message, MessageFull};
@@ -41,9 +41,9 @@ async fn main() -> Result<(), binder::Status> {
 
     info!("Creating publisher");
     let notify_subscribed = Arc::new(Notify::new());
-    let publisher = Arc::new(ConfigurablePublisher::new(notify_subscribed.clone()));
+    let publisher = Arc::new(RandomIntegerPublisher::new(notify_subscribed.clone()));
 
-    let publisher_wrapper = ConfigurablePublisherService { publisher: publisher.clone() };
+    let publisher_wrapper = RandomIntegerPublisherService { publisher: publisher.clone() };
 
     let publisher_info = PublisherInfo {
         serviceName: "SampleService".to_string(),

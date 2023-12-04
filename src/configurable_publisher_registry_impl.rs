@@ -24,6 +24,9 @@ const TOKIO_CHANNEL_CAPACITY: usize = 32;
 pub struct ConfigurablePublisherRegistryImpl {
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
     publisher_entries: Mutex<HashMap<String, HashMap<String, PublisherEntry>>>,
+    /// Hashmap to store handles for the spawned tokio tasks
+    // TODO: b/317902294 Design how to key subscriptions to configurable publishers
+    tokio_handles: Mutex<HashMap<(String, String), tokio::task::JoinHandle<()>>>,
 }
 
 /// Publisher registry entry.
@@ -70,7 +73,7 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
 
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
                 (callback)(message);
             }
@@ -81,7 +84,41 @@ impl ConfigurablePublisherRegistry for ConfigurablePublisherRegistryImpl {
             BinderFeatures::default(),
         );
 
-        publisher.subscribe(&listener_wrapper, configuration)?;
+        publisher.subscribe(&listener_wrapper, configuration).map_err(|error| {
+            ConfigurablePublisherRegistrySubscribeError::SubscribeFailed { error }
+        })?;
+
+        self.tokio_handles
+            .lock()
+            .unwrap()
+            .insert((service_name.to_string(), topic_name.to_string()), handle);
+
+        Ok(())
+    }
+
+    async fn unsubscribe(
+        &self,
+        service_name: &str,
+        topic_name: &str,
+        configuration: Option<&[u8]>,
+    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
+        let publisher =
+            self.visit_entry(service_name, topic_name, |entry| entry.publisher.clone())?;
+
+        let handle = self
+            .tokio_handles
+            .lock()
+            .unwrap()
+            .remove(&(service_name.to_string(), topic_name.to_string()))
+            .unwrap();
+
+        if !handle.is_finished() {
+            handle.abort();
+        }
+
+        publisher.unsubscribe(configuration).map_err(|error| {
+            ConfigurablePublisherRegistrySubscribeError::UnsubscribeFailed { error }
+        })?;
 
         Ok(())
     }
@@ -96,7 +133,10 @@ impl Default for ConfigurablePublisherRegistryImpl {
 impl ConfigurablePublisherRegistryImpl {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
-        ConfigurablePublisherRegistryImpl { publisher_entries: HashMap::new().into() }
+        ConfigurablePublisherRegistryImpl {
+            publisher_entries: HashMap::new().into(),
+            tokio_handles: HashMap::new().into(),
+        }
     }
 
     pub(crate) async fn register_publisher(
@@ -162,5 +202,208 @@ impl ConfigurablePublisherRegistryImpl {
                 topic_name: topic_name.to_owned(),
             })?;
         Ok(visitor(entry))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use protobuf::{Message, MessageFull};
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+
+    use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, ISubscriber::ISubscriber};
+    use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
+    use configurable_publisher_proto::sample_publisher;
+    use configurable_publisher_proto::sample_publisher::SampleMessage;
+
+    use super::*;
+
+    const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
+    const TOPIC_NAME: &str = "TEST_TOPIC_NAME";
+
+    const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
+    const TOPIC_NAME2: &str = "TEST_TOPIC_NAME2";
+
+    #[derive(Clone)]
+    struct MockConfigurablePublisher {
+        /// The number of times subscribe function of the mock was called.
+        num_subscribe_calls: Arc<AtomicU32>,
+        /// The number of times subscribe function of the mock was called.
+        num_unsubscribe_calls: Arc<AtomicU32>,
+    }
+
+    impl Interface for MockConfigurablePublisher {}
+
+    impl IConfigurablePublisher for MockConfigurablePublisher {
+        fn subscribe(
+            &self,
+            _subscriber: &Strong<dyn ISubscriber>,
+            _config: Option<&[u8]>,
+        ) -> BinderResult<()> {
+            self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn unsubscribe(&self, _config: Option<&[u8]>) -> BinderResult<()> {
+            self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    impl MockConfigurablePublisher {
+        pub fn new() -> Self {
+            MockConfigurablePublisher {
+                num_subscribe_calls: Arc::new(AtomicU32::new(0)),
+                num_unsubscribe_calls: Arc::new(AtomicU32::new(0)),
+            }
+        }
+
+        pub fn get_num_subscribe_calls(&self) -> u32 {
+            self.num_subscribe_calls.load(Ordering::SeqCst)
+        }
+
+        pub fn get_num_unsubscribe_calls(&self) -> u32 {
+            self.num_unsubscribe_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    async fn create_new_configurable_publisher_registry_impl(
+        configurable_publisher: MockConfigurablePublisher,
+    ) -> ConfigurablePublisherRegistryImpl {
+        let configurable_publisher_registry = ConfigurablePublisherRegistryImpl::new();
+
+        let file_descriptor = sample_publisher::file_descriptor();
+        let file_descriptor_proto = file_descriptor.proto();
+        let descriptor = SampleMessage::descriptor();
+
+        let publisher_info = PublisherInfo {
+            serviceName: SERVICE_NAME.to_string(),
+            topicName: TOPIC_NAME.to_string(),
+            fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
+            messageTypeName: format!(".{}", descriptor.full_name()),
+        };
+
+        let binder_publisher =
+            BnConfigurablePublisher::new_binder(configurable_publisher, BinderFeatures::default());
+
+        configurable_publisher_registry
+            .register_publisher(&publisher_info, &binder_publisher)
+            .await
+            .unwrap();
+
+        configurable_publisher_registry
+    }
+
+    #[tokio::test]
+    async fn subscribe_success() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry_impl =
+            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+
+        configurable_publisher_registry_impl
+            .subscribe(SERVICE_NAME, TOPIC_NAME, Box::new(|_| {}), None)
+            .await
+            .unwrap();
+
+        assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_incorrect_service_name_fail() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry_impl =
+            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+
+        let err = configurable_publisher_registry_impl
+            .subscribe(SERVICE_NAME2, TOPIC_NAME, Box::new(|_| {}), None)
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ConfigurablePublisherRegistrySubscribeError::ServiceNotFound { service_name } if service_name == SERVICE_NAME2),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn subscribe_incorrect_topic_name_fail() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry_impl =
+            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+
+        let err = configurable_publisher_registry_impl
+            .subscribe(SERVICE_NAME, TOPIC_NAME2, Box::new(|_| {}), None)
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ConfigurablePublisherRegistrySubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_success() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry_impl =
+            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+
+        let _ = configurable_publisher_registry_impl
+            .subscribe(SERVICE_NAME, TOPIC_NAME, Box::new(|_| {}), None)
+            .await;
+        let _ =
+            configurable_publisher_registry_impl.unsubscribe(SERVICE_NAME, TOPIC_NAME, None).await;
+
+        assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
+        assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_incorrect_service_name_fail() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry_impl =
+            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+
+        let _ = configurable_publisher_registry_impl
+            .subscribe(SERVICE_NAME, TOPIC_NAME, Box::new(|_| {}), None)
+            .await;
+        let err = configurable_publisher_registry_impl
+            .unsubscribe(SERVICE_NAME2, TOPIC_NAME, None)
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ConfigurablePublisherRegistrySubscribeError::ServiceNotFound { service_name } if service_name == SERVICE_NAME2),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_incorrect_topic_name_fail() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry_impl =
+            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+
+        let _ = configurable_publisher_registry_impl
+            .subscribe(SERVICE_NAME, TOPIC_NAME, Box::new(|_| {}), None)
+            .await;
+        let err = configurable_publisher_registry_impl
+            .unsubscribe(SERVICE_NAME, TOPIC_NAME2, None)
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ConfigurablePublisherRegistrySubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
+            "Unexpected error: {}",
+            err
+        );
     }
 }

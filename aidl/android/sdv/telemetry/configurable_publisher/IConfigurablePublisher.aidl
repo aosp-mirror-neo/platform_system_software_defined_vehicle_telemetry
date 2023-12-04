@@ -19,4 +19,11 @@ interface IConfigurablePublisher {
      *
      */
     void subscribe(in ISubscriber subscriber, in @nullable byte[] configuration);
+
+    /**
+     * Unsubscribes from a registered publisher.
+     * TODO: b/309128308: Design error mechanism for configurable publisher service
+     * TODO: b/317902294: Design how to store/manage subscriptions to configurable publishers
+     */
+    void unsubscribe(in @nullable byte[] configuration);
 }

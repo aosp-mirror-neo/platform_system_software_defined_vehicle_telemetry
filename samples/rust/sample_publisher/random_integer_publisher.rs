@@ -10,14 +10,14 @@ use rand::{rngs::SmallRng, Rng, SeedableRng};
 use std::sync::{Arc, Mutex};
 use tokio::{sync::Notify, time::Duration};
 
-pub struct ConfigurablePublisher {
+pub struct RandomIntegerPublisher {
     subscriber: Mutex<Option<Strong<dyn ISubscriber>>>,
     notify_subscribed: Arc<Notify>,
 }
 
-impl ConfigurablePublisher {
+impl RandomIntegerPublisher {
     pub fn new(notify_subscribed: Arc<Notify>) -> Self {
-        ConfigurablePublisher { subscriber: Mutex::new(None), notify_subscribed }
+        RandomIntegerPublisher { subscriber: Mutex::new(None), notify_subscribed }
     }
 
     pub fn subscribe(
@@ -39,7 +39,6 @@ impl ConfigurablePublisher {
         loop {
             // Verify that the map hasn't been cleared.
             if self.subscriber.lock().unwrap().is_none() {
-                self.notify_subscribed.notify_one();
                 return;
             }
 
@@ -66,5 +65,12 @@ impl ConfigurablePublisher {
                 }
             }
         }
+    }
+
+    pub fn unsubscribe(&self, _config: Option<&[u8]>) -> Result<(), String> {
+        let mut guard = self.subscriber.lock().unwrap();
+        *guard = None;
+
+        Ok(())
     }
 }

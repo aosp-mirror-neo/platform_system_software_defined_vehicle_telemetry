@@ -11,7 +11,7 @@ use std::fmt::Debug;
 use std::marker::{Send, Sync};
 use thiserror::Error;
 
-/// Interface used to register publishers and subscribe to registered publishers
+/// Interface used to manage subscriptions to registered publishers
 #[async_trait]
 pub trait ConfigurablePublisherRegistry: Send + Sync {
     /// Returns message descriptor of the specified topic published by the specified service.
@@ -30,6 +30,14 @@ pub trait ConfigurablePublisherRegistry: Send + Sync {
         callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
     ) -> Result<(), ConfigurablePublisherRegistrySubscribeError>;
+
+    /// Unsubscribes from the specified topic and service name.
+    async fn unsubscribe(
+        &self,
+        service_name: &str,
+        topic_name: &str,
+        configuration: Option<&[u8]>,
+    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError>;
 }
 
 #[derive(Error, Debug)]
@@ -40,10 +48,9 @@ pub enum ConfigurablePublisherRegistrySubscribeError {
     #[error("Topic {topic_name} is not registered for publisher {service_name}")]
     TopicNotFound { service_name: String, topic_name: String },
     #[error("Unable to subscribe to the topic: {error}")]
-    SubscriptionFailed {
-        #[from]
-        error: binder::Status,
-    },
+    SubscribeFailed { error: binder::Status },
+    #[error("Unable to unsubscribe from the topic: {error}")]
+    UnsubscribeFailed { error: binder::Status },
 }
 
 #[cfg(test)]
