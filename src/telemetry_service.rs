@@ -2,12 +2,11 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
-mod collection_extension;
 mod configurable_publisher_registry;
 mod expr;
-mod file_io_utils;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
+mod utils;
 
 // External dependencies.
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
@@ -39,6 +38,7 @@ use metrics_config_orchestrator::{
     MetricsConfigOrchestratorError as ConfigError, MetricsConfigOrchestratorImpl,
 };
 use metrics_report_listener::MetricsReportListener;
+use utils::file_io_utils;
 
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -632,9 +632,6 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod test_utils;
 
 #[cfg(test)]
 mod tests {

@@ -186,12 +186,12 @@ mod tests {
     use std::collections::HashMap;
 
     use super::*;
-    use crate::collection_extension::VecExtension;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::service_adapter::{
         ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::utils::collection_extension::VecExtension;
 
     const INTERVAL_MS: u64 = 42;
     const PUBLISHER_NAME: &str = "publisher";

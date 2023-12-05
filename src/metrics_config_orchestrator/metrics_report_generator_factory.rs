@@ -184,12 +184,11 @@ mod tests {
     use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 
     use super::*;
-    use crate::collection_extension::VecExtension;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
-    use crate::test_utils::ptr_eq;
+    use crate::utils::{collection_extension::VecExtension, test_utils::ptr_eq};
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";

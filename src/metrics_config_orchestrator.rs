@@ -28,13 +28,11 @@ use std::{
 use thiserror::Error;
 
 // Crate dependencies.
-use crate::collection_extension::HashMapExtension;
 use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
-use crate::expr::{
-    ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl},
-    ast_extensions::NodeValueType,
-    node_errors::{MessageProviderError, NodeError},
-};
+use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
+use crate::expr::ast_extensions::NodeValueType;
+use crate::expr::node_errors::{MessageProviderError, NodeError};
+use crate::utils::collection_extension::HashMapExtension;
 
 // Child module dependencies.
 use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};

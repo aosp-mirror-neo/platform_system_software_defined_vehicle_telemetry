@@ -206,7 +206,7 @@ pub(super) mod tests {
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::test_utils::with_timeout;
+    use crate::utils::test_utils::with_timeout;
 
     const SERVICE_NAME: &str = "service";
     const TOPIC_NAME: &str = "topic";
