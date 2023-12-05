@@ -95,10 +95,30 @@ message CombinationNode {
     POWER = 5;
   }
 
-  oneof operator {
-    RelationalOperator relational_operator = 1;
-    LogicalOperator logical_operator = 2;
-    ArithmeticOperator arithmetic_operator = 3;
+  // Unary operator.
+  // Output: integer.
+  // Type requirement: child node must hold a floating point value.
+  enum RoundingOperator {
+    // Output: the largest integer less than or equal to the input floating point.
+    // Examples:
+    // * 1.0 rounded down is 1
+    // * 0.9 rounded down is 0
+    // * -0.2 rounded down is -1
+    FLOOR = 0;
+
+    // Output: the nearest integer to the input floating point.
+    // Examples:
+    // * 1.0 rounded is 1
+    // * 0.5 rounded is 1
+    // * -0.5 rounded is -1
+    ROUND = 1;
+
+    // Output: the smallest integer greater than or equal to the input floating point.
+    // Examples:
+    // * 1.0 rounded up is 1
+    // * 0.2 rounded up is 1
+    // * -2.9 rounded up is -2
+    CEIL = 2;
   }
 
   // Required.
@@ -108,12 +128,19 @@ message CombinationNode {
   //   [left child] <operator> [right child]
   // The optional annotation is to verify that the left_index is set, not some
   // default value of 0. The left_index should always be specified.
-  optional uint32 left_index = 4;
+  optional uint32 left_index = 1;
 
   // Optional.
   // Index of the right child Node in the repeated list of `expression_nodes`
   // in MetricsConfig.
   // For unary operators, only the left child should be set. If the right child
   // is set, an error will be raised.
-  optional uint32 right_index = 5;
+  optional uint32 right_index = 2;
+
+  oneof operator {
+    RelationalOperator relational_operator = 3;
+    LogicalOperator logical_operator = 4;
+    ArithmeticOperator arithmetic_operator = 5;
+    RoundingOperator rounding_operator = 6;
+  }
 }

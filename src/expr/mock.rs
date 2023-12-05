@@ -3,6 +3,7 @@ use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdvtelemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+    RoundingOperator,
 };
 use std::sync::{Arc, Mutex};
 
@@ -59,6 +60,12 @@ lazy_static! {
         OperatorProto::RelationalOperator(RelationalOperator::DOES_NOT_CONTAIN.into());
     pub static ref OP_ALL_EQ: OperatorProto =
         OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into());
+    pub static ref OP_FLOOR: OperatorProto =
+        OperatorProto::RoundingOperator(RoundingOperator::FLOOR.into());
+    pub static ref OP_ROUND: OperatorProto =
+        OperatorProto::RoundingOperator(RoundingOperator::ROUND.into());
+    pub static ref OP_CEIL: OperatorProto =
+        OperatorProto::RoundingOperator(RoundingOperator::CEIL.into());
     pub static ref TEST_MESSAGE: TestMessage = {
         let mut test_message = TestMessage::new();
         // initialize scalar (optional) fields

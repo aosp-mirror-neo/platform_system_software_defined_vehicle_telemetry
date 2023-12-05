@@ -59,6 +59,8 @@ pub enum NodeError {
     ComparisonOperatorIncomptaibleOperands,
     #[error("Arithmetic operator requires numeric operands")]
     ArithmeticOperatorIncompatibleOperands,
+    #[error("Rounding operator requires a floating point operand")]
+    RoundingOperatorIncompatibleOperands,
     #[error("Modulus operator requires integer operands")]
     ModulusOperatorIncompatibleOperands,
     #[error("Arithmetic operation cannot divide or mod by zero")]

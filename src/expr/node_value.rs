@@ -13,6 +13,7 @@ use protobuf::{
 use sdvtelemetry_proto_rust::expression::{
     combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+        RoundingOperator,
     },
     constant_leaf_node::Node_value as NodeValueProto,
     ConstantLeafNode as ConstantLeafNodeProto,
@@ -153,6 +154,11 @@ impl NodeValue {
                 })?,
                 &get_right_operand()?,
             ),
+            OperatorProto::RoundingOperator(op) => {
+                self.handle_rounding(&op.enum_value().map_err(|i| NodeError::UnknownOperator {
+                    op: format!("Rounding operator with enum value {}", i),
+                })?)
+            }
             _ => Err(NodeError::UnknownOperator { op: format!("{:?}", op) }),
         }
     }
@@ -463,6 +469,20 @@ impl NodeValue {
             }
             RelationalOperator::ALL_EQ => self.all_equals(other),
         }?))
+    }
+
+    /// Handle rounding operations.
+    fn handle_rounding(&self, op: &RoundingOperator) -> Result<NodeValue, NodeError> {
+        let err_provider = || NodeError::RoundingOperatorIncompatibleOperands;
+        if !matches!(self, NodeValue::Float(_) | NodeValue::Double(_)) {
+            return Err(err_provider());
+        }
+        let value = self.get_double(&err_provider)?;
+        Ok(NodeValue::Int64(match op {
+            RoundingOperator::FLOOR => value.floor() as i64,
+            RoundingOperator::ROUND => value.round() as i64,
+            RoundingOperator::CEIL => value.ceil() as i64,
+        }))
     }
 
     /// Check if list contains some element.
@@ -1575,6 +1595,102 @@ mod tests {
         assert_eq!(
             float_list_2.operate(&OP_ALL_EQ, || provide(&point_five))?,
             NodeValue::Bool(true)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_operate_rounding_errs_if_operand_is_incompatible() {
+        let true_val = NodeValue::Bool(true);
+        let one = NodeValue::Int32(1);
+
+        assert!(matches!(
+            true_val.operate(&OP_ROUND, || provide(&NodeValue::None)).err().unwrap(),
+            NodeError::RoundingOperatorIncompatibleOperands
+        ));
+        assert!(matches!(
+            one.operate(&OP_CEIL, || provide(&NodeValue::None)).err().unwrap(),
+            NodeError::RoundingOperatorIncompatibleOperands
+        ));
+    }
+
+    #[test]
+    fn test_operate_rounding_floor_ok() -> Result<(), NodeError> {
+        let point_one = NodeValue::Double(0.1);
+        let two_point_nine = NodeValue::Float(2.9);
+        let five = NodeValue::Float(5.0);
+        let negative_point_three = NodeValue::Double(-0.33);
+        let negative_point_nine = NodeValue::Double(-0.99);
+
+        assert_eq!(
+            point_one.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            NodeValue::Int64(0)
+        );
+        assert_eq!(
+            two_point_nine.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            NodeValue::Int64(2)
+        );
+        assert_eq!(five.operate(&OP_FLOOR, || provide(&NodeValue::None))?, NodeValue::Int64(5));
+        assert_eq!(
+            negative_point_three.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            NodeValue::Int64(-1)
+        );
+        assert_eq!(
+            negative_point_nine.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            NodeValue::Int64(-1)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_operate_rounding_round_ok() -> Result<(), NodeError> {
+        let point_one = NodeValue::Double(0.1);
+        let two_point_nine = NodeValue::Float(2.9);
+        let five = NodeValue::Float(5.0);
+        let negative_point_three = NodeValue::Double(-0.33);
+        let negative_point_nine = NodeValue::Double(-0.99);
+
+        assert_eq!(
+            point_one.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            NodeValue::Int64(0)
+        );
+        assert_eq!(
+            two_point_nine.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            NodeValue::Int64(3)
+        );
+        assert_eq!(five.operate(&OP_ROUND, || provide(&NodeValue::None))?, NodeValue::Int64(5));
+        assert_eq!(
+            negative_point_three.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            NodeValue::Int64(0)
+        );
+        assert_eq!(
+            negative_point_nine.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            NodeValue::Int64(-1)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn test_operate_rounding_ceil_ok() -> Result<(), NodeError> {
+        let point_one = NodeValue::Double(0.1);
+        let two_point_nine = NodeValue::Float(2.9);
+        let five = NodeValue::Float(5.0);
+        let negative_point_three = NodeValue::Double(-0.33);
+        let negative_point_nine = NodeValue::Double(-0.99);
+
+        assert_eq!(point_one.operate(&OP_CEIL, || provide(&NodeValue::None))?, NodeValue::Int64(1));
+        assert_eq!(
+            two_point_nine.operate(&OP_CEIL, || provide(&NodeValue::None))?,
+            NodeValue::Int64(3)
+        );
+        assert_eq!(five.operate(&OP_CEIL, || provide(&NodeValue::None))?, NodeValue::Int64(5));
+        assert_eq!(
+            negative_point_three.operate(&OP_CEIL, || provide(&NodeValue::None))?,
+            NodeValue::Int64(0)
+        );
+        assert_eq!(
+            negative_point_nine.operate(&OP_CEIL, || provide(&NodeValue::None))?,
+            NodeValue::Int64(0)
         );
         Ok(())
     }

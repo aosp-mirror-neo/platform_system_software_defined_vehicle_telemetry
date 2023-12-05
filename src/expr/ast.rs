@@ -119,7 +119,7 @@ impl NodeFactoryImpl {
         NodeFactoryImpl {}
     }
 
-    /// Vists the node at `index` using pre-order traversal.
+    /// Vists the node at `index` using post-order traversal.
     /// Ensures that the node specifies valid indices for child nodes, and its
     /// children do not contain cyclic dependencies.
     ///
@@ -414,6 +414,7 @@ mod tests {
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{
             ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+            RoundingOperator,
         },
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
@@ -746,8 +747,8 @@ mod tests {
         node_0.set_constant_leaf_node(constant_leaf_one);
 
         let mut or_node = CombinationNode::new();
-        or_node.left_index = Some(0); // True
-        or_node.right_index = Some(0); // True
+        or_node.left_index = Some(0);
+        or_node.right_index = Some(0);
         or_node.set_logical_operator(LogicalOperator::OR);
         node_1.set_combination_node(or_node);
 
@@ -757,6 +758,55 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         assert!(matches!(err, NodeError::LogicalOperatorIncompatibleOperands));
+    }
+
+    #[test]
+    fn test_validate_rounding_operator_incompatible_types_should_fail() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+
+        let mut constant_leaf_one = ConstantLeafNode::new();
+        constant_leaf_one.set_int32_value(10);
+        node_0.set_constant_leaf_node(constant_leaf_one);
+
+        let mut floor_node = CombinationNode::new();
+        floor_node.left_index = Some(0); // fails because rounding requires floating point
+        floor_node.set_rounding_operator(RoundingOperator::FLOOR);
+        node_1.set_combination_node(floor_node);
+
+        let all_proto_nodes = vec![node_0, node_1];
+
+        // action
+        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+
+        assert!(matches!(err, NodeError::RoundingOperatorIncompatibleOperands));
+    }
+
+    #[test]
+    fn test_validate_rounding_operator_has_two_children_should_fail() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+
+        let mut constant_leaf_one = ConstantLeafNode::new();
+        constant_leaf_one.set_int32_value(1);
+        node_0.set_constant_leaf_node(constant_leaf_one);
+
+        let mut floor_node = CombinationNode::new();
+        floor_node.left_index = Some(0);
+        floor_node.right_index = Some(0); // fails for having right child
+        floor_node.set_rounding_operator(RoundingOperator::FLOOR);
+        node_1.set_combination_node(floor_node);
+
+        let all_proto_nodes = vec![node_0, node_1];
+
+        // action
+        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+
+        assert!(matches!(err, NodeError::UnaryOperatorIncorrectChildren));
     }
 
     #[test]
@@ -789,52 +839,54 @@ mod tests {
     fn test_validate_ok() {
         let node_factory = NodeFactoryImpl::new();
         let context = create_factory_context();
-        // setup tree containing all 3 types of operators
-        //                       index 4 (&&)
-        //                    /               \
-        //                index 2             index 3
-        //               LT_OR_EQ              TRUE
-        //              /        \
-        //     index 0 (5)      index 1 (+)
-        //                       /         \
-        //               index 0 (5)       index 0 (5)
+        // setup tree containing all 4 types of operators
+        //                    index 4 (NOT)
+        //                    /
+        //                index 3
+        //               LT_OR_EQ
+        //              /          \
+        //         index 1        index 2
+        //          ROUND          MULTIPLY
+        //           /           /         \
+        //    index 0          index 0    index 0
+        //       0.5             0.5         0.5
         let mut node_0 = NodeProto::new();
         let mut node_1 = NodeProto::new();
         let mut node_2 = NodeProto::new();
         let mut node_3 = NodeProto::new();
         let mut node_4 = NodeProto::new();
 
-        let mut constant_leaf_five = ConstantLeafNode::new();
-        constant_leaf_five.set_int32_value(5);
-        node_0.set_constant_leaf_node(constant_leaf_five);
+        let mut constant_leaf_point_five = ConstantLeafNode::new();
+        constant_leaf_point_five.set_double_value(0.5);
+        node_0.set_constant_leaf_node(constant_leaf_point_five);
 
-        let mut add_node = CombinationNode::new();
-        add_node.left_index = Some(0); // 5
-        add_node.right_index = Some(0); // 5
-        add_node.set_arithmetic_operator(ArithmeticOperator::ADD);
-        node_1.set_combination_node(add_node);
+        let mut round_node = CombinationNode::new();
+        round_node.left_index = Some(0); // 0.5
+        round_node.set_rounding_operator(RoundingOperator::ROUND);
+        node_1.set_combination_node(round_node);
 
-        let mut gt_eq_node = CombinationNode::new();
-        gt_eq_node.left_index = Some(0); // 5
-        gt_eq_node.right_index = Some(1); // 5+5 = 10
-        gt_eq_node.set_relational_operator(RelationalOperator::LT_OR_EQ);
-        node_2.set_combination_node(gt_eq_node);
+        let mut multiply_node = CombinationNode::new();
+        multiply_node.left_index = Some(0); // 0.5
+        multiply_node.right_index = Some(0); // 0.5
+        multiply_node.set_arithmetic_operator(ArithmeticOperator::MULTIPLY);
+        node_2.set_combination_node(multiply_node);
 
-        let mut constant_leaf_true = ConstantLeafNode::new();
-        constant_leaf_true.set_bool_value(true);
-        node_3.set_constant_leaf_node(constant_leaf_true);
+        let mut lt_eq_node = CombinationNode::new();
+        lt_eq_node.left_index = Some(1); // 0.5 rounded = 1
+        lt_eq_node.right_index = Some(2); // 0.5 * 0.5 = 0.25
+        lt_eq_node.set_relational_operator(RelationalOperator::LT_OR_EQ);
+        node_3.set_combination_node(lt_eq_node);
 
-        let mut and_node = CombinationNode::new();
-        and_node.left_index = Some(2); // 5 <= 10
-        and_node.right_index = Some(3); // TRUE
-        and_node.set_logical_operator(LogicalOperator::AND);
-        node_4.set_combination_node(and_node);
+        let mut not_node = CombinationNode::new();
+        not_node.left_index = Some(3); // 1 <= 0.25
+        not_node.set_logical_operator(LogicalOperator::NOT);
+        node_4.set_combination_node(not_node);
 
         let all_proto_nodes = vec![node_0, node_1, node_2, node_3, node_4];
         let expected_types = vec![
+            NodeValueType::Float,
             NodeValueType::Int,
-            NodeValueType::Int,
-            NodeValueType::Bool,
+            NodeValueType::Float,
             NodeValueType::Bool,
             NodeValueType::Bool,
         ];
@@ -1139,15 +1191,45 @@ mod tests {
     }
 
     #[test]
+    fn test_evaluate_rounding_operator_ok() -> Result<(), NodeError> {
+        let pi_node =
+            Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
+        let round_node = Arc::new(Node::Combination {
+            operator: OP_ROUND.clone(),
+            left: Some(pi_node.clone()),
+            right: None,
+        });
+        let nodes = vec![pi_node, round_node];
+
+        // we will evaluate every node in `nodes`, and we expect these results:
+        let expected_results = vec![
+            NodeValue::Float(std::f32::consts::PI), // constant value of Pi
+            NodeValue::Int64(3),                    // Pi rounded to the nearest int
+        ];
+
+        // assert that evaluated_result[i] == expected_result[i]  for all index i
+        for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
+            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn test_evaluate_mixed_operators() -> Result<(), NodeError> {
-        // setup tree containing all 3 types of operators
+        // setup tree containing all 4 types of operators
         //                       logical (&&)
         //                    /               \
-        //   relational (LT_OR_EQ)            True
-        //              /        \
-        //            5      arithmetic (+)
-        //                       /         \
-        //                     5            5
+        //     relational (LT_OR_EQ)              True
+        //            /              \
+        // rounding (ceil)      arithmetic (+)
+        //         /                   /         \
+        //        0.3                5            5
+        let point_three_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.3) });
+        let ceil_node = Arc::new(Node::Combination {
+            operator: OP_CEIL.clone(),
+            left: Some(point_three_node.clone()),
+            right: None,
+        });
         let five_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) });
         let add_node = Arc::new(Node::Combination {
             operator: OP_ADD.clone(),
@@ -1164,10 +1246,12 @@ mod tests {
             left: Some(lt_or_eq_node.clone()),
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
         });
-        let nodes = vec![five_node, add_node, lt_or_eq_node, and_node];
+        let nodes = vec![point_three_node, ceil_node, five_node, add_node, lt_or_eq_node, and_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = vec![
+            NodeValue::Float(0.3), // constant of 0.3
+            NodeValue::Int64(1),   // 0.3 rounded up
             NodeValue::Int32(5),   // constant of 5
             NodeValue::Int64(10),  // 5+5 = 10
             NodeValue::Bool(true), // True because 5 <= 10
