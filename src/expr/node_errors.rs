@@ -61,8 +61,8 @@ pub enum NodeError {
     ArithmeticOperatorIncompatibleOperands,
     #[error("Rounding operator requires a floating point operand")]
     RoundingOperatorIncompatibleOperands,
-    #[error("Modulus operator requires integer operands")]
-    ModulusOperatorIncompatibleOperands,
+    #[error("Modulo operator requires integer operands")]
+    ModuloOperatorIncompatibleOperands,
     #[error("Arithmetic operation cannot divide or mod by zero")]
     DivideByZero,
     #[error("Contains operator requires left operand is a list, right operand is a scalar of compatible type to the list value")]

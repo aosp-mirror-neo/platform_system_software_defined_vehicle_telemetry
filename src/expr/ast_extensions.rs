@@ -262,7 +262,7 @@ impl OperatorProtoExtension for OperatorProto {
                             Err(NodeError::ArithmeticOperatorIncompatibleOperands)
                         }
                     }
-                    ArithmeticOperator::MODULUS => {
+                    ArithmeticOperator::MODULO => {
                         if left.is_int() && right.is_int() {
                             Ok(NodeValueType::Int)
                         } else {

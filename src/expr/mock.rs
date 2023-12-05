@@ -38,8 +38,8 @@ lazy_static! {
         OperatorProto::ArithmeticOperator(ArithmeticOperator::MULTIPLY.into());
     pub static ref OP_DIVIDE: OperatorProto =
         OperatorProto::ArithmeticOperator(ArithmeticOperator::DIVIDE.into());
-    pub static ref OP_MODULUS: OperatorProto =
-        OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULUS.into());
+    pub static ref OP_MODULO: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULO.into());
     pub static ref OP_POWER: OperatorProto =
         OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into());
     pub static ref OP_EQ: OperatorProto =
