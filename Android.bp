@@ -21,6 +21,7 @@ rust_defaults {
     defaults: ["sdv@rust_defaults"],
     rustlibs: [
         "libanyhow",
+        "liblazy_static",
         "liblog_rust",
         "liblogger",
         "libbinder_rs",
@@ -109,7 +110,6 @@ rust_test_host {
     rustlibs: [
         "android.sdv.telemetry-rust",
         "libfutures",
-        "liblazy_static",
         "libprotobuf",
         "libsdv_telemetry_test_proto",
         "libsdvtelemetry_proto_rust",
@@ -195,5 +195,5 @@ rust_bindgen {
 }
 
 build = [
-    "sdv-binary-pdk.bp"
+    "sdv-binary-pdk.bp",
 ]

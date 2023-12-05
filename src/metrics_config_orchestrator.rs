@@ -12,8 +12,9 @@ mod trigger_factory;
 
 // External dependencies.
 use async_trait::async_trait;
+use lazy_static::lazy_static;
 use log::{error, warn};
-use protobuf::{reflect::FileDescriptor, MessageDyn};
+use protobuf::{reflect::FileDescriptor, well_known_types, MessageDyn};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
@@ -58,6 +59,21 @@ use trigger_factory::{
 
 const PUBLISHER: &str = "publisher";
 const TRIGGER: &str = "trigger";
+
+lazy_static! {
+    static ref WELL_KNOWN_FILE_DESCRIPTORS: Vec<FileDescriptor> = vec![
+        well_known_types::any::file_descriptor().clone(),
+        well_known_types::api::file_descriptor().clone(),
+        well_known_types::duration::file_descriptor().clone(),
+        well_known_types::empty::file_descriptor().clone(),
+        well_known_types::field_mask::file_descriptor().clone(),
+        well_known_types::source_context::file_descriptor().clone(),
+        well_known_types::struct_::file_descriptor().clone(),
+        well_known_types::timestamp::file_descriptor().clone(),
+        well_known_types::type_::file_descriptor().clone(),
+        well_known_types::wrappers::file_descriptor().clone()
+    ];
+}
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 #[async_trait]
@@ -239,7 +255,10 @@ where
     ) -> Result<(), MetricsConfigOrchestratorError> {
         // Build the provided proto file descriptors
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
+        let file_descriptors = FileDescriptor::new_dynamic_fds(
+            cloned_descriptor_protos,
+            &WELL_KNOWN_FILE_DESCRIPTORS,
+        )?;
 
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl { metrics_config: OnceLock::new() });
@@ -406,7 +425,10 @@ where
 
         // Build the provided proto file descriptors
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let file_descriptors = FileDescriptor::new_dynamic_fds(cloned_descriptor_protos, &[])?;
+        let file_descriptors = FileDescriptor::new_dynamic_fds(
+            cloned_descriptor_protos,
+            &WELL_KNOWN_FILE_DESCRIPTORS,
+        )?;
 
         // Validate expression nodes to ensure they are set up correctly.
         let node_factory_context = NodeFactoryContext {
@@ -813,7 +835,9 @@ where
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use protobuf::descriptor::FileDescriptorProto;
+    use protobuf::descriptor::{
+        field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
+    };
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::{MessageDyn, MessageFull};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
@@ -1394,6 +1418,140 @@ mod tests {
         config
     }
 
+    fn create_valid_config_with_known_protobuf_type() -> MetricsConfigProto {
+        let mut descriptor_proto = DescriptorProto::new();
+        descriptor_proto.set_name("WellKnownTypeMessage".to_owned());
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto
+            .set_type_name(".".to_owned() + well_known_types::any::Any::descriptor().full_name());
+        field_descriptor_proto.set_name("any".to_owned());
+        field_descriptor_proto.set_number(1);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto
+            .set_type_name(".".to_owned() + well_known_types::api::Api::descriptor().full_name());
+        field_descriptor_proto.set_name("api".to_owned());
+        field_descriptor_proto.set_number(2);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::duration::Duration::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("duration".to_owned());
+        field_descriptor_proto.set_number(3);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::empty::Empty::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("empty".to_owned());
+        field_descriptor_proto.set_number(4);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::field_mask::FieldMask::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("field_mask".to_owned());
+        field_descriptor_proto.set_number(5);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned()
+                + well_known_types::source_context::SourceContext::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("source_context".to_owned());
+        field_descriptor_proto.set_number(6);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::struct_::Struct::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("struct".to_owned());
+        field_descriptor_proto.set_number(7);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::timestamp::Timestamp::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("timestamp".to_owned());
+        field_descriptor_proto.set_number(8);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::type_::Type::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("type".to_owned());
+        field_descriptor_proto.set_number(9);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut field_descriptor_proto = FieldDescriptorProto::new();
+        field_descriptor_proto.set_type(field_descriptor_proto::Type::TYPE_MESSAGE);
+        field_descriptor_proto.set_type_name(
+            ".".to_owned() + well_known_types::wrappers::Int32Value::descriptor().full_name(),
+        );
+        field_descriptor_proto.set_name("int32_value".to_owned());
+        field_descriptor_proto.set_number(10);
+        descriptor_proto.field.push(field_descriptor_proto);
+
+        let mut file_descriptor_proto = FileDescriptorProto::new();
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::any::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::api::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::duration::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::empty::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::field_mask::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::source_context::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::struct_::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::timestamp::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::type_::file_descriptor().name().to_owned());
+        file_descriptor_proto
+            .dependency
+            .push(well_known_types::wrappers::file_descriptor().name().to_owned());
+        file_descriptor_proto.set_name("well_known_type_message.proto".to_owned());
+        file_descriptor_proto.message_type.push(descriptor_proto);
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.descriptor_protos = vec![file_descriptor_proto];
+        config.metrics_report_configs.push(MetricsReportConfig::new());
+        config
+    }
+
     #[tokio::test]
     async fn initialize_config_duplicate_publisher_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
@@ -1953,6 +2111,14 @@ mod tests {
         assert_eq!(*activate_calls.lock().unwrap(), expected_activations);
     }
 
+    #[tokio::test]
+    async fn initialize_config_with_known_protobuf_type_success() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let config = create_valid_config_with_known_protobuf_type();
+
+        orchestrator.initialize_config(&config).await.unwrap();
+    }
+
     #[test]
     fn finish_config_invalid_config_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
@@ -2221,5 +2387,13 @@ mod tests {
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
         assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn validate_config_with_known_protobuf_type_success() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let config = create_valid_config_with_known_protobuf_type();
+
+        orchestrator.validate_config(&config).unwrap();
     }
 }
