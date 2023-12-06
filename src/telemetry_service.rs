@@ -33,6 +33,8 @@ use std::sync::{Arc, Mutex};
 pub use configurable_publisher_registry::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
 };
+pub use utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
+
 use metrics_config_orchestrator::MetricsConfigOrchestrator;
 use metrics_config_orchestrator::{
     MetricsConfigOrchestratorError as ConfigError, MetricsConfigOrchestratorImpl,
