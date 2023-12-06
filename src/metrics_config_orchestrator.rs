@@ -12,19 +12,16 @@ mod trigger_factory;
 
 // External dependencies.
 use async_trait::async_trait;
-use lazy_static::lazy_static;
 use log::{error, warn};
-use protobuf::{reflect::FileDescriptor, well_known_types, MessageDyn};
+use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
     Trigger as TriggerProto,
 };
-use std::{
-    collections::HashMap,
-    marker::{PhantomData, Sync},
-    sync::{atomic::AtomicU32, Arc, Mutex, OnceLock},
-};
+use std::collections::HashMap;
+use std::marker::{PhantomData, Sync};
+use std::sync::{atomic::AtomicU32, Arc, Mutex, OnceLock};
 use thiserror::Error;
 
 // Crate dependencies.
@@ -32,7 +29,9 @@ use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::ast_extensions::NodeValueType;
 use crate::expr::node_errors::{MessageProviderError, NodeError};
-use crate::utils::collection_extension::HashMapExtension;
+use crate::utils::{
+    collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
+};
 
 // Child module dependencies.
 use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};
@@ -57,21 +56,6 @@ use trigger_factory::{
 
 const PUBLISHER: &str = "publisher";
 const TRIGGER: &str = "trigger";
-
-lazy_static! {
-    static ref WELL_KNOWN_FILE_DESCRIPTORS: Vec<FileDescriptor> = vec![
-        well_known_types::any::file_descriptor().clone(),
-        well_known_types::api::file_descriptor().clone(),
-        well_known_types::duration::file_descriptor().clone(),
-        well_known_types::empty::file_descriptor().clone(),
-        well_known_types::field_mask::file_descriptor().clone(),
-        well_known_types::source_context::file_descriptor().clone(),
-        well_known_types::struct_::file_descriptor().clone(),
-        well_known_types::timestamp::file_descriptor().clone(),
-        well_known_types::type_::file_descriptor().clone(),
-        well_known_types::wrappers::file_descriptor().clone()
-    ];
-}
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 #[async_trait]
@@ -837,7 +821,7 @@ mod tests {
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
     };
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-    use protobuf::{MessageDyn, MessageFull};
+    use protobuf::{well_known_types, MessageDyn, MessageFull};
     use sdvtelemetry_proto_rust::expression::Node as NodeProto;
     use sdvtelemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,

@@ -8,10 +8,9 @@ use binder::BinderFeatures;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::{ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError};
+use sdv_telemetry::{WELL_KNOWN_FILE_DESCRIPTORS, ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError};
 use std::collections::{hash_map::Entry, HashMap};
-use std::fmt::Debug;
-use std::sync::Mutex;
+use std::{fmt::Debug, sync::Mutex};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -107,7 +106,8 @@ impl ConfigurablePublisherRegistryImpl {
     ) -> Result<(), ConfigurablePublisherRegistryRegisterError> {
         let publisher_info_proto: FileDescriptorProto =
             protobuf::Message::parse_from_bytes(&publisher_info.fileDescriptorProto)?;
-        let file_descriptor = FileDescriptor::new_dynamic(publisher_info_proto, &[])?;
+        let file_descriptor =
+            FileDescriptor::new_dynamic(publisher_info_proto, &WELL_KNOWN_FILE_DESCRIPTORS)?;
         let message_descriptor = file_descriptor
             .message_by_full_name(&publisher_info.messageTypeName)
             .ok_or_else(|| ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName {
