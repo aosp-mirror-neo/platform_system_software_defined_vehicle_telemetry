@@ -17,14 +17,12 @@ use std::{
 use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
-use crate::metrics_config_orchestrator::{
-    publisher::{PublisherSubscribeError, PublisherUnsubscribeError},
-    Publisher,
+use crate::expr::{ast::Node, node_value::NodeValue};
+use crate::metrics_config_orchestrator::publisher::{
+    PublisherSubscribeError, PublisherUnsubscribeError,
 };
-use crate::{
-    collection_extension::HashMapExtension,
-    expr::{ast::Node, node_value::NodeValue},
-};
+use crate::metrics_config_orchestrator::Publisher;
+use crate::utils::collection_extension::HashMapExtension;
 
 #[async_trait]
 pub(crate) trait Trigger: Send + Sync {
@@ -495,7 +493,7 @@ mod tests {
     use crate::metrics_config_orchestrator::{
         publisher::mock::MockPublisher, trigger::mock::MockTrigger,
     };
-    use crate::test_utils::with_timeout;
+    use crate::utils::test_utils::with_timeout;
 
     const INTERVAL_MS: u64 = 10;
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";

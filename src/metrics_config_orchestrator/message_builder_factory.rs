@@ -1,3 +1,5 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     proto_message_builder::field_assignment::AggregationType, ProtoMessageBuilder,
@@ -8,16 +10,12 @@ use std::{
 };
 use thiserror::Error;
 
-use crate::{
-    collection_extension::HashMapExtension,
-    expr::{
-        ast::Node,
-        ast_extensions::{NodeValueType, NodeValueTypeExtension},
-    },
-    metrics_config_orchestrator::message_builder::{
-        AggregationFactory, MessageBuilder, MessageBuilderImpl,
-    },
+use crate::expr::ast::Node;
+use crate::expr::ast_extensions::{NodeValueType, NodeValueTypeExtension};
+use crate::metrics_config_orchestrator::message_builder::{
+    AggregationFactory, MessageBuilder, MessageBuilderImpl,
 };
+use crate::utils::collection_extension::HashMapExtension;
 
 /// Factory that validates MetricsConfig's ProtoMessageBuilder and creates
 /// corresponding Rust representations.

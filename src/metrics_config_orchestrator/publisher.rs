@@ -13,7 +13,6 @@ use std::{
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::collection_extension::HashMapExtension;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError,
@@ -22,6 +21,7 @@ use crate::metrics_config_orchestrator::service_adapter::{
 use crate::metrics_config_orchestrator::trigger::{
     Trigger, TriggerSubscriber, TriggerUnsubscribeError,
 };
+use crate::utils::collection_extension::HashMapExtension;
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
 const PUBLISHER_STATE_ACTIVATING: &str = "Activating";
