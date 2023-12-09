@@ -151,10 +151,13 @@ pub trait OperatorProtoExtension {
 
 impl OperatorProtoExtension for OperatorProto {
     fn is_unary_operator(&self) -> bool {
-        if let OperatorProto::LogicalOperator(op) = self {
-            return op.enum_value_or_default() == LogicalOperator::NOT;
+        match self {
+            OperatorProto::RoundingOperator(_) => true,
+            OperatorProto::LogicalOperator(op) => {
+                op.enum_value_or_default() == LogicalOperator::NOT
+            }
+            _ => false,
         }
-        false
     }
 
     fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), NodeError> {
@@ -267,6 +270,16 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                 }
+            }
+            // rounding operator output type = int
+            OperatorProto::RoundingOperator(_) => {
+                if right != &NodeValueType::None {
+                    return Err(NodeError::UnaryOperatorIncorrectChildren);
+                }
+                if left != &NodeValueType::Float {
+                    return Err(NodeError::RoundingOperatorIncompatibleOperands);
+                }
+                Ok(NodeValueType::Int)
             }
             _ => Err(NodeError::UnknownOperator { op: format!("{:?}", self) }),
         }
