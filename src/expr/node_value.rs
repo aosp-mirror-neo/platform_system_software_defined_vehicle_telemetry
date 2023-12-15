@@ -387,9 +387,9 @@ impl NodeValue {
                     self.get_double(&err_provider)? / other.get_double(&err_provider)?,
                 ))
             }
-            ArithmeticOperator::MODULUS => {
+            ArithmeticOperator::MODULO => {
                 if !self.is_int() || !other.is_int() {
-                    return Err(NodeError::ModulusOperatorIncompatibleOperands);
+                    return Err(NodeError::ModuloOperatorIncompatibleOperands);
                 }
                 if other.is_zero()? {
                     return Err(NodeError::DivideByZero);
@@ -1193,35 +1193,35 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_modulus_by_zero() {
+    fn test_operate_arithmetic_modulo_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
         assert!(matches!(
-            five.operate(&OP_MODULUS, || provide(&zero)).err().unwrap(),
+            five.operate(&OP_MODULO, || provide(&zero)).err().unwrap(),
             NodeError::DivideByZero
         ));
     }
 
     #[test]
-    fn test_operate_arithmetic_modulus() -> Result<(), NodeError> {
+    fn test_operate_arithmetic_modulo_ok() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let two = NodeValue::Int32(2);
 
         // 5 % 2 = 1
-        assert_eq!(five.operate(&OP_MODULUS, || provide(&two))?, NodeValue::Int64(1));
+        assert_eq!(five.operate(&OP_MODULO, || provide(&two))?, NodeValue::Int64(1));
         Ok(())
     }
 
     #[test]
-    fn test_operate_arithmetic_modulus_no_floating_points() {
+    fn test_operate_arithmetic_modulo_no_floating_points() {
         let five = NodeValue::Float(5.0);
         let two = NodeValue::Int32(2);
 
         // both operands must be integers
         assert!(matches!(
-            five.operate(&OP_MODULUS, || provide(&two)).err().unwrap(),
-            NodeError::ModulusOperatorIncompatibleOperands
+            five.operate(&OP_MODULO, || provide(&two)).err().unwrap(),
+            NodeError::ModuloOperatorIncompatibleOperands
         ));
     }
 

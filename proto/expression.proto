@@ -90,8 +90,8 @@ message CombinationNode {
     SUBTRACT = 1;
     MULTIPLY = 2;
     DIVIDE = 3;
-    // Modulus operator requires both operands to be integer types.
-    MODULUS = 4;
+    // Modulo operator requires both operands to be integer types.
+    MODULO = 4;
     POWER = 5;
   }
 

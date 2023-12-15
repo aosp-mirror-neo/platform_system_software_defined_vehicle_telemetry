@@ -235,7 +235,7 @@ fn parse_operator(buf: &str) -> Result<Token, String> {
         "*" => Token::Arithmetic(ArithmeticOperatorProto::MULTIPLY),
         "/" => Token::Arithmetic(ArithmeticOperatorProto::DIVIDE),
         "**" => Token::Arithmetic(ArithmeticOperatorProto::POWER),
-        "%" => Token::Arithmetic(ArithmeticOperatorProto::MODULUS),
+        "%" => Token::Arithmetic(ArithmeticOperatorProto::MODULO),
         "&&" => Token::Logical(LogicalOperatorProto::AND),
         "||" => Token::Logical(LogicalOperatorProto::OR),
         "^" => Token::Logical(LogicalOperatorProto::XOR),
@@ -313,7 +313,7 @@ impl Token {
                 ArithmeticOperatorProto::ADD | ArithmeticOperatorProto::SUBTRACT => 12,
                 ArithmeticOperatorProto::MULTIPLY
                 | ArithmeticOperatorProto::DIVIDE
-                | ArithmeticOperatorProto::MODULUS => 13,
+                | ArithmeticOperatorProto::MODULO => 13,
                 ArithmeticOperatorProto::POWER => 14,
             },
             Token::Relational(op) => match op {
@@ -563,7 +563,7 @@ mod tests {
         let mut leaf_three = NodeProto::new();
         let mut multiplication_node = NodeProto::new();
         let mut add_node = NodeProto::new();
-        let mut modulus_node = NodeProto::new();
+        let mut modulo_node = NodeProto::new();
 
         let mut constant_leaf = ConstantLeafNode::new();
         constant_leaf.set_int32_value(2);
@@ -583,14 +583,13 @@ mod tests {
         add.right_index = Some(2);
         add_node.set_combination_node(add);
 
-        let mut modulus = CombinationNode::new();
-        modulus.set_arithmetic_operator(ArithmeticOperator::MODULUS);
-        modulus.left_index = Some(3);
-        modulus.right_index = Some(0);
-        modulus_node.set_combination_node(modulus);
+        let mut modulo = CombinationNode::new();
+        modulo.set_arithmetic_operator(ArithmeticOperator::MODULO);
+        modulo.left_index = Some(3);
+        modulo.right_index = Some(0);
+        modulo_node.set_combination_node(modulo);
 
-        let expected_nodes =
-            vec![leaf_two, leaf_three, multiplication_node, add_node, modulus_node];
+        let expected_nodes = vec![leaf_two, leaf_three, multiplication_node, add_node, modulo_node];
 
         // action
         let index = parser.parse(expr)?;
