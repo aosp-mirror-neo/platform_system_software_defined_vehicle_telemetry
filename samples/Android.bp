@@ -54,7 +54,6 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "configurable_publisher_source",
-    use_protobuf3: true,
 }
 
 rust_binary {
