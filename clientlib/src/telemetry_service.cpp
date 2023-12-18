@@ -12,7 +12,8 @@ using ::android::sdv::telemetry::TelemetryServiceStatusCodes;
 
 namespace android::sdv::telemetry {
 
-std::optional<TelemetryServiceStatusCodes> validate_params(void* listener, CbFunction cbFunc) {
+template <typename T>
+std::optional<TelemetryServiceStatusCodes> validate_params(void* listener, T cbFunc) {
     if (listener == nullptr) {
         return TelemetryServiceStatusCodes::API_CALL_FAILED_LISTENER_NOT_SET;
     }
@@ -117,8 +118,8 @@ TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(void* l
     return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(void* listener,
-                                                                        CbFunction cbFunc) {
+TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
+        void* listener, ReportReadyCallbackFunction cbFunc) {
     std::optional<TelemetryServiceStatusCodes> maybe_error = validate_params(listener, cbFunc);
     if (maybe_error) {
         return *maybe_error;
@@ -136,8 +137,9 @@ TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener() {
     return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::get_metrics_report(int32_t report_number,
-                                                                 const char* report_uuid,
+TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* metrics_config_uuid,
+                                                                 const char* report_config_name,
+                                                                 int32_t report_number,
                                                                  void* listener,
                                                                  GetReportCallbackFunction cbFunc) {
     if (listener == nullptr) {
@@ -151,7 +153,8 @@ TelemetryServiceStatusCodes TelemetryService::get_metrics_report(int32_t report_
 
     android::sp<ReportListenerImpl> mReportListener(new ReportListenerImpl(listener, cbFunc));
     android::binder::Status err =
-            binder_service_->getMetricsReport(report_number, report_uuid, mReportListener);
+            binder_service_->getMetricsReport(metrics_config_uuid, report_config_name,
+                                              report_number, mReportListener);
     ALOGI("get_metrics_report from CPP %s", std::string(err.toString8()).c_str());
     return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
 }

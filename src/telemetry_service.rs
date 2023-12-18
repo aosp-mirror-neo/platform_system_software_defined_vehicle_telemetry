@@ -589,24 +589,25 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
     async fn getMetricsReport(
         &self,
+        metrics_config_uuid: &str,
+        _report_config_name: &str,
         report_number: i32,
-        metrics_report_uuid: &str,
         report_listener: &Strong<dyn ITelemetryReportListener>,
     ) -> BinderResult<()> {
-        info!("getMetricsReport: {}", metrics_report_uuid);
+        info!("getMetricsReport: {}", metrics_config_uuid);
         if let Ok(metrics_report) =
-            self.metrics_report_listener.get_metrics_report(report_number, metrics_report_uuid)
+            self.metrics_report_listener.get_metrics_report(report_number, metrics_config_uuid)
         {
             let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
             let _ = report_listener.deref().onReport(
                 StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0,
-                metrics_report_uuid,
+                metrics_config_uuid,
                 serialized_report,
             );
         } else {
             let _ = report_listener.deref().onReport(
                 StatusCodes::GET_FINISHED_REPORT_FAILED_LISTENER_REPORT_NOT_FOUND.0,
-                metrics_report_uuid,
+                metrics_config_uuid,
                 &[],
             );
         }
@@ -807,13 +808,18 @@ mod tests {
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, metrics_report_number: i32, report_uuid: &str) -> BinderResult<()> {
+        fn onReady(
+            &self,
+            metrics_config_uuid: &str,
+            _report_config_name: &str,
+            metrics_report_number: i32,
+        ) -> BinderResult<()> {
             let mut num_calls = self.num_on_ready_report_calls.lock().unwrap();
             *num_calls += 1;
             let mut report_number = self.report_number.lock().unwrap();
             *report_number = metrics_report_number as u32;
             let mut uuid = self.uuid.lock().unwrap();
-            *uuid = String::from(report_uuid);
+            *uuid = metrics_config_uuid.to_owned();
             Ok(())
         }
     }
@@ -1201,7 +1207,11 @@ mod tests {
         );
 
         // Call onReady on report ready listener
-        let _ = report_ready_listener.onReady(REPORT_NUMBER.try_into().unwrap(), UUID);
+        let _ = report_ready_listener.onReady(
+            UUID,
+            &String::default(),
+            REPORT_NUMBER.try_into().unwrap(),
+        );
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID, &report_ready_listener.get_uuid());
@@ -1339,7 +1349,12 @@ mod tests {
         test_environment.service.metrics_report_listener.on_report_ready(report);
         let _ = test_environment
             .service
-            .getMetricsReport(REPORT_NUMBER.try_into().unwrap(), UUID, &binder_report_listener)
+            .getMetricsReport(
+                UUID,
+                &String::default(),
+                REPORT_NUMBER.try_into().unwrap(),
+                &binder_report_listener,
+            )
             .await;
 
         assert_eq!(StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0, report_listener.get_status_code());

@@ -55,7 +55,7 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
 }
 
 int set_report_ready_listener(ServiceHolder* holder, void* listener,
-                              StatusCallbackFunction cbFunc) {
+                              ReportReadyListenerFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
                 reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
     return static_cast<int>(service->set_report_ready_listener(listener, cbFunc));
@@ -67,12 +67,13 @@ int clear_report_ready_listener(ServiceHolder* holder) {
     return static_cast<int>(service->clear_report_ready_listener());
 }
 
-int get_metrics_report(ServiceHolder* holder, int32_t report_number, const char* report_uuid,
-                       void* listener, GetReportCallbackFunction cbFunc) {
+int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
+                       const char* report_config_name, int32_t report_number, void* listener,
+                       GetReportCallbackFunction cbFunc) {
     android::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<android::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(
-            service->get_metrics_report(report_number, report_uuid, listener, cbFunc));
+    return static_cast<int>(service->get_metrics_report(metrics_config_uuid, report_config_name,
+                                                        report_number, listener, cbFunc));
 }
 
 int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc) {

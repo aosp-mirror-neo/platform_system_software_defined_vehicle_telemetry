@@ -5,14 +5,15 @@
 
 namespace android::sdv::telemetry {
 
-typedef void (*ReportReadyCallbackFunction)(void*, int32_t, const char*);
+typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int32_t);
 
 class ReportReadyListenerImpl :
       public android::sdv::telemetry::BnTelemetryReportReadyListener {
 public:
     void set_report_ready_listener(void* cbObject, ReportReadyCallbackFunction cbFunc);
-    android::binder::Status onReady(int32_t reportNumber,
-                                    const std::string& metricConfigUuid) override;
+    android::binder::Status onReady(const std::string& metricsConfigUuid,
+                                    const std::string& metricsReportConfigName,
+                                    int32_t reportNumber) override;
 
 private:
     // Void pointer storing the CB object passed by the OEM client app.
