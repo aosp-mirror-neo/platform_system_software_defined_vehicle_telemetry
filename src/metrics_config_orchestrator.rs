@@ -21,7 +21,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 };
 use std::collections::{HashMap, HashSet};
 use std::marker::{PhantomData, Sync};
-use std::sync::{atomic::AtomicU32, Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
 
 // Crate dependencies.
@@ -316,7 +316,6 @@ where
             file_descriptors: &file_descriptors,
             nodes: &expression_nodes,
             node_types: &node_types,
-            report_number: AtomicU32::new(1).into(),
         };
         let metrics_report_configs = config_proto.metrics_report_configs.iter().try_fold(
             HashMap::new(),
