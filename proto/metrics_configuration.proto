@@ -257,8 +257,12 @@ message MetricsReport {
   uint32 metrics_config_version = 5;
 
   // Required.
+  // The name of the MetricsReportConfig that was used to generate the report.
+  string report_config_name = 6;
+
+  // Required.
   // Metrics Report data.
-  google.protobuf.Any report_data = 6;
+  google.protobuf.Any report_data = 7;
 }
 
 message SamplePublisherConfig {}

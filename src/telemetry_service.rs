@@ -590,14 +590,16 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn getMetricsReport(
         &self,
         metrics_config_uuid: &str,
-        _report_config_name: &str,
+        report_config_name: &str,
         report_number: i32,
         report_listener: &Strong<dyn ITelemetryReportListener>,
     ) -> BinderResult<()> {
         info!("getMetricsReport: {}", metrics_config_uuid);
-        if let Ok(metrics_report) =
-            self.metrics_report_listener.get_metrics_report(report_number, metrics_config_uuid)
-        {
+        if let Ok(metrics_report) = self.metrics_report_listener.get_metrics_report(
+            metrics_config_uuid,
+            report_config_name,
+            report_number,
+        ) {
             let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
             let _ = report_listener.deref().onReport(
                 StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0,
