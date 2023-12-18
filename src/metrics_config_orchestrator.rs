@@ -19,7 +19,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
     Trigger as TriggerProto,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::marker::{PhantomData, Sync};
 use std::sync::{atomic::AtomicU32, Arc, Mutex, OnceLock};
 use thiserror::Error;
@@ -79,45 +79,47 @@ pub trait MetricsConfigOrchestrator {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum MetricsConfigOrchestratorError {
+    #[error("Cycle detected in the publisher and trigger dependency graph")]
+    CycledPublishersTriggers,
     #[error("Duplicate definition of publisher {publisher_name}")]
     DuplicatePublisherDefinition { publisher_name: String },
     #[error("Duplicate definition of trigger {trigger_name}")]
     DuplicateTriggerDefinition { trigger_name: String },
-    #[error("Cycle detected in the publisher and trigger dependency graph")]
-    CycledPublishersTriggers,
-    #[error("Invalid dependency: {dependency_name} doesn't exist")]
-    InvalidDependency { dependency_type: String, dependency_name: String },
     #[error("Duplicate metrics config identifier: {uuid}")]
     DuplicateMetricsConfigUuid { uuid: String },
-    #[error("Invalid definition for metrics report config {report_config_name}: {factory_error}")]
-    InvalidMetricsReportConfig {
-        report_config_name: String,
-        factory_error: MetricsReportGeneratorFactoryError,
-    },
-    #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
-    InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
-    #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
-    InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
+    #[error("Duplicate definition of metrics report config {name}")]
+    DuplicateMetricsReportConfigName { name: String },
+    #[error("Metric Config with UUID {uuid} doesn't exist")]
+    InvalidConfigUuid { uuid: String },
+    #[error("Invalid expression nodes. Reason: {e}")]
+    InvalidExpressionNodes { e: NodeError },
+    #[error("Invalid dependency: {dependency_name} doesn't exist")]
+    InvalidDependency { dependency_type: String, dependency_name: String },
     #[error("Invalid descriptor protos: {error}")]
     InvalidDescriptorProtos {
         #[from]
         error: protobuf::Error,
     },
-    #[error("Metric Config with UUID {uuid} doesn't exist")]
-    InvalidConfigUuid { uuid: String },
-    #[error("Invalid expression nodes. Reason: {e}")]
-    InvalidExpressionNodes { e: NodeError },
-    #[error("Unable to activate start trigger: {error}")]
-    UnableToActivateStartTrigger {
-        #[from]
-        error: TriggerSubscribeError,
+    #[error("Invalid definition for metrics report config {report_config_name}: {factory_error}")]
+    InvalidMetricsReportConfig {
+        report_config_name: String,
+        factory_error: MetricsReportGeneratorFactoryError,
     },
-    #[error("Unable to activate publisher {publisher_name}: {error}")]
-    UnableToActivatePublisher { publisher_name: String, error: PublisherActivateError },
     #[error("Unable to create DescriptorProvider because of an invalid publisher: {error}")]
     InvalidPublisherAndDescriptorCombination {
         #[from]
         error: DescriptorProviderConstructorError,
+    },
+    #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
+    InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
+    #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
+    InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
+    #[error("Unable to activate publisher {publisher_name}: {error}")]
+    UnableToActivatePublisher { publisher_name: String, error: PublisherActivateError },
+    #[error("Unable to activate start trigger: {error}")]
+    UnableToActivateStartTrigger {
+        #[from]
+        error: TriggerSubscribeError,
     },
 }
 
@@ -316,21 +318,29 @@ where
             node_types: &node_types,
             report_number: AtomicU32::new(1).into(),
         };
-        let metrics_report_configs = config_proto
-            .metrics_report_configs
-            .iter()
-            .map(|proto| {
-                self.metrics_report_generator_factory.create(proto, &context).map_or_else(
-                    |err| {
-                        Err(MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
-                            report_config_name: proto.name.clone(),
-                            factory_error: err,
+        let metrics_report_configs = config_proto.metrics_report_configs.iter().try_fold(
+            HashMap::new(),
+            |mut acc, proto| {
+                let report_generator =
+                    self.metrics_report_generator_factory.create(proto, &context).map_or_else(
+                        |err| {
+                            Err(MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
+                                report_config_name: proto.name.clone(),
+                                factory_error: err,
+                            })
+                        },
+                        Ok,
+                    )?;
+                match acc.try_insert_value(&proto.name, report_generator) {
+                    Ok(_) => Ok(acc),
+                    Err(_) => {
+                        Err(MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName {
+                            name: proto.name.clone(),
                         })
-                    },
-                    Ok,
-                )
-            })
-            .collect::<Result<_, _>>()?;
+                    }
+                }
+            },
+        )?;
 
         // Create MetricsConfig.
         let start_trigger =
@@ -341,7 +351,7 @@ where
             Self::maybe_get_trigger(&triggers, &config_proto.finish_trigger_name)?.cloned();
         let config = Arc::new(MetricsConfig {
             uuid: config_proto.uuid.clone(),
-            metrics_report_generators: metrics_report_configs,
+            metrics_report_generators: metrics_report_configs.into_values().collect(),
             publishers,
             start_trigger,
             end_trigger,
@@ -460,13 +470,19 @@ where
             file_descriptors: &file_descriptors,
             node_types: &node_types,
         };
-        config_proto.metrics_report_configs.iter().try_for_each(|proto| {
+        config_proto.metrics_report_configs.iter().try_fold(HashSet::new(), |mut acc, proto| {
+            if !acc.insert(&proto.name) {
+                return Err(MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName {
+                    name: proto.name.clone(),
+                });
+            }
             self.metrics_report_generator_factory.validate(proto, &context).map_err(|err| {
                 MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
                     report_config_name: proto.name.clone(),
                     factory_error: err,
                 }
-            })
+            })?;
+            Ok(acc)
         })?;
 
         Ok(())
@@ -1356,6 +1372,19 @@ mod tests {
         config
     }
 
+    fn create_config_with_duplicate_metrics_report_config_name() -> MetricsConfigProto {
+        let mut metrics_report1 = MetricsReportConfig::new();
+        metrics_report1.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+
+        let mut metrics_report2 = MetricsReportConfig::new();
+        metrics_report2.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.metrics_report_configs.push(metrics_report1);
+        config.metrics_report_configs.push(metrics_report2);
+        config
+    }
+
     fn create_configs_with_duplicate_uuid() -> (MetricsConfigProto, MetricsConfigProto) {
         let mut config1 = MetricsConfigProto::new();
         config1.uuid = UUID.to_owned();
@@ -1633,6 +1662,21 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[tokio::test]
+    async fn initialize_config_duplicate_metrics_report_config_name_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let config = create_config_with_duplicate_metrics_report_config_name();
+
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
             "Unexpected error: {:?}",
             err
         );
@@ -2240,6 +2284,21 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn validate_config_duplicate_metrics_report_config_name_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let config = create_config_with_duplicate_metrics_report_config_name();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
             "Unexpected error: {:?}",
             err
         );
