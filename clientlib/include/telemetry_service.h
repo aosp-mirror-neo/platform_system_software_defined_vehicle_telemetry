@@ -44,10 +44,12 @@ public:
     TelemetryServiceStatusCodes remove_metrics_config(const std::string& metricsConfigUuid,
                                                       void* listener, CbFunction cbFunc);
 
-    TelemetryServiceStatusCodes set_report_ready_listener(void* listener, CbFunction cbFunc);
+    TelemetryServiceStatusCodes set_report_ready_listener(void* listener,
+                                                          ReportReadyCallbackFunction cbFunc);
     TelemetryServiceStatusCodes clear_report_ready_listener();
-    TelemetryServiceStatusCodes get_metrics_report(int32_t report_number, const char* report_uuid,
-                                                   void* listener,
+    TelemetryServiceStatusCodes get_metrics_report(const char* metrics_config_uuid,
+                                                   const char* report_config_name,
+                                                   int32_t report_number, void* listener,
                                                    GetReportCallbackFunction cbFunc);
     TelemetryServiceStatusCodes set_status_listener(void* listener, CbFunction cbFunc);
     TelemetryServiceStatusCodes clear_status_listener();

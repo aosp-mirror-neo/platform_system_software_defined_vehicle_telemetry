@@ -28,5 +28,6 @@ private:
 
     static void on_report_received(void* listener, int32_t status_code, const char* status_message,
                                    const uint8_t* report, size_t size);
-    static void on_report_ready(void* listener, int32_t report_number, const char* report_uuid);
+    static void on_report_ready(void* listener, const char* metrics_report_uuid,
+                                const char* report_config_name, int32_t report_number);
 };

@@ -28,6 +28,17 @@ typedef struct ServiceHolder ServiceHolder;
 typedef void (*StatusCallbackFunction)(void*, int32_t, const char*);
 
 /**
+ * The report ready listener is called every time a new Metrics Report is ready to be downloaded.
+ *
+ * @param void* Pointer to the callback object associated with the callback function.
+ * @param metrics_config_uuid uuid of the metrics configuration of the ready report.
+ * @param report_config_name name of the metrics report config of the ready report.
+ * @param report_number report number of the ready metrics report.
+ *
+ */
+typedef void (*ReportReadyListenerFunction)(void*, const char*, const char*, int32_t);
+
+/**
  * The get report callback function relays the status of the get_metrics_report API call
  * If the API call was successful it also sends the serialized metrics report back to
  * the client
@@ -162,13 +173,14 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
  * @param holder An opaque pointer holding a reference to the telemetry_service
  * @param listener Reference to report ready listener object.
  * @param cbFunc Function pointer for the cbFunc that gets called when a report is ready. The
- * cbFunc takes a void pointer which points to the report listener sent to the telemetry
- * service by the client app and a const char* uuid which identifies the metrics config that
- * produced a report as params.
+ * cbFunc takes a void pointer that points to the report listener sent to the telemetry
+ * service by the client app, a const char* uuid, a const char* name and a int32_t that specify
+ * metrics config, metrics report name and report number of the report that is ready, respectively.
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int set_report_ready_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc);
+int set_report_ready_listener(ServiceHolder* holder, void* listener,
+                              ReportReadyListenerFunction cbFunc);
 
 /**
  * Clears a previously set report ready listener. Client can receive errors related to the
@@ -189,16 +201,19 @@ int clear_report_ready_listener(ServiceHolder* holder);
  * report listener object. If report is not found, an error is sent to the status listener.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
- * @param report_number Report number of the requested metrics report
- * @param report_uuid uuid of the requested metrics report
+ * @param metrics_config_uuid uuid of the metrics configuration of the requested report
+ * @param report_config_name name of the metrics report config of the requested report
+ * @param report_number report number of the requested metrics report
+ *
  * @param listener Reference to report listener object.
  * @param cbFunc pointer to callback function. Callback function is used to send the metrics report
  * as a byte array along with the size of the report, and the report listener object passed.
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int get_metrics_report(ServiceHolder* holder, int32_t report_number, const char* report_uuid,
-                       void* listener, GetReportCallbackFunction cbFunc);
+int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
+                       const char* report_config_name, int32_t report_number, void* listener,
+                       GetReportCallbackFunction cbFunc);
 
 /**
  * Sets a status listener that receives status codes and messages for misc errors related

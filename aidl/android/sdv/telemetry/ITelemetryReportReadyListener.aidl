@@ -9,7 +9,13 @@ package android.sdv.telemetry;
  */
 oneway interface ITelemetryReportReadyListener {
     /**
-     * Called by telemetry service to provide notifications on finished reports
+     * Called by telemetry service to provide notifications on finished reports.
+     *
+     * @param metricsConfigUuid uuid of the Metrics Config for which the report is ready.
+     * @param metricsReportConfigName the name of the Metrics Report Config for which the
+     *         report is ready.
+     * @param reportNumber report number of the report that is ready.
      */
-    void onReady(in int reportNumber, in @utf8InCpp String metricsConfigUuid);
+    void onReady(in @utf8InCpp String metricsConfigUuid,
+            in @utf8InCpp String metricsReportConfigName, in int reportNumber);
 }

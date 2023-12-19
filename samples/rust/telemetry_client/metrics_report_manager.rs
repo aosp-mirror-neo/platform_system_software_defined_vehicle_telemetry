@@ -12,21 +12,28 @@ use tokio::sync::mpsc;
 
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 
-extern "C" fn on_report_ready(
+/// Callback that handles report ready event.
+///
+/// # Safety
+///
+/// * `metrics_config_uuid` and `report_config_name` must point to C raw strings that satisfy
+///   `CStr::from_ptr` safety requirements.
+unsafe extern "C" fn on_report_ready(
     listener: *mut std::ffi::c_void,
+    metrics_config_uuid: *const std::ffi::c_char,
+    report_config_name: *const std::ffi::c_char,
     report_number: i32,
-    report_uuid: *const std::ffi::c_char,
 ) {
-    // SAFETY: This function is always safe to call
-    let uuid = unsafe {
-        // Convert *const std::ffi::c_char to &CStr
-        let c_str = CStr::from_ptr(report_uuid);
-
-        // Convert &CStr to String
-        c_str.to_str().unwrap().to_string()
-    };
-
-    info!("Report ready: {} report number: {}", uuid, report_number);
+    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+    // safety requirements.
+    unsafe {
+        info!(
+            "Report ready: {:?} {:?} report number: {}",
+            CStr::from_ptr(metrics_config_uuid),
+            CStr::from_ptr(report_config_name),
+            report_number
+        );
+    }
 
     // SAFETY: This function is always safe to call
     let report_manager = unsafe { &mut *(listener as *mut MetricsReportManager) };
@@ -37,8 +44,9 @@ extern "C" fn on_report_ready(
     unsafe {
         rust_to_c::get_metrics_report(
             report_manager.service as *mut rust_to_c::ServiceHolder,
+            metrics_config_uuid,
+            report_config_name,
             report_number,
-            report_uuid,
             listener,
             Some(on_report_received),
         );

@@ -36,27 +36,31 @@ impl MetricsReportListener {
     }
 
     pub fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
-        let uuid = metrics_report.metrics_config_uuid.clone();
+        let metrics_config_uuid = metrics_report.metrics_config_uuid.clone();
         let report_number = metrics_report.report_number as i32;
 
         self.metrics_report_store
             .lock()
             .unwrap()
-            .insert((uuid.clone(), report_number), metrics_report);
+            .insert((metrics_config_uuid.clone(), report_number), metrics_report);
         let listener = self.report_ready_listener.lock().unwrap();
         if let Some(listener_ref) = listener.as_ref() {
-            let _ = listener_ref.deref().onReady(report_number, &uuid);
+            let _ = listener_ref.deref().onReady(
+                &metrics_config_uuid,
+                &String::default(),
+                report_number,
+            );
         }
     }
 
     pub fn get_metrics_report(
         &self,
         report_number: i32,
-        metrics_report_uuid: &str,
+        metrics_config_uuid: &str,
     ) -> Result<MetricsReport, MetricsReportListenerError> {
         let report = {
             let mut report_container = self.metrics_report_store.lock().unwrap();
-            report_container.remove(&(metrics_report_uuid.to_string(), report_number))
+            report_container.remove(&(metrics_config_uuid.to_string(), report_number))
         };
         let Some(metrics_report) = report else {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
