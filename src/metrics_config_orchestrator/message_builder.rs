@@ -2,6 +2,7 @@
 
 mod node_value_to_protobuf_reflection;
 mod value_aggregator;
+pub(super) mod value_aggregator_factory;
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::collections::HashMap;
@@ -9,7 +10,6 @@ use std::sync::Mutex;
 use thiserror::Error;
 
 use node_value_to_protobuf_reflection::{ReflectRepeatedMutExt, ToReflectValueBox};
-pub use value_aggregator::AggregationFactory;
 use value_aggregator::{AggregationError, ValueAggregator};
 
 pub(crate) trait MessageBuilder: Send + Sync {
