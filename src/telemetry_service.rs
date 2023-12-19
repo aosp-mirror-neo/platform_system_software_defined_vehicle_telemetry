@@ -55,6 +55,9 @@ fn get_error_code_and_message(err: ConfigError) -> (i32, String) {
         ConfigError::DuplicateTriggerDefinition { .. } => {
             StatusCodes::ADD_METRICS_CONFIG_FAILED_DUPLICATE_TRIGGER_DEFINITION
         }
+        ConfigError::DuplicateMetricsReportConfigName { .. } => {
+            StatusCodes::ADD_METRICS_CONFIG_FAILED_DUPLICATE_METRICS_REPORT_CONFIG
+        }
         ConfigError::CycledPublishersTriggers => {
             StatusCodes::ADD_METRICS_CONFIG_FAILED_CYCLED_PUBLISHERS_TRIGGERS
         }
