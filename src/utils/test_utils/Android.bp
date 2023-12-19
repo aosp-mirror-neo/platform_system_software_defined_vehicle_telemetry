@@ -7,5 +7,4 @@ rust_protobuf {
         "-I external/protobuf/src",
     ],
     source_stem: "sdv_telemetry_test_proto",
-    use_protobuf3: true,
 }

@@ -43,7 +43,6 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "sdvtelemetry_proto_rust_source",
-    use_protobuf3: true,
 }
 
 rust_library {
