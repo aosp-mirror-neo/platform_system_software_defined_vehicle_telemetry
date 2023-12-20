@@ -6,7 +6,6 @@ package {
 
 cc_library {
     name: "libsdvtelemetry_proto_cpp",
-    host_supported: true,
     srcs: [":sdvtelemetryservice-proto-srcs"],
     proto: {
         export_proto_headers: true,
@@ -35,7 +34,6 @@ rust_defaults {
 
 rust_protobuf {
     name: "libsdvtelemetry_proto_rust",
-    host_supported: true,
     crate_name: "sdvtelemetry_proto_rust",
     protos: [":sdvtelemetryservice-proto-srcs"],
     proto_flags: [
@@ -49,7 +47,6 @@ rust_library {
     name: "libsdv_telemetry",
     crate_name: "sdv_telemetry",
     defaults: ["telemetry@rust_defaults"],
-    host_supported: true,
     srcs: [
         "src/telemetry_service.rs",
     ],
@@ -68,7 +65,6 @@ rust_library {
     name: "libsdv_telemetry_configurable_publisher",
     crate_name: "sdv_telemetry_configurable_publisher",
     defaults: ["telemetry@rust_defaults"],
-    host_supported: true,
     srcs: [
         "src/configurable_publisher_registry_service.rs",
     ],
@@ -101,7 +97,7 @@ rust_binary {
     system_ext_specific: true,
 }
 
-rust_test_host {
+rust_test {
     name: "libsdv_telemetry_unit_tests",
     defaults: ["telemetry@rust_defaults"],
     srcs: [
@@ -136,9 +132,12 @@ rust_test_host {
         },
     },
     auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
 }
 
-rust_test_host {
+rust_test {
     name: "libsdv_telemetry_configurable_publisher_unit_tests",
     defaults: ["telemetry@rust_defaults"],
     srcs: [
@@ -173,6 +172,9 @@ rust_test_host {
         },
     },
     auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
 }
 
 rust_bindgen {

@@ -32,7 +32,6 @@ cc_library {
         "src/telemetry_service.cpp",
         "src/lib.cpp",
     ],
-    host_supported: true,
     defaults: [
         "telemetry_defaults",
     ],

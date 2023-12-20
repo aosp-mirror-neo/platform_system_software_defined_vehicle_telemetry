@@ -13,7 +13,6 @@ aidl_interface {
     ],
     vendor_available: false,
     unstable: true,
-    host_supported: true,
     backend: {
         java: {
             enabled: false,
@@ -34,7 +33,6 @@ aidl_interface {
     ],
     vendor_available: false,
     unstable: true,
-    host_supported: true,
     backend: {
         java: {
             enabled: false,

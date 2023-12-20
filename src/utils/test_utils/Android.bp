@@ -1,6 +1,5 @@
 rust_protobuf {
     name: "libsdv_telemetry_test_proto",
-    host_supported: true,
     crate_name: "sdv_telemetry_test_proto",
     protos: ["test_message.proto"],
     proto_flags: [

@@ -1,6 +1,5 @@
 rust_defaults {
     name: "sdv_ast_defaults",
-    host_supported: true,
     rustlibs: [
         "liblog_rust",
         "liblogger",
@@ -19,7 +18,7 @@ rust_library {
     ],
 }
 
-rust_test_host {
+rust_test {
     name: "sdv_telem_expr_parser_unit_tests",
     defaults: ["sdv_ast_defaults"],
     srcs: [
@@ -33,4 +32,7 @@ rust_test_host {
         "automotive-sdv-tests",
     ],
     auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
 }
