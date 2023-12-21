@@ -158,6 +158,7 @@ impl MetricsReportGeneratorImpl {
                     report.report_reason = ReportReason::REGULAR.into();
                     report.metrics_config_uuid = self_clone.config_uuid.clone();
                     report.metrics_config_version = self_clone.config_version;
+                    report.report_config_name = self_clone.name.clone();
                     report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
 
                     (self_clone.report_ready_callback)(report);
@@ -291,6 +292,7 @@ mod test {
         assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
         assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
+        assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
         // as built by MockMessageBuilder
         assert!(report.report_data.is::<TestMessage>());
     }

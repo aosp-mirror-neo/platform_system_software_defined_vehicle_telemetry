@@ -9,16 +9,18 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
-pub struct MetricsReportListener {
+use crate::utils::collection_extension::HashMapExtension;
+
+pub(crate) struct MetricsReportListener {
     /// Hashmap to store the MetricsReport until the client asks for it.
-    metrics_report_store: Mutex<HashMap<(String, i32), MetricsReport>>,
+    metrics_report_store: Mutex<HashMap<(String, String, i32), MetricsReport>>,
     /// Report Ready listener to inform the client when a report is ready
     report_ready_listener: Mutex<Option<Strong<dyn ITelemetryReportReadyListener>>>,
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum MetricsReportListenerError {
+pub(crate) enum MetricsReportListenerError {
     #[error("Report Ready Listener already exists")]
     ReportReadyListenerExists,
     #[error("Report Ready Listener not set")]
@@ -28,39 +30,49 @@ pub enum MetricsReportListenerError {
 }
 
 impl MetricsReportListener {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         MetricsReportListener {
             metrics_report_store: Mutex::new(HashMap::new()),
             report_ready_listener: Mutex::new(None),
         }
     }
 
-    pub fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
+    pub(crate) fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
         let metrics_config_uuid = metrics_report.metrics_config_uuid.clone();
+        let report_config_name = metrics_report.report_config_name.clone();
         let report_number = metrics_report.report_number as i32;
 
+        let report_key = (metrics_config_uuid.clone(), report_config_name.clone(), report_number);
+        // Insert the report and panic if report with the same key already exists.
         self.metrics_report_store
             .lock()
             .unwrap()
-            .insert((metrics_config_uuid.clone(), report_number), metrics_report);
+            .try_insert_value(report_key, metrics_report)
+            .unwrap();
+
         let listener = self.report_ready_listener.lock().unwrap();
         if let Some(listener_ref) = listener.as_ref() {
             let _ = listener_ref.deref().onReady(
                 &metrics_config_uuid,
-                &String::default(),
+                &report_config_name,
                 report_number,
             );
         }
     }
 
-    pub fn get_metrics_report(
+    pub(crate) fn get_metrics_report(
         &self,
-        report_number: i32,
         metrics_config_uuid: &str,
+        report_config_name: &str,
+        report_number: i32,
     ) -> Result<MetricsReport, MetricsReportListenerError> {
         let report = {
             let mut report_container = self.metrics_report_store.lock().unwrap();
-            report_container.remove(&(metrics_config_uuid.to_string(), report_number))
+            report_container.remove(&(
+                metrics_config_uuid.to_owned(),
+                report_config_name.to_owned(),
+                report_number,
+            ))
         };
         let Some(metrics_report) = report else {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
@@ -69,7 +81,7 @@ impl MetricsReportListener {
         Ok(metrics_report)
     }
 
-    pub fn set_report_ready_listener(
+    pub(crate) fn set_report_ready_listener(
         &self,
         listener: &Strong<dyn ITelemetryReportReadyListener>,
     ) -> Result<(), MetricsReportListenerError> {
@@ -82,7 +94,7 @@ impl MetricsReportListener {
         }
     }
 
-    pub fn clear_report_ready_listener(&self) -> Result<(), MetricsReportListenerError> {
+    pub(crate) fn clear_report_ready_listener(&self) -> Result<(), MetricsReportListenerError> {
         let mut listener = self.report_ready_listener.lock().unwrap();
         if listener.is_none() {
             return Err(MetricsReportListenerError::ReportReadyListenerNotSet);
