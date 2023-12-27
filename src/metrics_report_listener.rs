@@ -40,7 +40,7 @@ impl MetricsReportListener {
     pub(crate) fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
         let metrics_config_uuid = metrics_report.metrics_config_uuid.clone();
         let report_config_name = metrics_report.report_config_name.clone();
-        let report_number = metrics_report.report_number as i32;
+        let report_number = metrics_report.report_number;
 
         let report_key = (metrics_config_uuid.clone(), report_config_name.clone(), report_number);
         // Insert the report and panic if report with the same key already exists.

@@ -225,7 +225,7 @@ message MetricsReport {
   // Monotonously increasing report number in Metrics Configuration.
   // Starts from 1 and incremented by 1 for each new report.
   // Report numbers are reset after a power down (turn off) or process restart.
-  uint32 report_number = 1;
+  int32 report_number = 1;
 
   // Required.
   // Report generation timestamp.

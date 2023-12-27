@@ -7,7 +7,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
 };
 use std::marker::{Send, Sync};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, task};
@@ -47,7 +47,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) triggers: Vec<Arc<dyn Trigger>>,
 
     is_active: AsyncMutex<bool>,
-    report_number: AtomicU32,
+    report_number: AtomicI32,
     subscriber: TriggerSubscriber,
     message_builder: Box<dyn MessageBuilder>,
 }
@@ -167,7 +167,7 @@ impl MetricsReportGeneratorImpl {
 #[cfg(test)]
 mod test {
     use lazy_static::lazy_static;
-    use std::{thread, time::Duration};
+    use std::{sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::watch;
 
     use super::*;

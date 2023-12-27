@@ -658,6 +658,7 @@ mod tests {
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
+    const REPORT_NUMBER: i32 = 42;
 
     struct MockMetricsConfigOrchestratorImpl {
         num_initialize_config_calls: Arc<Mutex<i32>>,
@@ -707,7 +708,7 @@ mod tests {
         status_message: Arc<Mutex<String>>,
         num_on_result_calls: Arc<Mutex<i32>>,
         uuid: Arc<Mutex<String>>,
-        report_number: Arc<Mutex<u32>>,
+        report_number: Arc<Mutex<i32>>,
         metrics_report: Arc<Mutex<Option<MetricsReport>>>,
     }
 
@@ -737,7 +738,7 @@ mod tests {
             *self.num_on_result_calls.lock().unwrap()
         }
 
-        fn get_report_number(&self) -> u32 {
+        fn get_report_number(&self) -> i32 {
             *self.report_number.lock().unwrap()
         }
 
@@ -781,7 +782,7 @@ mod tests {
     #[derive(Clone)]
     struct MockTelemetryReportReadyListener {
         num_on_ready_report_calls: Arc<Mutex<i32>>,
-        report_number: Arc<Mutex<u32>>,
+        report_number: Arc<Mutex<i32>>,
         uuid: Arc<Mutex<String>>,
     }
 
@@ -800,7 +801,7 @@ mod tests {
             *self.num_on_ready_report_calls.lock().unwrap()
         }
 
-        fn get_report_number(&self) -> u32 {
+        fn get_report_number(&self) -> i32 {
             *self.report_number.lock().unwrap()
         }
 
@@ -819,7 +820,7 @@ mod tests {
             let mut num_calls = self.num_on_ready_report_calls.lock().unwrap();
             *num_calls += 1;
             let mut report_number = self.report_number.lock().unwrap();
-            *report_number = metrics_report_number as u32;
+            *report_number = metrics_report_number;
             let mut uuid = self.uuid.lock().unwrap();
             *uuid = metrics_config_uuid.to_owned();
             Ok(())
@@ -1185,7 +1186,6 @@ mod tests {
     #[tokio::test]
     async fn set_report_ready_listener_and_check_on_ready_calls() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-        const REPORT_NUMBER: u32 = 42;
 
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
@@ -1209,11 +1209,7 @@ mod tests {
         );
 
         // Call onReady on report ready listener
-        let _ = report_ready_listener.onReady(
-            UUID,
-            &String::default(),
-            REPORT_NUMBER.try_into().unwrap(),
-        );
+        let _ = report_ready_listener.onReady(UUID, &String::default(), REPORT_NUMBER);
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID, &report_ready_listener.get_uuid());
@@ -1308,7 +1304,6 @@ mod tests {
     #[tokio::test]
     async fn get_metrics_report() {
         const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-        const REPORT_NUMBER: u32 = 42;
 
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
@@ -1351,12 +1346,7 @@ mod tests {
         test_environment.service.metrics_report_listener.on_report_ready(report);
         let _ = test_environment
             .service
-            .getMetricsReport(
-                UUID,
-                &String::default(),
-                REPORT_NUMBER.try_into().unwrap(),
-                &binder_report_listener,
-            )
+            .getMetricsReport(UUID, &String::default(), REPORT_NUMBER, &binder_report_listener)
             .await;
 
         assert_eq!(StatusCodes::GET_FINISHED_REPORT_SUCCEEDED.0, report_listener.get_status_code());
