@@ -298,42 +298,46 @@ message ProtoMessageBuilder {
     string field_name = 1;
 
     // Required.
-    // Index of root expression node. The expression node's evaluation output
-    // is either directly used as the value of the field, or aggregated
-    // based on the aggregation type.
-    optional uint32 expression_node_index = 2;
-
-    // Every time the field value is built, the node output can be aggregated
-    // with the past values of this field to produce a new field value.
-    enum AggregationType {
-      AGGREGATION_TYPE_UNSPECIFIED = 0;
-
-      // No aggregation is performed. The expression node's latest
-      // evaluation output will be used as the field value.
-      NO_AGGREGATION = 1;
-
-      // Concatenation of node evaluation outputs into a vector.
-      VECTOR = 2;
-
-      // Maximum numeric value of past and current node output value.
-      // Requires the expression node to evaluate to a numeric value.
-      MAX = 3;
-
-      // Minimum numeric value of past and current node output value.
-      // Requires the expression node to evaluate to a numeric value.
-      MIN = 4;
-
-      // Numeric average of all node output values.
-      // Requires the expression node to evaluate to a numeric value.
-      AVG = 5;
-
-      // Count is incremented by 1 every time the message is built.
-      COUNT = 6;
+    // Value of the field.
+    oneof aggregated_field_value {
+      NoAggregation no_aggregation = 2;
+      VectorAggregation vector_aggregation = 3;
+      MaxAggregation max_aggregation = 4;
+      MinAggregation min_aggregation = 5;
+      AvgAggregation avg_aggregation = 6;
+      CountAggregation count_aggregation = 7;
     }
 
-    // Required.
-    // Type of aggregation performed on the field.
-    AggregationType aggregation_type = 3;
+    // No aggregation is performed. The expression node's latest
+    // evaluation output will be used as the field value.
+    message NoAggregation {
+      optional uint32 expression_node_index = 1;
+    }
+
+    // Concatenation of node evaluation outputs into a vector.
+    message VectorAggregation {
+      optional uint32 expression_node_index = 1;
+    }
+
+    // Maximum numeric value of past and current node output value.
+    // Requires the expression node to evaluate to a numeric value.
+    message MaxAggregation {
+      optional uint32 expression_node_index = 1;
+    }
+
+    // Minimum numeric value of past and current node output value.
+    message MinAggregation {
+      optional uint32 expression_node_index = 1;
+    }
+
+    // Numeric average of all node output values.
+    message AvgAggregation {
+      optional uint32 expression_node_index = 1;
+    }
+
+    // Count is incremented by 1 every time the message is built.
+    // The first value is 1 and increments from there.
+    message CountAggregation {}
   }
 
   // Required.
