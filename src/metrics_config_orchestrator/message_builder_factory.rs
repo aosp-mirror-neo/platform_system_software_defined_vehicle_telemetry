@@ -12,7 +12,7 @@ use std::{
 use thiserror::Error;
 
 use crate::{
-    expr::{ast::Node, ast_extensions::NodeValueType},
+    expr::{ast::Node, node_value_type::NodeValueType},
     metrics_config_orchestrator::message_builder::{
         value_aggregator_factory::{
             ValueAggregatorFactory, ValueAggregatorFactoryCreateContext,

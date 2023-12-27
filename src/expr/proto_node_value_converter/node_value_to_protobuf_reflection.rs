@@ -4,8 +4,7 @@
 
 use protobuf::reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType};
 
-use crate::expr::node_value::NodeValue;
-use crate::metrics_config_orchestrator::message_builder::MessageBuilderError;
+use crate::expr::{node_errors::NodeError, node_value::NodeValue};
 
 /// Implementing type will be able to convert self into a ReflectValueBox.
 pub trait ToReflectValueBox {
@@ -15,41 +14,35 @@ pub trait ToReflectValueBox {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError>;
+    ) -> Result<ReflectValueBox, NodeError>;
 }
 
 /// Extensions for ReflectRepeatedMut.
 pub trait ReflectRepeatedMutExt {
     /// If NodeValue holds a list, it will push all the contents of the list into self.
-    fn push_node_value_content(
-        &mut self,
-        node_value: &NodeValue,
-    ) -> Result<(), MessageBuilderError>;
+    fn push_node_value_content(&mut self, node_value: &NodeValue) -> Result<(), NodeError>;
 
     /// Convert every vector element into a ReflectValueBox and pushes it to self.
-    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), MessageBuilderError>
+    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeError>
     where
         T: ToReflectValueBox;
 }
 
 impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
-    fn push_node_value_content(
-        &mut self,
-        node_value: &NodeValue,
-    ) -> Result<(), MessageBuilderError> {
+    fn push_node_value_content(&mut self, node_value: &NodeValue) -> Result<(), NodeError> {
         match node_value {
             NodeValue::BoolList(v) => self.push_vec_content(v),
             NodeValue::Int32List(v) => self.push_vec_content(v),
             NodeValue::Int64List(v) => self.push_vec_content(v),
             NodeValue::FloatList(v) => self.push_vec_content(v),
             NodeValue::DoubleList(v) => self.push_vec_content(v),
-            _ => Err(MessageBuilderError::RepeatedFieldWrongAssignment {
-                value: format!("{:?}", node_value),
-            }),
+            _ => {
+                Err(NodeError::RepeatedFieldWrongAssignment { value: format!("{:?}", node_value) })
+            }
         }
     }
 
-    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), MessageBuilderError>
+    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeError>
     where
         T: ToReflectValueBox,
     {
@@ -67,8 +60,8 @@ impl ToReflectValueBox for NodeValue {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError> {
-        let err_provider = || MessageBuilderError::ValueToProtoConversionError {
+    ) -> Result<ReflectValueBox, NodeError> {
+        let err_provider = || NodeError::ValueToProtoConversionError {
             value: format!("{:?}", self),
             refl_type: format!("{:?}", protobuf_type),
         };
@@ -99,11 +92,11 @@ impl ToReflectValueBox for bool {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError> {
+    ) -> Result<ReflectValueBox, NodeError> {
         if matches!(protobuf_type, ProtobufRuntimeType::Bool) {
             return Ok(ReflectValueBox::Bool(*self));
         }
-        Err(MessageBuilderError::ValueToProtoConversionError {
+        Err(NodeError::ValueToProtoConversionError {
             value: format!("{:?}", self),
             refl_type: format!("{:?}", protobuf_type),
         })
@@ -115,7 +108,7 @@ impl ToReflectValueBox for i32 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError> {
+    ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
             ProtobufRuntimeType::I32 => Ok(ReflectValueBox::I32(*self)),
             ProtobufRuntimeType::Enum(enum_descriptor) => {
@@ -131,9 +124,9 @@ impl ToReflectValueBox for i64 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError> {
+    ) -> Result<ReflectValueBox, NodeError> {
         let err_provider = |_| {
-            Err(MessageBuilderError::ValueToProtoConversionError {
+            Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             })
@@ -153,7 +146,7 @@ impl ToReflectValueBox for i64 {
                 .map_or_else(err_provider, |v| {
                     Ok(ReflectValueBox::Enum(enum_descriptor.clone(), v))
                 }),
-            _ => Err(MessageBuilderError::ValueToProtoConversionError {
+            _ => Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -166,7 +159,7 @@ impl ToReflectValueBox for f32 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError> {
+    ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self)),
             _ => (*self as f64).to_reflect_value_box(protobuf_type),
@@ -179,11 +172,11 @@ impl ToReflectValueBox for f64 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, MessageBuilderError> {
+    ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self as f32)),
             ProtobufRuntimeType::F64 => Ok(ReflectValueBox::F64(*self)),
-            _ => Err(MessageBuilderError::ValueToProtoConversionError {
+            _ => Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),

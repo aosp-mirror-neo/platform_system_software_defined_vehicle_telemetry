@@ -27,8 +27,8 @@ use thiserror::Error;
 // Crate dependencies.
 use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
-use crate::expr::ast_extensions::NodeValueType;
 use crate::expr::node_errors::{MessageProviderError, NodeError};
+use crate::expr::node_value_type::NodeValueType;
 use crate::utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
 };
@@ -852,8 +852,8 @@ mod tests {
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::expr::ast_extensions::NodeValueType;
     use crate::expr::node_value::NodeValue;
+    use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;

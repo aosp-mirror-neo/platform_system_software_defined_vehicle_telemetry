@@ -14,12 +14,11 @@ use std::{
 };
 
 use crate::expr::{
-    ast_extensions::{
-        FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
-        VisitStatus,
-    },
     node_errors::{DescriptorProviderError, MessageProviderError, NodeError},
     node_value::NodeValue,
+    node_value_type::{
+        FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
+    },
 };
 
 /// Creates rust nodes from protobuf expression nodes.
@@ -107,6 +106,14 @@ pub enum Node {
         /// Reference to the right child.
         right: Option<Arc<Node>>,
     },
+}
+
+/// Used for cycle detection in the expression nodes.
+#[derive(Clone, PartialEq)]
+enum VisitStatus {
+    NotVisited,
+    Visiting,
+    Visited,
 }
 
 /// Implementation of NodeFactory trait.

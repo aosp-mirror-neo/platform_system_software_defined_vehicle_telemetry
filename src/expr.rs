@@ -1,7 +1,8 @@
-pub mod ast;
-pub mod ast_extensions;
-pub mod node_errors;
-pub mod node_value;
+pub(crate) mod ast;
+pub(crate) mod node_errors;
+pub(crate) mod node_value;
+pub(crate) mod node_value_type;
+pub(crate) mod proto_node_value_converter;
 
 #[cfg(test)]
-pub mod mock;
+pub(crate) mod mock;

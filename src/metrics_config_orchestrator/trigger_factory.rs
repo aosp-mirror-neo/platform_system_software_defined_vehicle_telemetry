@@ -7,7 +7,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
-use crate::expr::{ast::Node, ast_extensions::NodeValueType};
+use crate::expr::{ast::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::{
     trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,
 };

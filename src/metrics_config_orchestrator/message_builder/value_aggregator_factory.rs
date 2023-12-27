@@ -5,7 +5,7 @@ use thiserror::Error;
 
 use crate::expr::{
     ast::Node,
-    ast_extensions::{NodeValueType, NodeValueTypeExtension},
+    node_value_type::{NodeValueType, NodeValueTypeExtension},
 };
 use crate::metrics_config_orchestrator::message_builder::{
     value_aggregator::{
