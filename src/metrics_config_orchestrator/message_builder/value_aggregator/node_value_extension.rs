@@ -31,6 +31,7 @@ impl NodeValueExtension for NodeValue {
             NodeValue::Int64(val) => NodeValue::Int64List(vec![*val]),
             NodeValue::Float(val) => NodeValue::FloatList(vec![*val]),
             NodeValue::Double(val) => NodeValue::DoubleList(vec![*val]),
+            NodeValue::Message(val) => NodeValue::MessageList(vec![val.clone_box()]),
             _ => {
                 return Err(AggregationError::VectorInitializationError {
                     value: format!("{:?}", self),
@@ -61,6 +62,9 @@ impl NodeValueExtension for NodeValue {
             }
             NodeValue::DoubleList(v) => {
                 v.push(value.get_double(&err_provider)?);
+            }
+            NodeValue::MessageList(v) => {
+                v.push(value.get_message(err_provider)?.clone_box());
             }
             _ => panic!("push() should never be called on non-list: {:?}", self),
         }

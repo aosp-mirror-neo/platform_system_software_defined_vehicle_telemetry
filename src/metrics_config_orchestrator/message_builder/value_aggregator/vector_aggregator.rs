@@ -38,6 +38,8 @@ impl ValueAggregator for VectorAggregator {
 
 #[cfg(test)]
 mod tests {
+    use protobuf::MessageDyn;
+
     use super::*;
     use crate::expr::mock::TEST_MESSAGE;
 
@@ -80,6 +82,25 @@ mod tests {
     }
 
     #[test]
+    fn test_compute_message_value_vector_aggregation_ok() {
+        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let mut aggregate_message_value = VectorAggregator::new(&Arc::new(Node::ConstantLeaf {
+            value: NodeValue::Message(boxed_message.clone()),
+        }));
+
+        // compute 5 times to see the vector is building up
+        for i in 0..5 {
+            let expected_vec = vec![boxed_message.clone(); i + 1];
+
+            // action
+            let res = aggregate_message_value.compute().unwrap();
+
+            // assert
+            assert_eq!(res, NodeValue::MessageList(expected_vec));
+        }
+    }
+
+    #[test]
     fn test_compute_handles_none_value() {
         let mut aggregator =
             VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
@@ -87,15 +108,6 @@ mod tests {
         let res = aggregator.compute().unwrap();
 
         assert_eq!(res, NodeValue::None);
-    }
-
-    #[test]
-    fn test_compute_vector_aggregate_message_value_fails() {
-        let mut aggregate_message_value = VectorAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Message(Box::new(TEST_MESSAGE.clone())),
-        }));
-
-        assert!(aggregate_message_value.compute().is_err());
     }
 
     #[test]

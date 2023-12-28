@@ -5,7 +5,7 @@
 //! message, as well as all the values that a FieldLeafNode can select.
 
 use protobuf::{
-    reflect::{ReflectFieldRef, ReflectValueRef},
+    reflect::{ReflectEqMode, ReflectFieldRef, ReflectValueRef},
     MessageDyn,
 };
 use sdvtelemetry_proto_rust::expression::{
@@ -63,6 +63,9 @@ pub enum NodeValue {
 
     /// Repeated double values.
     DoubleList(Vec<f64>),
+
+    /// Repeated protobuf messages.
+    MessageList(Vec<Box<dyn MessageDyn>>),
 }
 
 /// Check if two floating point values are approximately equal.
@@ -93,6 +96,9 @@ impl PartialEq for NodeValue {
             }
             (NodeValue::DoubleList(v1), NodeValue::DoubleList(v2)) => {
                 v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| approximately_equal(*a, *b))
+            }
+            (NodeValue::MessageList(v1), NodeValue::MessageList(v2)) => {
+                v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| a == b)
             }
             _ => false,
         }
@@ -503,6 +509,11 @@ impl NodeValue {
                 let target_value = element.get_double(&err_provider)?;
                 v.iter().any(|x| approximately_equal(*x, target_value))
             }
+            NodeValue::MessageList(v) => {
+                let target_value = element.get_message(err_provider)?;
+                let mode = ReflectEqMode::default();
+                v.iter().any(|x| x.reflect_eq_dyn(target_value, &mode))
+            }
             _ => return Err(err_provider()),
         })
     }
@@ -531,6 +542,11 @@ impl NodeValue {
             NodeValue::DoubleList(v) => {
                 let target_value = element.get_double(&err_provider)?;
                 v.iter().all(|x| approximately_equal(*x, target_value))
+            }
+            NodeValue::MessageList(v) => {
+                let target_value = element.get_message(err_provider)?;
+                let mode = ReflectEqMode::default();
+                v.iter().all(|x| x.reflect_eq_dyn(target_value, &mode))
             }
             _ => return Err(err_provider()),
         })
@@ -605,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn test_from_constant_leaf_node() -> Result<(), NodeError> {
+    fn from_constant_leaf_node() -> Result<(), NodeError> {
         // setup
         let mut constant_leaf_node_bool = ConstantLeafNode::new();
         constant_leaf_node_bool.set_bool_value(true);
@@ -647,7 +663,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_no_field_names_ok() -> Result<(), NodeError> {
+    fn extract_value_no_field_names_ok() -> Result<(), NodeError> {
         // setup
         let msg = TEST_MESSAGE.clone();
 
@@ -664,8 +680,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_explicitly_optional_field_not_set_returns_none() -> Result<(), NodeError>
-    {
+    fn extract_value_explicitly_optional_field_not_set_returns_none() -> Result<(), NodeError> {
         assert_eq!(
             NodeValue::extract_value(
                 Box::new(EMPTY_TEST_MESSAGE.clone()),
@@ -684,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_primitive_field_not_set_uses_default_values() -> Result<(), NodeError> {
+    fn extract_value_primitive_field_not_set_uses_default_values() -> Result<(), NodeError> {
         assert_eq!(
             NodeValue::extract_value(
                 Box::new(EMPTY_TEST_MESSAGE.clone()),
@@ -710,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_message_field_not_set_returns_none() -> Result<(), NodeError> {
+    fn extract_value_message_field_not_set_returns_none() -> Result<(), NodeError> {
         assert_eq!(
             NodeValue::extract_value(
                 Box::new(EMPTY_TEST_MESSAGE.clone()),
@@ -722,7 +737,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_repeated_field_not_set_returns_empty_list() -> Result<(), NodeError> {
+    fn extract_value_repeated_field_not_set_returns_empty_list() -> Result<(), NodeError> {
         assert_eq!(
             NodeValue::extract_value(
                 Box::new(EMPTY_TEST_MESSAGE.clone()),
@@ -734,7 +749,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_int_field_ok() -> Result<(), NodeError> {
+    fn extract_value_int_field_ok() -> Result<(), NodeError> {
         let field_names = ["int_field".to_string()];
 
         assert_eq!(
@@ -745,7 +760,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_float_field_ok() -> Result<(), NodeError> {
+    fn extract_value_float_field_ok() -> Result<(), NodeError> {
         let field_names = ["float_field".to_string()];
 
         assert_eq!(
@@ -756,7 +771,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_enum_field_ok() -> Result<(), NodeError> {
+    fn extract_value_enum_field_ok() -> Result<(), NodeError> {
         let field_names = ["enum_field".to_string()];
 
         assert_eq!(
@@ -767,7 +782,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_message_field_ok() -> Result<(), NodeError> {
+    fn extract_value_message_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["message_field".to_string()];
         let expected_value = NodeValue::Message(Box::new(msg.message_field.clone().unwrap()));
@@ -781,7 +796,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_field_has_default_value_ok() -> Result<(), NodeError> {
+    fn extract_value_field_has_default_value_ok() -> Result<(), NodeError> {
         let mut msg = TestMessage::new();
         msg.int_field = 0;
         msg.float_field = 0.0;
@@ -808,7 +823,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_nested_field_not_set_ok() -> Result<(), NodeError> {
+    fn extract_value_nested_field_not_set_ok() -> Result<(), NodeError> {
         let field_names = ["message_field".to_string(), "int_field".to_string()];
 
         assert_eq!(
@@ -819,7 +834,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_nested_singular_field_ok() -> Result<(), NodeError> {
+    fn extract_value_nested_singular_field_ok() -> Result<(), NodeError> {
         let field_names = ["message_field".to_string(), "bool_field".to_string()];
 
         assert_eq!(
@@ -830,7 +845,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_repeated_bool_field_ok() -> Result<(), NodeError> {
+    fn extract_value_repeated_bool_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["repeated_bools".to_string()];
         let repeated_bools = msg.repeated_bools.clone();
@@ -843,7 +858,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_repeated_int_field_ok() -> Result<(), NodeError> {
+    fn extract_value_repeated_int_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["repeated_i64s".to_string()];
         let repeated_i64s = msg.repeated_i64s.clone();
@@ -856,7 +871,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_repeated_double_field_ok() -> Result<(), NodeError> {
+    fn extract_value_repeated_double_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["repeated_doubles".to_string()];
         let repeated_doubles = msg.repeated_doubles.clone();
@@ -869,7 +884,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_repeated_enum_field_ok() -> Result<(), NodeError> {
+    fn extract_value_repeated_enum_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["repeated_enums".to_string()];
         let repeated_i32s = msg.repeated_enums.iter().map(|x| x.value()).collect();
@@ -882,7 +897,24 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_nested_repeated_field_ok() -> Result<(), NodeError> {
+    fn extract_value_repeated_message_field_ok() -> Result<(), NodeError> {
+        let msg = TEST_MESSAGE.clone();
+        let field_names = ["repeated_messages".to_string()];
+        let repeated_msgs: Vec<Box<dyn MessageDyn>> = msg
+            .repeated_messages
+            .iter()
+            .map(|x| Box::new(x.clone()) as Box<dyn MessageDyn>)
+            .collect();
+
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg), &field_names)?,
+            NodeValue::MessageList(repeated_msgs)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn extract_value_nested_repeated_field_ok() -> Result<(), NodeError> {
         let msg = TEST_MESSAGE.clone();
         let field_names = ["message_field".to_string(), "repeated_i32s".to_string()];
         let repeated_i32s = msg.message_field.repeated_i32s.clone();
@@ -895,7 +927,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_string_field_should_err() {
+    fn extract_value_string_field_should_err() {
         let field_names = ["string_field".to_string()];
 
         assert!(matches!(
@@ -905,17 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_repeated_message_field_should_err() {
-        let field_names = ["repeated_messages".to_string()];
-
-        assert!(matches!(
-            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).err().unwrap(),
-            NodeError::UnsupportedRepeatedFieldType { .. }
-        ));
-    }
-
-    #[test]
-    fn test_extract_value_repeated_message_as_intermediate_field_name_should_err() {
+    fn extract_value_repeated_message_as_intermediate_field_name_should_err() {
         let field_names = ["repeated_messages".to_string(), "bool_field".to_string()];
 
         assert!(matches!(
@@ -925,7 +947,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_value_nonexistent_field_should_err() {
+    fn extract_value_nonexistent_field_should_err() {
         let field_names = ["foo".to_string()];
 
         assert!(matches!(
@@ -935,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_requires_boolean_types() {
+    fn operate_logical_requires_boolean_types() {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
@@ -950,7 +972,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_and() -> Result<(), NodeError> {
+    fn operate_logical_and() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
         let none_val = NodeValue::None;
@@ -967,7 +989,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_and_short_circuits() -> Result<(), NodeError> {
+    fn operate_logical_and_short_circuits() -> Result<(), NodeError> {
         let false_val = NodeValue::Bool(false);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -985,7 +1007,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_and_short_circuiting_attempted() -> Result<(), NodeError> {
+    fn operate_logical_and_short_circuiting_attempted() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1003,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_or() -> Result<(), NodeError> {
+    fn operate_logical_or() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
         let none_val = NodeValue::None;
@@ -1020,7 +1042,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_or_short_circuits() -> Result<(), NodeError> {
+    fn operate_logical_or_short_circuits() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1038,7 +1060,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_or_short_circuiting_attempted() -> Result<(), NodeError> {
+    fn operate_logical_or_short_circuiting_attempted() -> Result<(), NodeError> {
         let false_val = NodeValue::Bool(false);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1056,7 +1078,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_xor() -> Result<(), NodeError> {
+    fn operate_logical_xor() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
         let none_val = NodeValue::None;
@@ -1073,7 +1095,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_logical_not() -> Result<(), NodeError> {
+    fn operate_logical_not() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
@@ -1095,7 +1117,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_requires_numeric_types() {
+    fn operate_arithmetic_requires_numeric_types() {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
@@ -1110,7 +1132,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_propagates_up_none_values() {
+    fn operate_arithmetic_propagates_up_none_values() {
         let int_val = NodeValue::Int32(1);
         let none_val = NodeValue::None;
 
@@ -1121,7 +1143,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_add_integers() -> Result<(), NodeError> {
+    fn operate_arithmetic_add_integers() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let twenty = NodeValue::Int32(20);
 
@@ -1131,7 +1153,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_add_floats() -> Result<(), NodeError> {
+    fn operate_arithmetic_add_floats() -> Result<(), NodeError> {
         let five = NodeValue::Float(5.2);
         let twenty = NodeValue::Double(20.1);
 
@@ -1141,7 +1163,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_subtract_integers() -> Result<(), NodeError> {
+    fn operate_arithmetic_subtract_integers() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let twenty = NodeValue::Int32(20);
 
@@ -1151,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_subtract_floats() -> Result<(), NodeError> {
+    fn operate_arithmetic_subtract_floats() -> Result<(), NodeError> {
         let five = NodeValue::Float(5.2);
         let twenty = NodeValue::Double(20.1);
 
@@ -1161,7 +1183,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_multiply() -> Result<(), NodeError> {
+    fn operate_arithmetic_multiply() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let point_five = NodeValue::Float(0.5);
 
@@ -1171,7 +1193,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_divide_by_zero() {
+    fn operate_arithmetic_divide_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
@@ -1182,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_divide() -> Result<(), NodeError> {
+    fn operate_arithmetic_divide() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let two = NodeValue::Int32(2);
 
@@ -1192,7 +1214,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_modulo_by_zero() {
+    fn operate_arithmetic_modulo_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
@@ -1203,7 +1225,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_modulo_ok() -> Result<(), NodeError> {
+    fn operate_arithmetic_modulo_ok() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let two = NodeValue::Int32(2);
 
@@ -1213,7 +1235,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_modulo_no_floating_points() {
+    fn operate_arithmetic_modulo_no_floating_points() {
         let five = NodeValue::Float(5.0);
         let two = NodeValue::Int32(2);
 
@@ -1225,7 +1247,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_power_integers() -> Result<(), NodeError> {
+    fn operate_arithmetic_power_integers() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
 
         // 2^2 = 4
@@ -1234,7 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_arithmetic_power_floats() -> Result<(), NodeError> {
+    fn operate_arithmetic_power_floats() -> Result<(), NodeError> {
         let val = 2.5_f64;
         let expected = val.powf(val);
         let two_point_five = NodeValue::Double(val);
@@ -1247,7 +1269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_propagates_up_none_values() {
+    fn operate_relational_propagates_up_none_values() {
         let int_val = NodeValue::Int32(1);
         let none_val = NodeValue::None;
 
@@ -1258,7 +1280,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_eq() -> Result<(), NodeError> {
+    fn operate_relational_eq() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let two_i64 = NodeValue::Int64(2);
         let two_f32 = NodeValue::Float(2.0);
@@ -1276,7 +1298,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_not_eq() -> Result<(), NodeError> {
+    fn operate_relational_not_eq() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let two_f32 = NodeValue::Float(2.0);
         let five = NodeValue::Float(5.5);
@@ -1290,7 +1312,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_gt() -> Result<(), NodeError> {
+    fn operate_relational_gt() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
@@ -1308,7 +1330,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_gt_or_eq() -> Result<(), NodeError> {
+    fn operate_relational_gt_or_eq() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
@@ -1325,7 +1347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_lt() -> Result<(), NodeError> {
+    fn operate_relational_lt() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
@@ -1343,7 +1365,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_lt_or_eq() -> Result<(), NodeError> {
+    fn operate_relational_lt_or_eq() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
@@ -1360,7 +1382,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_contains_errs_if_left_operand_not_a_list() {
+    fn operate_relational_contains_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
@@ -1370,7 +1392,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_contains_errs_if_operands_have_incompatible_types() {
+    fn operate_relational_contains_errs_if_operands_have_incompatible_types() {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
@@ -1381,7 +1403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_contains_bool_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_contains_bool_type_ok() -> Result<(), NodeError> {
         let bool_list = NodeValue::BoolList(vec![true, true, true]);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
@@ -1395,7 +1417,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_contains_int_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_contains_int_type_ok() -> Result<(), NodeError> {
         let int_list = NodeValue::Int32List(vec![3, 30, 300]);
         let zero = NodeValue::Int32(0);
         let three = NodeValue::Int32(3);
@@ -1414,7 +1436,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_contains_float_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_contains_float_type_ok() -> Result<(), NodeError> {
         let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
         let point_five = NodeValue::Float(0.5);
         // f64 PI, not f32 PI
@@ -1434,7 +1456,19 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_does_not_contain_errs_if_left_operand_not_a_list() {
+    fn operate_relational_contains_message_type_ok() -> Result<(), NodeError> {
+        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let msg_list = NodeValue::MessageList(vec![boxed_message.clone()]);
+        let msg_1 = NodeValue::Message(boxed_message);
+        let msg_2 = NodeValue::Message(Box::new(EMPTY_TEST_MESSAGE.clone()));
+
+        assert_eq!(msg_list.operate(&OP_CONTAINS, || provide(&msg_1))?, NodeValue::Bool(true));
+        assert_eq!(msg_list.operate(&OP_CONTAINS, || provide(&msg_2))?, NodeValue::Bool(false));
+        Ok(())
+    }
+
+    #[test]
+    fn operate_relational_does_not_contain_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
@@ -1444,7 +1478,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_does_not_contain_errs_if_operands_have_incompatible_types() {
+    fn operate_relational_does_not_contain_errs_if_operands_have_incompatible_types() {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
@@ -1455,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_does_not_contain_bool_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_does_not_contain_bool_type_ok() -> Result<(), NodeError> {
         let bool_list = NodeValue::BoolList(vec![true, true, true]);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
@@ -1472,7 +1506,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_does_not_contain_int_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_does_not_contain_int_type_ok() -> Result<(), NodeError> {
         let int_list = NodeValue::Int32List(vec![3, 30, 300]);
         let zero = NodeValue::Int32(0);
         let three = NodeValue::Int32(3);
@@ -1500,7 +1534,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_does_not_contain_float_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_does_not_contain_float_type_ok() -> Result<(), NodeError> {
         let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
         let point_five = NodeValue::Float(0.5);
         // f64 PI, not f32 PI
@@ -1529,7 +1563,25 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_all_eq_errs_if_left_operand_not_a_list() {
+    fn operate_relational_does_not_contain_message_type_ok() -> Result<(), NodeError> {
+        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let msg_list = NodeValue::MessageList(vec![boxed_message.clone()]);
+        let msg_1 = NodeValue::Message(boxed_message);
+        let msg_2 = NodeValue::Message(Box::new(EMPTY_TEST_MESSAGE.clone()));
+
+        assert_eq!(
+            msg_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&msg_1))?,
+            NodeValue::Bool(false)
+        );
+        assert_eq!(
+            msg_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&msg_2))?,
+            NodeValue::Bool(true)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn operate_relational_all_eq_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
@@ -1539,7 +1591,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_all_eq_errs_if_operands_have_incompatible_types() {
+    fn operate_relational_all_eq_errs_if_operands_have_incompatible_types() {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
@@ -1550,7 +1602,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_all_eq_bool_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_all_eq_bool_type_ok() -> Result<(), NodeError> {
         let bool_list_1 = NodeValue::BoolList(vec![true, true, true]);
         let bool_list_2 = NodeValue::BoolList(vec![true, false, false]);
         let true_val = NodeValue::Bool(true);
@@ -1570,7 +1622,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_all_eq_int_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_all_eq_int_type_ok() -> Result<(), NodeError> {
         let int_list_1 = NodeValue::Int64List(vec![3, 30, 300]);
         let int_list_2 = NodeValue::Int64List(vec![0, 0]);
         let zero = NodeValue::Int32(0);
@@ -1581,7 +1633,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_relational_all_eq_float_type_ok() -> Result<(), NodeError> {
+    fn operate_relational_all_eq_float_type_ok() -> Result<(), NodeError> {
         let float_list_1 = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
         let float_list_2 = NodeValue::FloatList(vec![0.5, 0.5]);
 
@@ -1599,7 +1651,19 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_rounding_errs_if_operand_is_incompatible() {
+    fn operate_relational_all_eq_message_type_ok() -> Result<(), NodeError> {
+        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let msg_list = NodeValue::MessageList(vec![boxed_message.clone(); 2]);
+        let msg_1 = NodeValue::Message(boxed_message);
+        let msg_2 = NodeValue::Message(Box::new(EMPTY_TEST_MESSAGE.clone()));
+
+        assert_eq!(msg_list.operate(&OP_ALL_EQ, || provide(&msg_1))?, NodeValue::Bool(true));
+        assert_eq!(msg_list.operate(&OP_ALL_EQ, || provide(&msg_2))?, NodeValue::Bool(false));
+        Ok(())
+    }
+
+    #[test]
+    fn operate_rounding_errs_if_operand_is_incompatible() {
         let true_val = NodeValue::Bool(true);
         let one = NodeValue::Int32(1);
 
@@ -1614,7 +1678,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_rounding_floor_ok() -> Result<(), NodeError> {
+    fn operate_rounding_floor_ok() -> Result<(), NodeError> {
         let point_one = NodeValue::Double(0.1);
         let two_point_nine = NodeValue::Float(2.9);
         let five = NodeValue::Float(5.0);
@@ -1642,7 +1706,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_rounding_round_ok() -> Result<(), NodeError> {
+    fn operate_rounding_round_ok() -> Result<(), NodeError> {
         let point_one = NodeValue::Double(0.1);
         let two_point_nine = NodeValue::Float(2.9);
         let five = NodeValue::Float(5.0);
@@ -1670,7 +1734,7 @@ mod tests {
     }
 
     #[test]
-    fn test_operate_rounding_ceil_ok() -> Result<(), NodeError> {
+    fn operate_rounding_ceil_ok() -> Result<(), NodeError> {
         let point_one = NodeValue::Double(0.1);
         let two_point_nine = NodeValue::Float(2.9);
         let five = NodeValue::Float(5.0);

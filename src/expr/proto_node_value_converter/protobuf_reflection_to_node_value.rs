@@ -58,7 +58,8 @@ impl MessageDescriptorExt for MessageDescriptor {
                     if proto3_optional {
                         Ok(NodeValue::None)
                     } else {
-                        // otherwise rust protobuf encodes default value as "None"
+                        // otherwise rust protobuf encodes default value as "None", so the field
+                        // value should actually be the default (either some sort of zero or None)
                         get_default_node_value_from_type(&field_descriptor.singular_runtime_type())
                     }
                 }
@@ -168,6 +169,20 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                     val.to_enum_value().ok_or(NodeError::TypeMismatch {
                         msg: format!("Repeated field {:?} type expected to be enum", self),
                     })
+                },
+            )?),
+            ProtobufRuntimeType::Message(_) => NodeValue::MessageList(self.to_vec(
+                // unwraps a protobuf message from a value reflection or error
+                |val: ReflectValueRef<'_>| {
+                    Ok(val
+                        .to_message()
+                        .ok_or(NodeError::TypeMismatch {
+                            msg: format!(
+                                "Repeated field {:?} type expected to be protobuf message",
+                                self
+                            ),
+                        })?
+                        .clone_box())
                 },
             )?),
             _ => {

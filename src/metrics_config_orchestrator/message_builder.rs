@@ -114,6 +114,7 @@ mod tests {
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const REPEATED_DOUBLE_FIELD_NAME: &str = "repeated_doubles";
     const REPEATED_ENUM_FIELD_NAME: &str = "repeated_enums";
+    const REPEATED_MESSAGE_FIELD_NAME: &str = "repeated_messages";
     const OPTIONAL_BOOL_FIELD_NAME: &str = "optional_bool_field";
     const OPTIONAL_INT64_FIELD_NAME: &str = "optional_int64_field";
 
@@ -212,6 +213,37 @@ mod tests {
         let res = builder.build()?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
+        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        Ok(())
+    }
+
+    #[test]
+    fn build_repeated_message_field_ok() -> Result<(), MessageBuilderError> {
+        let mut expected_message = TestMessage::new();
+        expected_message.int_field = 42;
+        expected_message.repeated_messages = vec![TEST_NESTED_MESSAGE.clone(); 2];
+
+        // create MessageBuilderImpl struct object, this is the subject of the test
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            vec![
+                (INT_FIELD_NAME, NodeValue::Int64(42)),
+                (
+                    // field name
+                    REPEATED_MESSAGE_FIELD_NAME,
+                    // value to assign to this field = a vector of 2 messages
+                    NodeValue::MessageList(vec![
+                        Box::new(TEST_NESTED_MESSAGE.clone())
+                            as Box<dyn MessageDyn>;
+                        2
+                    ]),
+                ),
+            ],
+        );
+        // action
+        let res = builder.build()?;
+
+        // verify the newly-built message does set the fields to the expected values
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
         Ok(())
     }
