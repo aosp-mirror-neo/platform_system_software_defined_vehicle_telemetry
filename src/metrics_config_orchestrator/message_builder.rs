@@ -1,6 +1,5 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-mod node_value_to_protobuf_reflection;
 mod value_aggregator;
 pub(super) mod value_aggregator_factory;
 
@@ -9,7 +8,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use thiserror::Error;
 
-use node_value_to_protobuf_reflection::{ReflectRepeatedMutExt, ToReflectValueBox};
+use crate::expr::{
+    node_errors::NodeError,
+    proto_node_value_converter::node_value_to_protobuf_reflection::{
+        ReflectRepeatedMutExt, ToReflectValueBox,
+    },
+};
 use value_aggregator::{AggregationError, ValueAggregator};
 
 pub(crate) trait MessageBuilder: Send + Sync {
@@ -30,10 +34,11 @@ pub(crate) struct MessageBuilderImpl {
 pub enum MessageBuilderError {
     #[error("Unable to assign value to field {field_name} because of: {e}")]
     BadAggregation { field_name: String, e: AggregationError },
-    #[error("Cannot assign {value} to a repeated field")]
-    RepeatedFieldWrongAssignment { value: String },
-    #[error("Cannot convert {value} to a protobuf reflection of type {refl_type}")]
-    ValueToProtoConversionError { value: String, refl_type: String },
+    #[error("Failed to assign node value to field because of: {e}")]
+    FailedToAssignValueToField {
+        #[from]
+        e: NodeError,
+    },
 }
 
 impl MessageBuilder for MessageBuilderImpl {
@@ -109,6 +114,8 @@ mod tests {
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const REPEATED_DOUBLE_FIELD_NAME: &str = "repeated_doubles";
     const REPEATED_ENUM_FIELD_NAME: &str = "repeated_enums";
+    const OPTIONAL_BOOL_FIELD_NAME: &str = "optional_bool_field";
+    const OPTIONAL_INT64_FIELD_NAME: &str = "optional_int64_field";
 
     /// Creates a MessageBuilderImpl struct object using the descriptor and
     /// field_name + node_value pairs as field assignments.
@@ -130,7 +137,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_singular_fields_ok() -> Result<(), MessageBuilderError> {
+    fn build_singular_fields_ok() -> Result<(), MessageBuilderError> {
         let mut expected_message = TestMessage::new();
         expected_message.int_field = 5;
         expected_message.float_field = 0.0;
@@ -155,7 +162,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_message_field_ok() -> Result<(), MessageBuilderError> {
+    fn build_message_field_ok() -> Result<(), MessageBuilderError> {
         let mut expected_message = TestMessage::new();
         expected_message.int_field = 42;
         expected_message.message_field = MessageField::some(TEST_NESTED_MESSAGE.clone());
@@ -178,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_repeated_primitive_fields_ok() -> Result<(), MessageBuilderError> {
+    fn build_repeated_primitive_fields_ok() -> Result<(), MessageBuilderError> {
         let booleans = vec![true, false, true, false];
         let integers = vec![42, 100, -1];
         let doubles = vec![0.0, 1.0];
@@ -210,14 +217,18 @@ mod tests {
     }
 
     #[test]
-    fn test_build_handles_none_value_ok() -> Result<(), MessageBuilderError> {
+    fn build_handles_none_value_ok() -> Result<(), MessageBuilderError> {
         let mut expected_message = TestMessage::new();
         expected_message.int_field = 5;
 
         // create MessageBuilderImpl struct object, this is the subject of the test
         let builder = create_message_builder(
             TestMessage::descriptor(),
-            vec![(INT_FIELD_NAME, NodeValue::Int32(5)), (FLOAT_FIELD_NAME, NodeValue::None)],
+            vec![
+                (INT_FIELD_NAME, NodeValue::Int32(5)),
+                (FLOAT_FIELD_NAME, NodeValue::None),
+                (OPTIONAL_BOOL_FIELD_NAME, NodeValue::None),
+            ],
         );
 
         // action
@@ -229,9 +240,54 @@ mod tests {
     }
 
     #[test]
-    fn test_build_node_value_incompatible_with_field_fails() {
+    fn build_zeros_are_not_encoded_in_implicitly_optional_fields() -> Result<(), MessageBuilderError>
+    {
+        // expect empty message because zeros are not encoded in implicitly optional fields
+        // that means 0 is indistinguishable from field-not-set
+        let expected_message = TestMessage::new();
+
+        // create MessageBuilderImpl struct object, this is the subject of the test
         let builder = create_message_builder(
             TestMessage::descriptor(),
+            vec![(INT_FIELD_NAME, NodeValue::Int32(0))],
+        );
+
+        // action
+        let res = builder.build()?;
+
+        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
+        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        Ok(())
+    }
+
+    #[test]
+    fn build_zeros_are_encoded_in_explicitly_optional_fields() -> Result<(), MessageBuilderError> {
+        let mut expected_message = TestMessage::new();
+        expected_message.optional_bool_field = Some(false);
+        expected_message.optional_int64_field = Some(0);
+
+        // create MessageBuilderImpl struct object, this is the subject of the test
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            vec![
+                (OPTIONAL_BOOL_FIELD_NAME, NodeValue::Bool(false)),
+                (OPTIONAL_INT64_FIELD_NAME, NodeValue::Int64(0)),
+            ],
+        );
+
+        // action
+        let res = builder.build()?;
+
+        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
+        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        Ok(())
+    }
+
+    #[test]
+    fn build_node_value_incompatible_with_singular_field_fails() {
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            // field expects integer, actual node value is a float
             vec![(INT_FIELD_NAME, NodeValue::Float(0.5))],
         );
 
@@ -240,12 +296,29 @@ mod tests {
 
         assert!(matches!(
             res.err().unwrap(),
-            MessageBuilderError::ValueToProtoConversionError { .. }
+            MessageBuilderError::FailedToAssignValueToField { .. }
         ));
     }
 
     #[test]
-    fn test_build_aggregated_field_value_compute_error_fails() {
+    fn build_node_value_incompatible_with_repeated_field_fails() {
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            // field expects repeated integers, actual node value is repeated floats
+            vec![(REPEATED_INT_FIELD_NAME, NodeValue::FloatList(vec![0.5]))],
+        );
+
+        // action
+        let res = builder.build();
+
+        assert!(matches!(
+            res.err().unwrap(),
+            MessageBuilderError::FailedToAssignValueToField { .. }
+        ));
+    }
+
+    #[test]
+    fn build_aggregated_field_value_compute_error_fails() {
         let mut mock_aggregated_field_value = MockValueAggregator::new(NodeValue::None);
         mock_aggregated_field_value.fail_compute();
         let field_assignments = {

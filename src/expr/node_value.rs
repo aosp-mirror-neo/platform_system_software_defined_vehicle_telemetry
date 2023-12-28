@@ -4,8 +4,6 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-mod protobuf_reflection_extensions;
-
 use protobuf::{
     reflect::{ReflectFieldRef, ReflectValueRef},
     MessageDyn,
@@ -21,7 +19,8 @@ use sdvtelemetry_proto_rust::expression::{
 use std::error::Error;
 
 use crate::expr::{
-    node_errors::NodeError, node_value::protobuf_reflection_extensions::MessageDescriptorExt,
+    node_errors::NodeError,
+    proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt,
 };
 
 const EPSILON: f32 = 1e-6;

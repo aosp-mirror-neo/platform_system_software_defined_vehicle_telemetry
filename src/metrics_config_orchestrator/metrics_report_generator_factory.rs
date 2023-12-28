@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::{ast::Node, ast_extensions::NodeValueType};
+use crate::expr::{ast::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,

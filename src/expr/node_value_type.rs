@@ -12,14 +12,6 @@ use sdvtelemetry_proto_rust::expression::{
 
 use crate::expr::{ast::DescriptorProvider, node_errors::NodeError};
 
-/// Used for cycle detection in the expression nodes.
-#[derive(Clone, PartialEq)]
-pub enum VisitStatus {
-    NotVisited,
-    Visiting,
-    Visited,
-}
-
 /// Used for compatibility type checking in expression nodes, such as
 /// operator-operand compatibility and protobuf field assignment compatibility.
 #[derive(Clone, PartialEq, Debug)]

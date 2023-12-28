@@ -69,6 +69,12 @@ pub enum NodeError {
     ContainsOperatorIncompatibleOperands,
     #[error("ALL_EQ operator requires left operand is a list, right operand is a scalar of compatible type to the list value")]
     AllEqualsOperatorIncompatibleOperands,
+
+    // errors related to converting a node value into a protobuf reflection object
+    #[error("Cannot assign {value} to a repeated field")]
+    RepeatedFieldWrongAssignment { value: String },
+    #[error("Cannot convert {value} to a protobuf reflection of type {refl_type}")]
+    ValueToProtoConversionError { value: String, refl_type: String },
 }
 
 /// Error returned by MessageProvider
