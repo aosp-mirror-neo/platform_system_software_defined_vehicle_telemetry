@@ -2,7 +2,10 @@
 
 //! Helper functions for converting NodeValue into protobuf reflection types.
 
-use protobuf::reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType};
+use protobuf::{
+    reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType},
+    MessageDyn,
+};
 
 use crate::expr::{node_errors::NodeError, node_value::NodeValue};
 
@@ -36,6 +39,7 @@ impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
             NodeValue::Int64List(v) => self.push_vec_content(v),
             NodeValue::FloatList(v) => self.push_vec_content(v),
             NodeValue::DoubleList(v) => self.push_vec_content(v),
+            NodeValue::MessageList(v) => self.push_vec_content(v),
             _ => {
                 Err(NodeError::RepeatedFieldWrongAssignment { value: format!("{:?}", node_value) })
             }
@@ -176,6 +180,22 @@ impl ToReflectValueBox for f64 {
         match protobuf_type {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self as f32)),
             ProtobufRuntimeType::F64 => Ok(ReflectValueBox::F64(*self)),
+            _ => Err(NodeError::ValueToProtoConversionError {
+                value: format!("{:?}", self),
+                refl_type: format!("{:?}", protobuf_type),
+            }),
+        }
+    }
+}
+
+// A Box<dyn MessageDyn> can be converted into a protobuf reflection value.
+impl ToReflectValueBox for Box<dyn MessageDyn> {
+    fn to_reflect_value_box(
+        &self,
+        protobuf_type: &ProtobufRuntimeType,
+    ) -> Result<ReflectValueBox, NodeError> {
+        match protobuf_type {
+            ProtobufRuntimeType::Message(_) => Ok(ReflectValueBox::Message(self.clone())),
             _ => Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),

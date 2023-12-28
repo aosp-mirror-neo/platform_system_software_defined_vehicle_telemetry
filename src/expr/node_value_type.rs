@@ -25,6 +25,7 @@ pub enum NodeValueType {
     BoolList,
     IntList,
     FloatList,
+    MessageList,
 }
 
 impl NodeValueType {
@@ -40,12 +41,17 @@ impl NodeValueType {
         matches!(self, NodeValueType::Int)
     }
 
+    fn is_message(&self) -> bool {
+        matches!(self, NodeValueType::Message)
+    }
+
     // returns true iff `self` is a list type, and `other` is a singular & compatible
     // type to the list
     fn can_apply_list_operator(&self, other: &NodeValueType) -> bool {
         match self {
             NodeValueType::BoolList => other.is_bool(),
             NodeValueType::IntList | NodeValueType::FloatList => other.is_numeric(),
+            NodeValueType::MessageList => other.is_message(),
             _ => false,
         }
     }
@@ -290,6 +296,7 @@ impl NodeValueTypeExtension for RuntimeFieldType {
                     NodeValueType::Bool => Ok(NodeValueType::BoolList),
                     NodeValueType::Int => Ok(NodeValueType::IntList),
                     NodeValueType::Float => Ok(NodeValueType::FloatList),
+                    NodeValueType::Message => Ok(NodeValueType::MessageList),
                     _ => Err(NodeError::UnsupportedRepeatedFieldType),
                 }
             }
