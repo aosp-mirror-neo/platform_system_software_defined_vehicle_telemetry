@@ -84,7 +84,7 @@ rust_library {
 }
 
 rust_binary {
-    name: "sdv_telemetry_service",
+    name: "sdv_telemetry_service_agent",
     defaults: ["telemetry@rust_defaults"],
     srcs: [
         "src/main.rs",
@@ -98,6 +98,7 @@ rust_binary {
         "libprotobuf",
         "librustutils",
     ],
+    system_ext_specific: true,
 }
 
 rust_test_host {
