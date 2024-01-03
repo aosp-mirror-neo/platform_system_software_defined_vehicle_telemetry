@@ -318,10 +318,10 @@ message ProtoMessageBuilder {
     message VectorAggregation {
       optional uint32 expression_node_index = 1;
 
-      // Length-limited vector. The vector will contain the last N outputs from
-      // the expression, dropping the oldest values if the vector exceeds max_length.
       // If unset, the vector will not be length-limited and will always grow in size.
-      // If set, the max_length must have value greater than 0.
+      // If set, the max_length must have value greater than 0. It will make the vector
+      // behave like a ring buffer, where the vector will contain the last N outputs from
+      // the expression, dropping the oldest values if the vector exceeds max_length.
       optional uint32 max_length = 2;
     }
 
