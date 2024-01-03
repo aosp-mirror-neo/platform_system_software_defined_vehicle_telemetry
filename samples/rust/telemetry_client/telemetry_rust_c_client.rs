@@ -24,7 +24,8 @@ extern "C" fn on_status(
     status_code: i32,
     status_msg: *const std::ffi::c_char,
 ) {
-    // SAFETY: This function is always safe to call
+    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+    // safety requirements.
     let msg = unsafe {
         // Convert *const std::ffi::c_char to &CStr
         let c_str = CStr::from_ptr(status_msg);
@@ -88,7 +89,8 @@ async fn main() -> Result<(), binder::Status> {
     info!("Connecting to service");
     // Unsafe block needed to be able to call C API functions
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: This function is always safe to call.
+    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // for on_status are passed.
     unsafe {
         service = rust_to_c::get_telemetry_service() as usize;
         rust_to_c::set_status_listener(
