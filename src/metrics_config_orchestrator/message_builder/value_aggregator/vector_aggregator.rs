@@ -10,11 +10,14 @@ pub struct VectorAggregator {
     node: Arc<Node>,
     // Stores the existing vector. New values to be appended to the existing vector.
     current_vec: Option<NodeValue>,
+    // Maximum length of the vector. If the vector is too long, the oldest value will be dropped.
+    // If max_length is None, then the vector is not length-limited.
+    max_length: Option<u32>,
 }
 
 impl VectorAggregator {
-    pub fn new(node: &Arc<Node>) -> Self {
-        VectorAggregator { node: node.clone(), current_vec: None }
+    pub fn new(node: &Arc<Node>, max_length: &Option<u32>) -> Self {
+        VectorAggregator { node: node.clone(), current_vec: None, max_length: *max_length }
     }
 }
 
@@ -25,7 +28,7 @@ impl ValueAggregator for VectorAggregator {
             return Ok(latest_value);
         }
         if let Some(existing_vec) = &mut self.current_vec {
-            existing_vec.push(&latest_value)?;
+            existing_vec.push(&latest_value, &self.max_length)?;
             Ok(existing_vec.clone())
         } else {
             // convert the single value NodeValue into a list type NodeValue
@@ -44,11 +47,12 @@ mod tests {
     use crate::expr::mock::TEST_MESSAGE;
 
     #[test]
-    fn test_compute_integer_vector_aggregation_ok() {
+    fn compute_integer_vector_aggregation_ok() {
         let test_int = 100;
-        let mut aggregate_int_value = VectorAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Int32(test_int),
-        }));
+        let mut aggregate_int_value = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(test_int) }),
+            &None,
+        );
 
         // compute 5 times to see the vector is building up
         for i in 0..5 {
@@ -63,11 +67,41 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_floating_point_vector_aggregation_ok() {
+    fn compute_integer_length_limited_vector_aggregation_ok() {
+        let mut aggregate_int_value = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(0) }),
+            &Some(3), // max length = 3
+        );
+        let expected_vectors = vec![
+            vec![0],
+            vec![0, 1],
+            vec![0, 1, 2],
+            // since max len = 3, the new value is appended and oldest value is dropped
+            vec![1, 2, 3],
+            vec![2, 3, 4],
+        ];
+
+        // compute 5 times to see the vector aggregation output is as expected
+        for (i, expected_vec) in expected_vectors.into_iter().enumerate() {
+            // make the next expression output equals to i
+            aggregate_int_value.node =
+                Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(i as i64) });
+
+            // action
+            let res = aggregate_int_value.compute().unwrap();
+
+            // assert
+            assert_eq!(res, NodeValue::Int64List(expected_vec));
+        }
+    }
+
+    #[test]
+    fn compute_floating_point_vector_aggregation_ok() {
         let test_double = 1.2_f64;
-        let mut aggregate_double_value = VectorAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Double(test_double),
-        }));
+        let mut aggregate_double_value = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Double(test_double) }),
+            &None,
+        );
 
         // compute 5 times to see the vector is building up
         for i in 0..5 {
@@ -82,11 +116,41 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_message_value_vector_aggregation_ok() {
+    fn compute_floating_point_length_limited_vector_aggregation_ok() {
+        let mut aggregate_int_value = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.0) }),
+            &Some(3), // max length = 3
+        );
+        let expected_vectors = vec![
+            vec![0.0],
+            vec![0.0, 0.2],
+            vec![0.0, 0.2, 0.4],
+            // since max len = 3, the new value is appended and oldest value is dropped
+            vec![0.2, 0.4, 0.6],
+            vec![0.4, 0.6, 0.8],
+        ];
+
+        // compute 5 times to see the vector aggregation output is as expected
+        for (i, expected_vec) in expected_vectors.into_iter().enumerate() {
+            // make the next expression output equals to i / 5 as a float
+            aggregate_int_value.node =
+                Arc::new(Node::ConstantLeaf { value: NodeValue::Float(i as f32 / 5.0) });
+
+            // action
+            let res = aggregate_int_value.compute().unwrap();
+
+            // assert
+            assert_eq!(res, NodeValue::FloatList(expected_vec));
+        }
+    }
+
+    #[test]
+    fn compute_message_value_vector_aggregation_ok() {
         let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
-        let mut aggregate_message_value = VectorAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Message(boxed_message.clone()),
-        }));
+        let mut aggregate_message_value = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(boxed_message.clone()) }),
+            &None,
+        );
 
         // compute 5 times to see the vector is building up
         for i in 0..5 {
@@ -101,9 +165,34 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_handles_none_value() {
+    fn compute_message_value_length_limited_vector_aggregation_ok() {
+        let max_len: usize = 3;
+        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let mut aggregate_message_value = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(boxed_message.clone()) }),
+            &Some(max_len as u32),
+        );
+
+        // compute 5 times and verify the output never exceeds max_len
+        for i in 0..5 {
+            let expected_vec = if i < max_len {
+                vec![boxed_message.clone(); i + 1]
+            } else {
+                vec![boxed_message.clone(); max_len]
+            };
+
+            // action
+            let res = aggregate_message_value.compute().unwrap();
+
+            // assert
+            assert_eq!(res, NodeValue::MessageList(expected_vec));
+        }
+    }
+
+    #[test]
+    fn compute_handles_none_value() {
         let mut aggregator =
-            VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
+            VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }), &None);
 
         let res = aggregator.compute().unwrap();
 
@@ -111,10 +200,11 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_vector_aggregate_vector_type_fails() {
-        let mut aggregate_list_of_list = VectorAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::BoolList(vec![true, false]),
-        }));
+    fn compute_vector_aggregate_vector_type_fails() {
+        let mut aggregate_list_of_list = VectorAggregator::new(
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::BoolList(vec![true, false]) }),
+            &None,
+        );
 
         assert!(aggregate_list_of_list.compute().is_err());
     }
