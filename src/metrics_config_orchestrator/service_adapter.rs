@@ -55,6 +55,11 @@ pub enum ServiceAdapterSubscribeError {
 pub(crate) enum ServiceAdapterUnsubscribeError {
     #[error("Service subscription is invalid")]
     InvalidServiceSubscription,
+    #[error("Unable to unsubscribe: {error}")]
+    UnsubscribeFailed {
+        #[from]
+        error: ConfigurablePublisherRegistrySubscribeError,
+    },
 }
 
 /// An implementation of ServiceAdapter that publishes incrementing i32 messages at random interval.
@@ -145,7 +150,11 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 };
 
                 if is_last_subscription {
-                    // TODO(b/309704265): unsubscribe from the publisher and remove entry from the map.
+                    self.publisher_registry
+                        .unsubscribe(&subscription.service_name, &subscription.topic_name, None)
+                        .await?;
+
+                    o.remove_entry();
                 }
             }
             Entry::Vacant(_) => {
@@ -365,12 +374,62 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_success() {
-        let service_adapter = create_default_service_adapter();
+        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = Arc::new(registry);
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
             .await
             .unwrap();
         service_adapter.unsubscribe(subscription).await.unwrap();
+
+        // Verify the number of registry unsubscribe calls.
+        assert_eq!(registry.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_not_called_unless_last_subscriber_unsubscribes() {
+        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = Arc::new(registry);
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
+            .await
+            .unwrap();
+
+        let _subscription2 = service_adapter
+            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
+            .await
+            .unwrap();
+
+        service_adapter.unsubscribe(subscription).await.unwrap();
+
+        // Verify the number of registry unsubscribe calls.
+        assert_eq!(registry.get_num_unsubscribe_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_called_after_last_subscriber_unsubscribes() {
+        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = Arc::new(registry);
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
+            .await
+            .unwrap();
+
+        let subscription2 = service_adapter
+            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
+            .await
+            .unwrap();
+
+        service_adapter.unsubscribe(subscription).await.unwrap();
+        service_adapter.unsubscribe(subscription2).await.unwrap();
+
+        // Verify the number of registry unsubscribe calls.
+        assert_eq!(registry.get_num_unsubscribe_calls(), 1);
     }
 }

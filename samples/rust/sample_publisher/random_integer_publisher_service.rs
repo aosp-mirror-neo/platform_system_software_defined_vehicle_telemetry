@@ -5,7 +5,7 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
 };
 use android_sdv_telemetry_configurable_publisher::binder::{Interface, Status, Strong, Result as BinderResult};
 
-use crate::configurable_publisher::ConfigurablePublisher;
+use crate::random_integer_publisher::RandomIntegerPublisher;
 
 use log::info;
 use std::fmt::Debug;
@@ -22,18 +22,22 @@ pub fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
     })
 }
 
-pub struct ConfigurablePublisherService {
-    pub publisher: Arc<ConfigurablePublisher>,
+pub struct RandomIntegerPublisherService {
+    pub publisher: Arc<RandomIntegerPublisher>,
 }
 
-impl Interface for ConfigurablePublisherService {}
+impl Interface for RandomIntegerPublisherService {}
 
-impl IConfigurablePublisher for ConfigurablePublisherService {
+impl IConfigurablePublisher for RandomIntegerPublisherService {
     fn subscribe(
         &self,
         subscriber: &Strong<dyn ISubscriber>,
         config: Option<&[u8]>,
     ) -> BinderResult<()> {
         to_binder_result(self.publisher.subscribe(subscriber, config))
+    }
+
+    fn unsubscribe(&self, config: Option<&[u8]>) -> BinderResult<()> {
+        to_binder_result(self.publisher.unsubscribe(config))
     }
 }

@@ -145,6 +145,7 @@ rust_test_host {
     ],
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
+        "libconfigurable_publisher_proto",
         "libprotobuf",
         "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
