@@ -8,7 +8,7 @@ telemetry service using ABI stable C APIs.
 The telemetry service is written using rust and uses tokio runtime to handle
 asynchrnous API calls. It implements the aidl-generated trait defined in
 ITelemetryAService.aidl. The service is registered as an async binder service
-using the sdv_telemetry_service executable.
+using the sdv_telemetry_service_agent executable.
 
 Run the client application with path to the serialzed config passed as a command line argument.
 
@@ -39,7 +39,7 @@ EXPECTED:
 2. LAUNCH NEW TERMINAL (**Terminal #2**)
 
 ```
-adb shell sdv_telemetry_service
+adb shell sdv_telemetry_service_agent
 ```
 
 EXPECTED (on this one, **Terminal #2**):
@@ -124,7 +124,7 @@ EXPECTED:
 2. LAUNCH NEW TERMINAL (**Terminal #2**)
 
 ```
-adb shell sdv_telemetry_service
+adb shell sdv_telemetry_service_agent
 ```
 
 EXPECTED (on this one, **Terminal #2**):
