@@ -23,7 +23,7 @@ const SIZE_MB: usize = 1024 * 1024;
 
 static METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.telemetry.metric_config_store_in_mb";
 static LOG_TAG: &str = "SdvTelemetryService";
-static ROOT_DIR: &str = "/data/local/tmp";
+static ROOT_DIR: &str = "/data/misc";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
