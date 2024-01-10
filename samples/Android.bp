@@ -44,7 +44,6 @@ rust_binary {
 
 rust_protobuf {
     name: "libconfigurable_publisher_proto",
-    host_supported: true,
     crate_name: "configurable_publisher_proto",
     protos: [
         "rust/sample_publisher/sample_publisher.proto",
