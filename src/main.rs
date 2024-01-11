@@ -27,6 +27,7 @@ static ROOT_DIR: &str = "/data/misc";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
+    sdv_tracing::init_tracing();
 
     // Create Configurable Publishers
 

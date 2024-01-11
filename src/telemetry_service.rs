@@ -28,6 +28,7 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use tracing::instrument;
 
 // Child module dependencies.
 pub use configurable_publisher_registry::{
@@ -119,6 +120,7 @@ impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
+    #[instrument(skip(configurable_publisher_registry))]
     pub async fn new(
         root_path: &str,
         config_store_size: usize,
@@ -275,6 +277,7 @@ impl SdvTelemetryService {
 
 #[async_trait]
 impl ITelemetryServiceAsyncServer for SdvTelemetryService {
+    #[instrument(skip(self, metrics_config))]
     async fn addMetricsConfig(&self, api_call_id: i32, metrics_config: &[u8]) -> BinderResult<()> {
         let config: MetricsConfig = match protobuf::Message::parse_from_bytes(metrics_config) {
             Ok(cfg) => cfg,
@@ -339,6 +342,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         );
     }
 
+    #[instrument(skip(self))]
     async fn activateMetricsConfig(
         &self,
         api_call_id: i32,
@@ -408,6 +412,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         )
     }
 
+    #[instrument(skip(self))]
     async fn deactivateMetricsConfig(
         &self,
         api_call_id: i32,
@@ -441,6 +446,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         )
     }
 
+    #[instrument(skip(self))]
     async fn removeMetricsConfig(
         &self,
         api_call_id: i32,
@@ -504,6 +510,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.send_status(api_call_id, StatusCodes::REMOVE_METRICS_CONFIG_SUCCEEDED.0, &uuid)
     }
 
+    #[instrument(skip(self))]
     async fn removeAllMetricsConfigs(&self, api_call_id: i32) -> BinderResult<()> {
         info!("removeAllMetricsConfigs");
 
@@ -545,6 +552,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         )
     }
 
+    #[instrument(skip(self))]
     async fn setReportReadyListener(
         &self,
         listener: &Strong<dyn ITelemetryReportReadyListener>,
@@ -568,6 +576,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
+    #[instrument(skip(self))]
     async fn setStatusListener(
         &self,
         listener: &Strong<dyn ITelemetryStatusListener>,
@@ -587,6 +596,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
+    #[instrument(skip(self, report_listener))]
     async fn getMetricsReport(
         &self,
         metrics_config_uuid: &str,
@@ -617,6 +627,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 
+    #[instrument(skip(self))]
     async fn clearReportReadyListener(&self) -> BinderResult<()> {
         info!("clearReportReadyListener");
         let (status_code, status_message) = {
@@ -634,6 +645,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
     }
 
+    #[instrument(skip(self))]
     async fn clearStatusListener(&self) -> BinderResult<()> {
         info!("clearStatusListener");
         *self.status_listener.lock().unwrap() = None;
