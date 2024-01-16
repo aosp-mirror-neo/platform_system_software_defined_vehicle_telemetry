@@ -8,7 +8,7 @@ See [go/sdv-telemetry](https://go/sdv-telemetry) for general information about S
 
 Run the following commands
 
-`$ UNSAFE_DISABLE_HIDDENAPI_FLAGS=true m -j`
+`$ m -j`
 
 ## Test instructions
 
@@ -16,4 +16,9 @@ Check the readme inside samples folder for instructions on how to experiment wit
 
 ## Unit Test Instructions
 
-`UNSAFE_DISABLE_HIDDENAPI_FLAGS=true atest libsdv_telemetry_unit_tests`
+Starting with ag/25844146 unit tests are converted to device side tests and instructions have changed.
+Run launch_cvd in a different terminal.
+`$ launch_cvd`
+
+run the tests
+`$ atest libsdv_telemetry_unit_tests`
