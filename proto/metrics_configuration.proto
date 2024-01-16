@@ -134,8 +134,6 @@ message ConditionalTrigger {
 }
 
 // Publishes messages and stores the latest published message.
-// A DataTrigger under publisher name that listens to it is implicitly created
-// for each Publisher in the Metrics Configuration.
 message Publisher {
   // Required.
   // The name of the publisher. Must be unique across all publishers and
