@@ -12,8 +12,8 @@ use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry:
     PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry
 };
 use android_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
-use configurable_publisher_proto::sample_publisher;
-use configurable_publisher_proto::sample_publisher::SampleMessage;
+use sample_publisher_proto::sample_publisher;
+use sample_publisher_proto::sample_publisher::SampleMessage;
 use crate::random_integer_publisher::RandomIntegerPublisher;
 use crate::random_integer_publisher_service::RandomIntegerPublisherService;
 

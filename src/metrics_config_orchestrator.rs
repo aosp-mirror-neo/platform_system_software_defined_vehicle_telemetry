@@ -30,6 +30,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
+use crate::data_tunnel_wrapper::DataTunnelWrapper;
 use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_errors::{MessageProviderError, NodeError};
 use crate::expr::node_value_type::NodeValueType;
@@ -149,6 +150,9 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     /// Used to fetch data from non-sdv aware publishers
     configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
 
+    /// Used to fetch data from data tunnel topics
+    data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
+
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
 
@@ -262,6 +266,7 @@ where
                 &file_descriptors,
                 &config_proto.publishers,
                 &self.configurable_publisher_registry,
+                &self.data_tunnel_wrapper,
             )?),
         };
         let (expression_nodes, node_types) =
@@ -471,6 +476,7 @@ where
                 &file_descriptors,
                 &config_proto.publishers,
                 &self.configurable_publisher_registry,
+                &self.data_tunnel_wrapper,
             )?),
         };
         let node_types = self
@@ -539,14 +545,18 @@ where
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
+        data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
-        let service_adapter =
-            Arc::new(ServiceAdapterImpl::new(configurable_publisher_registry.clone()));
+        let service_adapter = Arc::new(ServiceAdapterImpl::new(
+            configurable_publisher_registry.clone(),
+            data_tunnel_wrapper.clone(),
+        ));
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
             configurable_publisher_registry,
+            data_tunnel_wrapper,
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
                 message_builder_factory.clone(),
             ),
@@ -876,6 +886,7 @@ mod tests {
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
+    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
@@ -1229,6 +1240,7 @@ mod tests {
                 configurable_publisher_registry: Arc::new(
                     MockConfigurablePublisherRegistry::new_with_descriptor(Empty::descriptor()),
                 ),
+                data_tunnel_wrapper: Arc::new(MockDataTunnelWrapperImpl::new()),
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
@@ -1933,7 +1945,8 @@ mod tests {
                 error: ServiceAdapterSubscribeError::SubscriptionFailed {
                     error: ConfigurablePublisherRegistrySubscribeError::ServiceNotFound {
                         service_name: String::default(),
-                    },
+                    }
+                    .into(),
                 },
             })
         });

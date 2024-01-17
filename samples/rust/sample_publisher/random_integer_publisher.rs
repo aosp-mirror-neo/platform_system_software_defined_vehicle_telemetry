@@ -2,7 +2,7 @@
 
 use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
 use android_sdv_telemetry_configurable_publisher::binder::Strong;
-use configurable_publisher_proto::sample_publisher::SampleMessage;
+use sample_publisher_proto::sample_publisher::SampleMessage;
 
 use log::{error, info};
 use protobuf::Message;

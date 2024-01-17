@@ -96,6 +96,31 @@ rust_library {
     ],
 }
 
+rust_library {
+    name: "libsdv_telemetry_dt_wrapper",
+    crate_name: "sdv_telemetry_dt_wrapper",
+    srcs: ["src/data_tunnel_wrapper/lib.rs"],
+    rustlibs: [
+        "liblog_rust",
+        "liblogger",
+        "libonce_cell",
+        "libprotobuf",
+        "libsample_publisher_proto",
+        "libsdv_dt_rust",
+        "libsdv_telemetry",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        "libcxx",
+        "liblazy_static",
+        "liblibc",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
+    ],
+    system_ext_specific: true,
+}
+
 rust_binary {
     name: "sdv_telemetry_service_agent",
     defaults: ["telemetry@rust_defaults"],
@@ -105,10 +130,11 @@ rust_binary {
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
         "android.sdv.telemetry-rust",
-        "libsdv_telemetry_configurable_publisher",
-        "libsdv_telemetry",
-        "libsdvtelemetry_proto_rust",
         "librustutils",
+        "libsdv_telemetry",
+        "libsdv_telemetry_configurable_publisher",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdvtelemetry_proto_rust",
     ],
     system_ext_specific: true,
 }
@@ -161,7 +187,7 @@ rust_test {
     ],
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
-        "libconfigurable_publisher_proto",
+        "libsample_publisher_proto",
         "libsdv_telemetry",
         "libsdv_telemetry_utils",
         "libsdv_telemetry_configurable_publisher",
