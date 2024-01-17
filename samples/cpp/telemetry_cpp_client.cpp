@@ -36,11 +36,6 @@ int main(int argc, char* argv[]) {
     // Opaque pointer holding an instance of the telemetry service
     ServiceHolder* holder = get_telemetry_service();
 
-    android::sp<StatusListenerImpl> status_listener(new StatusListenerImpl());
-    ALOGI("Setting status listener");
-    set_status_listener(holder, static_cast<void*>(status_listener.get()),
-                        &trigger_status_listener);
-
     std::unique_ptr<MetricsReportManager> report_manager =
             std::make_unique<MetricsReportManager>(holder);
     std::unique_ptr<MetricsConfigManager> config_manager =
@@ -81,6 +76,11 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    android::sp<StatusListenerImpl> status_listener(new StatusListenerImpl());
+    ALOGI("Setting status listener");
+    set_status_listener(holder, static_cast<void*>(status_listener.get()),
+                        &trigger_status_listener);
+
     std::future<std::pair<bool, std::string>> future_add_config =
             config_manager->add_metrics_config(&vec[0], vec.size());
     std::pair<bool, std::string> add_config_result = future_add_config.get();
@@ -89,6 +89,7 @@ int main(int argc, char* argv[]) {
         ALOGI("Successfully added config %s", add_config_result.second.c_str());
     } else {
         ALOGE("Error in adding config");
+        clear_status_listener(holder);
         return 1;
     }
 
@@ -101,6 +102,7 @@ int main(int argc, char* argv[]) {
         ALOGI("Successfully activated config %s", activate_config_result.second.c_str());
     } else {
         ALOGE("Error in activating config");
+        clear_status_listener(holder);
         return 1;
     }
 
@@ -122,6 +124,8 @@ int main(int argc, char* argv[]) {
         ALOGI("Successfully removed config %s", remove_config_result.second.c_str());
     } else {
         ALOGE("Error in removing config");
+        clear_status_listener(holder);
         return 1;
     }
+    clear_status_listener(holder);
 }

@@ -139,5 +139,13 @@ async fn main() -> Result<(), binder::Status> {
         }
     }
 
+    // Unsafe block needed to be able to call C API functions
+    // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
+    // SAFETY: safe to use as service is a valid pointer to ServiceHolder.
+    unsafe {
+        rust_to_c::clear_status_listener(service as *mut rust_to_c::ServiceHolder);
+        rust_to_c::clear_report_ready_listener(service as *mut rust_to_c::ServiceHolder);
+    }
+
     Ok(())
 }
