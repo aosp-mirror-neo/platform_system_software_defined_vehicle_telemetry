@@ -24,6 +24,7 @@ use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::collections::HashMap;
 use std::fs::{self};
 use std::marker::{Send, Sync};
+use std::mem;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -418,7 +419,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     ) -> BinderResult<()> {
         info!("deactivateMetricsConfig: {}", metrics_config_uuid);
 
-        let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
+        let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid).await;
         if res.is_err() {
             info!("Invalid Metric Config UUID");
             let err_msg = format!("Config {} not found", metrics_config_uuid);
@@ -468,7 +469,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         }
 
         let active_config = {
-            let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid);
+            let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid).await;
             if let Err(err) = res {
                 if let ConfigError::InvalidConfigUuid { .. } = err {
                     info!("UUID {} doesn't exist or is inactive", uuid);
@@ -527,9 +528,9 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         }
 
         {
-            let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
+            let metric_config_map = mem::take(&mut *self.metrics_configs_store.lock().unwrap());
             for uuid in metric_config_map.keys() {
-                let res = self.metrics_config_orchestrator.finish_config(uuid);
+                let res = self.metrics_config_orchestrator.finish_config(uuid).await;
                 if let Err(err) = res {
                     if let ConfigError::InvalidConfigUuid { .. } = err {
                         info!("UUID {} doesn't exist or is not active", uuid);
@@ -538,8 +539,6 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     }
                 }
             }
-
-            metric_config_map.clear();
         }
 
         self.cur_persistent_config_store_size.store(0, Ordering::SeqCst);
@@ -698,7 +697,7 @@ mod tests {
             Ok(())
         }
 
-        fn finish_config(&self, _: &str) -> Result<(), ConfigError> {
+        async fn finish_config(&self, _: &str) -> Result<(), ConfigError> {
             let mut num_calls = self.num_finish_config_calls.lock().unwrap();
             *num_calls += 1;
             Ok(())
