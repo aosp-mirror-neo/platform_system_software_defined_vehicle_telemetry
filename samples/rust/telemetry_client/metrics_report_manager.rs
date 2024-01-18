@@ -48,7 +48,7 @@ unsafe extern "C" fn on_report_ready(
     // metrics report from the telemetry service.
     unsafe {
         rust_to_c::get_metrics_report(
-            report_manager.service as *mut rust_to_c::ServiceHolder,
+            report_manager.service,
             metrics_config_uuid,
             report_config_name,
             report_number,
@@ -103,7 +103,7 @@ extern "C" fn on_report_received(
 
 #[repr(C)]
 pub struct MetricsReportManager {
-    service: usize,
+    service: *mut rust_to_c::ServiceHolder,
     get_report_sender:
         mpsc::Sender<Result<MetricsReport, Box<dyn std::error::Error + Send + Sync>>>,
     get_report_receiver:
@@ -112,7 +112,7 @@ pub struct MetricsReportManager {
 }
 
 impl MetricsReportManager {
-    pub fn new(service: usize) -> Pin<Box<Self>> {
+    pub fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
         let (get_report_sender, get_report_receiver) = mpsc::channel(10);
 
         let report_manager = Box::pin(MetricsReportManager {
@@ -132,7 +132,7 @@ impl MetricsReportManager {
         // function safe to call.
         unsafe {
             rust_to_c::set_report_ready_listener(
-                service as *mut rust_to_c::ServiceHolder,
+                service,
                 report_manager_raw as *mut std::ffi::c_void,
                 Some(on_report_ready),
             );

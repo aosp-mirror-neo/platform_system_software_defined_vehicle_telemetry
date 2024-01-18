@@ -92,9 +92,9 @@ async fn main() -> Result<(), binder::Status> {
     // SAFETY: safe to use as all pointers needed to satify safety requirements
     // for on_status are passed.
     unsafe {
-        service = rust_to_c::get_telemetry_service() as usize;
+        service = rust_to_c::get_telemetry_service();
         rust_to_c::set_status_listener(
-            service as *mut rust_to_c::ServiceHolder,
+            service,
             &mut service as *mut _ as *mut std::ffi::c_void,
             Some(on_status),
         );
@@ -143,8 +143,8 @@ async fn main() -> Result<(), binder::Status> {
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
     // SAFETY: safe to use as service is a valid pointer to ServiceHolder.
     unsafe {
-        rust_to_c::clear_status_listener(service as *mut rust_to_c::ServiceHolder);
-        rust_to_c::clear_report_ready_listener(service as *mut rust_to_c::ServiceHolder);
+        rust_to_c::clear_status_listener(service);
+        rust_to_c::clear_report_ready_listener(service);
     }
 
     Ok(())
