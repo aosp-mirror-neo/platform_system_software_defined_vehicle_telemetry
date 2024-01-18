@@ -278,7 +278,7 @@ where
         let (publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
-            |publisher_proto, publishers, triggers| {
+            |publisher_proto, triggers| {
                 let context = PublisherFactoryCreateContext {
                     file_descriptors: &file_descriptors,
                     nodes: &expression_nodes,
@@ -286,18 +286,12 @@ where
                     triggers,
                 };
                 ordered_publisher_names.push(publisher_proto.name.clone());
-                self.publisher_factory.create(publisher_proto, &context).map_or_else(
-                    |factory_error| {
-                        Err(MetricsConfigOrchestratorError::InvalidPublisherDefinition {
-                            publisher_name: publisher_proto.name.clone(),
-                            factory_error,
-                        })
-                    },
-                    |publisher| {
-                        publishers.insert(publisher_proto.name.clone(), publisher);
-                        Ok(())
-                    },
-                )
+                self.publisher_factory.create(publisher_proto, &context).map_err(|factory_error| {
+                    MetricsConfigOrchestratorError::InvalidPublisherDefinition {
+                        publisher_name: publisher_proto.name.clone(),
+                        factory_error,
+                    }
+                })
             },
             // Create a rust Trigger object using already created Publisher and Trigger objects to resolve dependencies.
             |trigger_proto, publishers, triggers| {
@@ -307,18 +301,12 @@ where
                     publishers,
                     triggers,
                 };
-                self.trigger_factory.create(trigger_proto, &context).map_or_else(
-                    |factory_error| {
-                        Err(MetricsConfigOrchestratorError::InvalidTriggerDefinition {
-                            trigger_name: trigger_proto.name.clone(),
-                            factory_error,
-                        })
-                    },
-                    |trigger| {
-                        triggers.insert(trigger_proto.name.clone(), trigger);
-                        Ok(())
-                    },
-                )
+                self.trigger_factory.create(trigger_proto, &context).map_err(|factory_error| {
+                    MetricsConfigOrchestratorError::InvalidTriggerDefinition {
+                        trigger_name: trigger_proto.name.clone(),
+                        factory_error,
+                    }
+                })
             },
         )?;
 
@@ -451,9 +439,9 @@ where
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
-        Self::try_fold_topoligically_sorted_publishers_triggers(
+        let (_publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             config_proto,
-            |publisher_proto, _publishers, _triggers| {
+            |publisher_proto, _triggers| {
                 let context = PublisherFactoryValidateContext {
                     node_types: &node_types,
                     file_descriptors: &file_descriptors,
@@ -498,6 +486,11 @@ where
             })?;
             Ok(acc)
         })?;
+
+        // Validate lifecycle triggers.
+        Self::maybe_get_trigger(&triggers, &config_proto.start_trigger_name)?;
+        Self::maybe_get_trigger(&triggers, &config_proto.end_trigger_name)?;
+        Self::maybe_get_trigger(&triggers, &config_proto.finish_trigger_name)?;
 
         Ok(())
     }
@@ -567,10 +560,10 @@ where
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
     }
 
-    fn maybe_get_trigger<'a>(
-        triggers: &'a HashMap<String, Arc<TTrigger>>,
+    fn maybe_get_trigger<'a, TTrig>(
+        triggers: &'a HashMap<String, TTrig>,
         trigger_name: &str,
-    ) -> Result<Option<&'a Arc<TTrigger>>, MetricsConfigOrchestratorError> {
+    ) -> Result<Option<&'a TTrig>, MetricsConfigOrchestratorError> {
         if trigger_name.is_empty() {
             return Ok(None);
         }
@@ -605,22 +598,19 @@ where
 
     /// Topologically sort publishers and triggers declared in the protobuf message
     /// and try to fold the sorted list using provided functions.
-    fn try_fold_topoligically_sorted_publishers_triggers(
+    fn try_fold_topoligically_sorted_publishers_triggers<TTrig, TPub>(
         config_proto: &MetricsConfigProto,
         mut publisher_func: impl FnMut(
             &PublisherProto,
-            &mut HashMap<String, Arc<TPublisher>>,
-            &HashMap<String, Arc<TTrigger>>,
-        ) -> Result<(), MetricsConfigOrchestratorError>,
+            &HashMap<String, TTrig>,
+        ) -> Result<TPub, MetricsConfigOrchestratorError>,
         mut trigger_func: impl FnMut(
             &TriggerProto,
-            &HashMap<String, Arc<TPublisher>>,
-            &mut HashMap<String, Arc<TTrigger>>,
-        ) -> Result<(), MetricsConfigOrchestratorError>,
-    ) -> Result<
-        (HashMap<String, Arc<TPublisher>>, HashMap<String, Arc<TTrigger>>),
-        MetricsConfigOrchestratorError,
-    > {
+            &HashMap<String, TPub>,
+            &HashMap<String, TTrig>,
+        ) -> Result<TTrig, MetricsConfigOrchestratorError>,
+    ) -> Result<(HashMap<String, TPub>, HashMap<String, TTrig>), MetricsConfigOrchestratorError>
+    {
         enum DependencyContainer<'a> {
             Publisher { publisher_proto: &'a PublisherProto },
             Trigger { trigger_proto: &'a TriggerProto },
@@ -699,19 +689,21 @@ where
             |(mut publishers, mut triggers), container_key| {
                 match dependency_map.get(container_key) {
                     Some((DependencyContainer::Publisher { publisher_proto, .. }, _)) => {
-                        publisher_func(publisher_proto, &mut publishers, &triggers)
+                        let publisher = publisher_func(publisher_proto, &triggers)?;
+                        publishers.insert(publisher_proto.name.clone(), publisher);
                     }
                     Some((DependencyContainer::Trigger { trigger_proto, .. }, _)) => {
-                        trigger_func(trigger_proto, &publishers, &mut triggers)
+                        let trigger = trigger_func(trigger_proto, &publishers, &mut triggers)?;
+                        triggers.insert(trigger_proto.name.clone(), trigger);
                     }
                     None => {
                         let (container_type, name) = container_key;
-                        Err(MetricsConfigOrchestratorError::InvalidDependency {
+                        return Err(MetricsConfigOrchestratorError::InvalidDependency {
                             dependency_type: container_type.to_string(),
                             dependency_name: name.to_string(),
-                        })
+                        });
                     }
-                }?;
+                };
                 Ok((publishers, triggers))
             },
         )
@@ -1912,6 +1904,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialize_config_invalid_end_trigger_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.end_trigger_name = SOME_TRIGGER_NAME.to_owned();
+
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_config_invalid_finish_trigger_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.finish_trigger_name = SOME_TRIGGER_NAME.to_owned();
+
+        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
     async fn initialize_config_publisher_doesnt_activate_fails() {
         // Setup mock factory.
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
@@ -2565,5 +2591,56 @@ mod tests {
         let config = create_valid_config_with_known_protobuf_type();
 
         orchestrator.validate_config(&config).unwrap();
+    }
+
+    #[test]
+    fn validate_config_invalid_start_trigger_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.start_trigger_name = SOME_TRIGGER_NAME.to_owned();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_config_invalid_end_trigger_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.end_trigger_name = SOME_TRIGGER_NAME.to_owned();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_config_invalid_finish_trigger_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.finish_trigger_name = SOME_TRIGGER_NAME.to_owned();
+
+        let err = orchestrator.validate_config(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 }
