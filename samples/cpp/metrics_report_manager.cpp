@@ -12,6 +12,7 @@ MetricsReportManager::MetricsReportManager(ServiceHolder* holder) : holder_(hold
 
 MetricsReportManager::~MetricsReportManager() {
     ALOGI("Destroyed");
+    ::clear_report_ready_listener(holder_);
 }
 
 std::future<std::optional<android::sdv::telemetry::MetricsReport>>

@@ -114,12 +114,26 @@ extern "C" fn on_config_removed(
 #[derive(Clone)]
 #[repr(C)]
 pub struct MetricsConfigManager {
-    service: usize,
+    service: *mut rust_to_c::ServiceHolder,
     _pin: PhantomPinned,
 }
 
+// Unsafe Send impl needed to be able to wrap MetricsConfigManager in an Arc.
+// More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
+// SAFETY: Safe to use because the raw pointer in the struct is the return value of the FFI
+// rust_to_c::get_telemetry_service(), and this pointer is not dropped in the program.
+// The pointer is used throughout the struct to call rust_to_c FFI functions.
+unsafe impl Send for MetricsConfigManager {}
+
+// Unsafe Sync impl needed to be able to wrap MetricsConfigManager in an Arc.
+// More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
+// SAFETY: Safe to use because the raw pointer in the struct is the return value of the FFI
+// rust_to_c::get_telemetry_service(), and this pointer is not dropped in the program.
+// The pointer is used throughout the struct to call rust_to_c FFI functions.
+unsafe impl Sync for MetricsConfigManager {}
+
 impl MetricsConfigManager {
-    pub fn new(service: usize) -> Pin<Box<Self>> {
+    pub fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
         Box::pin(MetricsConfigManager { service, _pin: PhantomPinned })
     }
 
@@ -133,7 +147,7 @@ impl MetricsConfigManager {
         // for on_config_added are passed.
         unsafe {
             rust_to_c::add_metrics_config(
-                self.service as *mut rust_to_c::ServiceHolder,
+                self.service,
                 serialized_config.as_ptr() as *mut u8,
                 serialized_config.len(),
                 Box::into_raw(sender_wrapper) as *mut c_void,
@@ -167,7 +181,7 @@ impl MetricsConfigManager {
         // for on_config_activated are passed.
         unsafe {
             rust_to_c::activate_metrics_config(
-                self.service as *mut rust_to_c::ServiceHolder,
+                self.service,
                 uuid_cstring.as_ptr(),
                 Box::into_raw(sender_wrapper) as *mut c_void,
                 Some(on_config_activated),
@@ -200,7 +214,7 @@ impl MetricsConfigManager {
         // for on_config_removed are passed.
         unsafe {
             rust_to_c::remove_metrics_config(
-                self.service as *mut rust_to_c::ServiceHolder,
+                self.service,
                 uuid_cstring.as_ptr(),
                 Box::into_raw(sender_wrapper) as *mut c_void,
                 Some(on_config_removed),
