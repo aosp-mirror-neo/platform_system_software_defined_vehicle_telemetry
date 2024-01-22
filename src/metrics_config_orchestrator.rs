@@ -170,6 +170,7 @@ pub(super) struct MetricsConfig<
     uuid: String,
     state: AsyncMutex<MetricsConfigState>,
     metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
+    ordered_publisher_names: Vec<String>,
     publishers: HashMap<String, Arc<TPublisher>>,
     start_trigger: Option<Arc<TTrigger>>,
     end_trigger: Option<Arc<TTrigger>>,
@@ -355,6 +356,7 @@ where
             uuid: config_proto.uuid.clone(),
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: metrics_report_configs.into_values().collect(),
+            ordered_publisher_names,
             publishers,
             start_trigger,
             end_trigger,
@@ -380,12 +382,13 @@ where
             .set(config.clone())
             .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
-        // Activate publishers.
-        for publisher_name in ordered_publisher_names {
-            // Activating publishers one by one. In theory, it should be possible to also spawn
-            // activation tasks in parallel as an optimization.
-            config.publishers[&publisher_name].clone().activate().await.map_err(|error| {
-                MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error }
+        // Activate publishers one by one in topologically sorted order.
+        for publisher_name in &config.ordered_publisher_names {
+            config.publishers[publisher_name].clone().activate().await.map_err(|error| {
+                MetricsConfigOrchestratorError::UnableToActivatePublisher {
+                    publisher_name: publisher_name.to_owned(),
+                    error,
+                }
             })?;
         }
 
@@ -452,6 +455,13 @@ where
                 );
             }
         };
+
+        // Deactivate publishers in reverse topologically sorted order.
+        for publisher_name in config.ordered_publisher_names.iter().rev() {
+            if let Err(err) = config.publishers[publisher_name].deactivate().await {
+                error!("Error when trying to deactivate publisher {}: {}.", publisher_name, err);
+            }
+        }
 
         // Change state to Finished and release the mutex.
         *config_state = MetricsConfigState::Finished;
@@ -2310,29 +2320,64 @@ mod tests {
     #[tokio::test]
     async fn finish_config_not_started_unsubscribes() {
         // Setup start trigger mock.
-        let name_container = Arc::new(Mutex::new(String::default()));
+        let name_container = Arc::new(Mutex::new(vec![]));
         let mut start_trigger_mock = MockTrigger::new_for_subscriber(
             SOME_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigStart,
         );
         let name_container_clone = name_container.clone();
         start_trigger_mock.set_unsubscribe_callback(move |name| {
-            *name_container_clone.lock().unwrap() += name;
+            name_container_clone.lock().unwrap().push(name.to_owned());
+            None
+        });
+
+        // Setup mock publishers.
+        let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
+        let name_container_clone = name_container.clone();
+        service_publisher_mock.set_deactivate_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned());
+            None
+        });
+
+        let mut aggregation_publisher_mock =
+            MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
+        let name_container_clone = name_container.clone();
+        aggregation_publisher_mock.set_deactivate_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned());
             None
         });
 
         // Setup orchestrator.
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let start_trigger_mock = Arc::new(start_trigger_mock);
+        orchestrator.publisher_factory.add_publishers(vec![
+            Arc::new(service_publisher_mock),
+            Arc::new(aggregation_publisher_mock),
+        ]);
         orchestrator.trigger_factory.add_triggers(vec![start_trigger_mock.clone()]);
 
         // Setup Metrics Config.
+        let mut service_publisher_proto = PublisherProto::new();
+        service_publisher_proto.name = SERVICE_PUBLISHER_NAME.to_owned();
+        let mut aggregation_publisher_proto = PublisherProto::new();
+        aggregation_publisher_proto.name = AGGREGATION_PUBLISHER_NAME.to_owned();
         let mut trigger_proto = TriggerProto::new();
         trigger_proto.name = SOME_TRIGGER_NAME.to_owned();
+
+        let aggregation_publisher = aggregation_publisher_proto.mut_aggregation_publisher();
+        aggregation_publisher.trigger_names.push(trigger_proto.name.clone());
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
+
+        let data_trigger = trigger_proto.mut_data_trigger();
+        data_trigger.publisher_name = service_publisher_proto.name.clone();
 
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
         config.start_trigger_name = trigger_proto.name.clone();
+        config.descriptor_protos = create_test_file_descriptor_protos();
+        config.publishers.extend([service_publisher_proto, aggregation_publisher_proto]);
         config.triggers.push(trigger_proto);
 
         // Initialize config.
@@ -2358,7 +2403,10 @@ mod tests {
         }
 
         // Verify that there was exactly one unsubscribe call.
-        assert_eq!(name_container.lock().unwrap().as_str(), SOME_TRIGGER_NAME);
+        assert_eq!(
+            *name_container.lock().unwrap(),
+            [SOME_TRIGGER_NAME, AGGREGATION_PUBLISHER_NAME, SERVICE_PUBLISHER_NAME]
+        );
     }
 
     #[tokio::test]
@@ -2386,6 +2434,22 @@ mod tests {
             None
         });
 
+        // Setup mock publishers.
+        let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
+        let name_container_clone = name_container.clone();
+        service_publisher_mock.set_deactivate_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned());
+            None
+        });
+
+        let mut aggregation_publisher_mock =
+            MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
+        let name_container_clone = name_container.clone();
+        aggregation_publisher_mock.set_deactivate_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned());
+            None
+        });
+
         // Setup mock report generator.
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
@@ -2402,6 +2466,10 @@ mod tests {
         let end_trigger_mock = Arc::new(end_trigger_mock);
         let finish_trigger_mock = Arc::new(finish_trigger_mock);
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator.publisher_factory.add_publishers(vec![
+            Arc::new(service_publisher_mock),
+            Arc::new(aggregation_publisher_mock),
+        ]);
         orchestrator.trigger_factory.add_triggers(vec![
             start_trigger_mock.clone(),
             end_trigger_mock.clone(),
@@ -2412,6 +2480,10 @@ mod tests {
             .add_report_generators(vec![report_generator_mock.into()]);
 
         // Setup Metrics Config.
+        let mut service_publisher_proto = PublisherProto::new();
+        service_publisher_proto.name = SERVICE_PUBLISHER_NAME.to_owned();
+        let mut aggregation_publisher_proto = PublisherProto::new();
+        aggregation_publisher_proto.name = AGGREGATION_PUBLISHER_NAME.to_owned();
         let mut start_trigger_proto = TriggerProto::new();
         start_trigger_proto.name = START_TRIGGER_NAME.to_owned();
         let mut end_trigger_proto = TriggerProto::new();
@@ -2421,12 +2493,23 @@ mod tests {
         let mut metrics_report_config = MetricsReportConfig::new();
         metrics_report_config.name = REPORT_GENERATOR_NAME.to_owned();
 
+        let aggregation_publisher = aggregation_publisher_proto.mut_aggregation_publisher();
+        aggregation_publisher.trigger_names.push(start_trigger_proto.name.clone());
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
+
+        let data_trigger = start_trigger_proto.mut_data_trigger();
+        data_trigger.publisher_name = service_publisher_proto.name.clone();
+
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
         config.start_trigger_name = start_trigger_proto.name.clone();
         config.end_trigger_name = end_trigger_proto.name.clone();
         config.finish_trigger_name = finish_trigger_proto.name.clone();
+        config.descriptor_protos = create_test_file_descriptor_protos();
         config.metrics_report_configs.push(metrics_report_config);
+        config.publishers.extend([service_publisher_proto, aggregation_publisher_proto]);
         config.triggers.extend([start_trigger_proto, end_trigger_proto, finish_trigger_proto]);
 
         // Initialize config.
@@ -2461,7 +2544,13 @@ mod tests {
         // Verify that there was exactly one unsubscribe call.
         assert_eq!(
             *name_container.lock().unwrap(),
-            [END_TRIGGER_NAME, FINISH_TRIGGER_NAME, REPORT_GENERATOR_NAME]
+            [
+                END_TRIGGER_NAME,
+                FINISH_TRIGGER_NAME,
+                REPORT_GENERATOR_NAME,
+                AGGREGATION_PUBLISHER_NAME,
+                SERVICE_PUBLISHER_NAME
+            ]
         );
     }
 
