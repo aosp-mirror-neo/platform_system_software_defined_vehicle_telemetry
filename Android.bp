@@ -28,6 +28,7 @@ rust_defaults {
         "liblogger",
         "libbinder_rs",
         "libbinder_tokio_rs",
+        "libprotobuf",
         "librand",
         "libtokio",
         "libthiserror",
@@ -55,8 +56,8 @@ rust_library {
     ],
     rustlibs: [
         "android.sdv.telemetry-rust",
-        "libprotobuf",
         "libsdvtelemetry_proto_rust",
+        "libsdv_telemetry_utils",
     ],
     proc_macros: [
         "libasync_trait",
@@ -73,8 +74,21 @@ rust_library {
     ],
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
-        "libprotobuf",
         "libsdv_telemetry",
+        "libsdv_telemetry_utils",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_utils",
+    crate_name: "sdv_telemetry_utils",
+    defaults: ["telemetry@rust_defaults"],
+    srcs: [
+        "src/utils/lib.rs",
     ],
     proc_macros: [
         "libasync_trait",
@@ -94,7 +108,6 @@ rust_binary {
         "libsdv_telemetry_configurable_publisher",
         "libsdv_telemetry",
         "libsdvtelemetry_proto_rust",
-        "libprotobuf",
         "librustutils",
     ],
     system_ext_specific: true,
@@ -109,9 +122,9 @@ rust_test {
     rustlibs: [
         "android.sdv.telemetry-rust",
         "libfutures",
-        "libprotobuf",
         "libsdv_telemetry_test_proto",
         "libsdvtelemetry_proto_rust",
+        "libsdv_telemetry_utils",
     ],
     proc_macros: [
         "libasync_trait",
@@ -149,8 +162,8 @@ rust_test {
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
         "libconfigurable_publisher_proto",
-        "libprotobuf",
         "libsdv_telemetry",
+        "libsdv_telemetry_utils",
         "libsdv_telemetry_configurable_publisher",
     ],
     proc_macros: [

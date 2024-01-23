@@ -192,13 +192,13 @@ impl TriggerFactoryImpl {
 #[cfg(test)]
 mod tests {
     use protobuf::EnumOrUnknown;
+    use sdv_telemetry_utils::{collection_extension::VecExtension, test_utils::ptr_eq};
     use sdvtelemetry_proto_rust::metrics_configuration::conditional_trigger::ConditionType;
     use std::collections::HashMap;
 
     use super::*;
     use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::publisher::PublisherType;
-    use crate::utils::{collection_extension::VecExtension, test_utils::ptr_eq};
 
     const INTERVAL: u64 = u64::MAX;
     const NODE_INDEX: u32 = 42;

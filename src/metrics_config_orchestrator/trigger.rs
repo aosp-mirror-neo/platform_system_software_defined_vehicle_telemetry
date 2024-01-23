@@ -4,6 +4,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use log::error;
 use protobuf::MessageDyn;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdvtelemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
     metrics_configuration::conditional_trigger::ConditionType,
@@ -22,7 +23,6 @@ use crate::metrics_config_orchestrator::publisher::{
     PublisherSubscribeError, PublisherUnsubscribeError,
 };
 use crate::metrics_config_orchestrator::Publisher;
-use crate::utils::collection_extension::HashMapExtension;
 
 #[async_trait]
 pub(crate) trait Trigger: Send + Sync {
@@ -485,6 +485,7 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
+    use sdv_telemetry_utils::test_utils::with_timeout;
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::{sync::Notify, time};
 
@@ -493,7 +494,6 @@ mod tests {
     use crate::metrics_config_orchestrator::{
         publisher::mock::MockPublisher, trigger::mock::MockTrigger,
     };
-    use crate::utils::test_utils::with_timeout;
 
     const INTERVAL_MS: u64 = 10;
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";

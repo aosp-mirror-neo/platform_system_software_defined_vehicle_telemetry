@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::MessageDyn;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::{
     collections::HashMap,
     fmt,
@@ -21,7 +22,6 @@ use crate::metrics_config_orchestrator::service_adapter::{
 use crate::metrics_config_orchestrator::trigger::{
     Trigger, TriggerSubscriber, TriggerUnsubscribeError,
 };
-use crate::utils::collection_extension::HashMapExtension;
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
 const PUBLISHER_STATE_ACTIVATING: &str = "Activating";

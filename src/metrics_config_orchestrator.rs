@@ -14,6 +14,9 @@ mod trigger_factory;
 use async_trait::async_trait;
 use log::{error, warn};
 use protobuf::{reflect::FileDescriptor, MessageDyn};
+use sdv_telemetry_utils::{
+    collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
+};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
@@ -29,9 +32,6 @@ use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
 use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_errors::{MessageProviderError, NodeError};
 use crate::expr::node_value_type::NodeValueType;
-use crate::utils::{
-    collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
-};
 
 // Child module dependencies.
 use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};

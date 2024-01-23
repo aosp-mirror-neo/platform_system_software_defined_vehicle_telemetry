@@ -1,15 +1,13 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
-use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
-
 use android_sdv_telemetry::binder::Strong;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
+use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
-
-use crate::utils::collection_extension::HashMapExtension;
 
 pub(crate) struct MetricsReportListener {
     /// Hashmap to store the MetricsReport until the client asks for it.

@@ -6,7 +6,6 @@ mod configurable_publisher_registry;
 mod expr;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
-mod utils;
 
 // External dependencies.
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
@@ -20,6 +19,7 @@ use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use async_trait::async_trait;
 use log::{error, info};
 use protobuf::Message;
+use sdv_telemetry_utils::file_io_utils;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::collections::HashMap;
 use std::fs::{self};
@@ -34,14 +34,12 @@ use tracing::instrument;
 pub use configurable_publisher_registry::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
 };
-pub use utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 
 use metrics_config_orchestrator::MetricsConfigOrchestrator;
 use metrics_config_orchestrator::{
     MetricsConfigOrchestratorError as ConfigError, MetricsConfigOrchestratorImpl,
 };
 use metrics_report_listener::MetricsReportListener;
-use utils::file_io_utils;
 
 static ACTIVE_CONFIG_DATA_DIR: &str = "telemetry/active_configs";
 static INACTIVE_CONFIG_DATA_DIR: &str = "telemetry/inactive_configs";
