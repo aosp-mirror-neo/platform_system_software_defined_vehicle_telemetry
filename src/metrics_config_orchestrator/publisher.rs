@@ -19,9 +19,7 @@ use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError,
     ServiceSubscription,
 };
-use crate::metrics_config_orchestrator::trigger::{
-    Trigger, TriggerSubscriber, TriggerUnsubscribeError,
-};
+use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
 const PUBLISHER_STATE_ACTIVATING: &str = "Activating";
@@ -40,15 +38,13 @@ pub(crate) trait Publisher: Send + Sync {
         &self,
         data_trigger_name: &str,
         callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> Result<(), PublisherSubscribeError>;
-    async fn unsubscribe(&self, data_trigger_name: &str) -> Result<(), PublisherUnsubscribeError>;
+    );
+    async fn unsubscribe(&self, data_trigger_name: &str);
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherActivateError {
-    #[error("Unable to activate publisher: it's in {state} state")]
-    InvalidState { state: String },
     #[error("Service adapter failed to process subscription request: {error}")]
     ServiceAdapterError {
         #[from]
@@ -59,35 +55,11 @@ pub enum PublisherActivateError {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub(crate) enum PublisherDeactivateError {
-    #[error("Unable to deactivate publisher with active subscriptions")]
-    CannotDeactivateWithSubscriptions,
-    #[error("Unable to deactivate publisher: it's in {state} state")]
-    InvalidState { state: String },
     #[error("Service adapter failed to process unsubscription request: {error}")]
     ServiceAdapterError {
         #[from]
         error: ServiceAdapterUnsubscribeError,
     },
-    #[error("Unable to fully unsubscribe from underlying triggers: {errors:?}")]
-    TriggerUnsubscribeErrors { errors: Vec<(String, TriggerUnsubscribeError)> },
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum PublisherSubscribeError {
-    #[error("Unable to subscribe to publisher when it's {state}")]
-    PublisherNotActive { state: String },
-    #[error("Data trigger {data_trigger_name} is already subscribed to the publisher. Duplicate subscriptions are not allowed.")]
-    DuplicateSubscription { data_trigger_name: String },
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum PublisherUnsubscribeError {
-    #[error("Unable to unsubscribe from publisher when it's {state}")]
-    PublisherNotActive { state: String },
-    #[error("Data trigger {data_trigger_name} wasn't subscribed to the publisher")]
-    NotSubscribed { data_trigger_name: String },
 }
 
 pub(crate) struct PublisherImpl {
@@ -151,9 +123,11 @@ impl Publisher for PublisherImpl {
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
         {
             let mut state = self.state.lock().await;
-            if !matches!(*state, PublisherState::Inactive) {
-                return Err(PublisherActivateError::InvalidState { state: state.to_string() });
-            }
+            assert!(
+                matches!(*state, PublisherState::Inactive),
+                "Unable to activate publisher: it's in {} state",
+                state
+            );
             *state = PublisherState::Activating;
         }
 
@@ -163,7 +137,7 @@ impl Publisher for PublisherImpl {
                 for trigger in triggers {
                     let self_clone = self.clone();
                     let callback_map_reference = Arc::downgrade(&callback_map);
-                    if let Err(err) = trigger
+                    trigger
                         .clone()
                         .subscribe(
                             trigger_subscriber,
@@ -172,13 +146,7 @@ impl Publisher for PublisherImpl {
                                     .on_aggregation_publisher_trigger_fired(&callback_map_reference)
                             }),
                         )
-                        .await
-                    {
-                        error!(
-                            "Error when trying to activate trigger {} for aggregation publisher {}: {}.",
-                            trigger.get_name(), self.name, err
-                        );
-                    }
+                        .await;
                 }
             }
             PublisherType::Service {
@@ -187,9 +155,7 @@ impl Publisher for PublisherImpl {
                 service_adapter,
                 service_subscription,
             } => {
-                if service_subscription.lock().unwrap().is_some() {
-                    panic!("Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
-                }
+                assert!(service_subscription.lock().unwrap().is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
 
                 let self_clone = self.clone();
                 let callback_map_reference = Arc::downgrade(&callback_map);
@@ -205,9 +171,7 @@ impl Publisher for PublisherImpl {
                     .await?;
 
                 let mut subscription_container = service_subscription.lock().unwrap();
-                if subscription_container.is_some() {
-                    panic!("Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
-                }
+                assert!(subscription_container.is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
                 subscription_container.replace(subscription);
             }
             _ => {}
@@ -215,9 +179,7 @@ impl Publisher for PublisherImpl {
 
         {
             let mut state = self.state.lock().await;
-            if !matches!(*state, PublisherState::Activating) {
-                panic!("Unable to mark publisher {} as active because it is in an inconsistent state: {} instead of Activating", self.name, state);
-            }
+            assert!(matches!(*state, PublisherState::Activating), "Unable to mark publisher {} as active because it is in an inconsistent state: {} instead of Activating", self.name, state);
             *state = PublisherState::Active { callback_map };
         }
 
@@ -228,11 +190,12 @@ impl Publisher for PublisherImpl {
         {
             let mut state = self.state.lock().await;
             if let PublisherState::Active { callback_map } = &*state {
-                if !callback_map.lock().await.is_empty() {
-                    return Err(PublisherDeactivateError::CannotDeactivateWithSubscriptions);
-                }
+                assert!(
+                    callback_map.lock().await.is_empty(),
+                    "Unable to deactivate publisher with active subscriptions"
+                );
             } else {
-                return Err(PublisherDeactivateError::InvalidState { state: state.to_string() });
+                panic!("Unable to deactivate publisher: it's in {} state", state);
             }
             *state = PublisherState::Deactivating;
             *self.latest_message.lock().unwrap() = None;
@@ -240,16 +203,8 @@ impl Publisher for PublisherImpl {
 
         match &self.publisher_type {
             PublisherType::Aggregation { triggers, trigger_subscriber, .. } => {
-                let mut errors = Vec::new();
-
                 for trigger in triggers {
-                    if let Err(err) = trigger.unsubscribe(trigger_subscriber).await {
-                        errors.push((trigger.get_name().to_owned(), err));
-                    }
-                }
-
-                if !errors.is_empty() {
-                    return Err(PublisherDeactivateError::TriggerUnsubscribeErrors { errors });
+                    trigger.unsubscribe(trigger_subscriber).await;
                 }
             }
             PublisherType::Service { service_adapter, service_subscription, .. } => {
@@ -265,9 +220,7 @@ impl Publisher for PublisherImpl {
 
         {
             let mut state = self.state.lock().await;
-            if !matches!(*state, PublisherState::Deactivating) {
-                panic!("Unable to mark publisher {} as inactive because it is in an inconsistent state: {} instead of Deactivating", self.name, state);
-            }
+            assert!(matches!(*state, PublisherState::Deactivating), "Unable to mark publisher {} as inactive because it is in an inconsistent state: {} instead of Deactivating", self.name, state);
             *state = PublisherState::Inactive;
         }
 
@@ -278,35 +231,27 @@ impl Publisher for PublisherImpl {
         &self,
         data_trigger_name: &str,
         callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> Result<(), PublisherSubscribeError> {
+    ) {
         let state = self.state.lock().await;
         if let PublisherState::Active { callback_map } = &*state {
             callback_map
                 .lock()
                 .await
                 .try_insert_value(data_trigger_name.to_owned(), callback)
-                .map_err(|_| PublisherSubscribeError::DuplicateSubscription {
-                    data_trigger_name: data_trigger_name.to_owned(),
-                })?;
+                .unwrap_or_else(|_| panic!("Data trigger {} is already subscribed to the publisher. Duplicate subscriptions are not allowed.", data_trigger_name));
         } else {
-            return Err(PublisherSubscribeError::PublisherNotActive { state: state.to_string() });
+            panic!("Unable to unsubscribe from publisher when it's {}", state);
         }
-
-        Ok(())
     }
 
-    async fn unsubscribe(&self, data_trigger_name: &str) -> Result<(), PublisherUnsubscribeError> {
+    async fn unsubscribe(&self, data_trigger_name: &str) {
         let state = self.state.lock().await;
         if let PublisherState::Active { callback_map } = &*state {
-            if callback_map.lock().await.remove(data_trigger_name).is_none() {
-                Err(PublisherUnsubscribeError::NotSubscribed {
-                    data_trigger_name: data_trigger_name.to_owned(),
-                })
-            } else {
-                Ok(())
-            }
+            let _ = callback_map.lock().await.remove(data_trigger_name).unwrap_or_else(|| {
+                panic!("Data trigger {} wasn't subscribed to the publisher", data_trigger_name)
+            });
         } else {
-            Err(PublisherUnsubscribeError::PublisherNotActive { state: state.to_string() })
+            panic!("Unable to unsubscribe from publisher when it's {}", state);
         }
     }
 }
@@ -523,103 +468,68 @@ mod tests {
     ) -> Arc<PublisherImpl> {
         let publisher = create_active_service_publisher(service_adapter).await;
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await.unwrap();
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
         publisher
     }
 
     #[tokio::test]
-    async fn activate_when_activating_fails() {
+    #[should_panic]
+    async fn activate_when_activating_panics() {
         let (publisher, service_adapter) = create_activating_service_publisher();
         service_adapter.notify_subscribing.notified().await;
 
-        let err = publisher.activate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherActivateError::InvalidState { state } if state == PUBLISHER_STATE_ACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.activate().await.unwrap();
     }
 
     #[tokio::test]
-    async fn activate_when_active_fails() {
+    #[should_panic]
+    async fn activate_when_active_panics() {
         let publisher = create_active_service_publisher(None).await;
 
-        let err = publisher.activate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherActivateError::InvalidState { state } if state == PUBLISHER_STATE_ACTIVE),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.activate().await.unwrap();
     }
 
     #[tokio::test]
-    async fn activate_when_deactivating_fails() {
+    #[should_panic]
+    async fn activate_when_deactivating_panics() {
         let (publisher, service_adapter) = create_deactivating_service_publisher().await;
         service_adapter.notify_unsubscribing.notified().await;
 
-        let err = publisher.activate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherActivateError::InvalidState { state } if state == PUBLISHER_STATE_DEACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.activate().await.unwrap();
     }
 
     #[tokio::test]
-    async fn deactivate_when_inactive_fails() {
+    #[should_panic]
+    async fn deactivate_when_inactive_panics() {
         let publisher = create_inactive_service_publisher(None);
 
-        let err = publisher.deactivate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherDeactivateError::InvalidState { state } if state == PUBLISHER_STATE_INACTIVE),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.deactivate().await.unwrap();
     }
 
     #[tokio::test]
-    async fn deactivate_when_activating_fails() {
+    #[should_panic]
+    async fn deactivate_when_activating_panics() {
         let (publisher, service_adapter) = create_activating_service_publisher();
         service_adapter.notify_subscribing.notified().await;
 
-        let err = publisher.deactivate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherDeactivateError::InvalidState { state } if state == PUBLISHER_STATE_ACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.deactivate().await.unwrap();
     }
 
     #[tokio::test]
-    async fn deactivate_when_deactivating_fails() {
+    #[should_panic]
+    async fn deactivate_when_deactivating_panics() {
         let (publisher, service_adapter) = create_deactivating_service_publisher().await;
         service_adapter.notify_unsubscribing.notified().await;
 
-        let err = publisher.deactivate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherDeactivateError::InvalidState { state } if state == PUBLISHER_STATE_DEACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.deactivate().await.unwrap();
     }
 
     #[tokio::test]
-    async fn deactivate_with_subscriptions_fails() {
+    #[should_panic]
+    async fn deactivate_with_subscriptions_panics() {
         let publisher = create_service_publisher_with_subscription(None).await;
 
-        let err = publisher.deactivate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherDeactivateError::CannotDeactivateWithSubscriptions),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.deactivate().await.unwrap();
     }
 
     #[tokio::test]
@@ -633,98 +543,37 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deactivate_aggregation_publisher_subscribe_error_fails() {
-        let mut trigger1 = MockTrigger::new_for_subscriber(
-            TRIGGER_NAME.to_owned(),
-            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
-        );
-        trigger1.set_unsubscribe_callback(|_| {
-            Some(TriggerUnsubscribeError::NotSubscribed {
-                subscriber_name: DATA_TRIGGER_NAME.to_owned(),
-            })
-        });
-        let mut trigger2 = MockTrigger::new_for_subscriber(
-            DATA_TRIGGER_NAME.to_owned(),
-            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
-        );
-        trigger2.set_unsubscribe_callback(|_| {
-            Some(TriggerUnsubscribeError::PublisherUnsubscribeError {
-                error: PublisherUnsubscribeError::NotSubscribed {
-                    data_trigger_name: DATA_TRIGGER_NAME.to_owned(),
-                },
-            })
-        });
-        let publisher =
-            create_active_aggregation_publisher(vec![Arc::new(trigger1), Arc::new(trigger2)]).await;
-
-        let err = publisher.deactivate().await.err().unwrap();
-
-        let PublisherDeactivateError::TriggerUnsubscribeErrors { errors } = &err else {
-            panic!("Unexpected error: {}", err);
-        };
-        assert_eq!(errors.len(), 2);
-        let (trigger_name, error) = &errors[0];
-        assert_eq!(trigger_name, TRIGGER_NAME);
-        assert!(
-            matches!(error, TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == DATA_TRIGGER_NAME)
-        );
-        let (trigger_name, error) = &errors[1];
-        assert_eq!(trigger_name, DATA_TRIGGER_NAME);
-        assert!(matches!(error, TriggerUnsubscribeError::PublisherUnsubscribeError { .. }));
-    }
-
-    #[tokio::test]
-    async fn subscribe_when_inactive_fails() {
+    #[should_panic]
+    async fn subscribe_when_inactive_panics() {
         let publisher = create_inactive_service_publisher(None);
 
-        let err = publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherSubscribeError::PublisherNotActive { state } if state == PUBLISHER_STATE_INACTIVE),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
     }
 
     #[tokio::test]
-    async fn subscribe_when_activating_fails() {
+    #[should_panic]
+    async fn subscribe_when_activating_panics() {
         let (publisher, service_adapter) = create_activating_service_publisher();
         service_adapter.notify_subscribing.notified().await;
 
-        let err = publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherSubscribeError::PublisherNotActive { state } if state == PUBLISHER_STATE_ACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
     }
 
     #[tokio::test]
-    async fn subscribe_when_deactivating_fails() {
+    #[should_panic]
+    async fn subscribe_when_deactivating_panics() {
         let (publisher, service_adapter) = create_deactivating_service_publisher().await;
         service_adapter.notify_unsubscribing.notified().await;
 
-        let err = publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherSubscribeError::PublisherNotActive { state } if state == PUBLISHER_STATE_DEACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
     }
 
     #[tokio::test]
-    async fn subscribe_already_subscribed_fails() {
+    #[should_panic]
+    async fn subscribe_already_subscribed_panics() {
         let publisher = create_service_publisher_with_subscription(None).await;
 
-        let err = publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherSubscribeError::DuplicateSubscription { data_trigger_name } if data_trigger_name == DATA_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
     }
 
     #[tokio::test]
@@ -743,8 +592,7 @@ mod tests {
                     maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
                 }),
             )
-            .await
-            .unwrap();
+            .await;
         service_adapter.publish_new_message(&msg).await;
 
         let expected = Box::new(msg) as Box<dyn MessageDyn>;
@@ -769,8 +617,7 @@ mod tests {
                     maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
                 }),
             )
-            .await
-            .unwrap();
+            .await;
         trigger.fire().await;
 
         let test_message =
@@ -783,63 +630,43 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_when_inactive_fails() {
+    #[should_panic]
+    async fn unsubscribe_when_inactive_panics() {
         let publisher = create_inactive_service_publisher(None);
 
-        let err = publisher.unsubscribe(DATA_TRIGGER_NAME).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherUnsubscribeError::PublisherNotActive { state } if state == PUBLISHER_STATE_INACTIVE),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
     #[tokio::test]
-    async fn unsubscribe_when_activating_fails() {
+    #[should_panic]
+    async fn unsubscribe_when_activating_panics() {
         let (publisher, service_adapter) = create_activating_service_publisher();
         service_adapter.notify_subscribing.notified().await;
 
-        let err = publisher.unsubscribe(DATA_TRIGGER_NAME).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherUnsubscribeError::PublisherNotActive { state } if state == PUBLISHER_STATE_ACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
     #[tokio::test]
-    async fn unsubscribe_when_deactivating_fails() {
+    #[should_panic]
+    async fn unsubscribe_when_deactivating_panics() {
         let (publisher, service_adapter) = create_deactivating_service_publisher().await;
         service_adapter.notify_unsubscribing.notified().await;
 
-        let err = publisher.unsubscribe(DATA_TRIGGER_NAME).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherUnsubscribeError::PublisherNotActive { state } if state == PUBLISHER_STATE_DEACTIVATING),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
     #[tokio::test]
-    async fn unsubscribe_not_subscribed_fails() {
+    #[should_panic]
+    async fn unsubscribe_not_subscribed_panics() {
         let publisher = create_active_service_publisher(None).await;
 
-        let err = publisher.unsubscribe(DATA_TRIGGER_NAME).await.err().unwrap();
-
-        assert!(
-            matches!(&err, PublisherUnsubscribeError::NotSubscribed { data_trigger_name } if data_trigger_name == DATA_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
-        );
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
     #[tokio::test]
     async fn unsubscribe_success() {
         let publisher = create_service_publisher_with_subscription(None).await;
 
-        publisher.unsubscribe(DATA_TRIGGER_NAME).await.unwrap();
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 }

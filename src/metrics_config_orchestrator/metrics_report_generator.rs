@@ -9,31 +9,18 @@ use sdvtelemetry_proto_rust::metrics_configuration::{
 use std::marker::{Send, Sync};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::{sync::Mutex as AsyncMutex, task};
 
-use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
-use crate::metrics_config_orchestrator::trigger::{TriggerSubscriber, TriggerUnsubscribeError};
+use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
+use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
 
 #[async_trait]
 pub(crate) trait MetricsReportGenerator: Send + Sync {
     fn get_name(&self) -> &str;
 
-    async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError>;
-    async fn deactivate(&self) -> Result<(), MetricsReportGeneratorError>;
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum MetricsReportGeneratorError {
-    #[error("Unable to activate metrics report generator: it's already active")]
-    AlreadyActive,
-    #[error("Unable to deactivate metrics report generator: it's already inactive")]
-    AlreadyInactive,
-    #[error("Unable to deactivate metrics report generator due to unsubscription errors: {unsubscribe_errors:?}")]
-    UnableToUnsubscribe { unsubscribe_errors: Vec<TriggerUnsubscribeError> },
-    #[error("Unable to build report due to error in MessageBuilder: {e}")]
-    FailedToBuildReport { e: MessageBuilderError },
+    async fn activate(self: &Arc<Self>);
+    async fn deactivate(&self);
 }
 
 #[allow(dead_code)]
@@ -58,58 +45,34 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         &self.name
     }
 
-    async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError> {
+    async fn activate(self: &Arc<Self>) {
         let mut is_active = self.is_active.lock().await;
-
-        if *is_active {
-            return Err(MetricsReportGeneratorError::AlreadyActive);
-        }
+        assert!(!*is_active, "Unable to activate metrics report generator: it's already active");
 
         // Subscribing to triggers one by one. In theory, it should be possible to also spawn
         // subscription tasks in parallel as an optimization.
         for trigger in &self.triggers {
             let self_clone = self.clone();
-            if let Err(err) = trigger
+            trigger
                 .clone()
                 .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
-                .await
-            {
-                error!(
-                    "Metrics Report Generator {} failed to subscribe to trigger {} with error {}.",
-                    self.name,
-                    trigger.get_name(),
-                    err
-                );
-            }
+                .await;
         }
 
         *is_active = true;
-        Ok(())
     }
 
-    async fn deactivate(&self) -> Result<(), MetricsReportGeneratorError> {
+    async fn deactivate(&self) {
         let mut is_active = self.is_active.lock().await;
-
-        if !*is_active {
-            return Err(MetricsReportGeneratorError::AlreadyInactive);
-        }
-
-        let mut unsubscribe_errors = vec![];
+        assert!(*is_active, "Unable to deactivate metrics report generator: it's already inactive");
 
         // Unsubscribing from triggers one by one. In theory, it should be possible to also
         // spawn activation tasks in parallel as an optimization.
         for trigger in &self.triggers {
-            if let Err(err) = trigger.unsubscribe(&self.subscriber).await {
-                unsubscribe_errors.push(err);
-            }
-        }
-
-        if !unsubscribe_errors.is_empty() {
-            return Err(MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors });
+            trigger.unsubscribe(&self.subscriber).await;
         }
 
         *is_active = false;
-        Ok(())
     }
 }
 
@@ -157,7 +120,7 @@ impl MetricsReportGeneratorImpl {
                     (self_clone.report_ready_callback)(report);
                 }
                 Err(e) => {
-                    error!("{:?}", MetricsReportGeneratorError::FailedToBuildReport { e });
+                    error!("Unable to build report due to error in MessageBuilder: {:?}", e);
                 }
             }
         });
@@ -212,17 +175,12 @@ mod test {
     }
 
     #[tokio::test]
-    async fn activate_already_active_fails() {
+    #[should_panic]
+    async fn activate_already_active_panics() {
         let generator = Arc::new(create_generator());
 
-        generator.activate().await.unwrap();
-        let err = generator.activate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, MetricsReportGeneratorError::AlreadyActive),
-            "Unexpected error: {:?}",
-            err
-        );
+        generator.activate().await;
+        generator.activate().await;
     }
 
     #[tokio::test]
@@ -232,13 +190,12 @@ mod test {
         let num_fired_clone = num_fired.clone();
         trigger.subscribe_callback.replace(Box::new(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
-            None
         }));
 
         let mut generator = create_generator();
         generator.triggers.push(Arc::new(trigger));
 
-        Arc::new(generator).activate().await.unwrap();
+        Arc::new(generator).activate().await;
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
     }
@@ -251,7 +208,7 @@ mod test {
         let (tx, mut rx) = watch::channel(None);
         generator.report_ready_callback = Arc::new(move |report| tx.send(Some(report)).unwrap());
         generator.triggers.push(trigger.clone());
-        Arc::new(generator).activate().await.unwrap();
+        Arc::new(generator).activate().await;
 
         // Fire twice to make sure report number is incremented.
         trigger.fire().await;
@@ -282,22 +239,17 @@ mod test {
         let mut generator = create_generator();
         generator.report_ready_callback = Arc::new(|_| thread::sleep(Duration::MAX));
         generator.triggers.push(trigger.clone());
-        Arc::new(generator).activate().await.unwrap();
+        Arc::new(generator).activate().await;
 
         trigger.fire().await;
     }
 
     #[tokio::test]
-    async fn deactivate_already_inactive_fails() {
+    #[should_panic]
+    async fn deactivate_already_inactive_panics() {
         let generator = Arc::new(create_generator());
 
-        let err = generator.deactivate().await.err().unwrap();
-
-        assert!(
-            matches!(&err, MetricsReportGeneratorError::AlreadyInactive),
-            "Unexpected error: {:?}",
-            err
-        );
+        generator.deactivate().await;
     }
 
     #[tokio::test]
@@ -307,45 +259,15 @@ mod test {
         let num_fired_clone = num_fired.clone();
         trigger.set_unsubscribe_callback(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
-            None
         });
 
         let mut generator = create_generator();
         generator.triggers.push(Arc::new(trigger));
         let generator = Arc::new(generator);
 
-        generator.activate().await.unwrap();
-        generator.deactivate().await.unwrap();
+        generator.activate().await;
+        generator.deactivate().await;
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
-    }
-
-    #[tokio::test]
-    async fn deactivate_unsubscribe_returns_error_fails() {
-        const SUBSCRIBER_NAME: &str = "subscriber";
-
-        let mut trigger = create_trigger();
-        trigger.set_unsubscribe_callback(move |_| {
-            Some(TriggerUnsubscribeError::NotSubscribed {
-                subscriber_name: SUBSCRIBER_NAME.to_owned(),
-            })
-        });
-
-        let mut generator = create_generator();
-        generator.triggers.push(Arc::new(trigger));
-        let generator = Arc::new(generator);
-
-        generator.activate().await.unwrap();
-        let err = generator.deactivate().await.err().unwrap();
-
-        let MetricsReportGeneratorError::UnableToUnsubscribe { unsubscribe_errors } = &err else {
-            panic!("Unexpected error: {:?}", err);
-        };
-        assert_eq!(unsubscribe_errors.len(), 1);
-        assert!(
-            matches!(&unsubscribe_errors[0], TriggerUnsubscribeError::NotSubscribed { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
-            "Unexpected inner error: {:?}",
-            unsubscribe_errors[0]
-        );
     }
 }
