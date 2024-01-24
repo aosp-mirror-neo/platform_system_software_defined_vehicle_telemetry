@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor};
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto,
     ProtoMessageBuilder,
@@ -21,7 +22,6 @@ use crate::{
         },
         MessageBuilder, MessageBuilderImpl,
     },
-    utils::collection_extension::HashMapExtension,
 };
 
 /// Factory that validates MetricsConfig's ProtoMessageBuilder and creates

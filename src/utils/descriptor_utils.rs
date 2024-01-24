@@ -1,5 +1,5 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
-
+//! This module contains descriptors for well known protobuf types.
 use lazy_static::lazy_static;
 use protobuf::{reflect::FileDescriptor, well_known_types};
 

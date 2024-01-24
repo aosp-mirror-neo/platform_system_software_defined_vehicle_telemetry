@@ -177,6 +177,7 @@ impl MetricsReportGeneratorFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use sdv_telemetry_utils::{collection_extension::VecExtension, test_utils::ptr_eq};
     use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 
     use super::*;
@@ -184,7 +185,6 @@ mod tests {
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
-    use crate::utils::{collection_extension::VecExtension, test_utils::ptr_eq};
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";

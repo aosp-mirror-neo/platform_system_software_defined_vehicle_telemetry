@@ -211,11 +211,11 @@ pub(super) mod tests {
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageFull;
+    use sdv_telemetry_utils::test_utils::with_timeout;
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::utils::test_utils::with_timeout;
 
     const SERVICE_NAME: &str = "service";
     const TOPIC_NAME: &str = "topic";

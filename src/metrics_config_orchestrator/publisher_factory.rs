@@ -182,6 +182,7 @@ impl PublisherFactoryImpl {
 mod tests {
     use async_trait::async_trait;
     use protobuf::MessageDyn;
+    use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdvtelemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use std::collections::HashMap;
 
@@ -191,7 +192,6 @@ mod tests {
         ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
-    use crate::utils::collection_extension::VecExtension;
 
     const INTERVAL_MS: u64 = 42;
     const PUBLISHER_NAME: &str = "publisher";
