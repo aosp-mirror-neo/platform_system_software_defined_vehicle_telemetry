@@ -16,6 +16,8 @@ pub(crate) struct MockPublisher {
 
     name: String,
     activate_callback: Option<Box<dyn Fn(&str) -> Option<PublisherActivateError> + Send + Sync>>,
+    deactivate_callback:
+        Option<Box<dyn Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync>>,
     new_message_callback:
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
     subscribe_callback: Option<Box<dyn Fn() -> Option<PublisherSubscribeError> + Send + Sync>>,
@@ -43,6 +45,12 @@ impl Publisher for MockPublisher {
     }
 
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
+        if let Some(callback) = &self.deactivate_callback {
+            if let Some(error) = callback(&self.name) {
+                return Err(error);
+            }
+        }
+
         Ok(())
     }
 
@@ -83,6 +91,7 @@ impl MockPublisher {
             latest_message: None,
             name,
             activate_callback: None,
+            deactivate_callback: None,
             new_message_callback: None.into(),
             subscribe_callback: None,
             unsubscribe_callback: None,
@@ -98,6 +107,13 @@ impl MockPublisher {
         callback: impl Fn(&str) -> Option<PublisherActivateError> + Send + Sync + 'static,
     ) {
         self.activate_callback.replace(Box::new(callback));
+    }
+
+    pub(crate) fn set_deactivate_callback(
+        &mut self,
+        callback: impl Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync + 'static,
+    ) {
+        self.deactivate_callback.replace(Box::new(callback));
     }
 
     pub(crate) fn set_subscribe_callback(
