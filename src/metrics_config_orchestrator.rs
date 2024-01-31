@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::{PhantomData, Sync};
 use std::sync::{Arc, Mutex, OnceLock};
 use thiserror::Error;
+use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
@@ -67,7 +68,7 @@ pub trait MetricsConfigOrchestrator {
     ) -> Result<(), MetricsConfigOrchestratorError>;
 
     /// Finish lifecycle of Metrics Configuration with the specified uuid.
-    fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError>;
+    async fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError>;
 
     /// Verify that Metrics Configuration is valid.
     fn validate_config(
@@ -167,7 +168,7 @@ pub(super) struct MetricsConfig<
     TTrigger: Trigger = TriggerImpl,
 > {
     uuid: String,
-    state: Mutex<MetricsConfigState>,
+    state: AsyncMutex<MetricsConfigState>,
     metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
     publishers: HashMap<String, Arc<TPublisher>>,
     start_trigger: Option<Arc<TTrigger>>,
@@ -176,16 +177,16 @@ pub(super) struct MetricsConfig<
 }
 
 /// Lifecycle state of the metrics config.
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(super) enum MetricsConfigState {
     /// Config is active and waiting for start trigger to fire.
+    /// This is the initial state.
     NotStarted,
-    /// Start trigger has fired and data collection is starting.
-    Starting,
     /// Performing data collection and listening to end trigger.
     Running,
-    /// End trigger has fired and data collection is ending.
-    Ending,
+    /// Data collection finished and won't restart.
+    /// This is the terminal state.
+    Finished,
 }
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
@@ -394,14 +395,68 @@ where
         Ok(())
     }
 
-    fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError> {
-        let mut configs = self.configs.lock().unwrap();
-        match configs.remove(config_uuid) {
-            Some(_) => Ok(()),
-            _ => Err(MetricsConfigOrchestratorError::InvalidConfigUuid {
-                uuid: config_uuid.to_owned(),
-            }),
-        }
+    async fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError> {
+        let config = self.configs.lock().unwrap().remove(config_uuid).ok_or_else(|| {
+            MetricsConfigOrchestratorError::InvalidConfigUuid { uuid: config_uuid.to_owned() }
+        })?;
+
+        // Lock state mutex and hold it mutex until transition is complete.
+        let mut config_state = config.state.lock().await;
+
+        // Perform finishing logic based on the current state.
+        match &*config_state {
+            MetricsConfigState::NotStarted => {
+                // Unsubscribe from start trigger if it's set.
+                if let Some(start_trigger) = &config.start_trigger {
+                    if let Err(err) =
+                        start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await
+                    {
+                        error!("Error when trying to deactivate start trigger of Metrics Configuration {}: {}.", config.uuid, err);
+                    }
+                }
+            }
+            MetricsConfigState::Running => {
+                // Unsubscribe from end trigger if it's set.
+                if let Some(end_trigger) = &config.end_trigger {
+                    if let Err(err) =
+                        end_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigEnd).await
+                    {
+                        error!("Error when trying to deactivate end trigger of Metrics Configuration {}: {}.", config.uuid, err);
+                    }
+                }
+
+                // Unsubscribe from finish trigger if it's set.
+                if let Some(finish_trigger) = &config.finish_trigger {
+                    if let Err(err) =
+                        finish_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigFinish).await
+                    {
+                        error!("Error when trying to deactivate finish trigger of Metrics Configuration {}: {}.", config.uuid, err);
+                    }
+                }
+
+                // Deactivate metrics report generators.
+                for generator in &config.metrics_report_generators {
+                    if let Err(err) = generator.deactivate().await {
+                        error!(
+                            "Error when trying to deactivate metrics report generator {}: {}.",
+                            generator.get_name(),
+                            err
+                        );
+                    }
+                }
+            }
+            state => {
+                panic!(
+                    "Attempted to finish Metrics Configuration with unexpected state: {:?}",
+                    state
+                );
+            }
+        };
+
+        // Change state to Finished and release the mutex.
+        *config_state = MetricsConfigState::Finished;
+
+        Ok(())
     }
 
     fn validate_config(
@@ -709,29 +764,21 @@ where
         )
     }
 
-    fn verify_config_state(
-        current_state: &MetricsConfigState,
-        expected_state: &MetricsConfigState,
-    ) {
-        if current_state != expected_state {
-            panic!(
-                "Unexpected MetricsConfig state: got {:?}, expected {:?}",
-                current_state, expected_state
-            );
-        }
-    }
-
     // Lifecycle event handlers.
 
     fn on_start_trigger_fired(
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
         tokio::spawn(async move {
-            // Verify state and change it from NotStarted to Starting.
-            {
-                let mut config_state = config.state.lock().unwrap();
-                Self::verify_config_state(&config_state, &MetricsConfigState::NotStarted);
-                *config_state = MetricsConfigState::Starting;
+            // Lock state mutex, verify state and hold the mutex until transition is complete.
+            let mut config_state = config.state.lock().await;
+            match &*config_state {
+                MetricsConfigState::NotStarted => {} // Proceed with transition
+                MetricsConfigState::Finished => return, // No need to handle trigger fire when finished.
+                state => panic!(
+                    "Start trigger fired handler called for config in unexpected state: {:?}",
+                    state
+                ),
             }
 
             // Unsubscribe from start trigger.
@@ -803,12 +850,8 @@ where
                 }
             }
 
-            // Verify state and change it from Starting to Running.
-            {
-                let mut config_state = config.state.lock().unwrap();
-                Self::verify_config_state(&config_state, &MetricsConfigState::Starting);
-                *config_state = MetricsConfigState::Running;
-            }
+            // Change state to Running and release the mutex.
+            *config_state = MetricsConfigState::Running;
         });
     }
 
@@ -816,11 +859,15 @@ where
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
         tokio::spawn(async move {
-            // Verify state and change it from Running to Ending.
-            {
-                let mut config_state = config.state.lock().unwrap();
-                Self::verify_config_state(&config_state, &MetricsConfigState::Running);
-                *config_state = MetricsConfigState::Ending;
+            // Lock state mutex, verify state and hold the mutex until transition is complete.
+            let mut config_state = config.state.lock().await;
+            match &*config_state {
+                MetricsConfigState::Running => {}       // Proceed with transition
+                MetricsConfigState::Finished => return, // No need to handle trigger fire when finished.
+                state => panic!(
+                    "End trigger fired handler called for config in unexpected state: {:?}",
+                    state
+                ),
             }
 
             // Unsubscribe from end trigger.
@@ -859,12 +906,8 @@ where
                 );
             }
 
-            // Verify state and change it from Ending to NotStarted.
-            {
-                let mut config_state = config.state.lock().unwrap();
-                Self::verify_config_state(&config_state, &MetricsConfigState::Ending);
-                *config_state = MetricsConfigState::NotStarted;
-            }
+            // Change state to NotStarted and release the mutex.
+            *config_state = MetricsConfigState::NotStarted;
         });
     }
 
@@ -895,7 +938,6 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::Mutex;
-    use tokio::{time, time::Duration};
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
@@ -924,12 +966,16 @@ mod tests {
     const AGGREGATION_PUBLISHER_NAME: &str = "AggregationPublisher1";
     const CONDITIONAL_TRIGGER_NAME: &str = "ConditionalTrigger1";
     const DATA_TRIGGER_NAME: &str = "DataTrigger1";
+    const END_TRIGGER_NAME: &str = "end_trigger";
+    const FINISH_TRIGGER_NAME: &str = "finish_trigger";
     const INVALID_PUBLISHER_NAME: &str = "Publisher~0";
     const INVALID_TRIGGER_NAME: &str = "Trigger~0";
     const METRICS_REPORT_CONFIG_NAME: &str = "MetricsReportConfig1";
+    const REPORT_GENERATOR_NAME: &str = "report_generator";
     const SERVICE_PUBLISHER_NAME: &str = "ServicePublisher1";
     const SOME_PUBLISHER_NAME: &str = "Publisher1";
     const SOME_TRIGGER_NAME: &str = "Trigger1";
+    const START_TRIGGER_NAME: &str = "start_trigger";
     const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
@@ -1870,20 +1916,30 @@ mod tests {
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
         assert_eq!(*orchestrator.node_factory.num_nodes.lock().unwrap(), 1);
-        let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
-        assert_eq!(message_providers.len(), 1);
-        assert_eq!(
-            &message_providers[0].get_message(SERVICE_PUBLISHER_NAME).unwrap().unwrap(),
-            &(value1 as Box<dyn MessageDyn>)
-        );
-        assert_eq!(
-            &message_providers[0].get_message(AGGREGATION_PUBLISHER_NAME).unwrap().unwrap(),
-            &(value2 as Box<dyn MessageDyn>)
-        );
-        let configs = orchestrator.configs.lock().unwrap();
-        assert_eq!(configs.len(), 1);
-        let config = &configs[&config.uuid];
+        {
+            let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
+            assert_eq!(message_providers.len(), 1);
+            assert_eq!(
+                &message_providers[0].get_message(SERVICE_PUBLISHER_NAME).unwrap().unwrap(),
+                &(value1 as Box<dyn MessageDyn>)
+            );
+            assert_eq!(
+                &message_providers[0].get_message(AGGREGATION_PUBLISHER_NAME).unwrap().unwrap(),
+                &(value2 as Box<dyn MessageDyn>)
+            );
+        }
+        let config = {
+            let configs = orchestrator.configs.lock().unwrap();
+            assert_eq!(configs.len(), 1);
+            configs[&config.uuid].clone()
+        };
         assert_eq!(config.publishers.len(), 2);
+        let config_state = config.state.lock().await;
+        assert!(
+            matches!(&*config_state, MetricsConfigState::NotStarted),
+            "Unexpected config state: {:?}",
+            config_state
+        );
     }
 
     #[tokio::test]
@@ -2007,49 +2063,18 @@ mod tests {
         const DEACTIVATE: &str = "deactivate";
         const SUBSCRIBE: &str = "subscribe";
         const UNSUBSCRIBE: &str = "unsubscribe";
-        const START_TRIGGER_NAME: &str = "start_trigger";
-        const END_TRIGGER_NAME: &str = "end_trigger";
-        const FINISH_TRIGGER_NAME: &str = "finish_trigger";
-        const REPORT_GENERATOR_NAME: &str = "report_generator";
-        const NOT_STARTED: &str = "NotStarted";
-        const STARTING: &str = "Starting";
-        const ENDING: &str = "Ending";
 
         // Setup callbacks that log actions and current MetricsConfig state.
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
-        let orchestrator_container =
-            Arc::new(OnceLock::<Arc<MockedMetricsConfigOrchestratorImpl>>::new());
 
         let factory_calls_clone = factory_calls.clone();
-        let orchestrator_container_clone = orchestrator_container.clone();
         let subscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((
-                SUBSCRIBE.to_owned(),
-                name.to_owned(),
-                format!(
-                    "{:?}",
-                    orchestrator_container_clone.get().unwrap().configs.lock().unwrap()[UUID]
-                        .state
-                        .lock()
-                        .unwrap()
-                ),
-            ));
+            factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()));
             None
         };
         let factory_calls_clone = factory_calls.clone();
-        let orchestrator_container_clone = orchestrator_container.clone();
         let unsubscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((
-                UNSUBSCRIBE.to_owned(),
-                name.to_owned(),
-                format!(
-                    "{:?}",
-                    orchestrator_container_clone.get().unwrap().configs.lock().unwrap()[UUID]
-                        .state
-                        .lock()
-                        .unwrap()
-                ),
-            ));
+            factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()));
             None
         };
 
@@ -2078,19 +2103,8 @@ mod tests {
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
 
         let factory_calls_clone = factory_calls.clone();
-        let orchestrator_container_clone = orchestrator_container.clone();
         publisher_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((
-                ACTIVATE.to_owned(),
-                name.to_owned(),
-                format!(
-                    "{:?}",
-                    orchestrator_container_clone.get().unwrap().configs.lock().unwrap()[UUID]
-                        .state
-                        .lock()
-                        .unwrap()
-                ),
-            ));
+            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()));
             None
         });
 
@@ -2099,34 +2113,12 @@ mod tests {
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
 
         let factory_calls_clone = factory_calls.clone();
-        let orchestrator_container_clone = orchestrator_container.clone();
         report_generator_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((
-                ACTIVATE.to_owned(),
-                name.to_owned(),
-                format!(
-                    "{:?}",
-                    orchestrator_container_clone.get().unwrap().configs.lock().unwrap()[UUID]
-                        .state
-                        .lock()
-                        .unwrap()
-                ),
-            ))
+            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
         });
         let factory_calls_clone = factory_calls.clone();
-        let orchestrator_container_clone = orchestrator_container.clone();
         report_generator_mock.set_deactivate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((
-                DEACTIVATE.to_owned(),
-                name.to_owned(),
-                format!(
-                    "{:?}",
-                    orchestrator_container_clone.get().unwrap().configs.lock().unwrap()[UUID]
-                        .state
-                        .lock()
-                        .unwrap()
-                ),
-            ))
+            factory_calls_clone.lock().unwrap().push((DEACTIVATE.to_owned(), name.to_owned()))
         });
 
         // Create and setup orchestrator.
@@ -2142,10 +2134,6 @@ mod tests {
             end_trigger_mock.clone(),
             finish_trigger_mock.into(),
         ]);
-        let orchestrator = Arc::new(orchestrator);
-        orchestrator_container
-            .set(orchestrator.clone())
-            .unwrap_or_else(|_| panic!("Orchestrator is set more than once"));
 
         // Create metrics config.
         let mut start_trigger = TriggerProto::new();
@@ -2156,15 +2144,16 @@ mod tests {
         finish_trigger.name = FINISH_TRIGGER_NAME.to_owned();
         let mut publisher = PublisherProto::new();
         publisher.name = SOME_PUBLISHER_NAME.to_owned();
+        let mut metrics_report_config = MetricsReportConfig::new();
+        metrics_report_config.name = REPORT_GENERATOR_NAME.to_owned();
 
         let mut config = MetricsConfigProto::new();
         config.uuid = UUID.to_owned();
         config.start_trigger_name = start_trigger.name.clone();
         config.end_trigger_name = end_trigger.name.clone();
         config.finish_trigger_name = finish_trigger.name.clone();
-        config.triggers.push(start_trigger);
-        config.triggers.push(end_trigger);
-        config.triggers.push(finish_trigger);
+        config.metrics_report_configs.push(metrics_report_config);
+        config.triggers.extend([start_trigger, end_trigger, finish_trigger]);
         config.publishers.push(publisher);
 
         // Initialize config.
@@ -2174,29 +2163,34 @@ mod tests {
         start_trigger_mock.fire().await;
         start_trigger_mock.fire().await;
 
-        // Sleep to make sure trigger handler task is processed.
-        time::sleep(Duration::from_millis(1)).await;
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
 
         // Fire twice to verify that the second fire event is ignored.
         end_trigger_mock.fire().await;
         end_trigger_mock.fire().await;
 
-        // Sleep to make sure trigger handler task is processed.
-        time::sleep(Duration::from_millis(1)).await;
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
 
         let expected_calls = vec![
-            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned(), NOT_STARTED.to_owned()),
-            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned(), NOT_STARTED.to_owned()),
-            (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned(), STARTING.to_owned()),
-            (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned(), STARTING.to_owned()),
-            (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned(), STARTING.to_owned()),
-            (UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned(), ENDING.to_owned()),
-            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned(), ENDING.to_owned()),
+            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
+            (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
+            (ACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
+            (UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
+            (DEACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        assert_eq!(
-            *orchestrator.configs.lock().unwrap()[UUID].state.lock().unwrap(),
-            MetricsConfigState::NotStarted
+        let config = { orchestrator.configs.lock().unwrap()[UUID].clone() };
+        let config_state = config.state.lock().await;
+        assert!(
+            matches!(&*config_state, MetricsConfigState::NotStarted),
+            "Unexpected config state: {:?}",
+            config_state
         );
     }
 
@@ -2300,11 +2294,11 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
     }
 
-    #[test]
-    fn finish_config_invalid_config_uuid_fails() {
+    #[tokio::test]
+    async fn finish_config_invalid_config_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
 
-        let err = orchestrator.finish_config(UUID).err().unwrap();
+        let err = orchestrator.finish_config(UUID).await.err().unwrap();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } if uuid == UUID),
@@ -2314,15 +2308,161 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn finish_config_success() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+    async fn finish_config_not_started_unsubscribes() {
+        // Setup start trigger mock.
+        let name_container = Arc::new(Mutex::new(String::default()));
+        let mut start_trigger_mock = MockTrigger::new_for_subscriber(
+            SOME_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::MetricsConfigStart,
+        );
+        let name_container_clone = name_container.clone();
+        start_trigger_mock.set_unsubscribe_callback(move |name| {
+            *name_container_clone.lock().unwrap() += name;
+            None
+        });
 
-        let mut metrics_config = MetricsConfigProto::new();
-        metrics_config.uuid = UUID.to_owned();
+        // Setup orchestrator.
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let start_trigger_mock = Arc::new(start_trigger_mock);
+        orchestrator.trigger_factory.add_triggers(vec![start_trigger_mock.clone()]);
 
-        orchestrator.initialize_config(&metrics_config).await.unwrap();
+        // Setup Metrics Config.
+        let mut trigger_proto = TriggerProto::new();
+        trigger_proto.name = SOME_TRIGGER_NAME.to_owned();
 
-        assert!(orchestrator.finish_config(UUID).is_ok());
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.start_trigger_name = trigger_proto.name.clone();
+        config.triggers.push(trigger_proto);
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Store metrics config Rust object.
+        let metrics_config = orchestrator.configs.lock().unwrap()[UUID].clone();
+
+        // Finish config.
+        orchestrator.finish_config(UUID).await.unwrap();
+
+        // Fire start trigger. This should be ignored.
+        start_trigger_mock.fire().await;
+
+        // Verify config state.
+        {
+            let config_state = metrics_config.state.lock().await;
+            assert!(
+                matches!(*config_state, MetricsConfigState::Finished),
+                "Unexpected state: {:?}",
+                *config_state
+            );
+        }
+
+        // Verify that there was exactly one unsubscribe call.
+        assert_eq!(name_container.lock().unwrap().as_str(), SOME_TRIGGER_NAME);
+    }
+
+    #[tokio::test]
+    async fn finish_config_running_unsubscribes_and_deactivates() {
+        // Setup trigger mocks.
+        let name_container = Arc::new(Mutex::new(vec![]));
+
+        let mut end_trigger_mock = MockTrigger::new_for_subscriber(
+            END_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::MetricsConfigEnd,
+        );
+        let name_container_clone = name_container.clone();
+        end_trigger_mock.set_unsubscribe_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned());
+            None
+        });
+
+        let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
+            FINISH_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::MetricsConfigFinish,
+        );
+        let name_container_clone = name_container.clone();
+        finish_trigger_mock.set_unsubscribe_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned());
+            None
+        });
+
+        // Setup mock report generator.
+        let mut report_generator_mock =
+            MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
+        let name_container_clone = name_container.clone();
+        report_generator_mock.set_deactivate_callback(move |name| {
+            name_container_clone.lock().unwrap().push(name.to_owned())
+        });
+
+        // Setup orchestrator.
+        let start_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            START_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::MetricsConfigStart,
+        ));
+        let end_trigger_mock = Arc::new(end_trigger_mock);
+        let finish_trigger_mock = Arc::new(finish_trigger_mock);
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator.trigger_factory.add_triggers(vec![
+            start_trigger_mock.clone(),
+            end_trigger_mock.clone(),
+            finish_trigger_mock.clone(),
+        ]);
+        orchestrator
+            .metrics_report_generator_factory
+            .add_report_generators(vec![report_generator_mock.into()]);
+
+        // Setup Metrics Config.
+        let mut start_trigger_proto = TriggerProto::new();
+        start_trigger_proto.name = START_TRIGGER_NAME.to_owned();
+        let mut end_trigger_proto = TriggerProto::new();
+        end_trigger_proto.name = END_TRIGGER_NAME.to_owned();
+        let mut finish_trigger_proto = TriggerProto::new();
+        finish_trigger_proto.name = FINISH_TRIGGER_NAME.to_owned();
+        let mut metrics_report_config = MetricsReportConfig::new();
+        metrics_report_config.name = REPORT_GENERATOR_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.start_trigger_name = start_trigger_proto.name.clone();
+        config.end_trigger_name = end_trigger_proto.name.clone();
+        config.finish_trigger_name = finish_trigger_proto.name.clone();
+        config.metrics_report_configs.push(metrics_report_config);
+        config.triggers.extend([start_trigger_proto, end_trigger_proto, finish_trigger_proto]);
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Store metrics config Rust object.
+        let metrics_config = orchestrator.configs.lock().unwrap()[UUID].clone();
+
+        // Fire start trigger. This should start data collection.
+        start_trigger_mock.fire().await;
+
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
+
+        // Finish config.
+        orchestrator.finish_config(UUID).await.unwrap();
+
+        // Fire end and finish triggers. This should be ignored.
+        end_trigger_mock.fire().await;
+        finish_trigger_mock.fire().await;
+
+        // Verify config state.
+        {
+            let config_state = metrics_config.state.lock().await;
+            assert!(
+                matches!(*config_state, MetricsConfigState::Finished),
+                "Unexpected state: {:?}",
+                *config_state
+            );
+        }
+
+        // Verify that there was exactly one unsubscribe call.
+        assert_eq!(
+            *name_container.lock().unwrap(),
+            [END_TRIGGER_NAME, FINISH_TRIGGER_NAME, REPORT_GENERATOR_NAME]
+        );
     }
 
     #[test]
