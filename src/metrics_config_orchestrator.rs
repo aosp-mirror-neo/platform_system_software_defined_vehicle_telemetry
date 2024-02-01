@@ -49,7 +49,7 @@ use publisher_factory::{
     PublisherFactoryValidateContext,
 };
 use service_adapter::ServiceAdapterImpl;
-use trigger::{Trigger, TriggerImpl, TriggerSubscribeError, TriggerSubscriber};
+use trigger::{Trigger, TriggerImpl, TriggerSubscriber};
 use trigger_factory::{
     TriggerFactory, TriggerFactoryCreateContext, TriggerFactoryError, TriggerFactoryImpl,
     TriggerFactoryValidateContext,
@@ -117,11 +117,6 @@ pub enum MetricsConfigOrchestratorError {
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
     #[error("Unable to activate publisher {publisher_name}: {error}")]
     UnableToActivatePublisher { publisher_name: String, error: PublisherActivateError },
-    #[error("Unable to activate start trigger: {error}")]
-    UnableToActivateStartTrigger {
-        #[from]
-        error: TriggerSubscribeError,
-    },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -167,7 +162,6 @@ pub(super) struct MetricsConfig<
     TPublisher: Publisher = PublisherImpl,
     TTrigger: Trigger = TriggerImpl,
 > {
-    uuid: String,
     state: AsyncMutex<MetricsConfigState>,
     metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
     ordered_publisher_names: Vec<String>,
@@ -353,7 +347,6 @@ where
         let finish_trigger =
             Self::maybe_get_trigger(&triggers, &config_proto.finish_trigger_name)?.cloned();
         let config = Arc::new(MetricsConfig {
-            uuid: config_proto.uuid.clone(),
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: metrics_report_configs.into_values().collect(),
             ordered_publisher_names,
@@ -393,7 +386,7 @@ where
         }
 
         // Activate start trigger, if set.
-        Self::maybe_subscribe_to_start_trigger(&config).await?;
+        Self::maybe_subscribe_to_start_trigger(&config).await;
 
         Ok(())
     }
@@ -411,41 +404,23 @@ where
             MetricsConfigState::NotStarted => {
                 // Unsubscribe from start trigger if it's set.
                 if let Some(start_trigger) = &config.start_trigger {
-                    if let Err(err) =
-                        start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await
-                    {
-                        error!("Error when trying to deactivate start trigger of Metrics Configuration {}: {}.", config.uuid, err);
-                    }
+                    start_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await;
                 }
             }
             MetricsConfigState::Running => {
                 // Unsubscribe from end trigger if it's set.
                 if let Some(end_trigger) = &config.end_trigger {
-                    if let Err(err) =
-                        end_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigEnd).await
-                    {
-                        error!("Error when trying to deactivate end trigger of Metrics Configuration {}: {}.", config.uuid, err);
-                    }
+                    end_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigEnd).await;
                 }
 
                 // Unsubscribe from finish trigger if it's set.
                 if let Some(finish_trigger) = &config.finish_trigger {
-                    if let Err(err) =
-                        finish_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigFinish).await
-                    {
-                        error!("Error when trying to deactivate finish trigger of Metrics Configuration {}: {}.", config.uuid, err);
-                    }
+                    finish_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigFinish).await;
                 }
 
                 // Deactivate metrics report generators.
                 for generator in &config.metrics_report_generators {
-                    if let Err(err) = generator.deactivate().await {
-                        error!(
-                            "Error when trying to deactivate metrics report generator {}: {}.",
-                            generator.get_name(),
-                            err
-                        );
-                    }
+                    generator.deactivate().await;
                 }
             }
             state => {
@@ -642,7 +617,7 @@ where
 
     async fn maybe_subscribe_to_start_trigger(
         config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) -> Result<(), TriggerSubscribeError> {
+    ) {
         if let Some(start_trigger) = &config.start_trigger {
             let mut config_clone = Some(config.clone());
             start_trigger
@@ -655,9 +630,7 @@ where
                         }
                     }),
                 )
-                .await
-        } else {
-            Ok(())
+                .await;
         }
     }
 
@@ -792,36 +765,22 @@ where
             }
 
             // Unsubscribe from start trigger.
-            if let Err(err) = config
+            config
                 .start_trigger
                 .as_ref()
                 .expect("Start trigger is expected to exist in the start trigger fired handler")
                 .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
-                .await
-            {
-                error!(
-                    "Error when trying to deactivate start trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will not start.",
-                    config.uuid, err
-                );
-                return;
-            }
+                .await;
 
             // Activate metrics report generators.
             for generator in &config.metrics_report_generators {
-                if let Err(err) = generator.activate().await {
-                    error!(
-                        "Error when trying to activate metrics report generator {}: {}.",
-                        generator.get_name(),
-                        err
-                    );
-                }
+                generator.activate().await;
             }
 
             // Subscribe to end trigger if it's set.
             if let Some(end_trigger) = &config.end_trigger {
                 let mut config_clone = Some(config.clone());
-                if let Err(err) = end_trigger
+                end_trigger
                     .clone()
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigEnd,
@@ -831,33 +790,19 @@ where
                             }
                         }),
                     )
-                    .await
-                {
-                    error!(
-                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will never end.",
-                        config.uuid, err
-                    );
-                }
+                    .await;
             }
 
             // Subscribe to finish trigger if it's set.
             if let Some(finish_trigger) = &config.finish_trigger {
                 let config_clone = config.clone();
-                if let Err(err) = finish_trigger
+                finish_trigger
                     .clone()
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigFinish,
                         Box::new(move || Self::on_finish_trigger_fired(&config_clone)),
                     )
-                    .await
-                {
-                    error!(
-                        "Error when trying to activate end trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will never finish.",
-                        config.uuid, err
-                    );
-                }
+                    .await;
             }
 
             // Change state to Running and release the mutex.
@@ -881,40 +826,20 @@ where
             }
 
             // Unsubscribe from end trigger.
-            if let Err(err) = config
+            config
                 .end_trigger
                 .as_ref()
                 .expect("End trigger is expected to exist in the end trigger fired handler")
                 .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
-                .await
-            {
-                error!(
-                    "Error when trying to deactivate end trigger of Metrics Configuration {}: {}.\
-                        Metrics Configuration data collection will not end.",
-                    config.uuid, err
-                );
-                return;
-            }
+                .await;
 
             // Deactivate metrics report generators.
             for generator in &config.metrics_report_generators {
-                if let Err(err) = generator.deactivate().await {
-                    error!(
-                        "Error when trying to deactivate metrics report generator {}: {}.",
-                        generator.get_name(),
-                        err
-                    );
-                }
+                generator.deactivate().await;
             }
 
             // Subscribe to start trigger if it's set.
-            if let Err(err) = Self::maybe_subscribe_to_start_trigger(&config).await {
-                error!(
-                    "Error when trying to activate start trigger of Metrics Configuration {}: {}.\
-                    Metrics Configuration data collection will never start.",
-                    config.uuid, err
-                );
-            }
+            Self::maybe_subscribe_to_start_trigger(&config).await;
 
             // Change state to NotStarted and release the mutex.
             *config_state = MetricsConfigState::NotStarted;
@@ -954,14 +879,14 @@ mod tests {
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
-    use crate::metrics_config_orchestrator::metrics_report_generator::MetricsReportGeneratorError;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
+    use crate::metrics_config_orchestrator::service_adapter::ServiceAdapterSubscribeError;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
-    use crate::MetricsConfigOrchestratorImpl;
+    use crate::{ConfigurablePublisherRegistrySubscribeError, MetricsConfigOrchestratorImpl};
 
     type MockedMetricsConfigOrchestratorImpl<'a> = MetricsConfigOrchestratorImpl<
         MockMetricsReportGenerator,
@@ -1015,20 +940,16 @@ mod tests {
             &self.name
         }
 
-        async fn activate(self: &Arc<Self>) -> Result<(), MetricsReportGeneratorError> {
+        async fn activate(self: &Arc<Self>) {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);
             }
-
-            Ok(())
         }
 
-        async fn deactivate(&self) -> Result<(), MetricsReportGeneratorError> {
+        async fn deactivate(&self) {
             if let Some(callback) = &self.deactivate_callback {
                 callback(&self.name);
             }
-
-            Ok(())
         }
     }
 
@@ -2008,7 +1929,13 @@ mod tests {
         // Setup mock factory.
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
         publisher_mock.set_activate_callback(move |_| {
-            Some(PublisherActivateError::InvalidState { state: String::default() })
+            Some(PublisherActivateError::ServiceAdapterError {
+                error: ServiceAdapterSubscribeError::SubscriptionFailed {
+                    error: ConfigurablePublisherRegistrySubscribeError::ServiceNotFound {
+                        service_name: String::default(),
+                    },
+                },
+            })
         });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
@@ -2025,45 +1952,9 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.err().unwrap();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::InvalidState { .. })),
+            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::ServiceAdapterError { .. })),
             "Unexpected error: {:?}",
             err
-        );
-    }
-
-    #[tokio::test]
-    async fn initialize_config_start_trigger_doesnt_activate_fails() {
-        const SUBSCRIBER_NAME: &str = "subscriber";
-
-        let mut trigger_mock = MockTrigger::new_for_subscriber(
-            SOME_TRIGGER_NAME.to_owned(),
-            TriggerSubscriber::MetricsConfigStart,
-        );
-        trigger_mock.set_subscribe_callback(|_| {
-            Some(TriggerSubscribeError::DuplicateSubscription {
-                subscriber_name: SUBSCRIBER_NAME.to_owned(),
-            })
-        });
-
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.trigger_factory.add_triggers(vec![Arc::new(trigger_mock)]);
-
-        let mut start_trigger = TriggerProto::new();
-        start_trigger.name = SOME_TRIGGER_NAME.to_owned();
-        let mut config = MetricsConfigProto::new();
-        config.uuid = UUID.to_owned();
-        config.start_trigger_name = start_trigger.name.clone();
-        config.triggers.push(start_trigger);
-
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
-
-        let MetricsConfigOrchestratorError::UnableToActivateStartTrigger { error } = &err else {
-            panic!("Unexpected error: {:?}", err)
-        };
-        assert!(
-            matches!(&error, TriggerSubscribeError::DuplicateSubscription { subscriber_name } if subscriber_name == SUBSCRIBER_NAME),
-            "Unexpected inner error: {:?}",
-            error
         );
     }
 
@@ -2079,13 +1970,11 @@ mod tests {
 
         let factory_calls_clone = factory_calls.clone();
         let subscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()));
-            None
+            factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()))
         };
         let factory_calls_clone = factory_calls.clone();
         let unsubscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()));
-            None
+            factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()))
         };
 
         // Create start, end and finish mock triggers that use callbacks.
@@ -2327,8 +2216,7 @@ mod tests {
         );
         let name_container_clone = name_container.clone();
         start_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
-            None
+            name_container_clone.lock().unwrap().push(name.to_owned())
         });
 
         // Setup mock publishers.
@@ -2420,8 +2308,7 @@ mod tests {
         );
         let name_container_clone = name_container.clone();
         end_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
-            None
+            name_container_clone.lock().unwrap().push(name.to_owned())
         });
 
         let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2430,8 +2317,7 @@ mod tests {
         );
         let name_container_clone = name_container.clone();
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
-            None
+            name_container_clone.lock().unwrap().push(name.to_owned())
         });
 
         // Setup mock publishers.

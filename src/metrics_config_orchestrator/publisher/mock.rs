@@ -5,10 +5,7 @@ use protobuf::MessageDyn;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{
-    Publisher, PublisherActivateError, PublisherDeactivateError, PublisherSubscribeError,
-    PublisherUnsubscribeError,
-};
+use super::{Publisher, PublisherActivateError, PublisherDeactivateError};
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
@@ -20,8 +17,7 @@ pub(crate) struct MockPublisher {
         Option<Box<dyn Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync>>,
     new_message_callback:
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
-    subscribe_callback: Option<Box<dyn Fn() -> Option<PublisherSubscribeError> + Send + Sync>>,
-    unsubscribe_callback: Option<Box<dyn Fn() -> Option<PublisherUnsubscribeError> + Send + Sync>>,
+    unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 #[async_trait]
@@ -58,29 +54,17 @@ impl Publisher for MockPublisher {
         &self,
         data_trigger_name: &str,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> Result<(), PublisherSubscribeError> {
+    ) {
         assert!(self.expected_trigger_names.contains(data_trigger_name));
         self.new_message_callback.lock().await.replace(new_message_callback);
-
-        if let Some(callback) = &self.subscribe_callback {
-            if let Some(error) = callback() {
-                return Err(error);
-            }
-        }
-
-        Ok(())
     }
 
-    async fn unsubscribe(&self, data_trigger_name: &str) -> Result<(), PublisherUnsubscribeError> {
+    async fn unsubscribe(&self, data_trigger_name: &str) {
         assert!(self.expected_trigger_names.contains(data_trigger_name));
 
         if let Some(callback) = &self.unsubscribe_callback {
-            if let Some(error) = callback() {
-                return Err(error);
-            }
+            callback();
         }
-
-        Ok(())
     }
 }
 
@@ -93,7 +77,6 @@ impl MockPublisher {
             activate_callback: None,
             deactivate_callback: None,
             new_message_callback: None.into(),
-            subscribe_callback: None,
             unsubscribe_callback: None,
         }
     }
@@ -116,17 +99,7 @@ impl MockPublisher {
         self.deactivate_callback.replace(Box::new(callback));
     }
 
-    pub(crate) fn set_subscribe_callback(
-        &mut self,
-        callback: impl Fn() -> Option<PublisherSubscribeError> + Send + Sync + 'static,
-    ) {
-        self.subscribe_callback.replace(Box::new(callback));
-    }
-
-    pub(crate) fn set_unsubscribe_callback(
-        &mut self,
-        callback: impl Fn() -> Option<PublisherUnsubscribeError> + Send + Sync + 'static,
-    ) {
+    pub(crate) fn set_unsubscribe_callback(&mut self, callback: impl Fn() + Send + Sync + 'static) {
         self.unsubscribe_callback.replace(Box::new(callback));
     }
 }

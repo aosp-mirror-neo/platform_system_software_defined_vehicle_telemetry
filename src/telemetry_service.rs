@@ -85,9 +85,6 @@ fn get_error_code_and_message(err: ConfigError) -> (i32, String) {
         ConfigError::InvalidExpressionNodes { .. } => {
             StatusCodes::ADD_METRICS_CONFIG_FAILED_INVALID_EXPRESSION_NODES
         }
-        ConfigError::UnableToActivateStartTrigger { .. } => {
-            StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED_UNABLE_TO_ACTIVATE_START_TRIGGER
-        }
         ConfigError::UnableToActivatePublisher { .. } => {
             StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED_UNABLE_TO_ACTIVATE_PUBLISHER
         }
