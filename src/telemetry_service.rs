@@ -2,11 +2,10 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
-mod configurable_publisher_registry;
-mod data_tunnel_wrapper;
 mod expr;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
+mod service_publisher_manager;
 
 // External dependencies.
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
@@ -33,12 +32,9 @@ use std::sync::{Arc, Mutex};
 use tracing::instrument;
 
 // Child module dependencies.
-pub use configurable_publisher_registry::{
-    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
+pub use service_publisher_manager::{
+    ServicePublisherManager, ServicePublisherManagerSubscribeError,
 };
-
-// Child module dependencies.
-pub use data_tunnel_wrapper::{DataTunnelWrapper, DataTunnelWrapperError};
 
 use metrics_config_orchestrator::MetricsConfigOrchestrator;
 use metrics_config_orchestrator::{
@@ -120,12 +116,11 @@ impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
-    #[instrument(skip(configurable_publisher_registry, data_tunnel_wrapper))]
+    #[instrument(skip(service_publisher_manager))]
     pub async fn new(
         root_path: &str,
         config_store_size: usize,
-        configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
-        data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
+        service_publisher_manager: Arc<dyn ServicePublisherManager>,
     ) -> Option<Self> {
         let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
             (
@@ -144,8 +139,7 @@ impl SdvTelemetryService {
 
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
         let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
-            configurable_publisher_registry,
-            data_tunnel_wrapper,
+            service_publisher_manager,
             move |report| listener.on_report_ready(report),
         ));
 
@@ -380,11 +374,11 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 }
             };
             let uuid = &config.uuid;
-
+            info!("initializing {} Config", uuid);
             // Initializes metrics config
             match self.metrics_config_orchestrator.clone().initialize_config(&config).await {
                 Ok(()) => {
-                    info!("initializing {} Config", uuid);
+                    info!("Metrics config orchestrator successfully initialized {} config", uuid);
                     let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
                     file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
                         error!(
@@ -672,8 +666,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
+    use crate::service_publisher_manager::mock::MockServicePublisherManager;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
     const REPORT_NUMBER: i32 = 42;
@@ -910,8 +903,7 @@ mod tests {
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-                Arc::new(MockConfigurablePublisherRegistry::default()),
-                Arc::new(MockDataTunnelWrapperImpl::new()),
+                Arc::new(MockServicePublisherManager::default()),
             )
             .await
             .unwrap();

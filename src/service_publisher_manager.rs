@@ -9,27 +9,28 @@ use protobuf::reflect::MessageDescriptor;
 use protobuf::MessageDyn;
 use std::fmt::Debug;
 use std::marker::{Send, Sync};
+use std::sync::Arc;
 use thiserror::Error;
 
-/// Interface used to manage subscriptions to registered publishers
+/// Interface used to manage subscriptions to service publishers
 #[async_trait]
-pub trait ConfigurablePublisherRegistry: Send + Sync {
+pub trait ServicePublisherManager: Send + Sync {
     /// Returns message descriptor of the specified topic published by the specified service.
     fn get_message_descriptor(
         &self,
         service_name: &str,
         topic_name: &str,
-    ) -> Result<MessageDescriptor, ConfigurablePublisherRegistrySubscribeError>;
+    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError>;
 
     /// Subscribes specified callback to the new messages from the specified topic
     /// with certain configuration, if provided.
-    async fn subscribe(
+    async fn try_subscribe(
         &self,
         service_name: &str,
         topic_name: &str,
-        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError>;
+    ) -> Result<bool, ServicePublisherManagerSubscribeError>;
 
     /// Unsubscribes from the specified topic and service name.
     async fn unsubscribe(
@@ -37,20 +38,22 @@ pub trait ConfigurablePublisherRegistry: Send + Sync {
         service_name: &str,
         topic_name: &str,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError>;
+    ) -> Result<(), ServicePublisherManagerSubscribeError>;
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum ConfigurablePublisherRegistrySubscribeError {
-    #[error("Publisher {service_name} is not registered")]
-    ServiceNotFound { service_name: String },
+pub enum ServicePublisherManagerSubscribeError {
     #[error("Topic {topic_name} is not registered for publisher {service_name}")]
     TopicNotFound { service_name: String, topic_name: String },
-    #[error("Unable to subscribe to the topic: {error}")]
-    SubscribeFailed { error: binder::Status },
+    #[error("Already subscribed to the given topic: {topic_name}")]
+    TopicSubscriptionsExists { topic_name: String },
+    #[error("Publisher {service_name} is not registered")]
+    ServiceNotFound { service_name: String },
+    #[error("Unable to subscribe to the publisher: {error}")]
+    SubscribeFailed { error: anyhow::Error },
     #[error("Unable to unsubscribe from the topic: {error}")]
-    UnsubscribeFailed { error: binder::Status },
+    UnsubscribeFailed { error: anyhow::Error },
 }
 
 #[cfg(test)]

@@ -29,11 +29,10 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
-use crate::configurable_publisher_registry::ConfigurablePublisherRegistry;
-use crate::data_tunnel_wrapper::DataTunnelWrapper;
 use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_errors::{MessageProviderError, NodeError};
 use crate::expr::node_value_type::NodeValueType;
+use crate::service_publisher_manager::ServicePublisherManager;
 
 // Child module dependencies.
 use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};
@@ -147,11 +146,8 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     publisher_factory: TPublisherFactory,
     trigger_factory: TTriggerFactory,
 
-    /// Used to fetch data from non-sdv aware publishers
-    configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
-
-    /// Used to fetch data from data tunnel topics
-    data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
+    /// Used to fetch data from service publishers
+    service_publisher_manager: Arc<dyn ServicePublisherManager>,
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
@@ -265,8 +261,7 @@ where
             descriptor_provider: Box::new(DescriptorProviderImpl::new(
                 &file_descriptors,
                 &config_proto.publishers,
-                &self.configurable_publisher_registry,
-                &self.data_tunnel_wrapper,
+                &self.service_publisher_manager,
             )?),
         };
         let (expression_nodes, node_types) =
@@ -491,8 +486,7 @@ where
             descriptor_provider: Box::new(DescriptorProviderImpl::new(
                 &file_descriptors,
                 &config_proto.publishers,
-                &self.configurable_publisher_registry,
-                &self.data_tunnel_wrapper,
+                &self.service_publisher_manager,
             )?),
         };
         let node_types = self
@@ -560,19 +554,14 @@ where
 
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
-        configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
-        data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
+        service_publisher_manager: Arc<dyn ServicePublisherManager>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
-        let service_adapter = Arc::new(ServiceAdapterImpl::new(
-            configurable_publisher_registry.clone(),
-            data_tunnel_wrapper.clone(),
-        ));
+        let service_adapter = Arc::new(ServiceAdapterImpl::new(service_publisher_manager.clone()));
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            configurable_publisher_registry,
-            data_tunnel_wrapper,
+            service_publisher_manager,
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
                 message_builder_factory.clone(),
             ),
@@ -894,8 +883,6 @@ mod tests {
     use std::sync::Mutex;
 
     use super::*;
-    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
@@ -906,7 +893,8 @@ mod tests {
     use crate::metrics_config_orchestrator::service_adapter::ServiceAdapterSubscribeError;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
-    use crate::{ConfigurablePublisherRegistrySubscribeError, MetricsConfigOrchestratorImpl};
+    use crate::service_publisher_manager::mock::MockServicePublisherManager;
+    use crate::{MetricsConfigOrchestratorImpl, ServicePublisherManagerSubscribeError};
 
     type MockedMetricsConfigOrchestratorImpl<'a> = MetricsConfigOrchestratorImpl<
         MockMetricsReportGenerator,
@@ -1246,10 +1234,9 @@ mod tests {
         fn new() -> Self {
             MetricsConfigOrchestratorImpl {
                 configs: Mutex::new(HashMap::new()),
-                configurable_publisher_registry: Arc::new(
-                    MockConfigurablePublisherRegistry::new_with_descriptor(Empty::descriptor()),
+                service_publisher_manager: Arc::new(
+                    MockServicePublisherManager::new_with_descriptor(Empty::descriptor()),
                 ),
-                data_tunnel_wrapper: Arc::new(MockDataTunnelWrapperImpl::new()),
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
@@ -1957,10 +1944,9 @@ mod tests {
         publisher_mock.set_activate_callback(move |_| {
             Some(PublisherActivateError::ServiceAdapterError {
                 error: ServiceAdapterSubscribeError::SubscriptionFailed {
-                    error: ConfigurablePublisherRegistrySubscribeError::ServiceNotFound {
+                    error: ServicePublisherManagerSubscribeError::ServiceNotFound {
                         service_name: String::default(),
-                    }
-                    .into(),
+                    },
                 },
             })
         });

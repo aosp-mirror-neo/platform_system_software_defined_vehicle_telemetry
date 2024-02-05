@@ -1,49 +1,49 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use anyhow::anyhow;
 use async_trait::async_trait;
-use binder::Status;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use crate::{ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError};
+use crate::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
 
-pub(crate) struct MockConfigurablePublisherRegistry {
+pub(crate) struct MockServicePublisherManager {
     /// When set, the descriptor will be returned on the next call to get_message_descriptor.
     pub next_descriptor: Mutex<Option<MessageDescriptor>>,
     /// When set, the error will be returned on the next call to subscribe.
-    pub next_error: Mutex<Option<ConfigurablePublisherRegistrySubscribeError>>,
+    pub next_error: Mutex<Option<ServicePublisherManagerSubscribeError>>,
     /// The number of times subscribe function of the mock was called.
     num_subscribe_calls: AtomicU32,
     /// The number of times subscribe function of the mock was called.
     num_unsubscribe_calls: AtomicU32,
     /// The map of provided subscriber functions.
-    subscribers: Mutex<HashMap<(String, String), Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
+    subscribers: Mutex<HashMap<(String, String), Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
 }
 
 #[async_trait]
-impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
+impl ServicePublisherManager for MockServicePublisherManager {
     fn get_message_descriptor(
         &self,
         service_name: &str,
         _topic_name: &str,
-    ) -> Result<MessageDescriptor, ConfigurablePublisherRegistrySubscribeError> {
+    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
         self.next_descriptor.lock().unwrap().take().ok_or_else(|| {
-            ConfigurablePublisherRegistrySubscribeError::ServiceNotFound {
+            ServicePublisherManagerSubscribeError::ServiceNotFound {
                 service_name: service_name.to_owned(),
             }
         })
     }
 
-    async fn subscribe(
+    async fn try_subscribe(
         &self,
         service_name: &str,
         topic_name: &str,
-        subscriber: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        subscriber: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
-    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
+    ) -> Result<bool, ServicePublisherManagerSubscribeError> {
         self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
 
         if let Some(err) = self.next_error.lock().unwrap().take() {
@@ -53,8 +53,8 @@ impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
         self.subscribers
             .lock()
             .unwrap()
-            .insert((service_name.to_owned(), topic_name.to_owned()), subscriber);
-        Ok(())
+            .insert((service_name.to_owned(), topic_name.to_owned()), subscriber.clone());
+        Ok(true)
     }
 
     async fn unsubscribe(
@@ -62,7 +62,7 @@ impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
         service_name: &str,
         topic_name: &str,
         _configuration: Option<&[u8]>,
-    ) -> Result<(), ConfigurablePublisherRegistrySubscribeError> {
+    ) -> Result<(), ServicePublisherManagerSubscribeError> {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
 
         match self
@@ -75,8 +75,8 @@ impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
                 let _ = o.remove_entry();
             }
             Entry::Vacant(_) => {
-                return Err(ConfigurablePublisherRegistrySubscribeError::UnsubscribeFailed {
-                    error: Status::new_service_specific_error_str(-1, Some("Publisher not found")),
+                return Err(ServicePublisherManagerSubscribeError::UnsubscribeFailed {
+                    error: anyhow!("Publisher Not Found"),
                 })
             }
         }
@@ -85,19 +85,19 @@ impl ConfigurablePublisherRegistry for MockConfigurablePublisherRegistry {
     }
 }
 
-impl Default for MockConfigurablePublisherRegistry {
+impl Default for MockServicePublisherManager {
     fn default() -> Self {
         Self::new(None)
     }
 }
 
-impl MockConfigurablePublisherRegistry {
+impl MockServicePublisherManager {
     pub(crate) fn new_with_descriptor(descriptor: MessageDescriptor) -> Self {
         Self::new(Some(descriptor))
     }
 
     pub(crate) fn new(descriptor: Option<MessageDescriptor>) -> Self {
-        MockConfigurablePublisherRegistry {
+        MockServicePublisherManager {
             next_descriptor: descriptor.into(),
             next_error: None.into(),
             num_subscribe_calls: AtomicU32::new(0),
