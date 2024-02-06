@@ -7,7 +7,7 @@ mod metrics_report_manager;
 extern crate protobuf;
 
 use futures::future::join_all;
-use log::{error, info, Level};
+use log::{error, info, LevelFilter};
 use std::collections::HashSet;
 use std::env;
 use std::ffi::CStr;
@@ -81,7 +81,7 @@ async fn main() -> Result<(), binder::Status> {
     let _init_success = logger::init(
         logger::Config::default()
             .with_tag_on_device("telemetry_rust_c_client")
-            .with_min_level(Level::Trace),
+            .with_max_level(LevelFilter::Trace),
     );
 
     let mut service;
