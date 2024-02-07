@@ -16,7 +16,7 @@ Run the client application with path to the serialzed config passed as a command
 
 Start Guest:
 
-`$ launch_cvd -guest-enforce-security false`
+`$ cvd start -guest-enforce-security false`
 
 Steps to reproduce:
 1. LAUNCH NEW TERMINAL (**Terminal #1**), switch to root, start logcat:
@@ -101,7 +101,7 @@ Check logs with `adb logcat`
 
 Start Guest:
 
-`$ launch_cvd -guest-enforce-security false`
+`$ cvd start -guest-enforce-security false`
 
 Steps to reproduce:
 1. LAUNCH NEW TERMINAL (**Terminal #1**), switch to root, start logcat:
