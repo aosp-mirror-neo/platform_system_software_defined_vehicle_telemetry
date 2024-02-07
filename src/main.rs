@@ -13,6 +13,7 @@ use sdv_telemetry::SdvTelemetryService;
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistryImpl, ConfigurablePublisherRegistryService,
 };
+use sdv_telemetry_dt_wrapper::DataTunnelWrapperImpl;
 
 use binder_tokio::TokioRuntime;
 use log::{error, info};
@@ -29,8 +30,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
     sdv_tracing::init_tracing();
 
-    // Create Configurable Publishers
+    // Data Tunnel Wrapper to manage subcriptions
+    let data_tunnel_wrapper = Arc::new(DataTunnelWrapperImpl::new());
 
+    // Create Configurable Publishers
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistryImpl::new());
 
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
@@ -45,6 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ROOT_DIR,
         configured_size * SIZE_MB,
         configurable_publisher_registry.clone(),
+        data_tunnel_wrapper,
     )) {
         Some(telemetry_service) => telemetry_service,
         None => {

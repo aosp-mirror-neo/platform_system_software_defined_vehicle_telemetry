@@ -215,8 +215,8 @@ mod tests {
 
     use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, ISubscriber::ISubscriber};
     use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
-    use configurable_publisher_proto::sample_publisher;
-    use configurable_publisher_proto::sample_publisher::SampleMessage;
+    use sample_publisher_proto::sample_publisher;
+    use sample_publisher_proto::sample_publisher::SampleMessage;
 
     use super::*;
 

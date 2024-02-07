@@ -43,8 +43,8 @@ rust_binary {
 }
 
 rust_protobuf {
-    name: "libconfigurable_publisher_proto",
-    crate_name: "configurable_publisher_proto",
+    name: "libsample_publisher_proto",
+    crate_name: "sample_publisher_proto",
     protos: [
         "rust/sample_publisher/sample_publisher.proto",
     ],
@@ -63,7 +63,7 @@ rust_binary {
     rustlibs: [
         "android.sdv.telemetry.configurable_publisher-rust",
         "libbinder_rs",
-        "libconfigurable_publisher_proto",
+        "libsample_publisher_proto",
         "libfutures",
         "liblog_rust",
         "liblogger",
@@ -71,4 +71,21 @@ rust_binary {
         "librand",
         "libtokio",
     ],
+}
+
+rust_binary {
+    name: "dt_telemetry_sample_publisher",
+    srcs: ["rust/data_tunnel_publisher/publish_sample.rs"],
+    rustlibs: [
+        "libsample_publisher_proto",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_dt_rust",
+        "libcxx",
+        "liblibc",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+    ],
+    system_ext_specific: true,
 }
