@@ -3,6 +3,7 @@
 //! This module implements the ITelemetryService AIDL interface
 
 mod configurable_publisher_registry;
+mod data_tunnel_wrapper;
 mod expr;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
@@ -35,6 +36,9 @@ use tracing::instrument;
 pub use configurable_publisher_registry::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
 };
+
+// Child module dependencies.
+pub use data_tunnel_wrapper::{DataTunnelWrapper, DataTunnelWrapperError};
 
 use metrics_config_orchestrator::MetricsConfigOrchestrator;
 use metrics_config_orchestrator::{
@@ -116,11 +120,12 @@ impl Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
-    #[instrument(skip(configurable_publisher_registry))]
+    #[instrument(skip(configurable_publisher_registry, data_tunnel_wrapper))]
     pub async fn new(
         root_path: &str,
         config_store_size: usize,
         configurable_publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
+        data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
     ) -> Option<Self> {
         let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
             (
@@ -140,6 +145,7 @@ impl SdvTelemetryService {
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
         let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(
             configurable_publisher_registry,
+            data_tunnel_wrapper,
             move |report| listener.on_report_ready(report),
         ));
 
@@ -378,10 +384,15 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             // Initializes metrics config
             match self.metrics_config_orchestrator.initialize_config(&config).await {
                 Ok(()) => {
+                    info!("initializing {} Config", uuid);
                     let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
-                    file_io_utils::rename_file(&path, &new_path)
-                        .await
-                        .unwrap_or_else(|e| error!("An error occurred in renaming config: {}", e));
+                    file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
+                        error!(
+                            "An error occurred in renaming config to {}: {}",
+                            new_path.display(),
+                            e
+                        )
+                    });
                 }
                 Err(e) => {
                     error!("Error {} in initializing {} Config", e, uuid);
@@ -662,6 +673,7 @@ mod tests {
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
+    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
     const REPORT_NUMBER: i32 = 42;
@@ -896,6 +908,7 @@ mod tests {
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
                 Arc::new(MockConfigurablePublisherRegistry::default()),
+                Arc::new(MockDataTunnelWrapperImpl::new()),
             )
             .await
             .unwrap();

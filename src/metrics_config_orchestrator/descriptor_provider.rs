@@ -11,6 +11,7 @@ use thiserror::Error;
 use crate::configurable_publisher_registry::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
 };
+use crate::data_tunnel_wrapper::DataTunnelWrapper;
 use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError};
 
 #[derive(Error, Debug)]
@@ -23,7 +24,9 @@ pub enum DescriptorProviderConstructorError {
     use missing message descriptor of type {msg_type}"
     )]
     MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("Unable to get service metadata from the registry: {error}")]
+    #[error("Unable to find the following ServicePublisher: {service_name} {topic_name}")]
+    InvalidServicePublisher { service_name: String, topic_name: String },
+    #[error("Unable to validate the Configurable Publisher: {error}")]
     PublisherRegistryError {
         #[from]
         error: ConfigurablePublisherRegistrySubscribeError,
@@ -53,16 +56,46 @@ impl DescriptorProviderImpl {
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
         configurable_publisher_registry: &Arc<dyn ConfigurablePublisherRegistry>,
+        data_tunnel_wrapper: &Arc<dyn DataTunnelWrapper>,
     ) -> Result<Self, DescriptorProviderConstructorError> {
         let publisher_message_descriptor =
             publishers.iter().try_fold(HashMap::new(), |mut map, publisher| {
                 let descriptor = match &publisher.publisher_type {
                     Some(PublisherTypeProto::SignalPublisher(_)) => Empty::descriptor(),
                     Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
-                        configurable_publisher_registry.get_message_descriptor(
-                            &service_publisher_proto.service_name,
-                            &service_publisher_proto.topic_name,
-                        )?
+
+                        let cp_msg_descriptor = match  configurable_publisher_registry
+                                                    .get_message_descriptor(
+                                                        &service_publisher_proto.service_name,
+                                                        &service_publisher_proto.topic_name,
+                                                    )
+                        {
+                            Ok(msg_descriptor) => Some(msg_descriptor),
+                            Err(err) => {
+
+                                if let ConfigurablePublisherRegistrySubscribeError::ServiceNotFound { .. } = err {
+                                    None
+                                } else {
+                                    return Err(DescriptorProviderConstructorError::PublisherRegistryError {error: err});
+                                }
+
+                            }
+                        };
+
+                        if let Some(msg_descriptor) = cp_msg_descriptor {
+                            msg_descriptor
+                        } else if let Some(msg_descriptor) = data_tunnel_wrapper.get_message_descriptor(&service_publisher_proto.topic_name)
+                        {
+                            msg_descriptor
+                        } else {
+                            return Err(DescriptorProviderConstructorError::InvalidServicePublisher {
+                                    service_name: service_publisher_proto.service_name.clone(),
+                                    topic_name: service_publisher_proto.topic_name.clone(),
+                                },
+                            );
+                        }
+
+
                     }
                     Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
                         let message_builder =
@@ -107,6 +140,7 @@ mod tests {
 
     use super::*;
     use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
+    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
 
     const PUBLISHER_1: &str = "pub_1";
@@ -116,6 +150,10 @@ mod tests {
     const TOPIC_NAME: &str = "topic";
     const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestNestedMessage";
+
+    fn create_data_tunnel_wrapper() -> Arc<dyn DataTunnelWrapper> {
+        Arc::new(MockDataTunnelWrapperImpl::new())
+    }
 
     fn create_default_publisher_registry() -> Arc<dyn ConfigurablePublisherRegistry> {
         create_publisher_registry(None)
@@ -165,12 +203,13 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher],
             &create_default_publisher_registry(),
+            &create_data_tunnel_wrapper(),
         )
         .err()
         .unwrap();
 
         assert!(
-            matches!(&err, DescriptorProviderConstructorError::PublisherRegistryError { .. }),
+            matches!(&err, DescriptorProviderConstructorError::InvalidServicePublisher { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -184,6 +223,7 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher],
             &create_default_publisher_registry(),
+            &create_data_tunnel_wrapper(),
         )
         .err()
         .unwrap();
@@ -201,6 +241,7 @@ mod tests {
             get_test_file_descriptors(),
             &[],
             &create_default_publisher_registry(),
+            &create_data_tunnel_wrapper(),
         )
         .unwrap();
 
@@ -223,6 +264,7 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher],
             &create_publisher_registry(Some(TestMessage::descriptor())),
+            &create_data_tunnel_wrapper(),
         )
         .unwrap();
 
@@ -243,6 +285,7 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher_1, publisher_2],
             &create_default_publisher_registry(),
+            &create_data_tunnel_wrapper(),
         )
         .unwrap();
 
