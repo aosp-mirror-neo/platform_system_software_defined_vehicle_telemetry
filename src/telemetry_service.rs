@@ -107,7 +107,7 @@ pub struct SdvTelemetryService {
     cur_persistent_config_store_size: AtomicUsize,
     max_persistent_config_store_size: usize,
     /// Instance of Metrics Configuration Orchestrator.
-    metrics_config_orchestrator: Box<dyn MetricsConfigOrchestrator + Send + Sync>,
+    metrics_config_orchestrator: Arc<dyn MetricsConfigOrchestrator + Send + Sync>,
     /// Hashmap to store the metricsConfigs's size passed by the client.
     metrics_configs_store: Arc<Mutex<HashMap<String, usize>>>,
     /// Report Ready listener to inform the client when a report is ready
@@ -143,7 +143,7 @@ impl SdvTelemetryService {
         let listener = metrics_report_listener.clone(); // Clone the Arc to share ownership
 
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
-        let config_orchestrator = Box::new(MetricsConfigOrchestratorImpl::new(
+        let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
             configurable_publisher_registry,
             data_tunnel_wrapper,
             move |report| listener.on_report_ready(report),
@@ -179,7 +179,7 @@ impl SdvTelemetryService {
                     let uuid = &config.uuid;
 
                     // Validates and initializes metrics config
-                    match config_orchestrator.initialize_config(&config).await {
+                    match config_orchestrator.clone().initialize_config(&config).await {
                         Ok(()) => {
                             let mut metric_config_map = configs_store.lock().unwrap();
                             metric_config_map.insert(uuid.clone(), bytes.len());
@@ -382,7 +382,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             let uuid = &config.uuid;
 
             // Initializes metrics config
-            match self.metrics_config_orchestrator.initialize_config(&config).await {
+            match self.metrics_config_orchestrator.clone().initialize_config(&config).await {
                 Ok(()) => {
                     info!("initializing {} Config", uuid);
                     let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
@@ -700,7 +700,10 @@ mod tests {
 
     #[async_trait]
     impl MetricsConfigOrchestrator for MockMetricsConfigOrchestratorImpl {
-        async fn initialize_config(&self, _: &MetricsConfigProto) -> Result<(), ConfigError> {
+        async fn initialize_config(
+            self: Arc<Self>,
+            _: &MetricsConfigProto,
+        ) -> Result<(), ConfigError> {
             let mut num_calls = self.num_initialize_config_calls.lock().unwrap();
             *num_calls += 1;
             Ok(())
@@ -912,7 +915,7 @@ mod tests {
             )
             .await
             .unwrap();
-            service.metrics_config_orchestrator = Box::new(MockMetricsConfigOrchestratorImpl::new(
+            service.metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new(
                 num_initialize_config_calls.clone(),
                 num_finish_config_calls.clone(),
                 num_validate_config_calls.clone(),
