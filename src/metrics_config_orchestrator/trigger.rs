@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use log::error;
 use protobuf::MessageDyn;
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
+use sdv_telemetry_utils::callback_manager::CallbackManager;
 use sdvtelemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
     metrics_configuration::conditional_trigger::ConditionType,
@@ -57,12 +57,11 @@ pub(crate) struct TriggerImpl {
     pub(super) name: String,
     pub(super) trigger_type: TriggerType,
 
-    // The map of functions that need to be called when the trigger fires.
-    // The first subscription to TriggerImpl creates a new map and activates underlying trigger
-    // type, passing a reference to the map. Last unsubscription removes the map and deactivates
-    // underlying trigger type.
-    callback_map:
-        AsyncMutex<Arc<AsyncMutex<HashMap<TriggerSubscriber, Box<dyn FnMut() + Send + Sync>>>>>,
+    // Manages callbacks that need to be called when the trigger fires.
+    // The first subscription to TriggerImpl creates a new manager and activates the underlying
+    // trigger type, passing a reference to the callback map. Last unsubscription deactivates
+    // underlying trigger type and removes the callback manager.
+    callback_manager: AsyncMutex<Option<CallbackManager<TriggerSubscriber>>>,
 }
 
 #[allow(dead_code)]
@@ -112,45 +111,35 @@ impl Trigger for TriggerImpl {
         subscriber: &TriggerSubscriber,
         on_fired_callback: Box<dyn FnMut() + Send + Sync>,
     ) {
-        let maybe_callbacks_container = {
-            let callbacks_container = self.callback_map.lock().await;
-            let mut callbacks = callbacks_container.lock().await;
-            callbacks.try_insert_value(subscriber.clone(), on_fired_callback).unwrap_or_else(|_| panic!("Subscriber {} is already subscribed to the trigger. Duplicate subscriptions are not allowed.", subscriber));
+        let mut callback_manager_lock = self.callback_manager.lock().await;
 
-            // Return a reference to the container if this is the first subscription.
-            if callbacks.len() == 1 {
-                Some(callbacks_container.clone())
-            } else {
-                None
-            }
+        let callback_manager = if let Some(callback_manager) = callback_manager_lock.as_ref() {
+            // Trigger is already activated.
+            callback_manager
+        } else {
+            // Trigger is not activated yet.
+            // Create a new callback manager and activate the underlying trigger type.
+            let (callback_manager, callback_map) = CallbackManager::new();
+            self.clone().activate(callback_map).await;
+            callback_manager_lock.get_or_insert(callback_manager)
         };
 
-        if let Some(callbacks_container) = maybe_callbacks_container {
-            // If a container was returned, this is the first subscription and underlying
-            // trigger type needs to be activated.
-            self.activate(callbacks_container).await;
-        }
+        callback_manager.add_callback(subscriber.clone(), on_fired_callback).await;
     }
 
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
-        let mut callbacks_container = self.callback_map.lock().await;
-        let is_last_unsubscription = {
-            let mut callbacks = callbacks_container.lock().await;
-            assert!(
-                callbacks.remove(subscriber).is_some(),
-                "Subscriber {} wasn't subscribed to the trigger",
-                subscriber
-            );
+        let mut callback_manager_lock = self.callback_manager.lock().await;
 
-            callbacks.is_empty()
-        };
+        let is_last_subscription = callback_manager_lock
+            .as_ref()
+            .expect("Unsubscribe shouldn't be called for a non-activated trigger")
+            .remove_callback(subscriber)
+            .await;
 
-        if is_last_unsubscription {
-            // Create a new map to ensure no new items will be added to the old one.
-            *callbacks_container = Arc::new(AsyncMutex::new(HashMap::new()));
-
-            // Deactivate the trigger.
+        if is_last_subscription {
+            // Last unsubscription, deactivate the trigger and remove the callback manager.
             self.deactivate().await;
+            callback_manager_lock.take();
         }
     }
 }
@@ -158,11 +147,7 @@ impl Trigger for TriggerImpl {
 impl TriggerImpl {
     /// Creates a new instance of trigger of the provided trigger type.
     pub(super) fn new(name: String, trigger_type: TriggerType) -> Self {
-        TriggerImpl {
-            name,
-            trigger_type,
-            callback_map: AsyncMutex::new(Arc::new(AsyncMutex::new(HashMap::new()))),
-        }
+        TriggerImpl { name, trigger_type, callback_manager: None.into() }
     }
 
     /// Creates a new instance of conditional trigger.
