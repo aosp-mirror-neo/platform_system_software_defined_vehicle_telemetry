@@ -195,7 +195,6 @@ rust_test {
         "libsample_publisher_proto",
         "libsdv_telemetry",
         "libsdv_telemetry_utils",
-        "libsdv_telemetry_configurable_publisher",
     ],
     proc_macros: [
         "libasync_trait",

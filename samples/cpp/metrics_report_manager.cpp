@@ -36,7 +36,7 @@ void MetricsReportManager::on_report_received(void* listener, int32_t status_cod
     auto report_manager = static_cast<MetricsReportManager*>(listener);
 
     if (status_code ==
-        static_cast<int>(TelemetryServiceStatusCodes::GET_FINISHED_REPORT_SUCCEEDED)) {
+        static_cast<int>(TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS)) {
         android::sdv::telemetry::MetricsReport metrics_report;
         metrics_report.ParseFromArray(report, size);
         report_manager->promise_report_received_.set_value(metrics_report);

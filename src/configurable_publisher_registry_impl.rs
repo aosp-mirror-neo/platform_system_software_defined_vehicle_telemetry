@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 // Crate dependencies.
 use crate::subscriber_service::SubscriberService;
 
-// Arbitrarily chosen buffer cpaacity
+// Arbitrarily chosen buffer capacity
 const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
 /// ConfigurablePublisherRegistry that maintains the list of configurable publishers in memory.
