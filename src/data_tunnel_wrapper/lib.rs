@@ -2,6 +2,7 @@
 
 //! Sample Wrapper for DT.
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use log::{error, info};
 use once_cell::sync::OnceCell;
@@ -18,7 +19,11 @@ use tokio::time::{sleep, Duration};
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 use sdv_dt::{c_void, Result as SdvResult, SecurityMode, TopicTypedMetadata};
-use sdv_telemetry::{DataTunnelWrapper, DataTunnelWrapperError};
+use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
+
+// Static store of Message Descriptors for testing purposes. This logic will be removed once
+// Data Tunnel adds support for Message Descriptor
+static MESSAGE_DESC_STORE: OnceCell<HashMap<String, MessageDescriptor>> = OnceCell::new();
 
 const TOPIC_NAME: &str = "DataTunnelTopic";
 /// Struct for data publisher of DT, to simplify sample usage.
@@ -33,7 +38,7 @@ pub struct DataTunnelSubscription {
     _subscribe_meta_data: TopicTypedMetadata,
 }
 
-/// Struct for storing all data tunnel subscriptions that implements DataTunnelWrapper
+/// Struct for storing all data tunnel subscriptions that implements ServicePublisherManager
 pub struct DataTunnelWrapperImpl {
     /// Hashmap to store topic names and their subscriptions
     data_tunnel_subscriptions: Arc<Mutex<HashMap<String, DataTunnelSubscription>>>,
@@ -82,20 +87,16 @@ impl DataTunnelWrapperImpl {
     /// If the buffer is smaller than the number of messages, it does a partial write.
     /// Returns how many messages was read into the buffer.
     async fn read(
-        &self,
+        data_tunnel_subscriptions: Arc<Mutex<HashMap<String, DataTunnelSubscription>>>,
         topic_name: &str,
         buffer: &mut Vec<u8>,
-    ) -> Result<usize, DataTunnelWrapperError> {
-        if let Some(subscription) =
-            self.data_tunnel_subscriptions.lock().unwrap().get_mut(topic_name)
-        {
+    ) -> anyhow::Result<usize> {
+        if let Some(subscription) = data_tunnel_subscriptions.lock().unwrap().get_mut(topic_name) {
             let mut read_message_count = 0usize;
             let result =
                 sdv_dt::AvailableToRead(subscription.subscribe_handle, &mut read_message_count);
             if result != SdvResult::Success {
-                return Err(DataTunnelWrapperError::ReadFailed {
-                    topic_name: topic_name.to_string(),
-                });
+                return Err(anyhow!("Error: {:?}", result));
             };
 
             if read_message_count == 0 {
@@ -115,7 +116,7 @@ impl DataTunnelWrapperImpl {
                 )
             };
 
-            let answer: Result<usize, DataTunnelWrapperError> = match result {
+            let answer: anyhow::Result<usize> = match result {
                 SdvResult::Success => Ok(read_message_count),
                 _ => {
                     // The first ReadMessage() invocation could return error if the first
@@ -123,9 +124,7 @@ impl DataTunnelWrapperImpl {
                     if subscription.first_message {
                         Ok(0)
                     } else {
-                        Err(DataTunnelWrapperError::ReadFailed {
-                            topic_name: topic_name.to_string(),
-                        })
+                        Err(anyhow!("Unable to read data from topic: {}", topic_name))
                     }
                 }
             };
@@ -133,33 +132,40 @@ impl DataTunnelWrapperImpl {
             subscription.first_message = false;
             answer
         } else {
-            Err(DataTunnelWrapperError::TopicNotFound { topic_name: topic_name.to_string() })
+            Err(ServicePublisherManagerSubscribeError::TopicNotFound {
+                service_name: "data_tunnel".to_string(),
+                topic_name: topic_name.to_string(),
+            }
+            .into())
         }
     }
 }
 
 #[async_trait]
-impl DataTunnelWrapper for DataTunnelWrapperImpl {
+impl ServicePublisherManager for DataTunnelWrapperImpl {
     /// Subscribe to a Data Tunnel topic sample.
     /// The method returns a struct containing the topic information and the subscription topic handle.
     /// Returns a DT reader implementation that can be used to read messages.
-    async fn subscribe(
-        self: Arc<Self>,
+    async fn try_subscribe(
+        &self,
+        service_name: &str,
         topic: &str,
-        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-    ) -> Result<(), DataTunnelWrapperError> {
+        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        _configuration: Option<&[u8]>,
+    ) -> Result<bool, ServicePublisherManagerSubscribeError> {
         info!("Subscribing to data tunnel topic {}", topic);
 
         let message_size =
             match self.data_tunnel_subscriptions.lock().unwrap().entry(topic.to_string()) {
                 Entry::Occupied(_) => {
-                    return Err(DataTunnelWrapperError::TopicSubscriptionsExists {
+                    return Err(ServicePublisherManagerSubscribeError::TopicSubscriptionsExists {
                         topic_name: topic.to_string(),
                     })
                 }
                 Entry::Vacant(v) => {
                     cxx::let_cxx_string!(topic_name = topic);
                     let mut subscribe_handle = 0u32;
+                    let mut topic_exists = true;
 
                     let mut subscribe_meta_data = TopicTypedMetadata {
                         message_count_: 0,
@@ -170,12 +176,24 @@ impl DataTunnelWrapper for DataTunnelWrapperImpl {
 
                     let metadata: Pin<&mut TopicTypedMetadata> = Pin::new(&mut subscribe_meta_data);
 
+                    // Check if topic exists
+                    let result = sdv_dt::TopicExists(&topic_name, &mut topic_exists);
+                    if result != SdvResult::Success {
+                        return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
+                            error: anyhow!("Data Tunnel Result: {:?}", result),
+                        });
+                    };
+
+                    if !topic_exists {
+                        return Ok(false);
+                    }
+
                     // Subscribing to data tunnel topic
                     let result =
                         sdv_dt::SubscribeToTopic(&topic_name, metadata, &mut subscribe_handle);
                     if result != SdvResult::Success {
-                        return Err(DataTunnelWrapperError::SubscribeFailed {
-                            topic_name: topic_name.to_string(),
+                        return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
+                            error: anyhow!("Data Tunnel Result: {:?}", result),
                         });
                     };
 
@@ -191,14 +209,16 @@ impl DataTunnelWrapper for DataTunnelWrapperImpl {
                 }
             };
 
-        let message_descriptor = self.get_message_descriptor(topic).unwrap();
+        let message_descriptor = self.get_message_descriptor(service_name, topic)?;
         let topic_clone = topic.to_owned();
+        let data_tunnel_subscriptions = self.data_tunnel_subscriptions.clone();
         // Tokio task for fetching data from data tunnel and pushing it to telemetry service
         tokio::spawn(async move {
             let size_of_buffer = 100 * message_size;
             let mut buffer = vec![0u8; size_of_buffer];
             loop {
-                match self.clone().read(&topic_clone, &mut buffer).await {
+                match Self::read(data_tunnel_subscriptions.clone(), &topic_clone, &mut buffer).await
+                {
                     Ok(0) => {
                         info!("No new messages.");
                     }
@@ -229,32 +249,46 @@ impl DataTunnelWrapper for DataTunnelWrapperImpl {
             }
         });
 
+        Ok(true)
+    }
+
+    /// Unsubscribes from the specified topic and service name.
+    async fn unsubscribe(
+        &self,
+        _service_name: &str,
+        _topic_name: &str,
+        _configuration: Option<&[u8]>,
+    ) -> Result<(), ServicePublisherManagerSubscribeError> {
+        // This logic will be replaced once data tunnel has support for unsubscribe
         Ok(())
     }
 
     /// Checks if topic with given name exists in data tunnel
-    fn topic_exists(&self, topic_name: &str) -> bool {
-        // Always returns true since the topic name is hardcoded
-        topic_name == TOPIC_NAME
-    }
+    fn get_message_descriptor(
+        &self,
+        service_name: &str,
+        topic_name: &str,
+    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
+        let map = MESSAGE_DESC_STORE.get_or_init(|| {
+            let mut m = HashMap::new();
 
-    /// Checks if topic with given name exists in data tunnel
-    fn get_message_descriptor(&self, topic_name: &str) -> Option<MessageDescriptor> {
+            // Inserting sample topic for testing purposes
+            // Multiple topics and their corresponding Message Descriptors can be similarly added
+            let file_descriptor = sample_publisher::file_descriptor();
+            let message_type_name = format!(".{}", SampleMessage::descriptor().full_name());
+            let msg_descriptor = file_descriptor.message_by_full_name(&message_type_name).unwrap();
+            m.insert(TOPIC_NAME.to_string(), msg_descriptor);
+            m
+        });
+
         // Always returns true since the topic name is hardcoded
-        if topic_name == TOPIC_NAME {
-            static INSTANCE: OnceCell<MessageDescriptor> = OnceCell::new();
-            Some(
-                INSTANCE
-                    .get_or_init(|| {
-                        let file_descriptor = sample_publisher::file_descriptor();
-                        let message_type_name =
-                            format!(".{}", SampleMessage::descriptor().full_name());
-                        file_descriptor.message_by_full_name(&message_type_name).unwrap()
-                    })
-                    .clone(),
-            )
+        if let Some(msg_descriptor) = map.get(topic_name) {
+            Ok(msg_descriptor.clone())
         } else {
-            None
+            Err(ServicePublisherManagerSubscribeError::TopicNotFound {
+                service_name: service_name.to_string(),
+                topic_name: topic_name.to_string(),
+            })
         }
     }
 }

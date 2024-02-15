@@ -101,6 +101,7 @@ rust_library {
     crate_name: "sdv_telemetry_dt_wrapper",
     srcs: ["src/data_tunnel_wrapper/lib.rs"],
     rustlibs: [
+        "libanyhow",
         "liblog_rust",
         "liblogger",
         "libonce_cell",
@@ -135,6 +136,10 @@ rust_binary {
         "libsdv_telemetry_configurable_publisher",
         "libsdv_telemetry_dt_wrapper",
         "libsdvtelemetry_proto_rust",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
     ],
     system_ext_specific: true,
 }

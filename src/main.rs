@@ -1,6 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 //! Binary for registering Telemetry service.
+
+mod service_publisher_manager_impl;
+
 use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{
     BnConfigurablePublisherRegistry, BpConfigurablePublisherRegistry, IConfigurablePublisherRegistry,
 };
@@ -8,8 +11,9 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
 
+use crate::service_publisher_manager_impl::ServicePublisherManagerImpl;
 use rustutils::system_properties::PropertyWatcher;
-use sdv_telemetry::SdvTelemetryService;
+use sdv_telemetry::{SdvTelemetryService, ServicePublisherManager};
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistryImpl, ConfigurablePublisherRegistryService,
 };
@@ -36,6 +40,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create Configurable Publishers
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistryImpl::new());
 
+    // Add all service publishers to the manager in order of priority
+    let service_publishers: Vec<Arc<dyn ServicePublisherManager>> =
+        vec![data_tunnel_wrapper, configurable_publisher_registry.clone()];
+
+    // Create Service Publisher Manager
+    let service_publisher_manager_impl =
+        Arc::new(ServicePublisherManagerImpl::new(service_publishers));
+
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
     let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap_or("1".to_string());
 
@@ -47,8 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry_service = match telemetry_runtime.block_on(SdvTelemetryService::new(
         ROOT_DIR,
         configured_size * SIZE_MB,
-        configurable_publisher_registry.clone(),
-        data_tunnel_wrapper,
+        service_publisher_manager_impl,
     )) {
         Some(telemetry_service) => telemetry_service,
         None => {

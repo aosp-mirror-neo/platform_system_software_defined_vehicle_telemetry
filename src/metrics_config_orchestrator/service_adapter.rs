@@ -9,10 +9,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::configurable_publisher_registry::{
-    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
+use crate::service_publisher_manager::{
+    ServicePublisherManager, ServicePublisherManagerSubscribeError,
 };
-use crate::data_tunnel_wrapper::DataTunnelWrapper;
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
@@ -47,7 +46,7 @@ pub enum ServiceAdapterSubscribeError {
     #[error("Unable to perform subscription: {error}")]
     SubscriptionFailed {
         #[from]
-        error: anyhow::Error,
+        error: ServicePublisherManagerSubscribeError,
     },
 }
 
@@ -59,7 +58,7 @@ pub(crate) enum ServiceAdapterUnsubscribeError {
     #[error("Unable to unsubscribe: {error}")]
     UnsubscribeFailed {
         #[from]
-        error: ConfigurablePublisherRegistrySubscribeError,
+        error: ServicePublisherManagerSubscribeError,
     },
 }
 
@@ -68,11 +67,8 @@ pub(crate) struct ServiceAdapterImpl {
     // Id that will be used for the next subscription.
     next_subscription_id: AtomicU32,
 
-    // The registry of available publishers.
-    publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
-
-    // Wrapper for data tunnel
-    data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
+    // The registry of available service publishers.
+    service_publisher_manager: Arc<dyn ServicePublisherManager>,
 
     // The map of functions that need to be called when a new message is available.
     // The first subscription to service creates a new map and passes it to the callback that
@@ -113,40 +109,16 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 let subscriptions_container = Arc::new(AsyncMutex::new(subscriptions));
                 v.insert(subscriptions_container.clone());
 
-                match self
-                    .publisher_registry_subscription(
+                self.service_publisher_manager
+                    .try_subscribe(
                         service_name,
                         topic_name,
-                        subscriptions_container.clone(),
+                        Arc::new(move |msg| Self::on_new_message(msg, &subscriptions_container)),
+                        None,
                     )
-                    .await
-                {
-                    Ok(true) => (),
-                    Ok(false) => {
-                        if let Err(err) = self
-                            .data_tunnel_wrapper
-                            .clone()
-                            .subscribe(
-                                topic_name,
-                                Box::new(move |msg| {
-                                    Self::on_new_message(msg, &subscriptions_container)
-                                }),
-                            )
-                            .await
-                        {
-                            return Err(ServiceAdapterSubscribeError::SubscriptionFailed {
-                                error: err.into(),
-                            });
-                        }
-                    }
-                    Err(err) => {
-                        return Err(ServiceAdapterSubscribeError::SubscriptionFailed {
-                            error: err.into(),
-                        });
-                    }
-                }
+                    .await?;
             }
-        }
+        };
 
         Ok(ServiceSubscription {
             service_name: service_name.to_owned(),
@@ -177,7 +149,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 };
 
                 if is_last_subscription {
-                    self.publisher_registry
+                    self.service_publisher_manager
                         .unsubscribe(&subscription.service_name, &subscription.topic_name, None)
                         .await?;
 
@@ -194,14 +166,10 @@ impl ServiceAdapter for ServiceAdapterImpl {
 }
 
 impl ServiceAdapterImpl {
-    pub(super) fn new(
-        publisher_registry: Arc<dyn ConfigurablePublisherRegistry>,
-        data_tunnel_wrapper: Arc<dyn DataTunnelWrapper>,
-    ) -> Self {
+    pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherManager>) -> Self {
         ServiceAdapterImpl {
             next_subscription_id: AtomicU32::new(1),
-            publisher_registry,
-            data_tunnel_wrapper,
+            service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
         }
     }
@@ -231,35 +199,6 @@ impl ServiceAdapterImpl {
             }
         });
     }
-
-    async fn publisher_registry_subscription(
-        &self,
-        service_name: &str,
-        topic_name: &str,
-        subscriptions_container: Arc<
-            AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
-        >,
-    ) -> Result<bool, ConfigurablePublisherRegistrySubscribeError> {
-        match self
-            .publisher_registry
-            .subscribe(
-                service_name,
-                topic_name,
-                Box::new(move |msg| Self::on_new_message(msg, &subscriptions_container.clone())),
-                None,
-            )
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(err) => {
-                if let ConfigurablePublisherRegistrySubscribeError::ServiceNotFound { .. } = err {
-                    Ok(false)
-                } else {
-                    Err(err)
-                }
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -275,8 +214,7 @@ pub(super) mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
+    use crate::service_publisher_manager::mock::MockServicePublisherManager;
 
     const SERVICE_NAME: &str = "service";
     const TOPIC_NAME: &str = "topic";
@@ -292,10 +230,7 @@ pub(super) mod tests {
     }
 
     fn create_default_service_adapter() -> ServiceAdapterImpl {
-        ServiceAdapterImpl::new(
-            Arc::new(MockConfigurablePublisherRegistry::default()),
-            Arc::new(MockDataTunnelWrapperImpl::new()),
-        )
+        ServiceAdapterImpl::new(Arc::new(MockServicePublisherManager::default()))
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
@@ -308,16 +243,15 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_registry_returns_error_fails() {
-        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = MockServicePublisherManager::default();
         registry.next_error.lock().unwrap().replace(
-            ConfigurablePublisherRegistrySubscribeError::TopicNotFound {
+            ServicePublisherManagerSubscribeError::TopicNotFound {
                 service_name: SERVICE_NAME.to_owned(),
                 topic_name: TOPIC_NAME.to_owned(),
             },
         );
         let registry = Arc::new(registry);
-        let service_adapter =
-            ServiceAdapterImpl::new(registry.clone(), Arc::new(MockDataTunnelWrapperImpl::new()));
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
         let err = service_adapter
             .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
@@ -326,12 +260,10 @@ pub(super) mod tests {
             .unwrap();
 
         let ServiceAdapterSubscribeError::SubscriptionFailed { error } = &err;
-        let final_error = error.downcast_ref::<ConfigurablePublisherRegistrySubscribeError>();
-
         assert!(
-            matches!(final_error.unwrap(), ConfigurablePublisherRegistrySubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME ),
+            matches!(error, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME ),
             "Unexpected inner error: {:?}",
-            final_error
+            error
         );
 
         assert_eq!(registry.get_num_subscribe_calls(), 1);
@@ -339,9 +271,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_different_topics_subscribes_to_registry() {
-        let registry = Arc::new(MockConfigurablePublisherRegistry::default());
-        let service_adapter =
-            ServiceAdapterImpl::new(registry.clone(), Arc::new(MockDataTunnelWrapperImpl::new()));
+        let registry = Arc::new(MockServicePublisherManager::default());
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg1 = Box::new(Int32Value::new());
         msg1.value = 1;
@@ -384,9 +315,8 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_same_topic_subscribes_to_registry() {
-        let registry = Arc::new(MockConfigurablePublisherRegistry::default());
-        let service_adapter =
-            ServiceAdapterImpl::new(registry.clone(), Arc::new(MockDataTunnelWrapperImpl::new()));
+        let registry = Arc::new(MockServicePublisherManager::default());
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
@@ -443,10 +373,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_success() {
-        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = MockServicePublisherManager::default();
         let registry = Arc::new(registry);
-        let service_adapter =
-            ServiceAdapterImpl::new(registry.clone(), Arc::new(MockDataTunnelWrapperImpl::new()));
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
@@ -460,10 +389,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_not_called_unless_last_subscriber_unsubscribes() {
-        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = MockServicePublisherManager::default();
         let registry = Arc::new(registry);
-        let service_adapter =
-            ServiceAdapterImpl::new(registry.clone(), Arc::new(MockDataTunnelWrapperImpl::new()));
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
@@ -483,10 +411,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_called_after_last_subscriber_unsubscribes() {
-        let registry = MockConfigurablePublisherRegistry::default();
+        let registry = MockServicePublisherManager::default();
         let registry = Arc::new(registry);
-        let service_adapter =
-            ServiceAdapterImpl::new(registry.clone(), Arc::new(MockDataTunnelWrapperImpl::new()));
+        let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())

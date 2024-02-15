@@ -9,7 +9,7 @@ use log::info;
 use protobuf::Message;
 use rand::Rng;
 
-// Hardcoded topic name and msdg size for testing
+// Hardcoded topic name and msg size for testing
 const TOPIC_NAME: &str = "DataTunnelTopic";
 const TOPIC_MSG_SIZE: usize = 64;
 

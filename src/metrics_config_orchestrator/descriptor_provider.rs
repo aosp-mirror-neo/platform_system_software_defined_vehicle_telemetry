@@ -8,11 +8,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::configurable_publisher_registry::{
-    ConfigurablePublisherRegistry, ConfigurablePublisherRegistrySubscribeError,
-};
-use crate::data_tunnel_wrapper::DataTunnelWrapper;
 use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError};
+use crate::service_publisher_manager::{
+    ServicePublisherManager, ServicePublisherManagerSubscribeError,
+};
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -24,12 +23,10 @@ pub enum DescriptorProviderConstructorError {
     use missing message descriptor of type {msg_type}"
     )]
     MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("Unable to find the following ServicePublisher: {service_name} {topic_name}")]
-    InvalidServicePublisher { service_name: String, topic_name: String },
     #[error("Unable to validate the Configurable Publisher: {error}")]
     PublisherRegistryError {
         #[from]
-        error: ConfigurablePublisherRegistrySubscribeError,
+        error: ServicePublisherManagerSubscribeError,
     },
 }
 
@@ -55,47 +52,17 @@ impl DescriptorProviderImpl {
     pub fn new(
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
-        configurable_publisher_registry: &Arc<dyn ConfigurablePublisherRegistry>,
-        data_tunnel_wrapper: &Arc<dyn DataTunnelWrapper>,
+        service_publisher_manager: &Arc<dyn ServicePublisherManager>,
     ) -> Result<Self, DescriptorProviderConstructorError> {
         let publisher_message_descriptor =
             publishers.iter().try_fold(HashMap::new(), |mut map, publisher| {
                 let descriptor = match &publisher.publisher_type {
                     Some(PublisherTypeProto::SignalPublisher(_)) => Empty::descriptor(),
                     Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
-
-                        let cp_msg_descriptor = match  configurable_publisher_registry
-                                                    .get_message_descriptor(
-                                                        &service_publisher_proto.service_name,
-                                                        &service_publisher_proto.topic_name,
-                                                    )
-                        {
-                            Ok(msg_descriptor) => Some(msg_descriptor),
-                            Err(err) => {
-
-                                if let ConfigurablePublisherRegistrySubscribeError::ServiceNotFound { .. } = err {
-                                    None
-                                } else {
-                                    return Err(DescriptorProviderConstructorError::PublisherRegistryError {error: err});
-                                }
-
-                            }
-                        };
-
-                        if let Some(msg_descriptor) = cp_msg_descriptor {
-                            msg_descriptor
-                        } else if let Some(msg_descriptor) = data_tunnel_wrapper.get_message_descriptor(&service_publisher_proto.topic_name)
-                        {
-                            msg_descriptor
-                        } else {
-                            return Err(DescriptorProviderConstructorError::InvalidServicePublisher {
-                                    service_name: service_publisher_proto.service_name.clone(),
-                                    topic_name: service_publisher_proto.topic_name.clone(),
-                                },
-                            );
-                        }
-
-
+                        service_publisher_manager.get_message_descriptor(
+                            &service_publisher_proto.service_name,
+                            &service_publisher_proto.topic_name,
+                        )?
                     }
                     Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
                         let message_builder =
@@ -139,9 +106,8 @@ mod tests {
     };
 
     use super::*;
-    use crate::configurable_publisher_registry::mock::MockConfigurablePublisherRegistry;
-    use crate::data_tunnel_wrapper::mock::MockDataTunnelWrapperImpl;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
+    use crate::service_publisher_manager::mock::MockServicePublisherManager;
 
     const PUBLISHER_1: &str = "pub_1";
     const PUBLISHER_2: &str = "pub_2";
@@ -151,18 +117,14 @@ mod tests {
     const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
     const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestNestedMessage";
 
-    fn create_data_tunnel_wrapper() -> Arc<dyn DataTunnelWrapper> {
-        Arc::new(MockDataTunnelWrapperImpl::new())
-    }
-
-    fn create_default_publisher_registry() -> Arc<dyn ConfigurablePublisherRegistry> {
+    fn create_default_publisher_registry() -> Arc<dyn ServicePublisherManager> {
         create_publisher_registry(None)
     }
 
     fn create_publisher_registry(
         next_descriptor: Option<MessageDescriptor>,
-    ) -> Arc<dyn ConfigurablePublisherRegistry> {
-        Arc::new(MockConfigurablePublisherRegistry::new(next_descriptor))
+    ) -> Arc<dyn ServicePublisherManager> {
+        Arc::new(MockServicePublisherManager::new(next_descriptor))
     }
 
     fn create_aggregation_publisher_with_no_proto_message_builder(
@@ -203,13 +165,12 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher],
             &create_default_publisher_registry(),
-            &create_data_tunnel_wrapper(),
         )
         .err()
         .unwrap();
 
         assert!(
-            matches!(&err, DescriptorProviderConstructorError::InvalidServicePublisher { .. }),
+            matches!(&err, DescriptorProviderConstructorError::PublisherRegistryError { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -223,7 +184,6 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher],
             &create_default_publisher_registry(),
-            &create_data_tunnel_wrapper(),
         )
         .err()
         .unwrap();
@@ -241,7 +201,6 @@ mod tests {
             get_test_file_descriptors(),
             &[],
             &create_default_publisher_registry(),
-            &create_data_tunnel_wrapper(),
         )
         .unwrap();
 
@@ -264,7 +223,6 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher],
             &create_publisher_registry(Some(TestMessage::descriptor())),
-            &create_data_tunnel_wrapper(),
         )
         .unwrap();
 
@@ -285,7 +243,6 @@ mod tests {
             get_test_file_descriptors(),
             &[publisher_1, publisher_2],
             &create_default_publisher_registry(),
-            &create_data_tunnel_wrapper(),
         )
         .unwrap();
 
