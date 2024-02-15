@@ -28,7 +28,7 @@ use std::mem;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use tracing::instrument;
 
 // Child module dependencies.
@@ -131,18 +131,31 @@ impl SdvTelemetryService {
             (ACTIVE_CONFIG_DATA_DIR.to_owned(), INACTIVE_CONFIG_DATA_DIR.to_owned())
         };
 
+        // Create orchestrator and its dependencies
+        let report_listener = Arc::new(MetricsReportListener::new());
+        let report_listener_clone = report_listener.clone(); // Clone the Arc to share ownership
+        let config_orchestrator =
+            Arc::new_cyclic(|orchestrator_reference: &Weak<MetricsConfigOrchestratorImpl>| {
+                let orchestrator_reference_clone = orchestrator_reference.clone();
+                MetricsConfigOrchestratorImpl::new(
+                    service_publisher_manager,
+                    move |config_uuid| {
+                        if let Some(orchestrator) = orchestrator_reference_clone.upgrade() {
+                            tokio::spawn(async move {
+                                orchestrator.finish_config(&config_uuid).await.unwrap();
+                                // TODO(b/324306963): Move config to inactive directory when finish trigger fires.
+                            });
+                        }
+                    },
+                    move |report| report_listener_clone.on_report_ready(report),
+                )
+            });
+
+        // Activate configs that are stored in the active directory.
         let active_dir_path = Path::new(&active_data_dir);
         let inactive_dir_path = Path::new(&inactive_data_dir);
 
-        let metrics_report_listener = Arc::new(MetricsReportListener::new());
-        let listener = metrics_report_listener.clone(); // Clone the Arc to share ownership
-
         let configs_store = Arc::new(Mutex::new(HashMap::new()));
-        let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
-            service_publisher_manager,
-            move |report| listener.on_report_ready(report),
-        ));
-
         let mut num_active_configs = 0;
         let mut num_inactive_configs = 0;
         // Needed to get the size of all files
@@ -249,7 +262,7 @@ impl SdvTelemetryService {
             max_persistent_config_store_size: config_store_size,
             metrics_config_orchestrator: config_orchestrator,
             metrics_configs_store: configs_store,
-            metrics_report_listener,
+            metrics_report_listener: report_listener,
             status_listener: Mutex::new(None),
         })
     }
@@ -693,10 +706,7 @@ mod tests {
 
     #[async_trait]
     impl MetricsConfigOrchestrator for MockMetricsConfigOrchestratorImpl {
-        async fn initialize_config(
-            self: Arc<Self>,
-            _: &MetricsConfigProto,
-        ) -> Result<(), ConfigError> {
+        async fn initialize_config(&self, _: &MetricsConfigProto) -> Result<(), ConfigError> {
             let mut num_calls = self.num_initialize_config_calls.lock().unwrap();
             *num_calls += 1;
             Ok(())
