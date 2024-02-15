@@ -5,7 +5,7 @@
 mod expr;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
-mod service_publisher_manager;
+pub mod service_publisher_manager;
 
 // External dependencies.
 use android_sdv_telemetry::aidl::android::sdv::telemetry::{
