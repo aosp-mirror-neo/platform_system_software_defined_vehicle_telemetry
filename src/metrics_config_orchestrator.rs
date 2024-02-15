@@ -1,4 +1,5 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
+
 mod descriptor_provider;
 mod message_builder;
 mod message_builder_factory;
@@ -364,7 +365,7 @@ where
             let mut configs = self.configs.lock().unwrap();
             match configs.try_insert_value(config_proto.uuid.clone(), config.clone()) {
                 Ok(val) => val,
-                Err(()) => {
+                Err(_) => {
                     return Err(MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid {
                         uuid: config_proto.uuid.clone(),
                     })
@@ -696,7 +697,7 @@ where
                 ),
             ) {
                 Ok(_) => Ok(acc),
-                Err(()) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
+                Err(_) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
                     publisher_name: publisher_proto.name.clone(),
                 }),
             },
@@ -730,7 +731,7 @@ where
                     ),
                 ) {
                     Ok(_) => Ok(acc),
-                    Err(()) => Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
+                    Err(_) => Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
                         trigger_name: trigger_proto.name.clone(),
                     }),
                 }

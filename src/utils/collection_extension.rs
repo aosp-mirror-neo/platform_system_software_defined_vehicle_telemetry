@@ -3,7 +3,7 @@
 //! This module implements code extensions for HashMaps and Vector
 
 #![allow(clippy::result_unit_err)]
-use std::collections::hash_map::Entry;
+use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 
@@ -24,8 +24,9 @@ pub trait HashMapExtension<K: Eq + Hash, V> {
 
     /// Tries to insert a key-value pair into the map, and returns a mutable reference to the value
     /// in the entry.
-    /// If the map already had this key present, nothing is updated, and Err is returned.
-    fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, ()>;
+    /// If the map already had this key present, nothing is updated, and Err that contains the
+    /// existing entry is returned.
+    fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, OccupiedEntry<K, V>>;
 }
 
 /// Additional Vec functions that are either not available in the standard library, or hidden
@@ -85,9 +86,9 @@ impl<K: Eq + Hash, V> HashMapExtension<K, V> for HashMap<K, V> {
         }
     }
 
-    fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, ()> {
+    fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, OccupiedEntry<K, V>> {
         match self.entry(key) {
-            Entry::Occupied(_) => Err(()),
+            Entry::Occupied(o) => Err(o),
             Entry::Vacant(v) => Ok(v.insert(value)),
         }
     }
