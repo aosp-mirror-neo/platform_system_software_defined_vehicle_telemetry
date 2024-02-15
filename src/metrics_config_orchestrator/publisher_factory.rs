@@ -263,10 +263,10 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = Arc::new(TriggerImpl::new(
+        let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        ));
+        );
 
         (publisher, trigger)
     }
