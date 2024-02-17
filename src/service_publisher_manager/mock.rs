@@ -19,6 +19,8 @@ pub(crate) struct MockServicePublisherManager {
     num_subscribe_calls: AtomicU32,
     /// The number of times subscribe function of the mock was called.
     num_unsubscribe_calls: AtomicU32,
+    /// The number of times get message descriptor function of the mock was called.
+    num_get_message_descriptor_calls: AtomicU32,
     /// The map of provided subscriber functions.
     subscribers: Mutex<HashMap<(String, String), Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
 }
@@ -30,6 +32,7 @@ impl ServicePublisherManager for MockServicePublisherManager {
         service_name: &str,
         _topic_name: &str,
     ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
+        self.num_get_message_descriptor_calls.fetch_add(1, Ordering::SeqCst);
         self.next_descriptor.lock().unwrap().take().ok_or_else(|| {
             ServicePublisherManagerSubscribeError::ServiceNotFound {
                 service_name: service_name.to_owned(),
@@ -64,7 +67,6 @@ impl ServicePublisherManager for MockServicePublisherManager {
         _configuration: Option<&[u8]>,
     ) -> Result<(), ServicePublisherManagerSubscribeError> {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
-
         match self
             .subscribers
             .lock()
@@ -102,6 +104,7 @@ impl MockServicePublisherManager {
             next_error: None.into(),
             num_subscribe_calls: AtomicU32::new(0),
             num_unsubscribe_calls: AtomicU32::new(0),
+            num_get_message_descriptor_calls: AtomicU32::new(0),
             subscribers: HashMap::new().into(),
         }
     }
@@ -112,6 +115,10 @@ impl MockServicePublisherManager {
 
     pub(crate) fn get_num_unsubscribe_calls(&self) -> u32 {
         self.num_unsubscribe_calls.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn get_num_get_message_descriptor_calls(&self) -> u32 {
+        self.num_get_message_descriptor_calls.load(Ordering::SeqCst)
     }
 
     pub(crate) fn notify_subscriber(

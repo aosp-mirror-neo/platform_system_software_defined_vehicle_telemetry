@@ -2,6 +2,8 @@
 
 #![allow(missing_docs)]
 
+pub mod service_publisher_manager_impl;
+
 // External dependencies.
 use async_trait::async_trait;
 use log::error;

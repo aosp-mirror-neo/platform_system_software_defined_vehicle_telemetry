@@ -2,8 +2,6 @@
 
 //! Binary for registering Telemetry service.
 
-mod service_publisher_manager_impl;
-
 use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{
     BnConfigurablePublisherRegistry, BpConfigurablePublisherRegistry, IConfigurablePublisherRegistry,
 };
@@ -11,9 +9,11 @@ use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
 
-use crate::service_publisher_manager_impl::ServicePublisherManagerImpl;
 use rustutils::system_properties::PropertyWatcher;
-use sdv_telemetry::{SdvTelemetryService, ServicePublisherManager};
+use sdv_telemetry::{
+    service_publisher_manager::service_publisher_manager_impl::ServicePublisherManagerImpl,
+    SdvTelemetryService, ServicePublisherManager,
+};
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistryImpl, ConfigurablePublisherRegistryService,
 };
