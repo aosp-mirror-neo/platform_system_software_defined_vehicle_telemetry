@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 mod descriptor_provider;
+mod descriptor_provider_factory;
 mod message_builder;
 mod message_builder_factory;
 mod metrics_report_generator;
@@ -36,7 +37,8 @@ use crate::expr::node_value_type::NodeValueType;
 use crate::service_publisher_manager::ServicePublisherManager;
 
 // Child module dependencies.
-use descriptor_provider::{DescriptorProviderConstructorError, DescriptorProviderImpl};
+use descriptor_provider::DescriptorProviderConstructorError;
+use descriptor_provider_factory::{DescriptorProviderFactory, DescriptorProviderFactoryImpl};
 use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
@@ -142,8 +144,9 @@ pub(super) struct MetricsConfigOrchestratorImpl<
 {
     configs:
         Mutex<HashMap<String, Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>>,
-    node_factory: TNodeFactory,
+    descriptor_provider_factory: DescriptorProviderFactoryImpl,
     metrics_report_generator_factory: TMetricsReportGeneratorFactory,
+    node_factory: TNodeFactory,
     publisher_factory: TPublisherFactory,
     trigger_factory: TTriggerFactory,
 
@@ -260,14 +263,16 @@ where
 
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl { metrics_config: OnceLock::new() });
+        let descriptor_provider = self.descriptor_provider_factory.create(
+            &file_descriptors,
+            &config_proto.publishers,
+            &self.service_publisher_manager,
+        )?;
         let node_factory_context = NodeFactoryContext {
             message_provider: Some(message_provider.clone()),
-            descriptor_provider: Box::new(DescriptorProviderImpl::new(
-                &file_descriptors,
-                &config_proto.publishers,
-                &self.service_publisher_manager,
-            )?),
+            descriptor_provider,
         };
+
         let (expression_nodes, node_types) =
             self.create_expression_nodes(config_proto, &node_factory_context)?;
 
@@ -484,16 +489,14 @@ where
             cloned_descriptor_protos,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )?;
+        let descriptor_provider = self.descriptor_provider_factory.create(
+            &file_descriptors,
+            &config_proto.publishers,
+            &self.service_publisher_manager,
+        )?;
+        let node_factory_context =
+            NodeFactoryContext { message_provider: None, descriptor_provider };
 
-        // Validate expression nodes to ensure they are set up correctly.
-        let node_factory_context = NodeFactoryContext {
-            message_provider: None,
-            descriptor_provider: Box::new(DescriptorProviderImpl::new(
-                &file_descriptors,
-                &config_proto.publishers,
-                &self.service_publisher_manager,
-            )?),
-        };
         let node_types = self
             .node_factory
             .validate(&config_proto.expression_nodes, &node_factory_context)
@@ -567,7 +570,7 @@ impl MetricsConfigOrchestratorImpl {
         let service_adapter = Arc::new(ServiceAdapterImpl::new(service_publisher_manager.clone()));
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            service_publisher_manager,
+            descriptor_provider_factory: DescriptorProviderFactoryImpl,
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
                 message_builder_factory.clone(),
             ),
@@ -576,6 +579,7 @@ impl MetricsConfigOrchestratorImpl {
             trigger_factory: TriggerFactoryImpl::new(),
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),
+            service_publisher_manager,
             phantom_generator: PhantomData,
         }
     }
@@ -1230,15 +1234,16 @@ mod tests {
         fn new() -> Self {
             MetricsConfigOrchestratorImpl {
                 configs: Mutex::new(HashMap::new()),
-                service_publisher_manager: Arc::new(
-                    MockServicePublisherManager::new_with_descriptor(Empty::descriptor()),
-                ),
+                descriptor_provider_factory: DescriptorProviderFactoryImpl,
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
                 trigger_factory: MockTriggerFactory::new(),
                 finish_trigger_fired_callback: Arc::new(|_| {}),
                 report_ready_callback: Arc::new(|_| {}),
+                service_publisher_manager: Arc::new(
+                    MockServicePublisherManager::new_with_descriptor(Empty::descriptor()),
+                ),
                 phantom_generator: PhantomData,
             }
         }
