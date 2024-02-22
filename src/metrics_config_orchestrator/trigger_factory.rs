@@ -192,7 +192,7 @@ impl TriggerFactoryImpl {
 #[cfg(test)]
 mod tests {
     use protobuf::EnumOrUnknown;
-    use sdv_telemetry_utils::{collection_extension::VecExtension, test_utils::ptr_eq};
+    use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdvtelemetry_proto_rust::metrics_configuration::conditional_trigger::ConditionType;
     use std::collections::HashMap;
 
@@ -370,7 +370,7 @@ mod tests {
         let TriggerType::Data { publisher: res_publisher } = &res.trigger_type else {
             panic!("Unexpected trigger type");
         };
-        assert!(ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher>)));
+        assert!(Arc::ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher>)));
     }
 
     #[test]

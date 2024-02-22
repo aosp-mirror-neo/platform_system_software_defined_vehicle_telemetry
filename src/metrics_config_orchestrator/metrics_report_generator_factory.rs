@@ -177,7 +177,7 @@ impl MetricsReportGeneratorFactoryImpl {
 
 #[cfg(test)]
 mod tests {
-    use sdv_telemetry_utils::{collection_extension::VecExtension, test_utils::ptr_eq};
+    use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 
     use super::*;
@@ -380,8 +380,8 @@ mod tests {
         assert_eq!(res.config_version, VERSION);
         assert!(res.report_incomplete);
         assert_eq!(res.triggers.len(), 1);
-        assert!(ptr_eq(&res.report_ready_callback, &report_ready_callback));
-        assert!(ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger>)));
+        assert!(Arc::ptr_eq(&res.report_ready_callback, &report_ready_callback));
+        assert!(Arc::ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger>)));
     }
 
     #[test]
