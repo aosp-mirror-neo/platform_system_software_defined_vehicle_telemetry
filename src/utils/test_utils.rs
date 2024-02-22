@@ -1,15 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 //! Utility functions for unit tests.
-use std::{future::Future, sync::Arc};
+use std::future::Future;
 use tokio::{time, time::Duration};
-
-/// Compares Arcs by extracting and comparing data pointers only
-/// This is different from the behavior observed by Arc::ptr_eq
-/// (https://rust-lang.github.io/rust-clippy/master/index.html#/vtable_address_comparisons)
-pub fn ptr_eq<T: ?Sized>(left: &Arc<T>, right: &Arc<T>) -> bool {
-    Arc::as_ptr(left) == Arc::as_ptr(right)
-}
 
 /// Awaits specified future with a timeout of 150 seconds.
 /// The function is used in tests to halt the test instead of timing out the whole test suite.
