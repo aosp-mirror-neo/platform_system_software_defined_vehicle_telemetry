@@ -9,8 +9,7 @@ package android.sdv.telemetry;
  */
 oneway interface ITelemetryStatusListener {
     /**
-     * Called by telemetry service to provide notifications on finished reports or script
-     * runtime error.
+     * Called by telemetry service to provide notifications on finished reports.
      */
     void sendStatus(
             in int apiCallId, in int statusCode, in @utf8InCpp String statusMessage);

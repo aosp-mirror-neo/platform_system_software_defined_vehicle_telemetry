@@ -3,7 +3,6 @@
 
 uuid: "d3456chu-8fde-436a-9f29-c12f06a10c102504"
 version: 01
-script: "uid494_metricsconfig_2.lua"
 descriptor_protos: [
   {
     name: "multi_config_test.proto"
