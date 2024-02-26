@@ -977,7 +977,6 @@ mod tests {
         let mut config = MetricsConfig::new();
         config.uuid = uuid.to_string();
         config.version = 2;
-        config.script = "Sample Script".to_string();
 
         info!("Serializing metric config");
         config.write_to_bytes().unwrap()

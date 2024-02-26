@@ -25,12 +25,6 @@ message MetricsConfig {
   repeated google.protobuf.FileDescriptorProto descriptor_protos = 3;
 
   // Optional.
-  // A script that is executed at the device side. Must contain all the handler
-  // functions defined in subscribers below.
-  // The script functions must be `pure` functions.
-  string script = 4;
-
-  // Optional.
   // Triggers that are available in the Metrics Configuration.
   repeated Trigger triggers = 5;
 
@@ -168,7 +162,6 @@ message ServicePublisher {
   // Optional.
   // Service-specific configuration.
   oneof option {
-    NetworkPublisherConfig network_publisher_config = 10000;
     SamplePublisherConfig sample_publisher_config = 10001;
   }
 }
@@ -264,22 +257,6 @@ message MetricsReport {
 }
 
 message SamplePublisherConfig {}
-
-enum TrafficDirection {
-  ALL = 0;
-  DOWNLOAD = 1;
-  UPLOAD = 2;
-}
-
-message NetworkPublisherConfig {
-  // Required.
-  // The name of the application being monitored.
-  string application_name = 1;
-
-  // Required.
-  // The direction of traffic to monitor.
-  TrafficDirection traffic_direction = 2;
-}
 
 // Builds a protobuf message of some given type, where the content of the
 // message is specified by the list of field assignments.
