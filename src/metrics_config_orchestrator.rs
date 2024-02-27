@@ -9,6 +9,7 @@ mod metrics_report_generator_factory;
 mod publisher;
 mod publisher_factory;
 mod service_adapter;
+mod subscription_manager;
 mod trigger;
 mod trigger_factory;
 

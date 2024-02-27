@@ -104,17 +104,17 @@ impl TriggerFactory for TriggerFactoryImpl {
                     .iter()
                     .map(|name| context.triggers[name].clone() as Arc<dyn Trigger>)
                     .collect();
-                return Ok(Arc::new(TriggerImpl::new_conditional_trigger(
+                return Ok(TriggerImpl::new_conditional_trigger(
                     trigger_name,
                     condition_type,
                     triggers,
                     selector_expression.clone(),
-                )));
+                ));
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
         };
 
-        Ok(Arc::new(TriggerImpl::new(trigger_name, trigger_type)))
+        Ok(TriggerImpl::new(trigger_name, trigger_type))
     }
 
     fn validate(
@@ -260,10 +260,10 @@ mod tests {
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
-        let parent_trigger = Arc::new(TriggerImpl::new(
+        let parent_trigger = TriggerImpl::new(
             PARENT_TRIGGER_NAME.to_owned(),
             TriggerType::Periodic { interval_ms: INTERVAL },
-        ));
+        );
 
         (trigger, Some(vec![parent_trigger]))
     }
