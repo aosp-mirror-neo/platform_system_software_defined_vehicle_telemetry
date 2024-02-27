@@ -336,10 +336,8 @@ mod tests {
         message_builder_factory.fail_create();
         let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
         let config = create_valid_config();
-        let trigger = Arc::new(TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval_ms: 0 },
-        ));
+        let trigger =
+            TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval_ms: 0 });
 
         let err = factory
             .create_using_context(&config, None, None, Some(vec![trigger.clone()]))
@@ -361,10 +359,8 @@ mod tests {
         metrics_config.uuid = UUID.to_owned();
         metrics_config.version = VERSION;
         let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
-        let trigger = Arc::new(TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval_ms: 0 },
-        ));
+        let trigger =
+            TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval_ms: 0 });
 
         let res = factory
             .create_using_context(
