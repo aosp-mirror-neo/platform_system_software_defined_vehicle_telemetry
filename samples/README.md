@@ -222,7 +222,7 @@ Message written to DT sample_data: 71 of size: 2
 In **Terminal #1**, the one with `logcat`, expect new logs (on top of what was already printed in step 2):
 
 ```
-01-25 18:47:16.110   223   223 D libsdv_dt: RegisterTopic(name=DataTunnelTopic, properties = { security_mode=Secured, message_size=2, message_count=1024, supports_notifications=no })
+01-25 18:47:16.110   223   223 D libsdv_dt: RegisterTopic(name=DataTunnelTopic, properties = { message_size=2, message_count=1024 })
 ```
 
 3. LAUNCH NEW TERMINAL (**Terminal #2**)
