@@ -55,7 +55,7 @@ TelemetryServiceStatusCodes TelemetryService::add_metrics_config(
     int cur_api_id = ++api_id_;
     cb_container_->insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     binder_service_->addMetricsConfig(cur_api_id, metricConfig);
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::activate_metrics_config(
@@ -70,7 +70,7 @@ TelemetryServiceStatusCodes TelemetryService::activate_metrics_config(
     int cur_api_id = ++api_id_;
     cb_container_->insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     binder_service_->activateMetricsConfig(cur_api_id, metricsConfigUuid);
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::deactivate_metrics_config(
@@ -85,7 +85,7 @@ TelemetryServiceStatusCodes TelemetryService::deactivate_metrics_config(
 
     cb_container_->insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     binder_service_->deactivateMetricsConfig(cur_api_id, metricsConfigUuid);
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::remove_metrics_config(
@@ -100,7 +100,7 @@ TelemetryServiceStatusCodes TelemetryService::remove_metrics_config(
 
     cb_container_->insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     binder_service_->removeMetricsConfig(cur_api_id, metricsConfigUuid);
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(void* listener,
@@ -115,7 +115,7 @@ TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(void* l
     cb_container_->insert_callback(cur_api_id, CallbackData{listener, cbFunc});
 
     binder_service_->removeAllMetricsConfigs(cur_api_id);
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
@@ -128,13 +128,13 @@ TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
     mReportReadyListener_->set_report_ready_listener(listener, cbFunc);
     ALOGI("setReportReadyListener from CPP");
 
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener() {
     android::binder::Status err = binder_service_->clearReportReadyListener();
     ALOGI("clearReportReadyListener from CPP %s", std::string(err.toString8()).c_str());
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* metrics_config_uuid,
@@ -156,7 +156,7 @@ TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* met
             binder_service_->getMetricsReport(metrics_config_uuid, report_config_name,
                                               report_number, mReportListener);
     ALOGI("get_metrics_report from CPP %s", std::string(err.toString8()).c_str());
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::set_status_listener(void* listener,
@@ -169,12 +169,12 @@ TelemetryServiceStatusCodes TelemetryService::set_status_listener(void* listener
     mStatusListenerImpl_->set_status_listener(listener, cbFunc);
     ALOGI("set status callback from CPP");
 
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
     android::binder::Status err = binder_service_->clearStatusListener();
     ALOGI("clearStatusListener from CPP %s", std::string(err.toString8()).c_str());
-    return TelemetryServiceStatusCodes::API_CALL_SUCCESS;
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 }  // namespace android::sdv::telemetry

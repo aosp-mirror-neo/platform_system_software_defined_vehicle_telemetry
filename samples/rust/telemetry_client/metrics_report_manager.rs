@@ -79,7 +79,7 @@ extern "C" fn on_report_received(
         c_str.to_str().unwrap().to_string()
     };
 
-    if status_code != status_codes::TelemetryServiceStatusCodes_GET_FINISHED_REPORT_SUCCEEDED {
+    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving metrics report: {}", msg);
         let _ = report_manager.get_report_sender.try_send(Err(msg.into()));
         return;

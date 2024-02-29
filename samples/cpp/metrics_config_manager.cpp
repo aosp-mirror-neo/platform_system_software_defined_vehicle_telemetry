@@ -19,7 +19,7 @@ void MetricsConfigManager::on_config_added(void* listener, int32_t status_code,
     auto config_manager = static_cast<MetricsConfigManager*>(listener);
 
     if (status_code ==
-        static_cast<int>(TelemetryServiceStatusCodes::ADD_METRICS_CONFIG_SUCCEEDED)) {
+        static_cast<int>(TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS)) {
         config_manager->promise_add_config_.set_value({true, std::string(message)});
 
     } else {
@@ -34,7 +34,7 @@ void MetricsConfigManager::on_config_activated(void* listener, int32_t status_co
 
     auto config_manager = static_cast<MetricsConfigManager*>(listener);
     if (status_code ==
-        static_cast<int>(TelemetryServiceStatusCodes::ACTIVATE_METRICS_CONFIG_SUCCEEDED)) {
+        static_cast<int>(TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS)) {
         config_manager->promise_activate_config_.set_value({true, std::string(message)});
     } else {
         ALOGE("Error in activating config: %s", message);
@@ -49,7 +49,7 @@ void MetricsConfigManager::on_config_removed(void* listener, int32_t status_code
     auto config_manager = static_cast<MetricsConfigManager*>(listener);
 
     if (status_code ==
-        static_cast<int>(TelemetryServiceStatusCodes::REMOVE_METRICS_CONFIG_SUCCEEDED)) {
+        static_cast<int>(TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS)) {
         config_manager->promise_remove_config_.set_value({true, std::string(message)});
     } else {
         ALOGE("Error in removing config: %s", message);

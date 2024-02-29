@@ -18,7 +18,7 @@ void StatusListenerImpl::set_status_listener(void* listener, CbFunction cbFunc) 
     cb_container_->insert_callback(GLOBAL_STATUS_LISTENER_UNIQUE_ID,
                                    CallbackData{listener, cbFunc});
     sendStatus(GLOBAL_STATUS_LISTENER_UNIQUE_ID,
-               static_cast<int>(TelemetryServiceStatusCodes::SET_STATUS_LISTENER_SUCCEEDED),
+               static_cast<int>(TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS),
                "Status listener successfully added");
 }
 

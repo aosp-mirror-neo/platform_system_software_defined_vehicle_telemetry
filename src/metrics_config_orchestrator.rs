@@ -895,7 +895,10 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::service_publisher_manager::mock::MockServicePublisherManager;
-    use crate::{MetricsConfigOrchestratorImpl, ServicePublisherManagerSubscribeError};
+    use crate::{
+        metrics_config_orchestrator::MetricsConfigOrchestratorImpl,
+        ServicePublisherManagerSubscribeError,
+    };
 
     type MockedMetricsConfigOrchestratorImpl<'a> = MetricsConfigOrchestratorImpl<
         MockMetricsReportGenerator,

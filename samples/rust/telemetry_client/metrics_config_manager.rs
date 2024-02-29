@@ -38,7 +38,7 @@ unsafe extern "C" fn on_config_added(
     };
 
     let _ = sender.send((
-        status_code == status_codes::TelemetryServiceStatusCodes_ADD_METRICS_CONFIG_SUCCEEDED,
+        status_code == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS,
         msg,
     ));
 }
@@ -72,7 +72,7 @@ extern "C" fn on_config_activated(
     };
 
     let _ = sender.send((
-        status_code == status_codes::TelemetryServiceStatusCodes_ACTIVATE_METRICS_CONFIG_SUCCEEDED,
+        status_code == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS,
         msg,
     ));
 }
@@ -106,7 +106,7 @@ extern "C" fn on_config_removed(
     };
 
     let _ = sender.send((
-        status_code == status_codes::TelemetryServiceStatusCodes_REMOVE_METRICS_CONFIG_SUCCEEDED,
+        status_code == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS,
         msg,
     ));
 }
