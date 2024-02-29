@@ -18,7 +18,7 @@ use tokio::time::{sleep, Duration};
 
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
-use sdv_dt::{c_void, Result as SdvResult, TopicTypedMetadata};
+use sdv_dt::{c_void, Result as SdvResult, SecurityMode, TopicTypedMetadata};
 use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
 
 // Static store of Message Descriptors for testing purposes. This logic will be removed once
@@ -167,8 +167,12 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                     let mut subscribe_handle = 0u32;
                     let mut topic_exists = true;
 
-                    let mut subscribe_meta_data =
-                        TopicTypedMetadata { message_count_: 0, message_size_: 0 };
+                    let mut subscribe_meta_data = TopicTypedMetadata {
+                        message_count_: 0,
+                        message_size_: 0,
+                        security_mode: SecurityMode::Secured,
+                        supports_notification: false,
+                    };
 
                     let metadata: Pin<&mut TopicTypedMetadata> = Pin::new(&mut subscribe_meta_data);
 
@@ -301,8 +305,12 @@ pub fn register_topic(
 ) -> Result<DataTunnelPublisher, SdvResult> {
     cxx::let_cxx_string!(topic_name = topic_name);
     let publish_topic_handle: &mut u32 = &mut 0;
-    let register_meta_data =
-        TopicTypedMetadata { message_count_: queue_size, message_size_: message_size };
+    let register_meta_data = TopicTypedMetadata {
+        message_count_: queue_size,
+        message_size_: message_size,
+        security_mode: SecurityMode::Secured,
+        supports_notification: false,
+    };
     let result = sdv_dt::RegisterTopic(&topic_name, &register_meta_data, publish_topic_handle);
     match result {
         SdvResult::Success => Ok(DataTunnelPublisher { topic_handle: *publish_topic_handle }),
