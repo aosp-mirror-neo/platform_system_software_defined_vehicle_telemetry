@@ -41,12 +41,13 @@ message MetricsConfig {
   repeated MetricsReportConfig metrics_report_configs = 8;
 
   // Optional.
-  // The name of the trigger that starts data collection. The state is not
-  // persisted.
+  // The name of the trigger that starts data collection.
+  // If not set, data collection will start immediately after activation.
   string start_trigger_name = 9;
 
   // Optional.
   // The name of the trigger that ends data collection.
+  // If end trigger is set, start trigger must be set.
   string end_trigger_name = 10;
 
   // Optional.

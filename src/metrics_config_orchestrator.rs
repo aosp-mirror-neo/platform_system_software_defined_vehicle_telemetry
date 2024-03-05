@@ -119,6 +119,8 @@ pub enum MetricsConfigOrchestratorError {
     InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
     #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
+    #[error("End trigger cannot be set if start trigger is not set")]
+    NoStartTriggerDefined,
     #[error("Unable to activate publisher {publisher_name}: {error}")]
     UnableToActivatePublisher { publisher_name: String, error: PublisherActivateError },
 }
@@ -350,20 +352,16 @@ where
         )?;
 
         // Create MetricsConfig.
-        let start_trigger =
-            Self::maybe_get_trigger(&triggers, &config_proto.start_trigger_name)?.cloned();
-        let end_trigger =
-            Self::maybe_get_trigger(&triggers, &config_proto.end_trigger_name)?.cloned();
-        let finish_trigger =
-            Self::maybe_get_trigger(&triggers, &config_proto.finish_trigger_name)?.cloned();
+        let (start_trigger, end_trigger, finish_trigger) =
+            Self::get_lifecycle_triggers(&triggers, config_proto)?;
         let config = Arc::new(MetricsConfig {
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: metrics_report_configs.into_values().collect(),
             ordered_publisher_names,
             publishers,
-            start_trigger,
-            end_trigger,
-            finish_trigger,
+            start_trigger: start_trigger.cloned(),
+            end_trigger: end_trigger.cloned(),
+            finish_trigger: finish_trigger.cloned(),
         });
 
         // Store MetricsConfig with encapsulated objects.
@@ -395,8 +393,12 @@ where
             })?;
         }
 
-        // Activate start trigger, if set.
-        Self::maybe_subscribe_to_start_trigger(&config).await;
+        // Activate start trigger or start data collection immediately if start trigger is not set.
+        if let Some(start_trigger) = &config.start_trigger {
+            Self::subscribe_to_start_trigger(start_trigger, &config).await;
+        } else {
+            Self::start_data_collection(&config).await;
+        }
 
         // Subscribe to finish trigger if it's set.
         if let Some(finish_trigger) = &config.finish_trigger {
@@ -553,9 +555,7 @@ where
         })?;
 
         // Validate lifecycle triggers.
-        Self::maybe_get_trigger(&triggers, &config_proto.start_trigger_name)?;
-        Self::maybe_get_trigger(&triggers, &config_proto.end_trigger_name)?;
-        Self::maybe_get_trigger(&triggers, &config_proto.finish_trigger_name)?;
+        Self::get_lifecycle_triggers(&triggers, config_proto)?;
 
         Ok(())
     }
@@ -627,6 +627,24 @@ where
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
     }
 
+    fn get_lifecycle_triggers<'a, TTrig>(
+        triggers: &'a HashMap<String, TTrig>,
+        config_proto: &MetricsConfigProto,
+    ) -> Result<
+        (Option<&'a TTrig>, Option<&'a TTrig>, Option<&'a TTrig>),
+        MetricsConfigOrchestratorError,
+    > {
+        let start_trigger = Self::maybe_get_trigger(triggers, &config_proto.start_trigger_name)?;
+        let end_trigger = Self::maybe_get_trigger(triggers, &config_proto.end_trigger_name)?;
+        let finish_trigger = Self::maybe_get_trigger(triggers, &config_proto.finish_trigger_name)?;
+
+        if start_trigger.is_none() && end_trigger.is_some() {
+            return Err(MetricsConfigOrchestratorError::NoStartTriggerDefined);
+        }
+
+        Ok((start_trigger, end_trigger, finish_trigger))
+    }
+
     fn maybe_get_trigger<'a, TTrig>(
         triggers: &'a HashMap<String, TTrig>,
         trigger_name: &str,
@@ -642,23 +660,31 @@ where
         )?))
     }
 
-    async fn maybe_subscribe_to_start_trigger(
+    async fn start_data_collection(
         config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
-        if let Some(start_trigger) = &config.start_trigger {
-            let mut config_clone = Some(config.clone());
-            start_trigger
-                .clone()
-                .subscribe(
-                    &TriggerSubscriber::MetricsConfigStart,
-                    Box::new(move || {
-                        if let Some(config) = config_clone.take() {
-                            Self::on_start_trigger_fired(config);
-                        }
-                    }),
-                )
-                .await;
+        // Activate metrics report generators.
+        for generator in &config.metrics_report_generators {
+            generator.activate().await;
         }
+    }
+
+    async fn subscribe_to_start_trigger(
+        start_trigger: &Arc<TTrigger>,
+        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+    ) {
+        let mut config_clone = Some(config.clone());
+        start_trigger
+            .clone()
+            .subscribe(
+                &TriggerSubscriber::MetricsConfigStart,
+                Box::new(move || {
+                    if let Some(config) = config_clone.take() {
+                        Self::on_start_trigger_fired(config);
+                    }
+                }),
+            )
+            .await;
     }
 
     /// Topologically sort publishers and triggers declared in the protobuf message
@@ -799,10 +825,8 @@ where
                 .unsubscribe(&TriggerSubscriber::MetricsConfigStart)
                 .await;
 
-            // Activate metrics report generators.
-            for generator in &config.metrics_report_generators {
-                generator.activate().await;
-            }
+            // Start data collection.
+            Self::start_data_collection(&config).await;
 
             // Subscribe to end trigger if it's set.
             if let Some(end_trigger) = &config.end_trigger {
@@ -853,8 +877,15 @@ where
                 generator.deactivate().await;
             }
 
-            // Subscribe to start trigger if it's set.
-            Self::maybe_subscribe_to_start_trigger(&config).await;
+            // Subscribe to start trigger.
+            Self::subscribe_to_start_trigger(
+                config
+                    .start_trigger
+                    .as_ref()
+                    .expect("Start trigger must be set if end trigger is set"),
+                &config,
+            )
+            .await;
 
             // Change state to NotStarted and release the mutex.
             *config_state = MetricsConfigState::NotStarted;
@@ -880,6 +911,7 @@ mod tests {
         Trigger as TriggerProto,
     };
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
     use tokio::sync::oneshot;
 
@@ -1419,6 +1451,16 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.metrics_report_configs.push(metrics_report1);
         config.metrics_report_configs.push(metrics_report2);
+        config
+    }
+
+    fn create_config_with_end_trigger_only() -> MetricsConfigProto {
+        let mut trigger = TriggerProto::new();
+        trigger.name = SOME_TRIGGER_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.end_trigger_name = trigger.name.clone();
+        config.triggers.push(trigger);
         config
     }
 
@@ -1973,6 +2015,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initialize_config_only_end_trigger_set_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let config = create_config_with_end_trigger_only();
+
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
     async fn initialize_config_with_lifecycle_triggers_success() {
         const ACTIVATE: &str = "activate";
         const DEACTIVATE: &str = "deactivate";
@@ -2105,6 +2162,39 @@ mod tests {
             "Unexpected config state: {:?}",
             config_state
         );
+    }
+
+    #[tokio::test]
+    async fn initialize_config_no_start_trigger_starts_data_collection() {
+        // Create and setup mock report generator.
+        let mut report_generator_mock =
+            MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
+
+        let num_calls = Arc::new(AtomicU32::new(0));
+        let num_calls_clone = num_calls.clone();
+        report_generator_mock.set_activate_callback(move |_| {
+            num_calls_clone.fetch_add(1, Ordering::SeqCst);
+        });
+
+        // Create and setup orchestrator.
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        orchestrator
+            .metrics_report_generator_factory
+            .add_report_generators(vec![report_generator_mock.into()]);
+
+        // Create metrics config.
+        let mut metrics_report_config = MetricsReportConfig::new();
+        metrics_report_config.name = REPORT_GENERATOR_NAME.to_owned();
+
+        let mut config = MetricsConfigProto::new();
+        config.uuid = UUID.to_owned();
+        config.metrics_report_configs.push(metrics_report_config);
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Verify that the report generator was activated.
+        assert_eq!(num_calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
@@ -2848,6 +2938,21 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_config_only_end_trigger_set_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+
+        let config = create_config_with_end_trigger_only();
+
+        let err = orchestrator.validate_config(&config).unwrap_err();
+
+        assert!(
+            matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),
             "Unexpected error: {:?}",
             err
         );
