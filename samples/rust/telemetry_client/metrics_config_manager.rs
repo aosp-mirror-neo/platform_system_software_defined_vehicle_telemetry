@@ -50,7 +50,7 @@ unsafe extern "C" fn on_config_added(
 ///
 /// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
 ///    the activate_metrics_config api call.
-extern "C" fn on_config_activated(
+unsafe extern "C" fn on_config_activated(
     listener: *mut std::ffi::c_void,
     status_code: i32,
     status_msg: *const std::ffi::c_char,
@@ -84,7 +84,7 @@ extern "C" fn on_config_activated(
 ///
 /// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
 ///    the remove_metrics_config api call.
-extern "C" fn on_config_removed(
+unsafe extern "C" fn on_config_removed(
     listener: *mut std::ffi::c_void,
     status_code: i32,
     status_msg: *const std::ffi::c_char,
