@@ -62,6 +62,8 @@ pub enum MetricsReportGeneratorFactoryError {
     NameNotSet,
     #[error("Trigger name {trigger_name} is invalid")]
     InvalidTriggerName { trigger_name: String },
+    #[error("Trigger names in MetricsReportConfig are required for complete reports.")]
+    TriggerNameRequired,
     #[error("MetricsReportConfig contains invalid ProtoMessageBuilder: {e}")]
     InvalidProtoMessageBuilder {
         #[from]
@@ -89,6 +91,9 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
     ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
         // Verify that the name is set.
         Self::verify_name_set(metrics_report_config)?;
+
+        // Verify that trigger names are only left empty for incomplete reports.
+        Self::verify_trigger_names_set_for_complete_reports(metrics_report_config)?;
 
         // Create message builder.
         let message_builder = self.message_builder_factory.create(
@@ -137,6 +142,9 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         // Verify that the name is set.
         Self::verify_name_set(metrics_report_config)?;
 
+        // Verify that trigger names are only left empty for incomplete reports.
+        Self::verify_trigger_names_set_for_complete_reports(metrics_report_config)?;
+
         // Validate message builder protobuf message.
         self.message_builder_factory.validate(
             metrics_report_config
@@ -170,6 +178,17 @@ impl MetricsReportGeneratorFactoryImpl {
     ) -> Result<(), MetricsReportGeneratorFactoryError> {
         if metrics_report_config.name.is_empty() {
             return Err(MetricsReportGeneratorFactoryError::NameNotSet);
+        }
+        Ok(())
+    }
+
+    fn verify_trigger_names_set_for_complete_reports(
+        metrics_report_config: &MetricsReportConfig,
+    ) -> Result<(), MetricsReportGeneratorFactoryError> {
+        if !metrics_report_config.report_incomplete
+            && metrics_report_config.trigger_names.is_empty()
+        {
+            return Err(MetricsReportGeneratorFactoryError::TriggerNameRequired);
         }
         Ok(())
     }
@@ -275,6 +294,15 @@ mod tests {
         let mut config = MetricsReportConfig::new();
         config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
         config.trigger_names.push(TRIGGER_NAME.to_owned());
+        config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
+        config
+    }
+
+    fn create_config_with_empty_trigger_names(report_incomplete: bool) -> MetricsReportConfig {
+        let mut config = MetricsReportConfig::new();
+        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        config.trigger_names = vec![];
+        config.report_incomplete = report_incomplete;
         config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
         config
     }
@@ -439,6 +467,26 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
+    }
+
+    #[test]
+    fn validate_empty_trigger_names_with_complete_report_fails() {
+        let factory = create_factory();
+        let config = create_config_with_empty_trigger_names(/*incomplete_report=*/ false);
+        let err = factory.validate_using_empty_context(&config).err().unwrap();
+
+        assert!(
+            matches!(&err, MetricsReportGeneratorFactoryError::TriggerNameRequired),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_empty_trigger_names_with_incomplete_report_succeeds() {
+        let factory = create_factory();
+        let config = create_config_with_empty_trigger_names(/*incomplete_report=*/ true);
+        factory.validate_using_empty_context(&config).unwrap();
     }
 
     #[test]
