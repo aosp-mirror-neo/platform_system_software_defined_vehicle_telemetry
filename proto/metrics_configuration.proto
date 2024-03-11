@@ -282,6 +282,7 @@ message ProtoMessageBuilder {
       MinAggregation min_aggregation = 5;
       AvgAggregation avg_aggregation = 6;
       CountAggregation count_aggregation = 7;
+      SumAggregation sum_aggregation = 8;
     }
 
     // No aggregation is performed. The expression node's latest
@@ -320,6 +321,11 @@ message ProtoMessageBuilder {
     // Count is incremented by 1 every time the message is built.
     // The first value is 1 and increments from there.
     message CountAggregation {}
+
+    // Numeric sum of all node output values.
+    message SumAggregation {
+      optional uint32 expression_node_index = 1;
+    }
   }
 
   // Required.
