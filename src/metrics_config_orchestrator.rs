@@ -38,8 +38,9 @@ use crate::expr::node_value_type::NodeValueType;
 use crate::service_publisher_manager::ServicePublisherManager;
 
 // Child module dependencies.
-use descriptor_provider::DescriptorProviderConstructorError;
-use descriptor_provider_factory::{DescriptorProviderFactory, DescriptorProviderFactoryImpl};
+use descriptor_provider_factory::{
+    DescriptorProviderFactory, DescriptorProviderFactoryError, DescriptorProviderFactoryImpl,
+};
 use message_builder_factory::MessageBuilderFactoryImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
@@ -113,7 +114,7 @@ pub enum MetricsConfigOrchestratorError {
     #[error("Unable to create DescriptorProvider because of an invalid publisher: {error}")]
     InvalidPublisherAndDescriptorCombination {
         #[from]
-        error: DescriptorProviderConstructorError,
+        error: DescriptorProviderFactoryError,
     },
     #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
     InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
@@ -147,7 +148,7 @@ pub(super) struct MetricsConfigOrchestratorImpl<
 {
     configs:
         Mutex<HashMap<String, Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>>,
-    descriptor_provider_factory: DescriptorProviderFactoryImpl,
+    descriptor_provider_factory: Box<dyn DescriptorProviderFactory>,
     metrics_report_generator_factory: TMetricsReportGeneratorFactory,
     node_factory: TNodeFactory,
     publisher_factory: TPublisherFactory,
@@ -571,7 +572,7 @@ impl MetricsConfigOrchestratorImpl {
         let service_adapter = Arc::new(ServiceAdapterImpl::new(service_publisher_manager.clone()));
         MetricsConfigOrchestratorImpl {
             configs: Mutex::new(HashMap::new()),
-            descriptor_provider_factory: DescriptorProviderFactoryImpl,
+            descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
                 message_builder_factory.clone(),
             ),
@@ -907,8 +908,7 @@ mod tests {
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
         MetricsConfig as MetricsConfigProto, MetricsReportConfig,
         PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Publisher as PublisherProto,
-        ServicePublisher as ServicePublisherProto, SignalPublisher as SignalPublisherProto,
-        Trigger as TriggerProto,
+        ServicePublisher as ServicePublisherProto, Trigger as TriggerProto,
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
@@ -918,6 +918,7 @@ mod tests {
     use super::*;
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
+    use crate::metrics_config_orchestrator::descriptor_provider_factory::mock::MockDescriptorProviderFactory;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::publisher_factory::{
@@ -1270,7 +1271,7 @@ mod tests {
         fn new() -> Self {
             MetricsConfigOrchestratorImpl {
                 configs: Mutex::new(HashMap::new()),
-                descriptor_provider_factory: DescriptorProviderFactoryImpl,
+                descriptor_provider_factory: Box::new(MockDescriptorProviderFactory::new()),
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
@@ -1324,11 +1325,11 @@ mod tests {
     fn create_config_with_duplicate_publisher_name() -> MetricsConfigProto {
         let mut publisher1 = PublisherProto::new();
         publisher1.name = SOME_PUBLISHER_NAME.to_owned();
-        publisher1.set_signal_publisher(SignalPublisherProto::new());
+        publisher1.mut_aggregation_publisher();
 
         let mut publisher2 = PublisherProto::new();
         publisher2.name = publisher1.name.clone();
-        publisher2.set_service_publisher(ServicePublisherProto::new());
+        publisher2.mut_aggregation_publisher();
 
         let mut config = MetricsConfigProto::new();
         config.publishers.push(publisher1);

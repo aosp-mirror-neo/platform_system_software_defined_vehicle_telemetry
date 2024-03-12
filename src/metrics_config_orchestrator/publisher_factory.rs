@@ -13,7 +13,6 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,
 };
-use crate::metrics_config_orchestrator::publisher::PublisherType;
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{
     NodeValueType, Publisher, PublisherImpl, Trigger, TriggerImpl,
@@ -85,10 +84,6 @@ impl PublisherFactory for PublisherFactoryImpl {
         Self::verify_name_set(publisher_proto)?;
         let publisher_name = publisher_proto.name.clone();
         let publisher = match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::SignalPublisher(signal_publisher)) => PublisherImpl::new(
-                publisher_name,
-                PublisherType::Signal { signal_name: signal_publisher.signal_name.clone() },
-            ),
             Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
                 return Ok(Arc::new(PublisherImpl::new_service_publisher(
                     publisher_name,
@@ -115,8 +110,7 @@ impl PublisherFactory for PublisherFactoryImpl {
     ) -> Result<(), PublisherFactoryError> {
         Self::verify_name_set(publisher_proto)?;
         match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::SignalPublisher(_))
-            | Some(PublisherTypeProto::ServicePublisher(_)) => (),
+            Some(PublisherTypeProto::ServicePublisher(_)) => (),
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
                 self.message_builder_factory.validate(
                     &aggregation_publisher.message_builder,
@@ -188,6 +182,7 @@ mod tests {
 
     use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
+    use crate::metrics_config_orchestrator::publisher::PublisherType;
     use crate::metrics_config_orchestrator::service_adapter::{
         ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError, ServiceSubscription,
     };
@@ -196,7 +191,6 @@ mod tests {
     const INTERVAL_MS: u64 = 42;
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
-    const SIGNAL_NAME: &str = "signal";
     const TOPIC_NAME: &str = "topic";
     const TRIGGER_NAME: &str = "trigger";
 
@@ -247,13 +241,6 @@ mod tests {
         let service_publisher = publisher.mut_service_publisher();
         service_publisher.service_name = SERVICE_NAME.to_owned();
         service_publisher.topic_name = TOPIC_NAME.to_owned();
-        publisher
-    }
-
-    fn create_valid_signal_publisher() -> PublisherProto {
-        let mut publisher = create_publisher(PUBLISHER_NAME);
-        let signal_publisher = publisher.mut_signal_publisher();
-        signal_publisher.signal_name = SIGNAL_NAME.to_owned();
         publisher
     }
 
@@ -326,20 +313,6 @@ mod tests {
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
 
-    #[test]
-    fn create_signal_publisher_success() {
-        let factory = create_default_factory();
-        let publisher = create_valid_signal_publisher();
-
-        let res = factory.create_using_default_context(&publisher).unwrap();
-
-        assert_eq!(res.name, PUBLISHER_NAME);
-        let PublisherType::Signal { signal_name } = &res.publisher_type else {
-            panic!("Unexpected publisher type");
-        };
-        assert_eq!(signal_name, SIGNAL_NAME);
-    }
-
     #[tokio::test]
     async fn create_service_publisher_success() {
         let factory = create_default_factory();
@@ -400,14 +373,6 @@ mod tests {
         let err = factory.validate_using_default_context(&PublisherProto::new()).err().unwrap();
 
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
-    }
-
-    #[test]
-    fn validate_signal_publisher_success() {
-        let factory = create_default_factory();
-        let publisher = create_valid_signal_publisher();
-
-        factory.validate_using_default_context(&publisher).unwrap();
     }
 
     #[test]
