@@ -172,7 +172,7 @@ The configurbale publisher executbale needs to be terminated manually using `CTR
 
 Start Guest:
 
-`$ launch_cvd -guest-enforce-security false`
+`$ cvd start -guest-enforce-security false`
 
 Steps to reproduce:
 
@@ -182,7 +182,7 @@ Steps to reproduce:
 
     adb root
 
-    adb push config1.bin data/local/tmp/data_tunnel_config.bin
+    adb push data_tunnel_config.bin data/local/tmp/
 
     adb logcat | grep -E 'telemetry|telemetry_rust_c_client|DataTunnelTopic'
 
@@ -209,14 +209,12 @@ adb shell dt_telemetry_sample_publisher
 EXPECTED:
 
 ```
-Message written to DT sample_data: 84 of size: 2
-Message written to DT sample_data: 45 of size: 2
-Message written to DT sample_data: 80 of size: 2
-Message written to DT sample_data: 85 of size: 2
-Message written to DT sample_data: 67 of size: 2
-Message written to DT sample_data: 62 of size: 2
-Message written to DT sample_data: 51 of size: 2
-Message written to DT sample_data: 71 of size: 2
+Message written to DT sample_data: 423908830 of size: 7
+Message written to DT sample_data: -18516534 of size: 12
+Message written to DT sample_data: -237141808 of size: 12
+Message written to DT sample_data: -7741888 of size: 12
+Message written to DT sample_data: 1237407559 of size: 7
+Message written to DT sample_data: -193225183 of size: 12
 ```
 
 In **Terminal #1**, the one with `logcat`, expect new logs (on top of what was already printed in step 2):
