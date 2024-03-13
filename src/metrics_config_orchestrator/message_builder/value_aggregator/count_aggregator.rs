@@ -8,7 +8,7 @@ pub struct CountAggregator {
 
 impl CountAggregator {
     pub fn new() -> Self {
-        CountAggregator { count: 0 }
+        Self { count: 0 }
     }
 }
 

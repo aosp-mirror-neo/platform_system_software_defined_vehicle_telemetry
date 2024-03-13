@@ -569,7 +569,7 @@ impl MetricsConfigOrchestratorImpl {
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
         let service_adapter = Arc::new(ServiceAdapterImpl::new(service_publisher_manager.clone()));
-        MetricsConfigOrchestratorImpl {
+        Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: DescriptorProviderFactoryImpl,
             metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
@@ -966,7 +966,7 @@ mod tests {
 
     impl MockMetricsReportGenerator {
         fn new(name: String) -> Self {
-            MockMetricsReportGenerator { name, activate_callback: None, deactivate_callback: None }
+            Self { name, activate_callback: None, deactivate_callback: None }
         }
 
         fn set_activate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
@@ -1005,10 +1005,7 @@ mod tests {
 
     impl MockMetricsReportGeneratorFactory {
         fn new() -> Self {
-            MockMetricsReportGeneratorFactory {
-                report_generators: HashMap::new().into(),
-                error: None.into(),
-            }
+            Self { report_generators: HashMap::new().into(), error: None.into() }
         }
 
         fn add_report_generators(&self, report_generators: Vec<Arc<MockMetricsReportGenerator>>) {
@@ -1059,7 +1056,7 @@ mod tests {
 
     impl MockNodeFactory {
         fn new() -> Self {
-            MockNodeFactory {
+            Self {
                 fail_create_nodes: false,
                 fail_validate: false,
                 num_nodes: Mutex::new(0),
@@ -1122,7 +1119,7 @@ mod tests {
 
     impl MockPublisherFactory {
         fn new() -> Self {
-            MockPublisherFactory {
+            Self {
                 publishers: HashMap::new().into(),
                 create_callback: None,
                 validate_callback: None,
@@ -1200,11 +1197,7 @@ mod tests {
 
     impl MockTriggerFactory {
         fn new() -> Self {
-            MockTriggerFactory {
-                triggers: HashMap::new().into(),
-                create_callback: None,
-                validate_callback: None,
-            }
+            Self { triggers: HashMap::new().into(), create_callback: None, validate_callback: None }
         }
 
         fn add_triggers(&mut self, triggers: Vec<Arc<MockTrigger>>) {
@@ -1268,7 +1261,7 @@ mod tests {
 
     impl MockedMetricsConfigOrchestratorImpl<'_> {
         fn new() -> Self {
-            MetricsConfigOrchestratorImpl {
+            Self {
                 configs: Mutex::new(HashMap::new()),
                 descriptor_provider_factory: DescriptorProviderFactoryImpl,
                 metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),

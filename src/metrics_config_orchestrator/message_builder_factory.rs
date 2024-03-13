@@ -77,7 +77,7 @@ impl<'a> MessageBuilderFactoryCreateContext<'a> {
         nodes: &'a [Arc<Node>],
         node_types: &'a [NodeValueType],
     ) -> Self {
-        MessageBuilderFactoryCreateContext { file_descriptors, nodes, node_types }
+        Self { file_descriptors, nodes, node_types }
     }
 }
 
@@ -87,7 +87,7 @@ impl<'a> MessageBuilderFactoryValidateContext<'a> {
         file_descriptors: &'a [FileDescriptor],
         node_types: &'a [NodeValueType],
     ) -> Self {
-        MessageBuilderFactoryValidateContext { file_descriptors, node_types }
+        Self { file_descriptors, node_types }
     }
 }
 
@@ -168,9 +168,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
 
 impl MessageBuilderFactoryImpl {
     pub fn new() -> Self {
-        MessageBuilderFactoryImpl {
-            value_aggregator_factory: Box::new(ValueAggregatorFactoryImpl {}),
-        }
+        Self { value_aggregator_factory: Box::new(ValueAggregatorFactoryImpl {}) }
     }
 
     fn get_message_descriptor(

@@ -17,7 +17,7 @@ pub struct VectorAggregator {
 
 impl VectorAggregator {
     pub fn new(node: &Arc<Node>, max_length: &Option<u32>) -> Self {
-        VectorAggregator { node: node.clone(), current_vec: None, max_length: *max_length }
+        Self { node: node.clone(), current_vec: None, max_length: *max_length }
     }
 }
 

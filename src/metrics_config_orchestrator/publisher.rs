@@ -258,7 +258,7 @@ impl Publisher for PublisherImpl {
 
 impl PublisherImpl {
     pub(super) fn new(name: String, publisher_type: PublisherType) -> Self {
-        PublisherImpl {
+        Self {
             name,
             publisher_type,
             latest_message: None.into(),
@@ -279,7 +279,7 @@ impl PublisherImpl {
             triggers,
             message_builder,
         };
-        PublisherImpl::new(name, publisher_type)
+        Self::new(name, publisher_type)
     }
 
     pub(super) fn new_service_publisher(

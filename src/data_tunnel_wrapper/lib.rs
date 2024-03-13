@@ -109,7 +109,7 @@ impl DataTunnelWrapperImpl {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
         // Create struct to interact with Data Tunnel Apis
-        DataTunnelWrapperImpl { data_tunnel_subscriptions: Arc::new(Mutex::new(HashMap::new())) }
+        Self { data_tunnel_subscriptions: Arc::new(Mutex::new(HashMap::new())) }
     }
 
     /// Read messages using Data tunnel and writes data to the input buffer.

@@ -47,7 +47,7 @@ impl Trigger for MockTrigger {
 impl MockTrigger {
     /// Returns a new instance of MockTrigger
     pub(crate) fn new(name: String) -> Self {
-        MockTrigger {
+        Self {
             name,
             expected_subscribers: vec![],
             subscribe_callback: None,
@@ -57,7 +57,7 @@ impl MockTrigger {
     }
 
     pub(crate) fn new_for_subscriber(name: String, expected_subscriber: TriggerSubscriber) -> Self {
-        let mut trigger = MockTrigger::new(name);
+        let mut trigger = Self::new(name);
         trigger.expected_subscribers.push(expected_subscriber);
         trigger
     }

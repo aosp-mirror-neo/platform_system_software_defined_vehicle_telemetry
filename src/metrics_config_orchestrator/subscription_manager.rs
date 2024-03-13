@@ -134,7 +134,7 @@ mod tests {
 
     impl MockActivatable {
         fn new() -> Self {
-            MockActivatable {
+            Self {
                 callback_map: None.into(),
                 num_activate_calls: 0.into(),
                 num_deactivate_calls: 0.into(),
