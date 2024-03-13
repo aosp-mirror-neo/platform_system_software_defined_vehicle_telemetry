@@ -16,6 +16,7 @@ use sdvtelemetry_proto_rust::expression::{
     constant_leaf_node::Node_value as NodeValueProto,
     ConstantLeafNode as ConstantLeafNodeProto,
 };
+use std::convert::From;
 use std::error::Error;
 
 use crate::expr::{
@@ -602,6 +603,30 @@ impl NodeValue {
         } else {
             self.apply_numeric(other, int_func, float_func, err_provider)
         }
+    }
+}
+
+impl From<i32> for NodeValue {
+    fn from(item: i32) -> Self {
+        Self::Int32(item)
+    }
+}
+
+impl From<i64> for NodeValue {
+    fn from(item: i64) -> Self {
+        Self::Int64(item)
+    }
+}
+
+impl From<f32> for NodeValue {
+    fn from(item: f32) -> Self {
+        Self::Float(item)
+    }
+}
+
+impl From<f64> for NodeValue {
+    fn from(item: f64) -> Self {
+        Self::Double(item)
     }
 }
 
