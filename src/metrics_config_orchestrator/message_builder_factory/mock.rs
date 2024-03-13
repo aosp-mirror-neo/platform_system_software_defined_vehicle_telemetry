@@ -31,7 +31,7 @@ pub(crate) struct MockMessageBuilderFactory {
 
 impl MockMessageBuilderFactory {
     pub fn new() -> Self {
-        MockMessageBuilderFactory { fail_validate: false, fail_create: false }
+        Self { fail_validate: false, fail_create: false }
     }
 
     /// Intercepts the mock factory's validate() call and make it return an error.

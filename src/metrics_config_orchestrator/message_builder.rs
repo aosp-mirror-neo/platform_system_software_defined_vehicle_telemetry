@@ -78,7 +78,7 @@ impl MessageBuilderImpl {
         message_descriptor: MessageDescriptor,
         field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
     ) -> Self {
-        MessageBuilderImpl { message_descriptor, field_assignments }
+        Self { message_descriptor, field_assignments }
     }
 }
 

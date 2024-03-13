@@ -140,10 +140,7 @@ impl Default for ConfigurablePublisherRegistryImpl {
 impl ConfigurablePublisherRegistryImpl {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
-        ConfigurablePublisherRegistryImpl {
-            publisher_entries: HashMap::new().into(),
-            tokio_handles: HashMap::new().into(),
-        }
+        Self { publisher_entries: HashMap::new().into(), tokio_handles: HashMap::new().into() }
     }
 
     pub(crate) async fn register_publisher(
@@ -260,7 +257,7 @@ mod tests {
 
     impl MockConfigurablePublisher {
         pub fn new() -> Self {
-            MockConfigurablePublisher {
+            Self {
                 num_subscribe_calls: Arc::new(AtomicU32::new(0)),
                 num_unsubscribe_calls: Arc::new(AtomicU32::new(0)),
             }

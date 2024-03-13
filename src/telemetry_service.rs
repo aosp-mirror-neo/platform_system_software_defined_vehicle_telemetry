@@ -413,7 +413,7 @@ mod tests {
 
     impl MockTelemetryReportListener {
         fn new() -> Self {
-            MockTelemetryReportListener {
+            Self {
                 status_code: Arc::new(Mutex::new(0)),
                 status_message: Arc::new(Mutex::new(String::new())),
                 num_on_result_calls: Arc::new(Mutex::new(0)),
@@ -487,7 +487,7 @@ mod tests {
 
     impl MockTelemetryReportReadyListener {
         fn new() -> Self {
-            MockTelemetryReportReadyListener {
+            Self {
                 num_on_ready_report_calls: Arc::new(Mutex::new(0)),
                 report_number: Arc::new(Mutex::new(0)),
                 uuid: Arc::new(Mutex::new(String::new())),
@@ -535,10 +535,7 @@ mod tests {
 
     impl MockTelemetryStatusListener {
         fn new() -> Self {
-            MockTelemetryStatusListener {
-                num_send_status_calls: Arc::new(Mutex::new(0)),
-                status: Arc::new(Mutex::new(0)),
-            }
+            Self { num_send_status_calls: Arc::new(Mutex::new(0)), status: Arc::new(Mutex::new(0)) }
         }
 
         pub fn get_num_send_status_calls(&self) -> i32 {

@@ -29,7 +29,7 @@ pub(crate) enum MetricsReportListenerError {
 
 impl MetricsReportListener {
     pub(crate) fn new() -> Self {
-        MetricsReportListener {
+        Self {
             metrics_report_store: Mutex::new(HashMap::new()),
             report_ready_listener: Mutex::new(None),
         }

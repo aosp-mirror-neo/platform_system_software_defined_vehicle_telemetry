@@ -478,7 +478,7 @@ mod tests {
             num_finish_config_calls: Arc<Mutex<i32>>,
             num_validate_config_calls: Arc<Mutex<i32>>,
         ) -> Self {
-            MockMetricsConfigOrchestratorImpl {
+            Self {
                 num_initialize_config_calls,
                 num_finish_config_calls,
                 num_validate_config_calls,

@@ -26,7 +26,7 @@ impl ServicePublisherManagerImpl {
     /// Creates a new instance of the struct.
     pub fn new(service_publisher_registry: Vec<Arc<dyn ServicePublisherManager>>) -> Self {
         // Create struct to interact with Data Tunnel Apis
-        ServicePublisherManagerImpl {
+        Self {
             service_publisher_registry,
             service_publisher_subscriptions: Arc::new(Mutex::new(HashMap::new())),
         }

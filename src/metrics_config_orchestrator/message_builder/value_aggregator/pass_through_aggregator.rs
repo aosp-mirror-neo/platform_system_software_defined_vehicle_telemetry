@@ -10,7 +10,7 @@ pub struct PassThroughAggregator {
 
 impl PassThroughAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
-        PassThroughAggregator { node: node.clone() }
+        Self { node: node.clone() }
     }
 }
 

@@ -137,7 +137,7 @@ impl PublisherFactoryImpl {
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
         service_adapter: Arc<ServiceAdapterImpl>,
     ) -> Self {
-        PublisherFactoryImpl { message_builder_factory, service_adapter }
+        Self { message_builder_factory, service_adapter }
     }
 
     /// Creates Aggregation Publisher struct based on the protobuf message and context.

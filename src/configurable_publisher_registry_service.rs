@@ -59,6 +59,6 @@ impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistry
 impl ConfigurablePublisherRegistryService {
     /// Instantiates an instance of ConfigurablePublisherRegistryService
     pub fn new(configurable_publisher_registry: Arc<ConfigurablePublisherRegistryImpl>) -> Self {
-        ConfigurablePublisherRegistryService { configurable_publisher_registry }
+        Self { configurable_publisher_registry }
     }
 }

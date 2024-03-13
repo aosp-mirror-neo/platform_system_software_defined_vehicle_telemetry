@@ -17,7 +17,7 @@ pub struct RandomIntegerPublisher {
 
 impl RandomIntegerPublisher {
     pub fn new(notify_subscribed: Arc<Notify>) -> Self {
-        RandomIntegerPublisher { subscriber: Mutex::new(None), notify_subscribed }
+        Self { subscriber: Mutex::new(None), notify_subscribed }
     }
 
     pub fn subscribe(

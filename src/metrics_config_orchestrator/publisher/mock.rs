@@ -70,7 +70,7 @@ impl Publisher for MockPublisher {
 
 impl MockPublisher {
     pub(crate) fn new(name: String) -> Self {
-        MockPublisher {
+        Self {
             expected_trigger_names: HashSet::new(),
             latest_message: None,
             name,

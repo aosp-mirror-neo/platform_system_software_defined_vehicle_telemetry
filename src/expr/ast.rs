@@ -123,7 +123,7 @@ pub struct NodeFactoryImpl {}
 impl NodeFactoryImpl {
     /// Constructor.
     pub fn new() -> Self {
-        NodeFactoryImpl {}
+        Self {}
     }
 
     /// Vists the node at `index` using post-order traversal.

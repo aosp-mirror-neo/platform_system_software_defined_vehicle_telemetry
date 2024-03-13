@@ -41,7 +41,7 @@ impl ValueAggregatorFactory for MockValueAggregatorFactory {
 
 impl MockValueAggregatorFactory {
     pub fn new() -> Self {
-        MockValueAggregatorFactory { fail_create: false, fail_validate: false }
+        Self { fail_create: false, fail_validate: false }
     }
 
     pub fn fail_create(&mut self) {
