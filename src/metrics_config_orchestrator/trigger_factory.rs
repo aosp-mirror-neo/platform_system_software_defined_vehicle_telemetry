@@ -198,13 +198,14 @@ mod tests {
 
     use super::*;
     use crate::expr::node_value::NodeValue;
-    use crate::metrics_config_orchestrator::publisher::PublisherType;
+    use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
 
     const INTERVAL: u64 = u64::MAX;
     const NODE_INDEX: u32 = 42;
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
-    const SIGNAL_NAME: &str = "signal";
+    const SERVICE_NAME: &str = "service_name";
+    const TOPIC_NAME: &str = "topic_name";
     const TRIGGER_NAME: &str = "trigger";
 
     fn create_factory() -> TriggerFactoryImpl {
@@ -226,9 +227,11 @@ mod tests {
         let data_trigger = trigger.mut_data_trigger();
         data_trigger.publisher_name = PUBLISHER_NAME.to_owned();
 
-        let publisher = Arc::new(PublisherImpl::new(
+        let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
-            PublisherType::Signal { signal_name: SIGNAL_NAME.to_owned() },
+            SERVICE_NAME.to_owned(),
+            TOPIC_NAME.to_owned(),
+            Arc::new(MockServiceAdapter::new()),
         ));
 
         (trigger, publisher)

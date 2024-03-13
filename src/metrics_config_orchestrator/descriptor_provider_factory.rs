@@ -1,18 +1,17 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use crate::expr::ast::DescriptorProvider;
-use crate::metrics_config_orchestrator::descriptor_provider::{
-    DescriptorProviderConstructorError, DescriptorProviderImpl,
-};
-use crate::service_publisher_manager::ServicePublisherManager;
 use protobuf::reflect::FileDescriptor;
-use protobuf::well_known_types::empty::Empty;
-use protobuf::MessageFull;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use thiserror::Error;
+
+use crate::expr::ast::DescriptorProvider;
+use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
+use crate::service_publisher_manager::ServicePublisherManager;
+use crate::ServicePublisherManagerSubscribeError;
 
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
     fn create(
@@ -20,7 +19,24 @@ pub(crate) trait DescriptorProviderFactory: Send + Sync {
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
         service_publisher_manager: &Arc<dyn ServicePublisherManager>,
-    ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderConstructorError>;
+    ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError>;
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+pub(crate) enum DescriptorProviderFactoryError {
+    #[error("AggregationPublisher {pub_name} is invalid because it did not specify a ProtoMessageBuilder")]
+    InvalidAggregationPublisher { pub_name: String },
+    #[error(
+        "AggregationPublisher {pub_name} is invalid because its field assignments \
+    use missing message descriptor of type {msg_type}"
+    )]
+    MissingMessageDescriptor { pub_name: String, msg_type: String },
+    #[error("Unable to validate the Configurable Publisher: {error}")]
+    PublisherRegistryError {
+        #[from]
+        error: ServicePublisherManagerSubscribeError,
+    },
 }
 
 pub(crate) struct DescriptorProviderFactoryImpl;
@@ -31,11 +47,10 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
         service_publisher_manager: &Arc<dyn ServicePublisherManager>,
-    ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderConstructorError> {
+    ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         let publisher_message_descriptor =
             publishers.iter().try_fold(HashMap::new(), |mut map, publisher| {
                 let descriptor = match &publisher.publisher_type {
-                    Some(PublisherTypeProto::SignalPublisher(_)) => Empty::descriptor(),
                     Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
                         service_publisher_manager.get_message_descriptor(
                             &service_publisher_proto.service_name,
@@ -43,24 +58,22 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
                         )?
                     }
                     Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
-                        let message_builder =
-                            aggregation_publisher_proto.message_builder.as_ref().ok_or(
-                                DescriptorProviderConstructorError::InvalidAggregationPublisher {
-                                    pub_name: publisher.name.clone(),
-                                },
-                            )?;
+                        let message_builder = aggregation_publisher_proto
+                            .message_builder
+                            .as_ref()
+                            .ok_or(DescriptorProviderFactoryError::InvalidAggregationPublisher {
+                                pub_name: publisher.name.clone(),
+                            })?;
                         if let Some(msg_descriptor) = fds
                             .iter()
                             .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
                         {
                             msg_descriptor
                         } else {
-                            return Err(
-                                DescriptorProviderConstructorError::MissingMessageDescriptor {
-                                    pub_name: publisher.name.clone(),
-                                    msg_type: message_builder.message_type.clone(),
-                                },
-                            );
+                            return Err(DescriptorProviderFactoryError::MissingMessageDescriptor {
+                                pub_name: publisher.name.clone(),
+                                msg_type: message_builder.message_type.clone(),
+                            });
                         }
                     }
                     // Skip unknown publisher types.
@@ -72,6 +85,9 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
         Ok(Box::new(DescriptorProviderImpl { publisher_message_descriptor }))
     }
 }
+
+#[cfg(test)]
+pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
@@ -150,7 +166,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, DescriptorProviderConstructorError::PublisherRegistryError { .. }),
+            matches!(&err, DescriptorProviderFactoryError::PublisherRegistryError { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -171,7 +187,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, DescriptorProviderConstructorError::InvalidAggregationPublisher { pub_name } if pub_name == PUBLISHER_1),
+            matches!(&err, DescriptorProviderFactoryError::InvalidAggregationPublisher { pub_name } if pub_name == PUBLISHER_1),
             "Unexpected error: {:?}",
             err
         );

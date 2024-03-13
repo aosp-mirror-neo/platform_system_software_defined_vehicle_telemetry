@@ -74,9 +74,6 @@ pub(crate) enum PublisherState {
 
 #[allow(dead_code)]
 pub(crate) enum PublisherType {
-    Signal {
-        signal_name: String,
-    },
     Service {
         service_name: String,
         topic_name: String,
@@ -159,7 +156,6 @@ impl Publisher for PublisherImpl {
                 assert!(subscription_container.is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
                 subscription_container.replace(subscription);
             }
-            _ => {}
         }
 
         // Set state to Active and release the mutex.
@@ -196,7 +192,6 @@ impl Publisher for PublisherImpl {
                     panic!("Unable to deactivate publisher {} because it's in an inconsistent state: it's deactivating, but subscription is not set", self.name);
                 }
             }
-            _ => {}
         }
 
         // Reset latest message.
