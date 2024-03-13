@@ -77,7 +77,7 @@ pub(crate) struct MetricsReportGeneratorFactoryImpl {
 
 impl MetricsReportGeneratorFactoryImpl {
     pub fn new(message_builder_factory: Arc<dyn MessageBuilderFactory>) -> Self {
-        MetricsReportGeneratorFactoryImpl { message_builder_factory }
+        Self { message_builder_factory }
     }
 }
 

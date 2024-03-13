@@ -53,7 +53,7 @@ impl ServiceAdapter for MockServiceAdapter {
 
 impl MockServiceAdapter {
     pub(crate) fn new() -> Self {
-        MockServiceAdapter {
+        Self {
             block_subscribe: false,
             block_unsubscribe: false,
             new_message_callback: None.into(),

@@ -167,7 +167,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
 
 impl ServiceAdapterImpl {
     pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherManager>) -> Self {
-        ServiceAdapterImpl {
+        Self {
             next_subscription_id: AtomicU32::new(1),
             service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),

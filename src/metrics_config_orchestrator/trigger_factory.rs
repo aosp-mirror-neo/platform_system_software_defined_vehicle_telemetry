@@ -142,7 +142,7 @@ impl TriggerFactory for TriggerFactoryImpl {
 
 impl TriggerFactoryImpl {
     pub(super) fn new() -> Self {
-        TriggerFactoryImpl {}
+        Self {}
     }
 
     fn get_condition_type(

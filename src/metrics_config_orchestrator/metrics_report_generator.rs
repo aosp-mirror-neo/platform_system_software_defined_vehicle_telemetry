@@ -87,7 +87,7 @@ impl MetricsReportGeneratorImpl {
     ) -> Self {
         let subscriber =
             TriggerSubscriber::MetricsReportGenerator { name: metrics_report_config.name.clone() };
-        MetricsReportGeneratorImpl {
+        Self {
             name: metrics_report_config.name.clone(),
             config_uuid,
             config_version,

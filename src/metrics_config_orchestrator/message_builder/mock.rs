@@ -16,6 +16,6 @@ impl MessageBuilder for MockMessageBuilder {
 
 impl MockMessageBuilder {
     pub fn new() -> Self {
-        MockMessageBuilder {}
+        Self {}
     }
 }

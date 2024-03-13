@@ -28,7 +28,7 @@ impl MockMetricsConfigManager {
         num_remove_config_calls: Arc<Mutex<i32>>,
         num_remove_all_config_calls: Arc<Mutex<i32>>,
     ) -> Self {
-        MockMetricsConfigManager {
+        Self {
             num_add_metrics_config_calls,
             num_activate_metrics_config_calls,
             num_deactivate_metrics_config_calls,

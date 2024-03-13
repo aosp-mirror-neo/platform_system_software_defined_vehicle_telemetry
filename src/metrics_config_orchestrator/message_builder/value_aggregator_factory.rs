@@ -168,7 +168,7 @@ impl<'a> ValueAggregatorFactoryCreateContext<'a> {
         node_types: &'a [NodeValueType],
         nodes: &'a [Arc<Node>],
     ) -> Self {
-        ValueAggregatorFactoryCreateContext { field_descriptor, node_types, nodes }
+        Self { field_descriptor, node_types, nodes }
     }
 }
 
@@ -178,7 +178,7 @@ impl<'a> ValueAggregatorFactoryValidateContext<'a> {
         field_descriptor: &'a FieldDescriptor,
         node_types: &'a [NodeValueType],
     ) -> Self {
-        ValueAggregatorFactoryValidateContext { field_descriptor, node_types }
+        Self { field_descriptor, node_types }
     }
 }
 

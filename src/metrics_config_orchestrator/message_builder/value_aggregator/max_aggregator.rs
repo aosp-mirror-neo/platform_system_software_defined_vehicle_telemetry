@@ -14,7 +14,7 @@ pub struct MaxAggregator {
 
 impl MaxAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
-        MaxAggregator { node: node.clone(), current_max: None }
+        Self { node: node.clone(), current_max: None }
     }
 }
 

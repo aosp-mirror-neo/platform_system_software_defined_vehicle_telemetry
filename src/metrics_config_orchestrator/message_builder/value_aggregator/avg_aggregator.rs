@@ -16,7 +16,7 @@ pub struct AvgAggregator {
 
 impl AvgAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
-        AvgAggregator { node: node.clone(), current_avg: NodeValue::Double(0.0), n: 0 }
+        Self { node: node.clone(), current_avg: NodeValue::Double(0.0), n: 0 }
     }
 }
 

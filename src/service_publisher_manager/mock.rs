@@ -99,7 +99,7 @@ impl MockServicePublisherManager {
     }
 
     pub(crate) fn new(descriptor: Option<MessageDescriptor>) -> Self {
-        MockServicePublisherManager {
+        Self {
             next_descriptor: descriptor.into(),
             next_error: None.into(),
             num_subscribe_calls: AtomicU32::new(0),

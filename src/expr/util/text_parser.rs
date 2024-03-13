@@ -43,7 +43,7 @@ pub struct Parser {
 impl Parser {
     /// Constructor
     pub fn new() -> Self {
-        Parser { existing_nodes: Vec::new(), node_to_index: HashMap::new() }
+        Self { existing_nodes: Vec::new(), node_to_index: HashMap::new() }
     }
 
     /// Return all nodes constructed from all the past `parse()` calls.

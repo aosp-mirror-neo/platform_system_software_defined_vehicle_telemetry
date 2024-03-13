@@ -42,7 +42,7 @@ impl SubscriberService {
         message_descriptor: MessageDescriptor,
         tx: mpsc::Sender<Box<dyn MessageDyn>>,
     ) -> Self {
-        SubscriberService { message_descriptor, tx }
+        Self { message_descriptor, tx }
     }
 }
 

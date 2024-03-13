@@ -22,7 +22,7 @@ impl ValueAggregator for MockValueAggregator {
 
 impl MockValueAggregator {
     pub fn new(output: NodeValue) -> Self {
-        MockValueAggregator { output, fail_compute: false }
+        Self { output, fail_compute: false }
     }
 
     pub fn fail_compute(&mut self) {

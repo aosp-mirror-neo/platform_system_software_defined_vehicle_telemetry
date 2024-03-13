@@ -102,7 +102,7 @@ pub struct MockMessageProvider {
 
 impl MockMessageProvider {
     pub fn new() -> Self {
-        MockMessageProvider { next_result: None.into() }
+        Self { next_result: None.into() }
     }
 
     pub fn set_next_result(
@@ -133,7 +133,7 @@ pub struct MockDescriptorProvider {
 
 impl MockDescriptorProvider {
     pub fn new() -> Self {
-        MockDescriptorProvider { result_provider: None }
+        Self { result_provider: None }
     }
 }
 
