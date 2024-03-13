@@ -38,7 +38,6 @@ pub async fn create_dir(dir_path: &PathBuf) -> io::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 /// async function that removes a directory
 pub async fn remove_dir(dir_path: &PathBuf) -> io::Result<()> {
     tokio::fs::remove_dir_all(dir_path).await?;

@@ -44,7 +44,6 @@ pub(crate) trait Trigger: Send + Sync {
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber);
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Eq, Hash, PartialEq)]
 pub(crate) enum TriggerSubscriber {
     AggregationPublisher { name: String },
@@ -65,7 +64,6 @@ pub(crate) struct TriggerImpl {
     subscription_manager: Box<dyn SubscriptionManager<TriggerSubscriber>>,
 }
 
-#[allow(dead_code)]
 pub(crate) enum TriggerType {
     Data {
         publisher: Arc<dyn Publisher>,
