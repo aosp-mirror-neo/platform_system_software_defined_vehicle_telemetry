@@ -2,27 +2,8 @@
 
 use protobuf::reflect::MessageDescriptor;
 use std::collections::HashMap;
-use thiserror::Error;
 
 use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError};
-use crate::service_publisher_manager::ServicePublisherManagerSubscribeError;
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum DescriptorProviderConstructorError {
-    #[error("AggregationPublisher {pub_name} is invalid because it did not specify a ProtoMessageBuilder")]
-    InvalidAggregationPublisher { pub_name: String },
-    #[error(
-        "AggregationPublisher {pub_name} is invalid because its field assignments \
-    use missing message descriptor of type {msg_type}"
-    )]
-    MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("Unable to validate the Configurable Publisher: {error}")]
-    PublisherRegistryError {
-        #[from]
-        error: ServicePublisherManagerSubscribeError,
-    },
-}
 
 pub struct DescriptorProviderImpl {
     // key = publisher name, value = MessageDescriptor for the data it publishes
