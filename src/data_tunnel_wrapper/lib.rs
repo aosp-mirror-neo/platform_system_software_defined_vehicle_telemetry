@@ -18,7 +18,10 @@ use tokio::sync::Notify;
 
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
-use sdv_dt::{c_void, Result as SdvResult, SubscriptionNotificationType, TopicTypedMetadata};
+use sdv_dt::{
+    c_void, Result as SdvResult, SubscriptionHandle, SubscriptionNotificationType, TopicHandle,
+    TopicTypedMetadata,
+};
 use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
 
 // Static store of Message Descriptors for testing purposes. This logic will be removed once
@@ -57,12 +60,12 @@ extern "C" fn data_tunnel_callback(
 
 /// Struct for data publisher of DT, to simplify sample usage.
 pub struct DataTunnelPublisher {
-    topic_handle: u32,
+    topic_handle: TopicHandle,
 }
 
 /// Struct for subscription of DT topic
 pub struct DataTunnelSubscription {
-    subscribe_handle: u32,
+    subscription_handle: SubscriptionHandle,
     first_message: bool,
     _subscribe_meta_data: TopicTypedMetadata,
 }
@@ -123,7 +126,7 @@ impl DataTunnelWrapperImpl {
         if let Some(subscription) = data_tunnel_subscriptions.lock().unwrap().get_mut(topic_name) {
             let mut read_message_count = 0usize;
             let result =
-                sdv_dt::AvailableToRead(subscription.subscribe_handle, &mut read_message_count);
+                sdv_dt::AvailableToRead(subscription.subscription_handle, &mut read_message_count);
             if result != SdvResult::Success {
                 return Err(anyhow!("Error: {:?}", result));
             };
@@ -138,7 +141,7 @@ impl DataTunnelWrapperImpl {
             // in `SubscribeToTopic()` method.
             let result = unsafe {
                 sdv_dt::ReadMessages(
-                    subscription.subscribe_handle,
+                    subscription.subscription_handle,
                     buffer.as_mut_ptr() as *mut c_void,
                     read_message_count,
                 )
@@ -192,7 +195,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 }
                 Entry::Vacant(v) => {
                     cxx::let_cxx_string!(topic_name = topic);
-                    let mut subscribe_handle = 0u32;
+                    let mut subscription_handle = SubscriptionHandle::default();
                     let mut topic_exists = true;
 
                     let mut subscribe_meta_data =
@@ -212,7 +215,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                     }
 
                     let result =
-                        sdv_dt::SubscribeToTopic(&topic_name, metadata, &mut subscribe_handle);
+                        sdv_dt::SubscribeToTopic(&topic_name, metadata, &mut subscription_handle);
                     if result != SdvResult::Success {
                         return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
                             error: anyhow!("Data Tunnel Result: {:?}", result),
@@ -225,7 +228,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                     // Safety: "user_data" must point to valid data for "data_tunnel_callback" to use.
                     let result = unsafe {
                         sdv_dt::SetNotificationHandler(
-                            subscribe_handle,
+                            subscription_handle,
                             sdv_dt::SubscriptionNotificationCallback(data_tunnel_callback),
                             Arc::into_raw(notify.clone()) as *mut c_void,
                             NOTIFICATION_INTERVAL,
@@ -242,7 +245,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                     let count = subscribe_meta_data.message_count_;
 
                     v.insert(DataTunnelSubscription {
-                        subscribe_handle,
+                        subscription_handle,
                         _subscribe_meta_data: subscribe_meta_data,
                         first_message: true,
                     });
@@ -348,12 +351,12 @@ pub fn register_topic(
     message_size: usize,
 ) -> Result<DataTunnelPublisher, SdvResult> {
     cxx::let_cxx_string!(topic_name = topic_name);
-    let publish_topic_handle: &mut u32 = &mut 0;
+    let mut publish_topic_handle = TopicHandle::default();
     let register_meta_data =
         TopicTypedMetadata { message_count_: queue_size, message_size_: message_size };
-    let result = sdv_dt::RegisterTopic(&topic_name, &register_meta_data, publish_topic_handle);
+    let result = sdv_dt::RegisterTopic(&topic_name, &register_meta_data, &mut publish_topic_handle);
     match result {
-        SdvResult::Success => Ok(DataTunnelPublisher { topic_handle: *publish_topic_handle }),
+        SdvResult::Success => Ok(DataTunnelPublisher { topic_handle: publish_topic_handle }),
         _ => Err(result),
     }
 }
