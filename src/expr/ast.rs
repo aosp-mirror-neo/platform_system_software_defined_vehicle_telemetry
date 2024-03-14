@@ -147,9 +147,9 @@ impl NodeFactoryImpl {
     fn visit(
         index: usize,
         proto_nodes: &[NodeProto],
-        visit_status: &mut Vec<VisitStatus>,
-        nodes: &mut Vec<Option<Arc<Node>>>,
-        node_value_types: &mut Vec<NodeValueType>,
+        visit_status: &mut [VisitStatus],
+        nodes: &mut [Option<Arc<Node>>],
+        node_value_types: &mut [NodeValueType],
         context: &NodeFactoryContext,
     ) -> Result<Option<Arc<Node>>, NodeError> {
         // get visit status, `?` returns early if error
@@ -261,7 +261,7 @@ impl NodeFactoryImpl {
     /// a Rust Node, put the node into the vector at the `index`, and return that node.
     /// Otherwise it will return a success status containing nothing.
     fn maybe_create_node(
-        nodes: &mut Vec<Option<Arc<Node>>>,
+        nodes: &mut [Option<Arc<Node>>],
         index: usize,
         create_node_func: impl FnOnce() -> Result<Arc<Node>, NodeError>,
     ) -> Result<Option<Arc<Node>>, NodeError> {
@@ -290,7 +290,7 @@ impl NodeFactory for NodeFactoryImpl {
                 i,
                 proto_nodes,
                 &mut visit_status,
-                &mut vec![],
+                &mut [],
                 &mut node_value_types,
                 context,
             )?;
