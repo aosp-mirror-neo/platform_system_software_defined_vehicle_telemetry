@@ -31,6 +31,7 @@ rust_binary {
         "rust/telemetry_client/telemetry_rust_c_client.rs",
     ],
     rustlibs: [
+        "libclap",
         "libfutures",
         "liblog_rust",
         "libbinder_rs",
