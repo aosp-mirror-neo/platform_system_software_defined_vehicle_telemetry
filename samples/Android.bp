@@ -78,6 +78,7 @@ rust_binary {
     srcs: ["rust/data_tunnel_publisher/publish_sample.rs"],
     rustlibs: [
         "libsample_publisher_proto",
+        "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_dt_wrapper",
         "libsdv_dt_rust",
         "libcxx",

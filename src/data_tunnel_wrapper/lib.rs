@@ -4,11 +4,10 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
+use cxx::CxxVector;
 use log::{error, info};
-use once_cell::sync::OnceCell;
-use protobuf::reflect::MessageDescriptor;
+use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use protobuf::MessageFull;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::pin::Pin;
@@ -16,22 +15,16 @@ use std::result::Result;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Notify;
 
-use sample_publisher_proto::sample_publisher;
-use sample_publisher_proto::sample_publisher::SampleMessage;
 use sdv_dt::{
     c_void, Result as SdvResult, SubscriptionHandle, SubscriptionNotificationType, TopicHandle,
     TopicTypedMetadata,
 };
 use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
-
-// Static store of Message Descriptors for testing purposes. This logic will be removed once
-// Data Tunnel adds support for Message Descriptor
-static MESSAGE_DESC_STORE: OnceCell<HashMap<String, MessageDescriptor>> = OnceCell::new();
+use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
+use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 
 // Notification interval betwween two consecutive messages received from Data Tunnel
 const NOTIFICATION_INTERVAL: u32 = 0;
-
-const TOPIC_NAME: &str = "DataTunnelTopic";
 
 /// Callback that handles data received from data tunnel.
 ///
@@ -74,6 +67,8 @@ pub struct DataTunnelSubscription {
 pub struct DataTunnelWrapperImpl {
     /// Hashmap to store topic names and their subscriptions
     data_tunnel_subscriptions: Arc<Mutex<HashMap<String, DataTunnelSubscription>>>,
+    /// Hashmap to store topic names and their MessageDescriptors
+    data_tunnel_topic_message_descriptors: Arc<Mutex<HashMap<String, MessageDescriptor>>>,
 }
 
 /// Publisher struct impl that encapsulates the data required for publishing.
@@ -112,7 +107,10 @@ impl DataTunnelWrapperImpl {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
         // Create struct to interact with Data Tunnel Apis
-        Self { data_tunnel_subscriptions: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            data_tunnel_subscriptions: Arc::new(Mutex::new(HashMap::new())),
+            data_tunnel_topic_message_descriptors: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// Read messages using Data tunnel and writes data to the input buffer.
@@ -313,30 +311,67 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
     /// Checks if topic with given name exists in data tunnel
     fn get_message_descriptor(
         &self,
-        service_name: &str,
-        topic_name: &str,
+        _service_name: &str,
+        topic: &str,
     ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
-        let map = MESSAGE_DESC_STORE.get_or_init(|| {
-            let mut m = HashMap::new();
+        let message_descriptor = match self
+            .data_tunnel_topic_message_descriptors
+            .lock()
+            .unwrap()
+            .entry(topic.to_string())
+        {
+            Entry::Occupied(o) => o.get().clone(),
+            Entry::Vacant(v) => {
+                cxx::let_cxx_string!(topic_name = topic);
 
-            // Inserting sample topic for testing purposes
-            // Multiple topics and their corresponding Message Descriptors can be similarly added
-            let file_descriptor = sample_publisher::file_descriptor();
-            let message_type_name = format!(".{}", SampleMessage::descriptor().full_name());
-            let msg_descriptor = file_descriptor.message_by_full_name(&message_type_name).unwrap();
-            m.insert(TOPIC_NAME.to_string(), msg_descriptor);
-            m
-        });
+                let mut cxx_metadata_vec = CxxVector::<u8>::new();
+                let pinned_metadata = cxx_metadata_vec.pin_mut();
 
-        // Always returns true since the topic name is hardcoded
-        if let Some(msg_descriptor) = map.get(topic_name) {
-            Ok(msg_descriptor.clone())
-        } else {
-            Err(ServicePublisherManagerSubscribeError::TopicNotFound {
-                service_name: service_name.to_string(),
-                topic_name: topic_name.to_string(),
-            })
-        }
+                let result = sdv_dt::GetTopicMetadata(&topic_name, pinned_metadata);
+                if result != SdvResult::Success {
+                    return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
+                        error: anyhow!("Data Tunnel Result: {:?}", result),
+                    });
+                };
+
+                let publisher_metadata: TelemetryPublisherMetadata =
+                    protobuf::Message::parse_from_bytes(cxx_metadata_vec.as_slice()).map_err(
+                        |e| ServicePublisherManagerSubscribeError::SubscribeFailed {
+                            error: anyhow!("Error in parsing Metadata: {:?}", e),
+                        },
+                    )?;
+
+                // Build the provided proto file descriptors
+                let file_descriptors = FileDescriptor::new_dynamic_fds(
+                    publisher_metadata.descriptor_protos,
+                    &WELL_KNOWN_FILE_DESCRIPTORS,
+                )
+                .map_err(|e| {
+                    ServicePublisherManagerSubscribeError::SubscribeFailed {
+                        error: anyhow!("Invalid Descriptor Protos: {:?}", e),
+                    }
+                })?;
+
+                // iterate through all file_descriptors, find MessageDescriptor for the given message_type
+                // message_by_full_name() method requires the name to start with dot, it returns a clone
+                // of the MessageDescriptor, so we can return it as-is without cloning again
+                let message_descriptor = file_descriptors
+                    .iter()
+                    .find_map(|fd| fd.message_by_full_name(&publisher_metadata.message_type_name))
+                    .ok_or(ServicePublisherManagerSubscribeError::SubscribeFailed {
+                        error: anyhow!(
+                            "Message Name {} not found in descriptor",
+                            publisher_metadata.message_type_name
+                        ),
+                    })?;
+
+                v.insert(message_descriptor.clone());
+
+                message_descriptor
+            }
+        };
+
+        Ok(message_descriptor)
     }
 }
 
@@ -349,12 +384,24 @@ pub fn register_topic(
     topic_name: &str,
     queue_size: usize,
     message_size: usize,
+    metadata: Vec<u8>,
 ) -> Result<DataTunnelPublisher, SdvResult> {
     cxx::let_cxx_string!(topic_name = topic_name);
+
     let mut publish_topic_handle = TopicHandle::default();
     let register_meta_data =
         TopicTypedMetadata { message_count_: queue_size, message_size_: message_size };
-    let result = sdv_dt::RegisterTopic(&topic_name, &register_meta_data, &mut publish_topic_handle);
+
+    let mut cxx_metadata_vec = CxxVector::<u8>::new();
+    for elem in metadata {
+        cxx_metadata_vec.pin_mut().push(elem);
+    }
+    let result = sdv_dt::RegisterTopicWithMetadata(
+        &topic_name,
+        &register_meta_data,
+        &cxx_metadata_vec,
+        &mut publish_topic_handle,
+    );
     match result {
         SdvResult::Success => Ok(DataTunnelPublisher { topic_handle: publish_topic_handle }),
         _ => Err(result),
