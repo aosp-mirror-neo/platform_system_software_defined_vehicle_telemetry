@@ -58,7 +58,7 @@ unsafe extern "C" fn on_report_ready(
     }
 }
 
-extern "C" fn on_report_received(
+unsafe extern "C" fn on_report_received(
     listener: *mut std::ffi::c_void,
     status_code: i32,
     status_msg: *const std::ffi::c_char,

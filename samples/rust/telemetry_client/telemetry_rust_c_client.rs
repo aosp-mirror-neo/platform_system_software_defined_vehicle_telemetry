@@ -19,7 +19,7 @@ use crate::metrics_config_manager::MetricsConfigManager;
 use crate::metrics_report_manager::MetricsReportManager;
 use sdv_telemetry_bindgen as rust_to_c;
 
-extern "C" fn on_status(
+unsafe extern "C" fn on_status(
     _listener: *mut std::ffi::c_void,
     status_code: i32,
     status_msg: *const std::ffi::c_char,
