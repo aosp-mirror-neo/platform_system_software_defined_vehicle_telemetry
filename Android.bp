@@ -223,6 +223,32 @@ rust_test {
     },
 }
 
+rust_test {
+    name: "sdv_telemetry_integration_tests",
+    srcs: [
+        "tests/integration_tests.rs",
+    ],
+    rustlibs: [
+        "libfutures",
+        "liblog_rust",
+        "libbinder_rs",
+        "liblogger",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+        "libsdv_telemetry_bindgen",
+        "libstatus_codes_bindgen",
+        "libtokio",
+    ],
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    data: [
+        "tests/config.bin",
+    ],
+    auto_gen_config: true,
+}
+
 rust_bindgen {
     name: "libsdv_telemetry_bindgen",
     crate_name: "sdv_telemetry_bindgen",
