@@ -48,48 +48,42 @@ impl ValueAggregator for MaxAggregator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn max_aggregator_compute_with_int_ok() {
-        let node_outputs = [0, 1, 2, 0, -1, 3, 0, -1];
-        let expected_max = [0, 1, 2, 2, 2, 3, 3];
-        let mut max_aggregator = MaxAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Int32(node_outputs[0]),
-        }));
+    fn get_computed_values_from_aggregator<T>(node_outputs: &[T]) -> Vec<NodeValue>
+    where
+        NodeValue: std::convert::From<T>,
+        T: Copy,
+    {
+        let mut aggregator =
+            MaxAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
+        let mut result = Vec::new();
 
-        // verify the maximum is correctly tracked as the node output changes in each compute()
-        for i in 0..expected_max.len() {
-            // action
-            let res = max_aggregator.compute().unwrap();
-
-            // assert
-            assert_eq!(res, NodeValue::Int32(expected_max[i]));
+        for i in 0..node_outputs.len() - 1 {
+            result.push(aggregator.compute().unwrap());
 
             // update the next exrp eval result, so we can test correctness of compute()
-            max_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(node_outputs[i + 1]) });
+            aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
         }
+        result
+    }
+
+    #[test]
+    fn max_aggregator_compute_with_int_ok() {
+        let node_outputs: &[i32] = &[0, 1, 2, 0, -1, 3, 0, -1];
+        let expected_max: &[i32] = &[0, 1, 2, 2, 2, 3, 3];
+
+        let res = get_computed_values_from_aggregator(node_outputs);
+
+        assert_eq!(res, expected_max.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
     fn max_aggregator_compute_with_float_ok() {
-        let node_outputs = [-1.0, -0.5, 1.0, 2.5, 0.0, -1.0];
-        let expected_max = [-1.0, -0.5, 1.0, 2.5, 2.5];
-        let mut max_aggregator = MaxAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Float(node_outputs[0]),
-        }));
+        let node_outputs: &[f32] = &[-1.0, -0.5, 1.0, 2.5, 0.0, -1.0];
+        let expected_max: &[f32] = &[-1.0, -0.5, 1.0, 2.5, 2.5];
 
-        // verify the maximum is correctly tracked as the node output changes in each compute()
-        for i in 0..expected_max.len() {
-            // action
-            let res = max_aggregator.compute().unwrap();
+        let res = get_computed_values_from_aggregator(node_outputs);
 
-            // assert
-            assert_eq!(res, NodeValue::Float(expected_max[i]));
-
-            // update the next exrp eval result, so we can test correctness of compute()
-            max_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Float(node_outputs[i + 1]) });
-        }
+        assert_eq!(res, expected_max.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
