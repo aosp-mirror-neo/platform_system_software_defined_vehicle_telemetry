@@ -49,7 +49,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compute_integer_min_aggregation_ok() {
+    fn min_aggregator_compute_with_int_ok() {
         let node_outputs = [0, 1, 2, 0, -1, -2, -1, 0];
         let expected_min = [0, 0, 0, 0, -1, -2, -2];
         let mut min_aggregator = MinAggregator::new(&Arc::new(Node::ConstantLeaf {
@@ -71,7 +71,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_floating_point_min_aggregation_ok() {
+    fn min_aggregator_compute_with_float_ok() {
         let node_outputs = [5.0, 2.5, 1.25, 0.625, 0.625, 1.25, 2.5];
         let expected_min = [5.0, 2.5, 1.25, 0.625, 0.625, 0.625];
         let mut min_aggregator = MinAggregator::new(&Arc::new(Node::ConstantLeaf {
@@ -93,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_handles_none_value() {
+    fn min_aggregator_compute_with_none_value_ok() {
         let mut aggregator =
             MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
@@ -104,7 +104,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn test_compute_node_output_type_is_not_numeric_panics() {
+    fn min_aggregator_compute_with_non_numeric_value_panics() {
         let mut bad_min =
             MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
