@@ -17,7 +17,7 @@ pub trait HashMapExtension<K: Eq + Hash, V> {
     ///
     /// * `dependency_selector` - A function that accepts HashMap value and returns keys that are
     ///   dependent on the corresponding entry.
-    fn to_topological_sorted_vec<F: Fn(&V) -> &Vec<K>>(
+    fn to_topological_sorted_vec<F: Fn(&V) -> &[K]>(
         &self,
         dependency_selector: F,
     ) -> Option<Vec<&K>>;
@@ -42,7 +42,7 @@ pub trait VecExtension<T> {
 }
 
 impl<K: Eq + Hash, V> HashMapExtension<K, V> for HashMap<K, V> {
-    fn to_topological_sorted_vec<F: Fn(&V) -> &Vec<K>>(
+    fn to_topological_sorted_vec<F: Fn(&V) -> &[K]>(
         &self,
         dependency_selector: F,
     ) -> Option<Vec<&K>> {

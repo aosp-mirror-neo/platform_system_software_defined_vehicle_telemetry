@@ -147,9 +147,9 @@ impl NodeFactoryImpl {
     fn visit(
         index: usize,
         proto_nodes: &[NodeProto],
-        visit_status: &mut Vec<VisitStatus>,
-        nodes: &mut Vec<Option<Arc<Node>>>,
-        node_value_types: &mut Vec<NodeValueType>,
+        visit_status: &mut [VisitStatus],
+        nodes: &mut [Option<Arc<Node>>],
+        node_value_types: &mut [NodeValueType],
         context: &NodeFactoryContext,
     ) -> Result<Option<Arc<Node>>, NodeError> {
         // get visit status, `?` returns early if error
@@ -290,7 +290,7 @@ impl NodeFactory for NodeFactoryImpl {
                 i,
                 proto_nodes,
                 &mut visit_status,
-                &mut vec![],
+                &mut [],
                 &mut node_value_types,
                 context,
             )?;

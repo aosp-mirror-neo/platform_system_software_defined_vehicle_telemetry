@@ -121,7 +121,7 @@ impl DataTunnelWrapperImpl {
     fn read(
         data_tunnel_subscriptions: Arc<Mutex<HashMap<String, DataTunnelSubscription>>>,
         topic_name: &str,
-        buffer: &mut Vec<u8>,
+        buffer: &mut [u8],
     ) -> anyhow::Result<usize> {
         if let Some(subscription) = data_tunnel_subscriptions.lock().unwrap().get_mut(topic_name) {
             let mut read_message_count = 0usize;
