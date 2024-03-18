@@ -26,7 +26,7 @@ mod tests {
     use crate::expr::mock::OP_ADD;
 
     #[test]
-    fn test_compute_ok() {
+    fn pass_through_aggregator_compute_ok() {
         let int64_val = NodeValue::Int64(20);
         let mut int64_field_value =
             PassThroughAggregator::new(&Arc::new(Node::ConstantLeaf { value: int64_val.clone() }));
@@ -35,7 +35,7 @@ mod tests {
     }
 
     #[test]
-    fn test_compute_node_evaluation_error_fails() {
+    fn pass_through_aggregator_compute_node_evaluation_error_fails() {
         let true_val = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) });
         let bad_node = Arc::new(Node::Combination {
             operator: OP_ADD.clone(),

@@ -24,7 +24,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_compute_ok() {
+    fn count_aggregator_compute_ok() {
         let mut aggregator = CountAggregator::new();
 
         // compute 5 times to see the count is incrementing
