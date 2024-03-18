@@ -47,7 +47,7 @@ mod tests {
     use crate::expr::mock::TEST_MESSAGE;
 
     #[test]
-    fn compute_integer_vector_aggregation_ok() {
+    fn vector_aggregator_compute_with_int_ok() {
         let test_int = 100;
         let mut aggregate_int_value = VectorAggregator::new(
             &Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(test_int) }),
@@ -67,7 +67,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_integer_length_limited_vector_aggregation_ok() {
+    fn vector_aggregator_compute_with_int_and_limited_length_ok() {
         let mut aggregate_int_value = VectorAggregator::new(
             &Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(0) }),
             &Some(3), // max length = 3
@@ -96,7 +96,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_floating_point_vector_aggregation_ok() {
+    fn vector_aggregator_compute_with_float_ok() {
         let test_double = 1.2_f64;
         let mut aggregate_double_value = VectorAggregator::new(
             &Arc::new(Node::ConstantLeaf { value: NodeValue::Double(test_double) }),
@@ -116,7 +116,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_floating_point_length_limited_vector_aggregation_ok() {
+    fn vector_aggregator_compute_with_float_and_limited_length_ok() {
         let mut aggregate_int_value = VectorAggregator::new(
             &Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.0) }),
             &Some(3), // max length = 3
@@ -145,7 +145,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_message_value_vector_aggregation_ok() {
+    fn vector_aggregator_compute_with_message_value_ok() {
         let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
         let mut aggregate_message_value = VectorAggregator::new(
             &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(boxed_message.clone()) }),
@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_message_value_length_limited_vector_aggregation_ok() {
+    fn vector_aggregator_compute_with_message_value_and_limited_length_ok() {
         let max_len: usize = 3;
         let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
         let mut aggregate_message_value = VectorAggregator::new(
@@ -190,7 +190,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_handles_none_value() {
+    fn vector_aggregator_compute_with_none_value_ok() {
         let mut aggregator =
             VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }), &None);
 
@@ -200,7 +200,7 @@ mod tests {
     }
 
     #[test]
-    fn compute_vector_aggregate_vector_type_fails() {
+    fn vector_aggregator_compute_with_vector_fails() {
         let mut aggregate_list_of_list = VectorAggregator::new(
             &Arc::new(Node::ConstantLeaf { value: NodeValue::BoolList(vec![true, false]) }),
             &None,
