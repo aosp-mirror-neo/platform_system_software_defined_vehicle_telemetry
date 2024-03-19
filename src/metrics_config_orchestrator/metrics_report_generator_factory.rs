@@ -287,6 +287,7 @@ mod tests {
     fn create_config_without_message_builder() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
         config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        config.trigger_names.push(TRIGGER_NAME.to_owned());
         config
     }
 
