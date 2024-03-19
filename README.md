@@ -18,7 +18,7 @@ Check the readme inside samples folder for instructions on how to experiment wit
 
 Starting with ag/25844146 unit tests are converted to device side tests and instructions have changed.
 Run launch_cvd in a different terminal.
-`$ launch_cvd`
+`$ cvd start`
 
 run the tests
 `$ atest libsdv_telemetry_unit_tests`
