@@ -1,4 +1,6 @@
-use sdvtelemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
+use sdvtelemetry_proto_rust::expression::combination_node::{
+    ArithmeticOperator, Operator, RelationalOperator,
+};
 
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::AggregationError;
@@ -23,6 +25,10 @@ pub trait NodeValueExtension {
         n: u32,
         new_value: &NodeValue,
     ) -> Result<(), AggregationError>;
+
+    // Update the sum average after learning the new sample.
+    // Caller must be a NodeValue::Double.
+    fn update_sum(&mut self, new_value: &NodeValue) -> Result<(), AggregationError>;
 }
 
 impl NodeValueExtension for NodeValue {
@@ -111,6 +117,14 @@ impl NodeValueExtension for NodeValue {
         } else {
             panic!("update_running_average() should never be called on non-double");
         }
+        Ok(())
+    }
+
+    fn update_sum(&mut self, new_value: &NodeValue) -> Result<(), AggregationError> {
+        *self = self
+            .operate(&Operator::ArithmeticOperator(ArithmeticOperator::ADD.into()), move || {
+                Ok(new_value.clone())
+            })?;
         Ok(())
     }
 }
