@@ -40,42 +40,41 @@ impl ValueAggregator for SumAggregator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn sum_aggregator_compute_with_int_ok() {
-        let node_outputs = [-2, 0, 2, 4, 6, 8, -32, 0];
-        let expected_sum = [-2, -2, 0, 4, 10, 18, -14];
-        let mut sum_aggregator = SumAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Int32(node_outputs[0]),
-        }));
+    fn get_computed_sums_from_aggregator<T>(node_outputs: &[T]) -> Vec<NodeValue>
+    where
+        NodeValue: std::convert::From<T>,
+        T: Copy,
+    {
+        let mut sum_aggregator =
+            SumAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
+        let mut result_sums = Vec::new();
 
-        // verify the sum is correctly calculated as the node output changes in each compute()
-        for i in 0..expected_sum.len() {
+        for i in 0..node_outputs.len() - 1 {
             let res = sum_aggregator.compute().unwrap();
-            assert_eq!(res, NodeValue::Int64(expected_sum[i]));
+            result_sums.push(res);
 
             // update the next exrp eval result, so we can test correctness of compute()
             sum_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(node_outputs[i + 1]) });
+                Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
         }
+
+        result_sums
+    }
+
+    #[test]
+    fn sum_aggregator_compute_with_int_ok() {
+        let node_outputs: &[i64] = &[-2, 0, 2, 4, 6, 8, -32, 0];
+        let expected_sum: &[i64] = &[-2, -2, 0, 4, 10, 18, -14];
+        let res = get_computed_sums_from_aggregator(node_outputs);
+        assert_eq!(res, expected_sum.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
     fn sum_aggregator_compute_with_float_ok() {
-        let node_outputs = [-2.0, 0.0, 2.0, 4.0, 6.0, 8.0, -32.0, 0.0];
-        let expected_sum = [-2.0, -2.0, 0.0, 4.0, 10.0, 18.0, -14.0];
-        let mut sum_aggregator = SumAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Float(node_outputs[0]),
-        }));
-
-        // verify the sum is correctly calculated as the node output changes in each compute()
-        for i in 0..expected_sum.len() {
-            let res = sum_aggregator.compute().unwrap();
-            assert_eq!(res, NodeValue::Double(expected_sum[i]));
-
-            // update the next exrp eval result, so we can test correctness of compute()
-            sum_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Float(node_outputs[i + 1]) });
-        }
+        let node_outputs: &[f64] = &[-2.0, 0.0, 2.0, 4.0, 6.0, 8.0, -32.0, 0.0];
+        let expected_sum: &[f64] = &[-2.0, -2.0, 0.0, 4.0, 10.0, 18.0, -14.0];
+        let res = get_computed_sums_from_aggregator(node_outputs);
+        assert_eq!(res, expected_sum.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
