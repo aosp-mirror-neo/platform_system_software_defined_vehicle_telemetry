@@ -3,14 +3,19 @@
 package android.sdv.telemetry.configurable_publisher;
 
 /**
- * Implemented by a subscriber and sent as a
- * function argument to IConfigurablePublisher's subscribe function.
+ * Interface for telemetry service to implement. Telemetry service subscribes to configurable
+ * publisher as a data subscriber. The methods in this interface are named from the perspective of
+ * the data publisher. Interface is not oneway to ensure sendData returns only after received by
+ * telemetry service.
  */
+@VintfStability
 interface ISubscriber {
     /**
-     * Sends data to the subscriber
+     * Sends data to the subscriber. The data format is already known by the subscriber.
+     * There is no check for maximum data size, however the caller must not send more than 10KB of
+     * data at a time as all binders for a process shares the same 1MB buffer limit
      *
-     * @param data: binary serialized protobuf Any message sent to subscriber
+     * @param data binary serialized protobuf message sent to subscriber
      *
      */
     void sendData(in byte[] data);

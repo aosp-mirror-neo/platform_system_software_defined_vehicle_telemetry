@@ -28,17 +28,17 @@ std::optional<TelemetryServiceStatusCodes> validate_params(void* listener, T cbF
 TelemetryService::TelemetryService() {
     api_id_ = 1;
     const std::string instance =
-            StringPrintf("%s", android::String8(ITelemetryService::descriptor).c_str());
+            StringPrintf("%s/default", android::String8(ITelemetryService::descriptor).c_str());
 
     binder_service_ = android::waitForService<android::sdv::telemetry::ITelemetryService>(
             android::String16(instance.c_str()));
     cb_container_ = new CallbackContainer();
 
     mStatusListenerImpl_ = new StatusListenerImpl(cb_container_);
-    binder_service_->setStatusListener(mStatusListenerImpl_);
+    binder_service_->registerStatusListener(mStatusListenerImpl_);
 
     mReportReadyListener_ = new ReportReadyListenerImpl();
-    binder_service_->setReportReadyListener(mReportReadyListener_);
+    binder_service_->registerReportReadyListener(mReportReadyListener_);
 
     ALOGI("TelemetryService Created");
 }
@@ -126,14 +126,14 @@ TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
     }
 
     mReportReadyListener_->set_report_ready_listener(listener, cbFunc);
-    ALOGI("setReportReadyListener from CPP");
+    ALOGI("registerReportReadyListener from CPP");
 
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener() {
-    android::binder::Status err = binder_service_->clearReportReadyListener();
-    ALOGI("clearReportReadyListener from CPP %s", std::string(err.toString8()).c_str());
+    android::binder::Status err = binder_service_->unregisterReportReadyListener();
+    ALOGI("unregisterReportReadyListener from CPP %s", std::string(err.toString8()).c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
@@ -173,8 +173,8 @@ TelemetryServiceStatusCodes TelemetryService::set_status_listener(void* listener
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
-    android::binder::Status err = binder_service_->clearStatusListener();
-    ALOGI("clearStatusListener from CPP %s", std::string(err.toString8()).c_str());
+    android::binder::Status err = binder_service_->unregisterStatusListener();
+    ALOGI("unregisterStatusListener from CPP %s", std::string(err.toString8()).c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 }  // namespace android::sdv::telemetry

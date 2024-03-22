@@ -279,11 +279,11 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     }
 
     #[instrument(skip(self))]
-    async fn setReportReadyListener(
+    async fn registerReportReadyListener(
         &self,
         listener: &Strong<dyn ITelemetryReportReadyListener>,
     ) -> BinderResult<()> {
-        info!("setReportReadyListener");
+        info!("registerReportReadyListener");
         let (status_code, status_message) =
             self.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
                 |_| {
@@ -303,7 +303,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     }
 
     #[instrument(skip(self))]
-    async fn setStatusListener(
+    async fn registerStatusListener(
         &self,
         listener: &Strong<dyn ITelemetryStatusListener>,
     ) -> BinderResult<()> {
@@ -354,25 +354,19 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     }
 
     #[instrument(skip(self))]
-    async fn clearReportReadyListener(&self) -> BinderResult<()> {
-        info!("clearReportReadyListener");
-        let (status_code, status_message) = {
-            match self.metrics_report_listener.clear_report_ready_listener() {
-                Ok(()) => (
-                    StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
-                    "Report listener successfully cleared",
-                ),
-                Err(_) => {
-                    (StatusCodes::CLEAR_REPORT_READY_LISTENER_FAILED.0, "Report listener not set")
-                }
-            }
-        };
-        self.send_status(GLOBAL_STATUS_LISTENER_API_CALL_ID, status_code, status_message)
+    async fn unregisterReportReadyListener(&self) -> BinderResult<()> {
+        info!("unregisterReportReadyListener");
+        self.metrics_report_listener.clear_report_ready_listener().unwrap();
+        self.send_status(
+            GLOBAL_STATUS_LISTENER_API_CALL_ID,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            "Report listener successfully cleared",
+        )
     }
 
     #[instrument(skip(self))]
-    async fn clearStatusListener(&self) -> BinderResult<()> {
-        info!("clearStatusListener");
+    async fn unregisterStatusListener(&self) -> BinderResult<()> {
+        info!("unregisterStatusListener");
         *self.status_listener.lock().unwrap() = None;
         Ok(())
     }
@@ -617,7 +611,7 @@ mod tests {
                 BinderFeatures::default(),
             );
 
-            let _ = self.service.setStatusListener(&binder_status_listener).await;
+            let _ = self.service.registerStatusListener(&binder_status_listener).await;
             self.status_listener = Some(status_listener);
 
             assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0, self.get_status_code());
@@ -873,15 +867,17 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ =
-            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        let _ = test_environment
+            .service
+            .registerReportReadyListener(&binder_report_ready_listener)
+            .await;
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
         );
 
-        let _ = test_environment.service.clearReportReadyListener().await;
+        let _ = test_environment.service.unregisterReportReadyListener().await;
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -905,8 +901,10 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ =
-            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        let _ = test_environment
+            .service
+            .registerReportReadyListener(&binder_report_ready_listener)
+            .await;
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -931,8 +929,10 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ =
-            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        let _ = test_environment
+            .service
+            .registerReportReadyListener(&binder_report_ready_listener)
+            .await;
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -957,14 +957,14 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment.service.setReportReadyListener(&report_listener).await;
+        let _ = test_environment.service.registerReportReadyListener(&report_listener).await;
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
         );
 
-        let _ = test_environment.service.setReportReadyListener(&report_listener).await;
+        let _ = test_environment.service.registerReportReadyListener(&report_listener).await;
         assert_eq!(
             StatusCodes::SET_REPORT_READY_LISTENER_FAILED.0,
             test_environment.get_status_code()
@@ -987,7 +987,7 @@ mod tests {
         );
 
         let serialized_config = create_serialized_config(UUID);
-        let _ = test_environment.service.setStatusListener(&binder_listener).await;
+        let _ = test_environment.service.registerStatusListener(&binder_listener).await;
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             status_listener.get_status_code()
@@ -1012,13 +1012,13 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment.service.setStatusListener(&binder_listener).await;
+        let _ = test_environment.service.registerStatusListener(&binder_listener).await;
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             status_listener.get_status_code()
         );
 
-        let _ = test_environment.service.setStatusListener(&binder_listener).await;
+        let _ = test_environment.service.registerStatusListener(&binder_listener).await;
         assert_eq!(StatusCodes::SET_STATUS_LISTENER_FAILED.0, status_listener.get_status_code());
     }
 
@@ -1030,7 +1030,7 @@ mod tests {
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_status_listener().await;
 
-        let result = test_environment.service.clearStatusListener().await;
+        let result = test_environment.service.unregisterStatusListener().await;
         assert!(result.is_ok());
         assert!(test_environment.service.status_listener.lock().unwrap().is_none());
     }
@@ -1054,8 +1054,10 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ =
-            test_environment.service.setReportReadyListener(&binder_report_ready_listener).await;
+        let _ = test_environment
+            .service
+            .registerReportReadyListener(&binder_report_ready_listener)
+            .await;
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,

@@ -11,8 +11,10 @@ aidl_interface {
     srcs: [
         "android/sdv/telemetry/*.aidl",
     ],
-    vendor_available: false,
-    unstable: true,
+    vendor_available: true,
+    system_ext_specific: true,
+    stability: "vintf",
+    owner: "google",
     backend: {
         java: {
             enabled: false,
@@ -31,8 +33,10 @@ aidl_interface {
     srcs: [
         "android/sdv/telemetry/configurable_publisher/*.aidl",
     ],
-    vendor_available: false,
-    unstable: true,
+    vendor_available: true,
+    system_ext_specific: true,
+    stability: "vintf",
+    owner: "google",
     backend: {
         java: {
             enabled: false,

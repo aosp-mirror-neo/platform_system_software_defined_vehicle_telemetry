@@ -7,10 +7,13 @@ import android.sdv.telemetry.ITelemetryReportReadyListener;
 import android.sdv.telemetry.ITelemetryStatusListener;
 
 /**
- * Internal binder interface for telemetry service.
+ * Telemetry system for software defined vehicle has three main components: Telemetry service, Data
+ * logger (the application that controls telemetry service and receive metrics reports) and Data
+ * publishers. This is the primary interface exposed by the telemetry service for communicating with
+ * the Data logger
  *
- * @hide
  */
+@VintfStability
 interface ITelemetryService {
     /**
      * Adds telemetry MetricsConfigs to TelemetryService.
@@ -57,43 +60,45 @@ interface ITelemetryService {
     /**
      * Sends finished telemetry report with the specified metricsConfigUuid,
      * metricsReportConfigName and reportNumber, or errors associated with it using the specified
-     * {@code ITelemetryReportListener}.
      *
      * @param metricsConfigUuid uuid of the Metrics Config for which the generated report is
      *         requested.
      * @param metricsReportConfigName the name of the Metrics Report Config for which the
      *         generated report is requested.
      * @param reportNumber report number of the metrics report requested.
-     * @param listener implementation of ITelemetryReportListener, that is used to send the report
-     *         back.
+     * @param listener Listener that is called when the requested report is ready
      */
     void getMetricsReport(in @utf8InCpp String metricsConfigUuid,
             in @utf8InCpp String metricsReportConfigName, in int reportNumber,
             in ITelemetryReportListener listener);
 
     /**
-     * Registers a listener for receiving notifications when a metrics report is ready.
+     * Registers a listener for receiving notifications when a metrics report is ready. If a
+     * listener is already registered an error is sent back to the global status listener.
      *
      * @param listener implementation of ITelemetryReportReadyListener, responsible for informing
      * the client about reports which are ready for consumption
      */
-    void setReportReadyListener(in ITelemetryReportReadyListener listener);
+    void registerReportReadyListener(in ITelemetryReportReadyListener listener);
 
     /**
-     * Registers a callback for receiving status codes for API calls.
+     * Registers a callback for receiving status codes for API calls. If a listener is already
+     * registered an error is sent back to the global status listener.
      *
      * @param listener implementation of ITelemetryStatusListener, responsible for sending
      * status codes back to the client
      */
-    void setStatusListener(in ITelemetryStatusListener listener);
+    void registerStatusListener(in ITelemetryStatusListener listener);
 
     /**
-     * Clears listener to stop receiving notifications when a report or telemetry error is ready.
+     * Clears listener to stop receiving notifications when a report or telemetry error is ready. If
+     * a listener is already unregistered, the call has no effect.
      */
-    void clearReportReadyListener();
+    void unregisterReportReadyListener();
 
     /**
-     * Clears listener to stop receiving status codes.
+     * Clears listener to stop receiving status codes. If a listener is already unregistered, the
+     * call has no effect.
      */
-    void clearStatusListener();
+    void unregisterStatusListener();
 }

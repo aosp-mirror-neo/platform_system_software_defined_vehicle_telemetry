@@ -42,7 +42,9 @@ cc_library {
         "export",
     ],
     shared_libs: [
-        "android.sdv.telemetry-cpp",
+        "android.sdv.telemetry-V1-cpp",
         "libsdvtelemetry_proto_cpp",
     ],
+    vendor_available: true,
+    system_ext_specific: true,
 }
