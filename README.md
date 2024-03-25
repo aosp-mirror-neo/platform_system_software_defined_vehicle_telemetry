@@ -17,7 +17,7 @@ Check the readme inside samples folder for instructions on how to experiment wit
 ## Unit Test Instructions
 
 Starting with ag/25844146 unit tests are converted to device side tests and instructions have changed.
-Run launch_cvd in a different terminal.
+Run `cvd start` in a different terminal.
 `$ cvd start`
 
 run the tests
