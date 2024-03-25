@@ -1,5 +1,6 @@
 pub(super) mod avg_aggregator;
 pub(super) mod count_aggregator;
+pub(super) mod delta_aggregator;
 pub(super) mod max_aggregator;
 pub(super) mod min_aggregator;
 pub(super) mod node_value_extension;

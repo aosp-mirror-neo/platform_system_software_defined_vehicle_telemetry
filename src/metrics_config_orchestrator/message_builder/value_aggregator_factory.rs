@@ -10,9 +10,10 @@ use crate::expr::{
 use crate::metrics_config_orchestrator::message_builder::{
     value_aggregator::{
         avg_aggregator::AvgAggregator, count_aggregator::CountAggregator,
-        max_aggregator::MaxAggregator, min_aggregator::MinAggregator,
-        pass_through_aggregator::PassThroughAggregator, std_dev_aggregator::StdDevAggregator,
-        sum_aggregator::SumAggregator, vector_aggregator::VectorAggregator,
+        delta_aggregator::DeltaAggregator, max_aggregator::MaxAggregator,
+        min_aggregator::MinAggregator, pass_through_aggregator::PassThroughAggregator,
+        std_dev_aggregator::StdDevAggregator, sum_aggregator::SumAggregator,
+        vector_aggregator::VectorAggregator,
     },
     ValueAggregator,
 };
@@ -113,6 +114,11 @@ impl ValueAggregatorFactory for ValueAggregatorFactoryImpl {
             }
             AggregatedFieldValueProto::StdDevAggregation(aggr_proto) => {
                 Ok(Box::new(StdDevAggregator::new(
+                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
+                )))
+            }
+            AggregatedFieldValueProto::DeltaAggregation(aggr_proto) => {
+                Ok(Box::new(DeltaAggregator::new(
                     &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
                 )))
             }
@@ -297,6 +303,19 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                     })
                 }
             }
+            AggregatedFieldValueProto::DeltaAggregation(aggr_proto) => {
+                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                if matches!(node_type, NodeValueType::Int | NodeValueType::Float) {
+                    Ok(node_type.clone())
+                } else {
+                    Err(ValueAggregatorFactoryError::IncompatibleAggregation {
+                        msg: format!(
+                            "Cannot apply delta aggregation on node output type {:?}",
+                            node_type
+                        ),
+                    })
+                }
+            }
             AggregatedFieldValueProto::CountAggregation(_) => Ok(NodeValueType::Int),
             _ => Err(ValueAggregatorFactoryError::UnknownAggregationType {
                 msg: format!("{:?}", self),
@@ -323,8 +342,8 @@ mod tests {
     use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::{
-        AvgAggregation, CountAggregation, MaxAggregation, MinAggregation, NoAggregation,
-        StdDevAggregation, SumAggregation, VectorAggregation,
+        AvgAggregation, CountAggregation, DeltaAggregation, MaxAggregation, MinAggregation,
+        NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
     };
 
     use super::*;
@@ -365,6 +384,12 @@ mod tests {
 
     fn create_avg_aggregation_proto(idx: Option<u32>) -> AvgAggregation {
         let mut aggr = AvgAggregation::new();
+        aggr.expression_node_index = idx;
+        aggr
+    }
+
+    fn create_delta_aggregation_proto(idx: Option<u32>) -> DeltaAggregation {
+        let mut aggr = DeltaAggregation::new();
         aggr.expression_node_index = idx;
         aggr
     }
@@ -486,6 +511,30 @@ mod tests {
         let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
         let aggregated_field_value =
             AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn validate_delta_aggregation_with_int_ok() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
+        let node_types = vec![NodeValueType::Int];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn validate_delta_aggregation_with_float_ok() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
+        let node_types = vec![NodeValueType::Float];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0)));
 
         factory.validate(&aggregated_field_value, &context).unwrap();
     }
@@ -737,6 +786,19 @@ mod tests {
             ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
         let aggregated_field_value =
             AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0)));
+
+        factory.create(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn create_delta_aggregation_ok() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
+        let (nodes, node_types) = create_int_nodes_of_size(1);
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0)));
 
         factory.create(&aggregated_field_value, &context).unwrap();
     }
