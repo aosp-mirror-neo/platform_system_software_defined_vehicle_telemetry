@@ -42,48 +42,42 @@ impl ValueAggregator for AvgAggregator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn avg_aggregator_compute_with_int_ok() {
-        let node_outputs = [-2, 0, 2, 4, 6, 8, -32, 0];
-        let expected_avg = [-2, -1, 0, 1, 2, 3, -2];
-        let mut avg_aggregator = AvgAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Int32(node_outputs[0]),
-        }));
+    fn get_computed_values_from_aggregator<T>(node_outputs: &[T]) -> Vec<NodeValue>
+    where
+        NodeValue: std::convert::From<T>,
+        T: Copy,
+    {
+        let mut aggregator =
+            AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
+        let mut result = Vec::new();
 
-        // verify the average is correctly tracked as the node output changes in each compute()
-        for i in 0..expected_avg.len() {
-            // action
-            let res = avg_aggregator.compute().unwrap();
-
-            // assert
-            assert_eq!(res, NodeValue::Double(expected_avg[i].into()));
+        for i in 0..node_outputs.len() - 1 {
+            result.push(aggregator.compute().unwrap());
 
             // update the next exrp eval result, so we can test correctness of compute()
-            avg_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(node_outputs[i + 1]) });
+            aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
         }
+        result
+    }
+
+    #[test]
+    fn avg_aggregator_compute_with_int_ok() {
+        let node_outputs: &[i32] = &[-2, 0, 2, 4, 6, 8, -32, 0];
+        let expected_avg: &[f64] = &[-2.0, -1.0, 0.0, 1.0, 2.0, 3.0, -2.0];
+
+        let res = get_computed_values_from_aggregator(node_outputs);
+
+        assert_eq!(res, expected_avg.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
     fn avg_aggregator_compute_with_float_ok() {
-        let node_outputs = [-1.5, 3.0, 9.0, 6.5, 0.0];
-        let expected_avg = [-1.5, 0.75, 3.5, 4.25];
-        let mut avg_aggregator = AvgAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Float(node_outputs[0]),
-        }));
+        let node_outputs: &[f32] = &[-1.5, 3.0, 9.0, 6.5, 0.0];
+        let expected_avg: &[f64] = &[-1.5, 0.75, 3.5, 4.25];
 
-        // verify the average is correctly tracked as the node output changes in each compute()
-        for i in 0..expected_avg.len() {
-            // action
-            let res = avg_aggregator.compute().unwrap();
+        let res = get_computed_values_from_aggregator(node_outputs);
 
-            // assert
-            assert_eq!(res, NodeValue::Double(expected_avg[i]));
-
-            // update the next exrp eval result, so we can test correctness of compute()
-            avg_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Float(node_outputs[i + 1]) });
-        }
+        assert_eq!(res, expected_avg.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]

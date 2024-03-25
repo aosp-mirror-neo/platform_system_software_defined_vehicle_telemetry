@@ -48,48 +48,42 @@ impl ValueAggregator for MinAggregator {
 mod tests {
     use super::*;
 
-    #[test]
-    fn min_aggregator_compute_with_int_ok() {
-        let node_outputs = [0, 1, 2, 0, -1, -2, -1, 0];
-        let expected_min = [0, 0, 0, 0, -1, -2, -2];
-        let mut min_aggregator = MinAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Int32(node_outputs[0]),
-        }));
+    fn get_computed_values_from_aggregator<T>(node_outputs: &[T]) -> Vec<NodeValue>
+    where
+        NodeValue: std::convert::From<T>,
+        T: Copy,
+    {
+        let mut aggregator =
+            MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
+        let mut result = Vec::new();
 
-        // verify the minimum is correctly tracked as the node output changes in each compute()
-        for i in 0..expected_min.len() {
-            // action
-            let res = min_aggregator.compute().unwrap();
-
-            // assert
-            assert_eq!(res, NodeValue::Int32(expected_min[i]));
+        for i in 0..node_outputs.len() - 1 {
+            result.push(aggregator.compute().unwrap());
 
             // update the next exrp eval result, so we can test correctness of compute()
-            min_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(node_outputs[i + 1]) });
+            aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
         }
+        result
+    }
+
+    #[test]
+    fn min_aggregator_compute_with_int_ok() {
+        let node_outputs: &[i32] = &[0, 1, 2, 0, -1, -2, -1, 0];
+        let expected_min: &[i32] = &[0, 0, 0, 0, -1, -2, -2];
+
+        let res = get_computed_values_from_aggregator(node_outputs);
+
+        assert_eq!(res, expected_min.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
     fn min_aggregator_compute_with_float_ok() {
-        let node_outputs = [5.0, 2.5, 1.25, 0.625, 0.625, 1.25, 2.5];
-        let expected_min = [5.0, 2.5, 1.25, 0.625, 0.625, 0.625];
-        let mut min_aggregator = MinAggregator::new(&Arc::new(Node::ConstantLeaf {
-            value: NodeValue::Float(node_outputs[0]),
-        }));
+        let node_outputs: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 1.25, 2.5];
+        let expected_min: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 0.625];
 
-        // verify the minimum is correctly tracked as the node output changes in each compute()
-        for i in 0..expected_min.len() {
-            // action
-            let res = min_aggregator.compute().unwrap();
+        let res = get_computed_values_from_aggregator(node_outputs);
 
-            // assert
-            assert_eq!(res, NodeValue::Float(expected_min[i]));
-
-            // update the next exrp eval result, so we can test correctness of compute()
-            min_aggregator.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Float(node_outputs[i + 1]) });
-        }
+        assert_eq!(res, expected_min.iter().copied().map(NodeValue::from).collect::<Vec<_>>());
     }
 
     #[test]
