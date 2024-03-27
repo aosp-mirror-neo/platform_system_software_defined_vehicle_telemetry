@@ -4,3 +4,8 @@ filegroup {
     name: "sdvtelemetryservice-proto-srcs",
     srcs: ["*.proto"],
 }
+
+filegroup {
+    name: "sdvtelemetryservice-metadata-proto-srcs",
+    srcs: ["metadata_protos/*.proto"],
+}
