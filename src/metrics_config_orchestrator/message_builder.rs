@@ -3,6 +3,7 @@
 mod value_aggregator;
 pub(super) mod value_aggregator_factory;
 
+use log::trace;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -22,11 +23,14 @@ pub(crate) trait MessageBuilder: Send + Sync {
 }
 
 pub(crate) struct MessageBuilderImpl {
-    /// Uses descriptor to create and populate a protobuf message
-    pub message_descriptor: MessageDescriptor,
-
     /// Maps field_name to the node whose evaluation output is the field value.
-    pub field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
+    field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
+
+    /// Descriptor of the protocol buffer message that this builder is creating.
+    message_descriptor: MessageDescriptor,
+
+    /// The name of the owner for tracing purposes.
+    owner_name: String,
 }
 
 #[derive(Error, Debug)]
@@ -58,6 +62,7 @@ impl MessageBuilder for MessageBuilderImpl {
                 // TODO: b/307547570 - properly handle absent values
                 continue;
             }
+            trace!("Assigning value to field {} of {}", field_name, self.owner_name);
             if field_descriptor.is_singular() {
                 field_descriptor.set_singular_field(
                     msg.as_mut(),
@@ -75,10 +80,11 @@ impl MessageBuilder for MessageBuilderImpl {
 
 impl MessageBuilderImpl {
     pub fn new(
+        owner_name: String,
         message_descriptor: MessageDescriptor,
         field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
     ) -> Self {
-        Self { message_descriptor, field_assignments }
+        Self { field_assignments, message_descriptor, owner_name }
     }
 }
 
@@ -134,7 +140,7 @@ mod tests {
                 (field.to_string(), Mutex::new(mock_aggregator))
             })
             .collect();
-        MessageBuilderImpl { message_descriptor, field_assignments }
+        MessageBuilderImpl::new(String::default(), message_descriptor, field_assignments)
     }
 
     #[test]
@@ -359,8 +365,11 @@ mod tests {
             map.insert(INT_FIELD_NAME.to_string(), Mutex::new(boxed_value));
             map
         };
-        let builder =
-            MessageBuilderImpl { message_descriptor: TestMessage::descriptor(), field_assignments };
+        let builder = MessageBuilderImpl::new(
+            String::default(),
+            TestMessage::descriptor(),
+            field_assignments,
+        );
 
         // action
         let res = builder.build();

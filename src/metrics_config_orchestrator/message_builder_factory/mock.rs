@@ -61,6 +61,7 @@ impl MessageBuilderFactory for MockMessageBuilderFactory {
 
     fn create(
         &self,
+        _owner_name: String,
         _proto_message_builder: &ProtoMessageBuilder,
         _context: &MessageBuilderFactoryCreateContext,
     ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError> {

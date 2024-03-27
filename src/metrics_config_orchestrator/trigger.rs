@@ -2,7 +2,7 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use log::error;
+use log::{error, trace};
 use protobuf::MessageDyn;
 use sdvtelemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
@@ -127,17 +127,26 @@ impl Activatable<TriggerSubscriber> for TriggerImpl {
     ) {
         match &self.trigger_type {
             TriggerType::Data { publisher } => {
+                let trigger_name_clone = self.name.clone();
                 publisher
                     .subscribe(
                         &self.name,
-                        Box::new(move |msg| {
-                            Self::on_data_trigger_publisher_new_message(&callback_map, msg)
+                        Box::new(move |message| {
+                            Self::on_data_trigger_publisher_new_message(
+                                &trigger_name_clone,
+                                &callback_map,
+                                message,
+                            )
                         }),
                     )
                     .await;
             }
             TriggerType::Periodic { interval_ms } => {
-                tokio::spawn(Self::call_periodically(*interval_ms, callback_map));
+                let trigger_name_clone = self.name.clone();
+                let interval_ms = *interval_ms;
+                tokio::spawn(async move {
+                    Self::call_periodically(&trigger_name_clone, interval_ms, callback_map).await;
+                });
             }
             TriggerType::Conditional { condition_type, subscriber, triggers, .. } => {
                 let condition_checker: for<'a, 'b> fn(
@@ -237,6 +246,7 @@ impl TriggerImpl {
 
     /// Periodically invokes callbacks until the weak reference is no longer valid.
     async fn call_periodically(
+        trigger_name: &str,
         interval_ms: u64,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
     ) {
@@ -255,13 +265,16 @@ impl TriggerImpl {
             timer.tick().await;
 
             // Fire trigger.
-            Self::fire_trigger(&callback_map).await;
+            Self::fire_trigger(trigger_name, &callback_map).await;
         }
     }
 
     /// Fires the trigger by invoking provided callback.
     /// The operation is performed after asynchronously awaiting on the mutex.
-    async fn fire_trigger(callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>) {
+    async fn fire_trigger(
+        trigger_name: &str,
+        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
+    ) {
         // Retrieve callbacks.
         let mut callbacks = callback_map.lock().await;
 
@@ -269,6 +282,8 @@ impl TriggerImpl {
         if callbacks.is_empty() {
             return;
         }
+
+        trace!("Trigger {} is firing", trigger_name);
 
         // Synchronously invoke callbacks.
         // The loop needs to wait before they finish to release the mutex lock when they're
@@ -328,12 +343,14 @@ impl TriggerImpl {
 
     /// A callback to handle a new message published by the data trigger's associated publisher.
     fn on_data_trigger_publisher_new_message(
+        trigger_name: &str,
         callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
         _message: &dyn MessageDyn,
     ) {
+        let trigger_name_clone = trigger_name.to_owned();
         let callback_map_clone = callback_map.clone();
         tokio::spawn(async move {
-            Self::fire_trigger(&callback_map_clone).await;
+            Self::fire_trigger(&trigger_name_clone, &callback_map_clone).await;
         });
     }
 
@@ -370,9 +387,10 @@ impl TriggerImpl {
                 panic!("Failed to perform comparison for trigger {}: {:?}", self.name, err)
             });
         if check_succeeded {
+            let trigger_name_clone = self.name.clone();
             let callback_map_clone = callback_map.clone();
             tokio::spawn(async move {
-                Self::fire_trigger(&callback_map_clone).await;
+                Self::fire_trigger(&trigger_name_clone, &callback_map_clone).await;
             });
         }
     }

@@ -35,6 +35,7 @@ pub(crate) trait MessageBuilderFactory: Send + Sync {
 
     fn create(
         &self,
+        owner_name: String,
         proto_message_builder: &ProtoMessageBuilder,
         context: &MessageBuilderFactoryCreateContext,
     ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError>;
@@ -131,6 +132,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
 
     fn create(
         &self,
+        owner_name: String,
         proto_message_builder: &ProtoMessageBuilder,
         context: &MessageBuilderFactoryCreateContext,
     ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError> {
@@ -162,7 +164,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
             })
             .collect::<Result<_, _>>()?;
 
-        Ok(Box::new(MessageBuilderImpl::new(message_descriptor, field_assignments)))
+        Ok(Box::new(MessageBuilderImpl::new(owner_name, message_descriptor, field_assignments)))
     }
 }
 
@@ -404,7 +406,7 @@ mod tests {
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
         );
 
-        factory.create(&proto_message_builder, &context).unwrap();
+        factory.create(String::default(), &proto_message_builder, &context).unwrap();
     }
 
     #[test]
@@ -422,7 +424,8 @@ mod tests {
             }],
         );
 
-        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+        let err =
+            factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
@@ -442,7 +445,8 @@ mod tests {
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
         );
 
-        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+        let err =
+            factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
@@ -465,7 +469,8 @@ mod tests {
             ],
         );
 
-        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+        let err =
+            factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
@@ -488,7 +493,8 @@ mod tests {
             ],
         );
 
-        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+        let err =
+            factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::FieldNotFound { .. }),
@@ -511,7 +517,8 @@ mod tests {
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
         );
 
-        let err = factory.create(&proto_message_builder, &context).err().unwrap();
+        let err =
+            factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. }),
