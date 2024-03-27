@@ -47,6 +47,17 @@ rust_protobuf {
     source_stem: "sdvtelemetry_proto_rust_source",
 }
 
+rust_protobuf {
+    name: "libsdvtelemetry_metadata_proto_rust",
+    crate_name: "sdvtelemetry_metadata_proto_rust",
+    protos: [":sdvtelemetryservice-metadata-proto-srcs"],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "sdvtelemetry_metadata_proto_rust_source",
+}
+
 rust_library {
     name: "libsdv_telemetry",
     crate_name: "sdv_telemetry",
@@ -109,6 +120,7 @@ rust_library {
         "libsample_publisher_proto",
         "libsdv_dt_rust",
         "libsdv_telemetry",
+        "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libtokio",
         "libcxx",
