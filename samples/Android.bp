@@ -38,6 +38,7 @@ rust_binary {
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
         "libsdv_telemetry_bindgen",
+        "libsdv_telemetry_rust_wrapper",
         "libstatus_codes_bindgen",
         "libtokio",
     ],

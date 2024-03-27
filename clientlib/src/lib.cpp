@@ -13,11 +13,6 @@ ServiceHolder* get_telemetry_service() {
     return reinterpret_cast<ServiceHolder*>(service);
 }
 
-int stop_telemetry_service(ServiceHolder* holder) {
-    // Note: Kept for future use. In case variables need to be freed explicitly.
-    return 0;
-}
-
 int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size, void* listener,
                        StatusCallbackFunction cbFunc) {
     google::sdv::telemetry::TelemetryService* service =
