@@ -13,7 +13,7 @@ use crate::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
 pub(crate) struct MockServicePublisherManager {
     /// When set, the descriptor will be returned on the next call to get_message_descriptor.
     pub next_descriptor: Mutex<Option<MessageDescriptor>>,
-    /// When set, the error will be returned on the next call to subscribe.
+    /// When set, the error will be returned on the next call to get_message_descriptor or subscribe.
     pub next_error: Mutex<Option<ServicePublisherManagerSubscribeError>>,
     /// The number of times subscribe function of the mock was called.
     num_subscribe_calls: AtomicU32,
@@ -29,15 +29,16 @@ pub(crate) struct MockServicePublisherManager {
 impl ServicePublisherManager for MockServicePublisherManager {
     fn get_message_descriptor(
         &self,
-        service_name: &str,
+        _service_name: &str,
         _topic_name: &str,
-    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
+    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
         self.num_get_message_descriptor_calls.fetch_add(1, Ordering::SeqCst);
-        self.next_descriptor.lock().unwrap().take().ok_or_else(|| {
-            ServicePublisherManagerSubscribeError::ServiceNotFound {
-                service_name: service_name.to_owned(),
-            }
-        })
+
+        if let Some(err) = self.next_error.lock().unwrap().take() {
+            return Err(err);
+        }
+
+        Ok(self.next_descriptor.lock().unwrap().take())
     }
 
     async fn try_subscribe(

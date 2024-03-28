@@ -5,6 +5,7 @@
 use async_trait::async_trait;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::MessageDyn;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
@@ -35,9 +36,23 @@ impl ServicePublisherManagerImpl {
 
 #[async_trait]
 impl ServicePublisherManager for ServicePublisherManagerImpl {
-    /// Subscribe to a Data Tunnel topic sample.
-    /// The method returns a struct containing the topic information and the subscription topic handle.
-    /// Returns a DT reader implementation that can be used to read messages.
+    fn get_message_descriptor(
+        &self,
+        service_name: &str,
+        topic_name: &str,
+    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
+        for service_publisher_manager_impl in &self.service_publisher_registry {
+            let msg_descriptor =
+                service_publisher_manager_impl.get_message_descriptor(service_name, topic_name)?;
+
+            if msg_descriptor.is_some() {
+                return Ok(msg_descriptor);
+            }
+        }
+
+        Ok(None)
+    }
+
     async fn try_subscribe(
         &self,
         service_name: &str,
@@ -46,29 +61,27 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
         configuration: Option<&[u8]>,
     ) -> Result<bool, ServicePublisherManagerSubscribeError> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
-            match service_publisher_manager_impl
+            if service_publisher_manager_impl
                 .try_subscribe(service_name, topic_name, callback.clone(), configuration)
-                .await
+                .await?
             {
-                Ok(true) => {
-                    let _ = self.service_publisher_subscriptions.lock().unwrap().insert(
-                        (service_name.to_string(), topic_name.to_string()),
+                self.service_publisher_subscriptions
+                    .lock()
+                    .unwrap()
+                    .try_insert_value(
+                        (service_name.to_owned(), topic_name.to_owned()),
                         service_publisher_manager_impl.clone(),
-                    );
-                    return Ok(true);
-                }
-                Ok(false) => (),
-                Err(err) => return Err(err),
+                    )
+                    .unwrap_or_else(|_| {
+                        panic!("Only one subscription per service name and topic name is supported")
+                    });
+                return Ok(true);
             }
         }
 
-        Err(ServicePublisherManagerSubscribeError::TopicNotFound {
-            service_name: service_name.to_string(),
-            topic_name: topic_name.to_string(),
-        })
+        Ok(false)
     }
 
-    /// Unsubscribes from the specified topic and service name.
     async fn unsubscribe(
         &self,
         service_name: &str,
@@ -93,31 +106,11 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
             .remove(&(service_name.to_string(), topic_name.to_string()));
         Ok(())
     }
-
-    /// Checks if topic with given name exists in data tunnel
-    fn get_message_descriptor(
-        &self,
-        service_name: &str,
-        topic_name: &str,
-    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
-        for service_publisher_manager_impl in &self.service_publisher_registry {
-            if let Ok(msg_descriptor) =
-                service_publisher_manager_impl.get_message_descriptor(service_name, topic_name)
-            {
-                return Ok(msg_descriptor);
-            }
-        }
-
-        Err(ServicePublisherManagerSubscribeError::TopicNotFound {
-            service_name: service_name.to_string(),
-            topic_name: topic_name.to_string(),
-        })
-    }
 }
 
 #[cfg(test)]
 mod tests {
-
+    use anyhow::anyhow;
     use protobuf::well_known_types::empty::Empty;
     use protobuf::MessageFull;
     use std::sync::Arc;
@@ -135,14 +128,13 @@ mod tests {
     async fn get_message_descriptor_success() {
         let service_publisher =
             Arc::new(MockServicePublisherManager::new_with_descriptor(Empty::descriptor()));
-
         let service_publishers =
             vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
-
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         let res = service_publisher_manager_impl
             .get_message_descriptor(SERVICE_NAME, TOPIC_NAME)
+            .unwrap()
             .unwrap();
 
         assert_eq!(service_publisher.get_num_get_message_descriptor_calls(), 1);
@@ -150,12 +142,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_message_descriptor_incorrect_service_name_fails() {
+    async fn get_message_descriptor_propagates_error() {
         let service_publisher = Arc::new(MockServicePublisherManager::default());
-
-        let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
-
+        service_publisher.next_error.lock().unwrap().replace(
+            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
+        );
+        let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherManager>];
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         let err = service_publisher_manager_impl
@@ -164,40 +156,30 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME2 && topic_name == TOPIC_NAME),
+            matches!(&err, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
             "Unexpected error: {}",
             err
         );
     }
 
     #[tokio::test]
-    async fn get_message_descriptor_incorrect_topic_name_fails() {
+    async fn get_message_descriptor_no_match_returns_none() {
         let service_publisher = Arc::new(MockServicePublisherManager::default());
-
-        let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
-
+        let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherManager>];
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
-        let err = service_publisher_manager_impl
+        let res = service_publisher_manager_impl
             .get_message_descriptor(SERVICE_NAME, TOPIC_NAME2)
-            .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
-            "Unexpected error: {}",
-            err
-        );
+        assert!(res.is_none(), "Unexpected result: {:?}", res);
     }
 
     #[tokio::test]
     async fn subscribe_success() {
         let service_publisher = Arc::new(MockServicePublisherManager::default());
-
         let service_publishers =
             vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
-
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         let res = service_publisher_manager_impl
@@ -210,13 +192,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_incorrect_service_name_fails() {
+    async fn subscribe_propagates_error() {
         let service_publisher = MockServicePublisherManager::default();
         service_publisher.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::TopicNotFound {
-                service_name: SERVICE_NAME2.to_owned(),
-                topic_name: TOPIC_NAME.to_owned(),
-            },
+            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
         );
         let service_publisher = Arc::new(service_publisher);
 
@@ -232,36 +211,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME2 && topic_name == TOPIC_NAME),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[tokio::test]
-    async fn subscribe_incorrect_topic_name_fails() {
-        let service_publisher = MockServicePublisherManager::default();
-        service_publisher.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::TopicNotFound {
-                service_name: SERVICE_NAME.to_owned(),
-                topic_name: TOPIC_NAME2.to_owned(),
-            },
-        );
-        let service_publisher = Arc::new(service_publisher);
-
-        let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
-
-        let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
-
-        let err = service_publisher_manager_impl
-            .try_subscribe(SERVICE_NAME, TOPIC_NAME2, Arc::new(|_| {}), None)
-            .await
-            .err()
-            .unwrap();
-
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
+            matches!(&err, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
             "Unexpected error: {}",
             err
         );
@@ -301,7 +251,6 @@ mod tests {
             .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
-
         service_publisher_manager_impl.unsubscribe(SERVICE_NAME2, TOPIC_NAME, None).await.unwrap();
     }
 
@@ -319,16 +268,6 @@ mod tests {
             .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
-        let err = service_publisher_manager_impl
-            .unsubscribe(SERVICE_NAME, TOPIC_NAME2, None)
-            .await
-            .err()
-            .unwrap();
-
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
-            "Unexpected error: {}",
-            err
-        );
+        service_publisher_manager_impl.unsubscribe(SERVICE_NAME, TOPIC_NAME2, None).await.unwrap();
     }
 }

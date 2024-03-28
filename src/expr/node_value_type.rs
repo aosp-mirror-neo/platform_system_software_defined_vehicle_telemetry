@@ -94,10 +94,15 @@ impl FieldLeafNodeExtension for FieldLeafNode {
         if self.field_names.is_empty() {
             return Ok(NodeValueType::Message);
         }
-        let descriptor = &descriptor_provider
-            .get_descriptor(&self.publisher_name)
-            .map_err(|e| NodeError::DescriptorProviderError { e })?;
-        get_nested_field_type(descriptor, &self.field_names)
+
+        let maybe_descriptor = descriptor_provider.get_descriptor(&self.publisher_name)?;
+
+        if let Some(descriptor) = maybe_descriptor {
+            get_nested_field_type(descriptor, &self.field_names)
+        } else {
+            // TODO(b/331482267): Don't fail validation if the publisher metadata is not available yet.
+            Err(NodeError::InternalError { msg: "Publisher metadata not found".to_owned() })
+        }
     }
 }
 

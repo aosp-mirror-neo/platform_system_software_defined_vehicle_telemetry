@@ -903,6 +903,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use anyhow::anyhow;
     use async_trait::async_trait;
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
@@ -1988,8 +1989,8 @@ mod tests {
         publisher_mock.set_activate_callback(move |_| {
             Some(PublisherActivateError::ServiceAdapterError {
                 error: ServiceAdapterSubscribeError::SubscriptionFailed {
-                    error: ServicePublisherManagerSubscribeError::ServiceNotFound {
-                        service_name: String::default(),
+                    error: ServicePublisherManagerSubscribeError::SubscribeFailed {
+                        error: anyhow!("Error"),
                     },
                 },
             })

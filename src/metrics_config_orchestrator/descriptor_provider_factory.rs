@@ -32,8 +32,8 @@ pub(crate) enum DescriptorProviderFactoryError {
     use missing message descriptor of type {msg_type}"
     )]
     MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("Unable to validate the Configurable Publisher: {error}")]
-    PublisherRegistryError {
+    #[error("Error when calling ServicePublisherManager: {error}")]
+    ServicePublisherManagerError {
         #[from]
         error: ServicePublisherManagerSubscribeError,
     },
@@ -68,7 +68,7 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
                             .iter()
                             .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
                         {
-                            msg_descriptor
+                            Some(msg_descriptor)
                         } else {
                             return Err(DescriptorProviderFactoryError::MissingMessageDescriptor {
                                 pub_name: publisher.name.clone(),
@@ -91,6 +91,7 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use anyhow::anyhow;
     use protobuf::reflect::MessageDescriptor;
     use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
@@ -149,7 +150,12 @@ mod tests {
     }
 
     #[test]
-    fn create_descriptor_provider_service_publisher_no_message_descriptor_fails() {
+    fn create_descriptor_provider_service_publisher_manager_error_fails() {
+        let service_publisher_manager = Arc::new(MockServicePublisherManager::new(None));
+        service_publisher_manager.next_error.lock().unwrap().replace(
+            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
+        );
+
         let mut publisher = PublisherProto::new();
         let service_publisher = publisher.mut_service_publisher();
         service_publisher.service_name = SERVICE_NAME.to_owned();
@@ -160,15 +166,21 @@ mod tests {
             .create(
                 get_test_file_descriptors(),
                 &[publisher],
-                &create_default_service_publisher_manager(),
+                &(service_publisher_manager as Arc<dyn ServicePublisherManager>),
             )
             .err()
             .unwrap();
 
+        let DescriptorProviderFactoryError::ServicePublisherManagerError { error: inner_error } =
+            &err
+        else {
+            panic!("Unexpected error: {:?}", err)
+        };
+
         assert!(
-            matches!(&err, DescriptorProviderFactoryError::PublisherRegistryError { .. }),
-            "Unexpected error: {:?}",
-            err
+            matches!(&inner_error, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
+            "Unexpected inner error: {:?}",
+            inner_error
         );
     }
 
@@ -225,7 +237,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().proto(),
+            descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().unwrap().proto(),
             TestMessage::descriptor().proto()
         )
     }
@@ -247,11 +259,11 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().proto(),
+            descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().unwrap().proto(),
             TestMessage::descriptor().proto()
         );
         assert_eq!(
-            descriptor_provider.get_descriptor(PUBLISHER_2).unwrap().proto(),
+            descriptor_provider.get_descriptor(PUBLISHER_2).unwrap().unwrap().proto(),
             TestNestedMessage::descriptor().proto()
         );
     }
