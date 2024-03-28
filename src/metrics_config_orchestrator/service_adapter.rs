@@ -9,9 +9,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::service_publisher_manager::{
-    ServicePublisherManager, ServicePublisherManagerSubscribeError,
-};
+use crate::service_publisher_manager::ServicePublisherManager;
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
@@ -46,7 +44,7 @@ pub enum ServiceAdapterSubscribeError {
     #[error("Unable to perform subscription: {error}")]
     SubscriptionFailed {
         #[from]
-        error: ServicePublisherManagerSubscribeError,
+        error: anyhow::Error,
     },
 }
 
@@ -58,7 +56,7 @@ pub(crate) enum ServiceAdapterUnsubscribeError {
     #[error("Unable to unsubscribe: {error}")]
     UnsubscribeFailed {
         #[from]
-        error: ServicePublisherManagerSubscribeError,
+        error: anyhow::Error,
     },
 }
 
@@ -245,9 +243,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_registry_returns_error_fails() {
         let registry = MockServicePublisherManager::default();
-        registry.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
-        );
+        registry.next_error.lock().unwrap().replace(anyhow!("Error"));
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
@@ -257,13 +253,11 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        let ServiceAdapterSubscribeError::SubscriptionFailed { error } = &err;
         assert!(
-            matches!(error, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
-            "Unexpected inner error: {:?}",
-            error
+            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { .. }),
+            "Unexpected error: {:?}",
+            err
         );
-
         assert_eq!(registry.get_num_subscribe_calls(), 1);
     }
 

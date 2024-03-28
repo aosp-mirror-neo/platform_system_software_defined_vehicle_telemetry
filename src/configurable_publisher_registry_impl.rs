@@ -8,7 +8,7 @@ use binder::BinderFeatures;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
+use sdv_telemetry::ServicePublisherManager;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::{fmt::Debug, sync::Mutex};
@@ -57,7 +57,7 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
         &self,
         service_name: &str,
         topic_name: &str,
-    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
+    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         Ok(self.visit_entry(service_name, topic_name, |entry| entry.message_descriptor.clone()))
     }
 
@@ -67,7 +67,7 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
         topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
-    ) -> Result<bool, ServicePublisherManagerSubscribeError> {
+    ) -> Result<bool, anyhow::Error> {
         let result = self.visit_entry(service_name, topic_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
         });
@@ -89,9 +89,7 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
             BinderFeatures::default(),
         );
 
-        publisher.subscribe(&listener_wrapper, configuration).map_err(|error| {
-            ServicePublisherManagerSubscribeError::SubscribeFailed { error: error.into() }
-        })?;
+        publisher.subscribe(&listener_wrapper, configuration)?;
 
         self.tokio_handles
             .lock()
@@ -106,7 +104,7 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
         service_name: &str,
         topic_name: &str,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ServicePublisherManagerSubscribeError> {
+    ) -> Result<(), anyhow::Error> {
         let maybe_publisher =
             self.visit_entry(service_name, topic_name, |entry| entry.publisher.clone());
         let Some(publisher) = maybe_publisher else {
@@ -124,9 +122,7 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
             handle.abort();
         }
 
-        publisher.unsubscribe(configuration).map_err(|error| {
-            ServicePublisherManagerSubscribeError::UnsubscribeFailed { error: error.into() }
-        })?;
+        publisher.unsubscribe(configuration)?;
 
         Ok(())
     }

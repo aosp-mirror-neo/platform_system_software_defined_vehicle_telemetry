@@ -26,9 +26,7 @@ use std::sync::{Arc, Mutex};
 use tracing::instrument;
 
 // Child module dependencies.
-pub use service_publisher_manager::{
-    ServicePublisherManager, ServicePublisherManagerSubscribeError,
-};
+pub use service_publisher_manager::ServicePublisherManager;
 
 use metrics_config_manager::MetricsConfigManager;
 use metrics_config_manager::{

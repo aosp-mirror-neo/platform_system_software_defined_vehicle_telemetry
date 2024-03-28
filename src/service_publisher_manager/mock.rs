@@ -8,13 +8,13 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
+use crate::ServicePublisherManager;
 
 pub(crate) struct MockServicePublisherManager {
     /// When set, the descriptor will be returned on the next call to get_message_descriptor.
     pub next_descriptor: Mutex<Option<MessageDescriptor>>,
     /// When set, the error will be returned on the next call to get_message_descriptor or subscribe.
-    pub next_error: Mutex<Option<ServicePublisherManagerSubscribeError>>,
+    pub next_error: Mutex<Option<anyhow::Error>>,
     /// The number of times subscribe function of the mock was called.
     num_subscribe_calls: AtomicU32,
     /// The number of times subscribe function of the mock was called.
@@ -31,7 +31,7 @@ impl ServicePublisherManager for MockServicePublisherManager {
         &self,
         _service_name: &str,
         _topic_name: &str,
-    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
+    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         self.num_get_message_descriptor_calls.fetch_add(1, Ordering::SeqCst);
 
         if let Some(err) = self.next_error.lock().unwrap().take() {
@@ -47,7 +47,7 @@ impl ServicePublisherManager for MockServicePublisherManager {
         topic_name: &str,
         subscriber: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
-    ) -> Result<bool, ServicePublisherManagerSubscribeError> {
+    ) -> Result<bool, anyhow::Error> {
         self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
 
         if let Some(err) = self.next_error.lock().unwrap().take() {
@@ -66,7 +66,7 @@ impl ServicePublisherManager for MockServicePublisherManager {
         service_name: &str,
         topic_name: &str,
         _configuration: Option<&[u8]>,
-    ) -> Result<(), ServicePublisherManagerSubscribeError> {
+    ) -> Result<(), anyhow::Error> {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
         match self
             .subscribers
@@ -77,11 +77,7 @@ impl ServicePublisherManager for MockServicePublisherManager {
             Entry::Occupied(o) => {
                 let _ = o.remove_entry();
             }
-            Entry::Vacant(_) => {
-                return Err(ServicePublisherManagerSubscribeError::UnsubscribeFailed {
-                    error: anyhow!("Publisher Not Found"),
-                })
-            }
+            Entry::Vacant(_) => return Err(anyhow!("Publisher Not Found")),
         }
 
         Ok(())

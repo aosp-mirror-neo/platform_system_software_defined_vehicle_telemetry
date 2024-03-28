@@ -6,13 +6,10 @@ pub mod service_publisher_manager_impl;
 
 // External dependencies.
 use async_trait::async_trait;
-use log::error;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::MessageDyn;
-use std::fmt::Debug;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
-use thiserror::Error;
 
 /// Interface used to manage subscriptions to service publishers
 #[async_trait]
@@ -24,7 +21,7 @@ pub trait ServicePublisherManager: Send + Sync {
         &self,
         service_name: &str,
         topic_name: &str,
-    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError>;
+    ) -> Result<Option<MessageDescriptor>, anyhow::Error>;
 
     /// Subscribes specified callback to the new messages from the specified topic
     /// with certain configuration, if provided.
@@ -34,7 +31,7 @@ pub trait ServicePublisherManager: Send + Sync {
         topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
-    ) -> Result<bool, ServicePublisherManagerSubscribeError>;
+    ) -> Result<bool, anyhow::Error>;
 
     /// Unsubscribes from the specified topic and service name.
     async fn unsubscribe(
@@ -42,16 +39,7 @@ pub trait ServicePublisherManager: Send + Sync {
         service_name: &str,
         topic_name: &str,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ServicePublisherManagerSubscribeError>;
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum ServicePublisherManagerSubscribeError {
-    #[error("Unable to subscribe to the publisher: {error}")]
-    SubscribeFailed { error: anyhow::Error },
-    #[error("Unable to unsubscribe from the topic: {error}")]
-    UnsubscribeFailed { error: anyhow::Error },
+    ) -> Result<(), anyhow::Error>;
 }
 
 #[cfg(test)]

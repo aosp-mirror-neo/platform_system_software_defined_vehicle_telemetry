@@ -19,7 +19,7 @@ use sdv_dt::{
     c_void, Result as SdvResult, SubscriptionHandle, SubscriptionNotificationType, TopicHandle,
     TopicTypedMetadata,
 };
-use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
+use sdv_telemetry::ServicePublisherManager;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 
@@ -178,24 +178,20 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
         topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
-    ) -> Result<bool, ServicePublisherManagerSubscribeError> {
+    ) -> Result<bool, anyhow::Error> {
         info!("Subscribing to data tunnel topic {}", topic_name);
 
         let (message_size, message_count, notification_receiver) =
             match self.data_tunnel_subscriptions.lock().unwrap().entry(topic_name.to_owned()) {
                 Entry::Occupied(_) => {
-                    return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                        error: anyhow!("Already subscribed to the given topic: {}", topic_name),
-                    })
+                    return Err(anyhow!("Already subscribed to the given topic: {}", topic_name));
                 }
                 Entry::Vacant(v) => {
                     cxx::let_cxx_string!(cxx_topic_name = topic_name);
                     let mut topic_exists = true;
                     let result = sdv_dt::TopicExists(&cxx_topic_name, &mut topic_exists);
                     if result != SdvResult::Success {
-                        return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                            error: anyhow!("Data Tunnel Result: {:?}", result),
-                        });
+                        return Err(anyhow!("Data Tunnel Result: {:?}", result));
                     };
                     if !topic_exists {
                         return Ok(false);
@@ -211,9 +207,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                         &mut subscription_handle,
                     );
                     if result != SdvResult::Success {
-                        return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                            error: anyhow!("Data Tunnel Result: {:?}", result),
-                        });
+                        return Err(anyhow!("Data Tunnel Result: {:?}", result));
                     };
 
                     // Setting notification handler
@@ -230,9 +224,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                     };
 
                     if result != SdvResult::Success {
-                        return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                            error: anyhow!("Data Tunnel Result: {:?}", result),
-                        });
+                        return Err(anyhow!("Data Tunnel Result: {:?}", result));
                     };
 
                     let size = subscribe_meta_data.message_size_;
@@ -248,14 +240,9 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 }
             };
 
-        let message_descriptor = self
-            .get_message_descriptor(service_name, topic_name)?
-            .ok_or_else(|| ServicePublisherManagerSubscribeError::SubscribeFailed {
-                error: anyhow!(
-                    "Metadata not found for service: {}, topic: {}",
-                    service_name,
-                    topic_name
-                ),
+        let message_descriptor =
+            self.get_message_descriptor(service_name, topic_name)?.ok_or_else(|| {
+                anyhow!("Metadata not found for service: {}, topic: {}", service_name, topic_name)
             })?;
         let topic_name_clone = topic_name.to_owned();
         let data_tunnel_subscriptions = self.data_tunnel_subscriptions.clone();
@@ -311,7 +298,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
         _service_name: &str,
         _topic_name: &str,
         _configuration: Option<&[u8]>,
-    ) -> Result<(), ServicePublisherManagerSubscribeError> {
+    ) -> Result<(), anyhow::Error> {
         // This logic will be replaced once data tunnel has support for unsubscribe
         Ok(())
     }
@@ -321,7 +308,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
         &self,
         _service_name: &str,
         topic_name: &str,
-    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
+    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         let message_descriptor = match self
             .data_tunnel_topic_message_descriptors
             .lock()
@@ -334,9 +321,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 let mut topic_exists = true;
                 let result = sdv_dt::TopicExists(&cxx_topic_name, &mut topic_exists);
                 if result != SdvResult::Success {
-                    return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                        error: anyhow!("Data Tunnel Result: {:?}", result),
-                    });
+                    return Err(anyhow!("Data Tunnel Result: {:?}", result));
                 };
                 if !topic_exists {
                     return Ok(None);
@@ -346,28 +331,19 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 let pinned_metadata = cxx_metadata_vec.pin_mut();
                 let result = sdv_dt::GetTopicMetadata(&cxx_topic_name, pinned_metadata);
                 if result != SdvResult::Success {
-                    return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                        error: anyhow!("Data Tunnel Result: {:?}", result),
-                    });
+                    return Err(anyhow!("Data Tunnel Result: {:?}", result));
                 };
 
                 let publisher_metadata: TelemetryPublisherMetadata =
-                    protobuf::Message::parse_from_bytes(cxx_metadata_vec.as_slice()).map_err(
-                        |e| ServicePublisherManagerSubscribeError::SubscribeFailed {
-                            error: anyhow!("Error in parsing Metadata: {:?}", e),
-                        },
-                    )?;
+                    protobuf::Message::parse_from_bytes(cxx_metadata_vec.as_slice())
+                        .map_err(|e| anyhow!("Error in parsing Metadata: {:?}", e))?;
 
                 // Build the provided proto file descriptors
                 let file_descriptors = FileDescriptor::new_dynamic_fds(
                     publisher_metadata.descriptor_protos,
                     &WELL_KNOWN_FILE_DESCRIPTORS,
                 )
-                .map_err(|e| {
-                    ServicePublisherManagerSubscribeError::SubscribeFailed {
-                        error: anyhow!("Invalid Descriptor Protos: {:?}", e),
-                    }
-                })?;
+                .map_err(|e| anyhow!("Invalid Descriptor Protos: {:?}", e))?;
 
                 // iterate through all file_descriptors, find MessageDescriptor for the given message_type
                 // message_by_full_name() method requires the name to start with dot, it returns a clone
@@ -375,12 +351,10 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 let message_descriptor = file_descriptors
                     .iter()
                     .find_map(|fd| fd.message_by_full_name(&publisher_metadata.message_type_name))
-                    .ok_or(ServicePublisherManagerSubscribeError::SubscribeFailed {
-                        error: anyhow!(
-                            "Message Name {} not found in descriptor",
-                            publisher_metadata.message_type_name
-                        ),
-                    })?;
+                    .ok_or(anyhow!(
+                        "Message Name {} not found in descriptor",
+                        publisher_metadata.message_type_name
+                    ))?;
 
                 v.insert(message_descriptor.clone());
 

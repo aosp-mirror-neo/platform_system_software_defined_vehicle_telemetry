@@ -935,11 +935,8 @@ mod tests {
     use crate::metrics_config_orchestrator::service_adapter::ServiceAdapterSubscribeError;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
+    use crate::metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
     use crate::service_publisher_manager::mock::MockServicePublisherManager;
-    use crate::{
-        metrics_config_orchestrator::MetricsConfigOrchestratorImpl,
-        ServicePublisherManagerSubscribeError,
-    };
 
     type MockedMetricsConfigOrchestratorImpl<'a> = MetricsConfigOrchestratorImpl<
         MockMetricsReportGenerator,
@@ -1988,11 +1985,7 @@ mod tests {
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
         publisher_mock.set_activate_callback(move |_| {
             Some(PublisherActivateError::ServiceAdapterError {
-                error: ServiceAdapterSubscribeError::SubscriptionFailed {
-                    error: ServicePublisherManagerSubscribeError::SubscribeFailed {
-                        error: anyhow!("Error"),
-                    },
-                },
+                error: ServiceAdapterSubscribeError::SubscriptionFailed { error: anyhow!("Error") },
             })
         });
 
