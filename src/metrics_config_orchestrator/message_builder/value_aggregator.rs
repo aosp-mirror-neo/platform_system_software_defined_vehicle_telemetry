@@ -4,6 +4,7 @@ pub(super) mod max_aggregator;
 pub(super) mod min_aggregator;
 pub(super) mod node_value_extension;
 pub(super) mod pass_through_aggregator;
+pub(super) mod std_dev_aggregator;
 pub(super) mod sum_aggregator;
 pub(super) mod vector_aggregator;
 
