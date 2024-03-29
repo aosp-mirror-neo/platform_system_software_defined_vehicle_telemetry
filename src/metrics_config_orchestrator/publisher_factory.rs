@@ -142,6 +142,7 @@ impl PublisherFactoryImpl {
         context: &PublisherFactoryCreateContext,
     ) -> Result<PublisherImpl, PublisherFactoryError> {
         let message_builder = self.message_builder_factory.create(
+            format!("Aggregation Publisher {}", publisher_name),
             &aggregation_publisher_proto.message_builder,
             &MessageBuilderFactoryCreateContext {
                 file_descriptors: context.file_descriptors,

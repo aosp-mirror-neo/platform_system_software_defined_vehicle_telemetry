@@ -15,7 +15,7 @@ mod trigger_factory;
 
 // External dependencies.
 use async_trait::async_trait;
-use log::error;
+use log::{debug, error};
 use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
@@ -173,6 +173,7 @@ pub(super) struct MetricsConfig<
     TPublisher: Publisher = PublisherImpl,
     TTrigger: Trigger = TriggerImpl,
 > {
+    uuid: String,
     state: AsyncMutex<MetricsConfigState>,
     metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
     ordered_publisher_names: Vec<String>,
@@ -356,6 +357,7 @@ where
         let (start_trigger, end_trigger, finish_trigger) =
             Self::get_lifecycle_triggers(&triggers, config_proto)?;
         let config = Arc::new(MetricsConfig {
+            uuid: config_proto.uuid.clone(),
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: metrics_report_configs.into_values().collect(),
             ordered_publisher_names,
@@ -411,6 +413,7 @@ where
                     &TriggerSubscriber::MetricsConfigFinish,
                     Box::new(move || {
                         if let Some((callback, uuid)) = maybe_parameters.take() {
+                            debug!("MetricsConfig {} finish trigger fired", uuid);
                             callback(uuid);
                         }
                     }),
@@ -806,6 +809,8 @@ where
     fn on_start_trigger_fired(
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
+        debug!("MetricsConfig {} start trigger fired", config.uuid);
+
         tokio::spawn(async move {
             // Lock state mutex, verify state and hold the mutex until transition is complete.
             let mut config_state = config.state.lock().await;
@@ -853,6 +858,8 @@ where
     fn on_end_trigger_fired(
         config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
+        debug!("MetricsConfig {} end trigger fired", config.uuid);
+
         tokio::spawn(async move {
             // Lock state mutex, verify state and hold the mutex until transition is complete.
             let mut config_state = config.state.lock().await;

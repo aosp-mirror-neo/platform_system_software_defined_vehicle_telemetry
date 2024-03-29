@@ -97,6 +97,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
 
         // Create message builder.
         let message_builder = self.message_builder_factory.create(
+            format!("Metrics Report {}", metrics_report_config.name),
             metrics_report_config
                 .message_builder
                 .as_ref()
