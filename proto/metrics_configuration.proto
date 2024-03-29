@@ -275,6 +275,7 @@ message ProtoMessageBuilder {
       AvgAggregation avg_aggregation = 6;
       CountAggregation count_aggregation = 7;
       SumAggregation sum_aggregation = 8;
+      StdDevAggregation std_dev_aggregation = 9;
     }
 
     // No aggregation is performed. The expression node's latest
@@ -316,6 +317,12 @@ message ProtoMessageBuilder {
 
     // Numeric sum of all node output values.
     message SumAggregation {
+      optional uint32 expression_node_index = 1;
+    }
+
+    // Numeric standard deviation of all node output values. The calculation is performed as running
+    // standard deviation using Welford's algorithm.
+    message StdDevAggregation {
       optional uint32 expression_node_index = 1;
     }
   }
