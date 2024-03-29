@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use async_trait::async_trait;
-use log::error;
+use log::{debug, error};
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
 use sdvtelemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
@@ -53,9 +53,13 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         // subscription tasks in parallel as an optimization.
         for trigger in &self.triggers {
             let self_clone = self.clone();
+            let trigger_name_clone = trigger.get_name().to_owned();
             trigger
                 .clone()
-                .subscribe(&self.subscriber, Box::new(move || self_clone.on_trigger_fired()))
+                .subscribe(
+                    &self.subscriber,
+                    Box::new(move || self_clone.on_trigger_fired(&trigger_name_clone)),
+                )
                 .await;
         }
 
@@ -101,10 +105,11 @@ impl MetricsReportGeneratorImpl {
         }
     }
 
-    fn on_trigger_fired(self: &Arc<Self>) {
+    fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str) {
         // Send report in a non-blocking task since it's handled outside of orchestrator
         // by a function that is not allowed to mutate itself.
         let self_clone = self.clone();
+        let trigger_name = trigger_name.to_owned();
         task::spawn(async move {
             match self_clone.message_builder.build() {
                 Ok(report_data) => {
@@ -116,6 +121,14 @@ impl MetricsReportGeneratorImpl {
                     report.metrics_config_version = self_clone.config_version;
                     report.report_config_name = self_clone.name.clone();
                     report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+
+                    debug!(
+                        "Metrics Report {} #{} was generated on trigger {} for metrics config {}",
+                        report.report_config_name,
+                        report.report_number,
+                        trigger_name,
+                        report.metrics_config_uuid
+                    );
 
                     (self_clone.report_ready_callback)(report);
                 }
