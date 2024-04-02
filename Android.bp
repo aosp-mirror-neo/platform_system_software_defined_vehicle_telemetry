@@ -13,6 +13,8 @@ cc_library {
         type: "full",
     },
     shared_libs: ["libprotobuf-cpp-full"],
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_defaults {
@@ -45,6 +47,8 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "sdvtelemetry_proto_rust_source",
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_protobuf {
@@ -56,6 +60,8 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "sdvtelemetry_metadata_proto_rust_source",
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_library {
@@ -66,7 +72,7 @@ rust_library {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry-rust",
+        "android.sdv.telemetry-V1-rust",
         "libsdvtelemetry_proto_rust",
         "libsdv_telemetry_utils",
     ],
@@ -74,6 +80,8 @@ rust_library {
         "libasync_trait",
         "libclap_derive",
     ],
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_library {
@@ -84,7 +92,7 @@ rust_library {
         "src/configurable_publisher_registry_service.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry.configurable_publisher-rust",
+        "android.sdv.telemetry.configurable_publisher-V1-rust",
         "libsdv_telemetry",
         "libsdv_telemetry_utils",
     ],
@@ -92,6 +100,8 @@ rust_library {
         "libasync_trait",
         "libclap_derive",
     ],
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_library {
@@ -105,6 +115,8 @@ rust_library {
         "libasync_trait",
         "libclap_derive",
     ],
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_library {
@@ -131,18 +143,25 @@ rust_library {
         "libasync_trait",
         "libclap_derive",
     ],
+    vendor_available: true,
     system_ext_specific: true,
 }
 
 rust_binary {
     name: "sdv_telemetry_service_agent",
+    vendor_available: true,
+    system_ext_specific: true,
+    vintf_fragments: [
+        "android.sdv.telemetry-service.xml",
+        "android.sdv.telemetry.configurable_publisher-service.xml",
+    ],
     defaults: ["telemetry@rust_defaults"],
     srcs: [
         "src/main.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry.configurable_publisher-rust",
-        "android.sdv.telemetry-rust",
+        "android.sdv.telemetry.configurable_publisher-V1-rust",
+        "android.sdv.telemetry-V1-rust",
         "librustutils",
         "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
@@ -153,7 +172,6 @@ rust_binary {
         "libasync_trait",
         "libclap_derive",
     ],
-    system_ext_specific: true,
 }
 
 rust_test {
@@ -163,7 +181,7 @@ rust_test {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry-rust",
+        "android.sdv.telemetry-V1-rust",
         "libfutures",
         "libsdv_telemetry_test_proto",
         "libsdvtelemetry_proto_rust",
@@ -203,7 +221,7 @@ rust_test {
         "src/configurable_publisher_registry_service.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry.configurable_publisher-rust",
+        "android.sdv.telemetry.configurable_publisher-V1-rust",
         "libsample_publisher_proto",
         "libsdv_telemetry",
         "libsdv_telemetry_utils",
@@ -269,7 +287,8 @@ rust_bindgen {
     shared_libs: [
         "libtelemetry_c",
     ],
-
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_bindgen {
@@ -278,7 +297,8 @@ rust_bindgen {
     wrapper_src: "clientlib/export/status_codes.h",
     cpp_std: "gnu++17",
     source_stem: "bindings",
-
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 build = [

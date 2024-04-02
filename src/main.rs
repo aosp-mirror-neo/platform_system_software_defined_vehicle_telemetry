@@ -68,7 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    let telemetry_descriptor = <BpTelemetryService as ITelemetryService>::get_descriptor();
+    let telemetry_descriptor =
+        format!("{}/default", <BpTelemetryService as ITelemetryService>::get_descriptor());
 
     println!("Adding {telemetry_descriptor} service to binder");
     let telemetry_binder = BnTelemetryService::new_async_binder(
@@ -76,11 +77,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         TokioRuntime(telemetry_runtime),
         binder::BinderFeatures::default(),
     );
-    binder::add_service(telemetry_descriptor, telemetry_binder.as_binder())
+    binder::add_service(&telemetry_descriptor, telemetry_binder.as_binder())
         .expect("Failed to register service");
 
-    let configurable_publisher_registry_descriptor =
-        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor();
+    let configurable_publisher_registry_descriptor = format!(
+        "{}/default",
+        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor()
+    );
 
     println!("Adding {configurable_publisher_registry_descriptor} service to binder");
     let configurable_publisher_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
@@ -92,7 +95,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         binder::BinderFeatures::default(),
     );
     binder::add_service(
-        configurable_publisher_registry_descriptor,
+        &configurable_publisher_registry_descriptor,
         configurable_publisher_binder.as_binder(),
     )
     .expect("Failed to register service");

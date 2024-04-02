@@ -21,8 +21,6 @@ pub(crate) struct MetricsReportListener {
 pub(crate) enum MetricsReportListenerError {
     #[error("Report Ready Listener already exists")]
     ReportReadyListenerExists,
-    #[error("Report Ready Listener not set")]
-    ReportReadyListenerNotSet,
     #[error("Metrics Report not found")]
     MetricsReportNotFound,
 }
@@ -94,9 +92,6 @@ impl MetricsReportListener {
 
     pub(crate) fn clear_report_ready_listener(&self) -> Result<(), MetricsReportListenerError> {
         let mut listener = self.report_ready_listener.lock().unwrap();
-        if listener.is_none() {
-            return Err(MetricsReportListenerError::ReportReadyListenerNotSet);
-        }
         *listener = None;
         Ok(())
     }

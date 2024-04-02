@@ -52,30 +52,15 @@ enum class TelemetryServiceStatusCodes : int32_t {
     SET_STATUS_LISTENER_FAILED = 410,
 
     /**
-     * Errors specific to clear report ready listener
-     */
-    CLEAR_REPORT_READY_LISTENER_FAILED = 411,
-
-    /**
-     * Errors specific to clear report listener
-     */
-    CLEAR_REPORT_LISTENER_FAILED = 412,
-
-    /**
-     * Errors specific to clear status listener
-     */
-    CLEAR_STATUS_LISTENER_FAILED = 413,
-
-    /**
      * Errors specific to get finished report
      */
-    GET_FINISHED_REPORT_FAILED = 414,
+    GET_FINISHED_REPORT_FAILED = 411,
 
     /**
      * Errors with params sent to API calls
      */
-    API_CALL_FAILED_LISTENER_NOT_SET = 415,
-    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 416,
+    API_CALL_FAILED_LISTENER_NOT_SET = 412,
+    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 413,
 
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined

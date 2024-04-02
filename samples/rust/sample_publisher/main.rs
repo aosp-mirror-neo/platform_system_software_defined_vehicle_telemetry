@@ -23,9 +23,11 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 
 pub fn connect() -> Result<binder::Strong<dyn IConfigurablePublisherRegistry>, binder::StatusCode> {
-    binder::get_interface(
-        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor(),
-    )
+    let configurable_publisher_registry_descriptor = format!(
+        "{}/default",
+        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor()
+    );
+    binder::get_interface(&configurable_publisher_registry_descriptor)
 }
 
 #[tokio::main]
