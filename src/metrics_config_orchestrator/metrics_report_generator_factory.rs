@@ -46,13 +46,13 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigg
     pub triggers: &'a HashMap<String, Arc<TTrigger>>,
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
     pub trigger_protos: &'a Vec<TriggerProto>,
     pub file_descriptors: &'a [FileDescriptor],
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
 }
 
 #[derive(Error, Debug)]

@@ -40,13 +40,13 @@ pub(crate) struct TriggerFactoryCreateContext<
     Trig: Trigger = TriggerImpl,
 > {
     pub expression_nodes: &'a Vec<Arc<Node>>,
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
     pub publishers: &'a HashMap<String, Arc<Pub>>,
     pub triggers: &'a HashMap<String, Arc<Trig>>,
 }
 
 pub(crate) struct TriggerFactoryValidateContext<'a> {
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
 }
 
 #[derive(Error, Debug)]
@@ -60,12 +60,14 @@ pub enum TriggerFactoryError {
     MissingNodeIndex,
     #[error("Incorrect conditional trigger node index {node_index}")]
     IncorrectNodeIndex { node_index: u32 },
-    #[error("Unknown change type {condition_type}")]
+    #[error("Unknown condition type {condition_type}")]
     UnknownConditionType { condition_type: i32 },
+    #[error("Condition type is not specified")]
+    UnspecifiedConditionType,
     #[error(
         "Condition {condition_type:?} cannot be applied to an expression of type {value_type:?}"
     )]
-    InvalidConditionType { condition_type: ConditionType, value_type: NodeValueType },
+    InvalidNodeValueType { condition_type: ConditionType, value_type: NodeValueType },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
 }
@@ -147,20 +149,24 @@ impl TriggerFactoryImpl {
 
     fn get_condition_type(
         conditional_trigger_proto: &ConditionalTriggerProto,
-        value_type: &NodeValueType,
+        value_type: &Option<NodeValueType>,
     ) -> Result<ConditionType, TriggerFactoryError> {
         let condition_type = conditional_trigger_proto
             .condition_type
             .enum_value()
             .map_err(|value| TriggerFactoryError::UnknownConditionType { condition_type: value })?;
 
-        if matches!(condition_type, ConditionType::CHANGE_TYPE_UNSPECIFIED)
-            || (!value_type.is_bool() && !value_type.is_numeric())
-        {
-            return Err(TriggerFactoryError::InvalidConditionType {
-                condition_type,
-                value_type: value_type.clone(),
-            });
+        if matches!(condition_type, ConditionType::CONDITION_TYPE_UNSPECIFIED) {
+            return Err(TriggerFactoryError::UnspecifiedConditionType);
+        }
+
+        if let Some(value_type) = value_type {
+            if !value_type.is_bool() && !value_type.is_numeric() {
+                return Err(TriggerFactoryError::InvalidNodeValueType {
+                    condition_type,
+                    value_type: value_type.clone(),
+                });
+            }
         }
 
         Ok(condition_type)
@@ -288,6 +294,15 @@ mod tests {
         trigger
     }
 
+    fn create_conditional_trigger_with_unspecified_condition_type() -> TriggerProto {
+        let mut trigger = new_trigger(TRIGGER_NAME);
+        let conditional_trigger = trigger.mut_conditional_trigger();
+        conditional_trigger.condition_type = ConditionType::CONDITION_TYPE_UNSPECIFIED.into();
+        conditional_trigger.selector_node_index = Some(0);
+        conditional_trigger.trigger_names.push(String::default());
+        trigger
+    }
+
     fn create_conditional_trigger_with_all_changes_condition_type() -> TriggerProto {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
@@ -306,19 +321,18 @@ mod tests {
             &self,
             trigger_proto: &TriggerProto,
         ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
-            self.create_using_context_with(trigger_proto, None, None, None, None)
+            self.create_using_context_with(trigger_proto, None, vec![], None, None)
         }
 
         fn create_using_context_with(
             &self,
             trigger_proto: &TriggerProto,
             nodes: Option<Vec<Arc<Node>>>,
-            node_types: Option<Vec<NodeValueType>>,
+            node_types: Vec<Option<NodeValueType>>,
             publishers: Option<Vec<Arc<PublisherImpl>>>,
             triggers: Option<Vec<Arc<TriggerImpl>>>,
         ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
             let expression_nodes = nodes.unwrap_or_default();
-            let node_types = node_types.unwrap_or_default();
             let publishers = publishers.map_or(HashMap::new(), |val| {
                 val.into_hash_map(|publisher| publisher.name.clone())
             });
@@ -337,15 +351,14 @@ mod tests {
             &self,
             trigger_proto: &TriggerProto,
         ) -> Result<(), TriggerFactoryError> {
-            self.validate_using_context_with(trigger_proto, None)
+            self.validate_using_context_with(trigger_proto, vec![])
         }
 
         fn validate_using_context_with(
             &self,
             trigger_proto: &TriggerProto,
-            node_types: Option<Vec<NodeValueType>>,
+            node_types: Vec<Option<NodeValueType>>,
         ) -> Result<(), TriggerFactoryError> {
-            let node_types = node_types.unwrap_or_default();
             let context = TriggerFactoryValidateContext { node_types: &node_types };
             self.validate(trigger_proto, &context)
         }
@@ -366,7 +379,7 @@ mod tests {
         let (trigger, publisher) = create_valid_data_trigger();
 
         let res = factory
-            .create_using_context_with(&trigger, None, None, Some(vec![publisher.clone()]), None)
+            .create_using_context_with(&trigger, None, vec![], Some(vec![publisher.clone()]), None)
             .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
@@ -441,7 +454,7 @@ mod tests {
             .create_using_context_with(
                 &trigger,
                 Some(vec![Arc::new(create_node())]),
-                Some(vec![NodeValueType::Bool]),
+                vec![None],
                 None,
                 None,
             )
@@ -456,6 +469,29 @@ mod tests {
     }
 
     #[test]
+    fn create_conditional_trigger_unspecified_condition_type_fails() {
+        let factory = create_factory();
+        let trigger = create_conditional_trigger_with_unspecified_condition_type();
+
+        let err = factory
+            .create_using_context_with(
+                &trigger,
+                Some(vec![Arc::new(create_node())]),
+                vec![None],
+                None,
+                None,
+            )
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(err, TriggerFactoryError::UnspecifiedConditionType),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn create_conditional_trigger_incompatible_condition_type_fails() {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_all_changes_condition_type();
@@ -464,7 +500,7 @@ mod tests {
             .create_using_context_with(
                 &trigger,
                 Some(vec![Arc::new(create_node())]),
-                Some(vec![NodeValueType::Message]),
+                vec![Some(NodeValueType::Message)],
                 None,
                 None,
             )
@@ -472,7 +508,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(err, TriggerFactoryError::InvalidConditionType { .. }),
+            matches!(err, TriggerFactoryError::InvalidNodeValueType { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -489,7 +525,7 @@ mod tests {
             .create_using_context_with(
                 &trigger,
                 Some(vec![node_0.clone(), node_1.clone()]),
-                Some(vec![NodeValueType::Bool, NodeValueType::Bool]),
+                vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
                 None,
                 parent_triggers.clone(),
             )
@@ -513,6 +549,23 @@ mod tests {
     }
 
     #[test]
+    fn create_conditional_trigger_unknown_node_type_success() {
+        let factory = create_factory();
+        let (trigger, parent_triggers) = create_valid_conditional_trigger();
+
+        let node = Arc::new(create_node());
+        factory
+            .create_using_context_with(
+                &trigger,
+                Some(vec![node]),
+                vec![None],
+                None,
+                parent_triggers,
+            )
+            .unwrap();
+    }
+
+    #[test]
     fn validate_no_name_fails() {
         let factory = create_factory();
 
@@ -527,7 +580,7 @@ mod tests {
         let (trigger, publisher) = create_valid_data_trigger();
 
         factory
-            .create_using_context_with(&trigger, None, None, Some(vec![publisher]), None)
+            .create_using_context_with(&trigger, None, vec![], Some(vec![publisher]), None)
             .unwrap();
     }
 
@@ -586,13 +639,24 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_unknown_condition_type();
 
-        let err = factory
-            .validate_using_context_with(&trigger, Some(vec![NodeValueType::Bool]))
-            .err()
-            .unwrap();
+        let err = factory.validate_using_context_with(&trigger, vec![None]).err().unwrap();
 
         assert!(
             matches!(err, TriggerFactoryError::UnknownConditionType { condition_type: -1 }),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_conditional_trigger_unspecified_condition_type_fails() {
+        let factory = create_factory();
+        let trigger = create_conditional_trigger_with_unspecified_condition_type();
+
+        let err = factory.validate_using_context_with(&trigger, vec![None]).err().unwrap();
+
+        assert!(
+            matches!(err, TriggerFactoryError::UnspecifiedConditionType),
             "Unexpected error: {:?}",
             err
         );
@@ -604,12 +668,12 @@ mod tests {
         let trigger = create_conditional_trigger_with_all_changes_condition_type();
 
         let err = factory
-            .validate_using_context_with(&trigger, Some(vec![NodeValueType::Message]))
+            .validate_using_context_with(&trigger, vec![Some(NodeValueType::Message)])
             .err()
             .unwrap();
 
         assert!(
-            matches!(err, TriggerFactoryError::InvalidConditionType { .. }),
+            matches!(err, TriggerFactoryError::InvalidNodeValueType { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -620,6 +684,14 @@ mod tests {
         let factory = create_factory();
         let (trigger, _) = create_valid_conditional_trigger();
 
-        factory.validate_using_context_with(&trigger, Some(vec![NodeValueType::Bool])).unwrap();
+        factory.validate_using_context_with(&trigger, vec![Some(NodeValueType::Bool)]).unwrap();
+    }
+
+    #[test]
+    fn validate_conditional_trigger_unknown_node_type_success() {
+        let factory = create_factory();
+        let (trigger, _) = create_valid_conditional_trigger();
+
+        factory.validate_using_context_with(&trigger, vec![None]).unwrap();
     }
 }

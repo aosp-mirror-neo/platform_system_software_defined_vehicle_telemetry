@@ -190,6 +190,7 @@ rust_test {
     proc_macros: [
         "libasync_trait",
         "libclap_derive",
+        "libpaste",
     ],
     test_suites: [
         "general-tests",

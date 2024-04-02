@@ -18,8 +18,8 @@ lazy_static! {
         let node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
         vec![node; 3]
     };
-    static ref NODE_TYPES: Vec<NodeValueType> = {
-        let node_type = NodeValueType::Int;
+    static ref NODE_TYPES: Vec<Option<NodeValueType>> = {
+        let node_type = Some(NodeValueType::Int);
         vec![node_type; 3]
     };
 }
@@ -85,6 +85,6 @@ pub(crate) fn get_test_nodes<'a>() -> &'a [Arc<Node>] {
 }
 
 /// Return 3 node types, this is required to build the MessageBuilderFactory's validate context
-pub(crate) fn get_test_node_types<'a>() -> &'a [NodeValueType] {
+pub(crate) fn get_test_node_types<'a>() -> &'a [Option<NodeValueType>] {
     &NODE_TYPES
 }

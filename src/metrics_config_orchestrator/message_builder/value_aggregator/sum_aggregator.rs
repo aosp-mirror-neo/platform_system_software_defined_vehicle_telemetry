@@ -24,12 +24,6 @@ impl ValueAggregator for SumAggregator {
         if latest_value.is_none() {
             return Ok(latest_value);
         }
-        if !latest_value.is_numeric() {
-            panic!(
-                "Validation should have ensured that sum aggregation type \
-              has numeric expression evaluation results"
-            );
-        }
 
         self.current_sum.update_sum(&latest_value)?;
         Ok(self.current_sum.clone())

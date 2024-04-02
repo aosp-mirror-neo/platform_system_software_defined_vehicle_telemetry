@@ -105,7 +105,7 @@ message ConditionalTrigger {
   enum ConditionType {
     // Condition type is not specified.
     // Conditional triggers associated with this type are invalid.
-    CHANGE_TYPE_UNSPECIFIED = 0;
+    CONDITION_TYPE_UNSPECIFIED = 0;
 
     // Fires if the new value is greater than the previous value.
     RISING_EDGE = 1;

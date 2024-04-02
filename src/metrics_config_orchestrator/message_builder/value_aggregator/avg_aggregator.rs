@@ -26,12 +26,6 @@ impl ValueAggregator for AvgAggregator {
         if latest_value.is_none() {
             return Ok(latest_value);
         }
-        if !latest_value.is_numeric() {
-            panic!(
-                "Validation should have ensured that avg aggregation type \
-                has numeric expression evaluation results"
-            );
-        }
         self.current_avg.update_running_average(self.n, &latest_value)?;
         self.n += 1;
         Ok(self.current_avg.clone())
@@ -91,11 +85,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn avg_aggregator_compute_with_non_numeric_value_panics() {
+    fn avg_aggregator_compute_with_non_numeric_value_fails() {
         let mut bad_avg =
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        bad_avg.compute().unwrap();
+        let err = bad_avg.compute().err().unwrap();
+
+        assert!(
+            matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 }

@@ -153,8 +153,8 @@ impl Activatable<TriggerSubscriber> for TriggerImpl {
                     &'a NodeValue,
                     &'b Mutex<Option<NodeValue>>,
                 ) -> anyhow::Result<bool> = match condition_type {
-                    ConditionType::CHANGE_TYPE_UNSPECIFIED => {
-                        panic!("Change type for trigger {} is not specified", self.name)
+                    ConditionType::CONDITION_TYPE_UNSPECIFIED => {
+                        panic!("Condition type for trigger {} is not specified", self.name)
                     }
                     ConditionType::RISING_EDGE => |current_value, previous_value_holder| {
                         Self::compare_with_previous(

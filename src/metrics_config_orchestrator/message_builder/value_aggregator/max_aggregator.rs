@@ -25,10 +25,9 @@ impl ValueAggregator for MaxAggregator {
             return Ok(latest_value);
         }
         if !latest_value.is_numeric() {
-            panic!(
-                "Validation should have ensured that MAX aggregation type \
-                has numeric expression evaluation results"
-            );
+            return Err(AggregationError::NumericAggregationTypeMismatch {
+                value: format!("{:?}", latest_value),
+            });
         }
         if let Some(max) = &self.current_max {
             if max.is_less_than(&latest_value)? {
@@ -97,11 +96,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn max_aggregator_compute_with_non_numeric_value_panics() {
+    fn max_aggregator_compute_with_non_numeric_value_fails() {
         let mut bad_max =
             MaxAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        bad_max.compute().unwrap();
+        let err = bad_max.compute().err().unwrap();
+
+        assert!(
+            matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 }

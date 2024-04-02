@@ -25,10 +25,9 @@ impl ValueAggregator for MinAggregator {
             return Ok(latest_value);
         }
         if !latest_value.is_numeric() {
-            panic!(
-                "Validation should have ensured that MIN aggregation type \
-                has numeric expression evaluation results"
-            );
+            return Err(AggregationError::NumericAggregationTypeMismatch {
+                value: format!("{:?}", latest_value),
+            });
         }
         if let Some(min) = &self.current_min {
             if latest_value.is_less_than(min)? {
@@ -97,11 +96,16 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
-    fn min_aggregator_compute_with_non_numeric_value_panics() {
+    fn min_aggregator_compute_with_non_numeric_value_fails() {
         let mut bad_min =
             MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        bad_min.compute().unwrap();
+        let err = bad_min.compute().err().unwrap();
+
+        assert!(
+            matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 }

@@ -44,12 +44,12 @@ pub(crate) trait MessageBuilderFactory: Send + Sync {
 pub(crate) struct MessageBuilderFactoryCreateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
 }
 
 pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
 }
 
 #[derive(Error, Debug)]
@@ -76,7 +76,7 @@ impl<'a> MessageBuilderFactoryCreateContext<'a> {
     pub(crate) fn new(
         file_descriptors: &'a [FileDescriptor],
         nodes: &'a [Arc<Node>],
-        node_types: &'a [NodeValueType],
+        node_types: &'a [Option<NodeValueType>],
     ) -> Self {
         Self { file_descriptors, nodes, node_types }
     }
@@ -86,7 +86,7 @@ impl<'a> MessageBuilderFactoryValidateContext<'a> {
     /// Constructor for the context used by factory's validate() method
     pub(crate) fn new(
         file_descriptors: &'a [FileDescriptor],
-        node_types: &'a [NodeValueType],
+        node_types: &'a [Option<NodeValueType>],
     ) -> Self {
         Self { file_descriptors, node_types }
     }
