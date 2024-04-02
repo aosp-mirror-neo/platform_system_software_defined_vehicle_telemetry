@@ -22,6 +22,7 @@ cc_binary {
         "libtelemetry_c",
         "liblog",
     ],
+    vendor: true,
 }
 
 rust_binary {
@@ -40,6 +41,7 @@ rust_binary {
         "libstatus_codes_bindgen",
         "libtokio",
     ],
+    vendor: true,
 }
 
 rust_protobuf {
@@ -53,6 +55,8 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "configurable_publisher_source",
+    vendor_available: true,
+    system_ext_specific: true,
 }
 
 rust_binary {
@@ -61,7 +65,7 @@ rust_binary {
         "rust/sample_publisher/main.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry.configurable_publisher-rust",
+        "android.sdv.telemetry.configurable_publisher-V1-rust",
         "libbinder_rs",
         "libsample_publisher_proto",
         "libfutures",
@@ -71,6 +75,7 @@ rust_binary {
         "librand",
         "libtokio",
     ],
+    vendor: true,
 }
 
 rust_binary {
@@ -88,5 +93,5 @@ rust_binary {
         "libprotobuf",
         "librand",
     ],
-    system_ext_specific: true,
+    vendor: true,
 }

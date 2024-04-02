@@ -6,6 +6,7 @@ package android.sdv.telemetry;
  * Exhaustive list of all status codes supported by the telemetry service.
  */
 @Backing(type="int")
+@VintfStability
 enum TelemetryServiceStatusCodes {
 
     /**
@@ -16,10 +17,33 @@ enum TelemetryServiceStatusCodes {
     /**
      * Common error messages during API calls
      */
+
+    /**
+     * Invalid metric config uuid send to API call
+     */
     METRICS_CONFIG_INVALID_CONFIG_UUID = 400,
+
+    /**
+     * Metric Config version used is deprecated and
+     * telemetry service can not understand it.
+     */
     METRICS_CONFIG_VERSION_TOO_OLD = 401,
+
+    /**
+     * Error occurred when trying to parse Metric Config.
+     * Metric Config is either passed during add metrics config
+     * or loaded from disk.
+     */
     METRICS_CONFIG_PARSE_ERROR = 402,
+
+    /**
+     * Error occurred while trying to read metric config from disk.
+     */
     METRICS_CONFIG_CORRUPTED = 403,
+
+    /**
+     * Error occurred while performing a file operation (delete, move, etc)
+     */
     FILE_IO_ERROR = 404,
 
     /**
@@ -53,34 +77,19 @@ enum TelemetryServiceStatusCodes {
     SET_STATUS_LISTENER_FAILED = 410,
 
     /**
-     * Errors specific to clear report ready listener
-     */
-    CLEAR_REPORT_READY_LISTENER_FAILED = 411,
-
-    /**
-     * Errors specific to clear report listener
-     */
-    CLEAR_REPORT_LISTENER_FAILED = 412,
-
-    /**
-     * Errors specific to clear status listener
-     */
-    CLEAR_STATUS_LISTENER_FAILED = 413,
-
-    /**
      * Errors specific to get finished report
      */
-    GET_FINISHED_REPORT_FAILED = 414,
+    GET_FINISHED_REPORT_FAILED = 411,
 
     /**
      * No Listener object sent to telemetry service API Call
      */
-    API_CALL_FAILED_LISTENER_NOT_SET = 415,
+    API_CALL_FAILED_LISTENER_NOT_SET = 412,
 
     /**
      * No Callback Function sent to telemetry service API Call
      */
-    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 416,
+    API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 413,
 
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined
