@@ -1,9 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher,
 };
-use android_sdv_telemetry_configurable_publisher::binder::{Interface, Status, Strong, Result as BinderResult};
+use google_sdv_telemetry_configurable_publisher::binder::{Interface, Status, Strong, Result as BinderResult};
 
 use crate::random_integer_publisher::RandomIntegerPublisher;
 

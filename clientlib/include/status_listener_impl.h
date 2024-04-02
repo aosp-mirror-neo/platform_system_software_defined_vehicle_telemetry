@@ -2,13 +2,13 @@
 
 #include "callback_container.h"
 
-#include <android/sdv/telemetry/BnTelemetryStatusListener.h>
-#include <android/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <google/sdv/telemetry/BnTelemetryStatusListener.h>
+#include <google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <utils/Log.h>
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
-class StatusListenerImpl : public android::sdv::telemetry::BnTelemetryStatusListener {
+class StatusListenerImpl : public google::sdv::telemetry::BnTelemetryStatusListener {
 public:
     explicit StatusListenerImpl(android::sp<CallbackContainer> cb_container);
     void set_status_listener(void* listener, CbFunction cbFunc);
@@ -19,4 +19,4 @@ private:
     android::sp<CallbackContainer> cb_container_;
 };
 
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry

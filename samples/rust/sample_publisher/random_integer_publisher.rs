@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
-use android_sdv_telemetry_configurable_publisher::binder::Strong;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
+use google_sdv_telemetry_configurable_publisher::binder::Strong;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 
 use log::{error, info};

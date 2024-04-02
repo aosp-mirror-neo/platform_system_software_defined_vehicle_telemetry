@@ -4,7 +4,7 @@
 
 #include "callback_container.h"
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 bool CallbackContainer::insert_callback(int api_call_id, CallbackData cb) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -22,4 +22,4 @@ std::optional<CallbackData> CallbackContainer::extract_callback(int api_call_id)
 
     return std::nullopt;
 }
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry

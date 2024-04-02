@@ -238,7 +238,7 @@ mod tests {
     use mock::get_test_file_descriptors;
 
     // Package and message name are in to src/test_utils/test_message.proto
-    const TEST_MESSAGE_FULL_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
+    const TEST_MESSAGE_FULL_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
     const INT_FIELD_NAME: &str = "int_field";
 
     fn create_message_builder_factory() -> MessageBuilderFactoryImpl {

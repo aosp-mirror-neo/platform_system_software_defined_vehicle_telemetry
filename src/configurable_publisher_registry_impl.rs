@@ -1,8 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 // External dependencies.
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::IConfigurablePublisher, ISubscriber::BnSubscriber, PublisherInfo::PublisherInfo};
-use android_sdv_telemetry_configurable_publisher::binder::Strong;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::IConfigurablePublisher, ISubscriber::BnSubscriber, PublisherInfo::PublisherInfo};
+use google_sdv_telemetry_configurable_publisher::binder::Strong;
 use async_trait::async_trait;
 use binder::BinderFeatures;
 use protobuf::descriptor::FileDescriptorProto;
@@ -216,8 +216,8 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
-    use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, ISubscriber::ISubscriber};
-    use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
+    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, ISubscriber::ISubscriber};
+    use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
     use sample_publisher_proto::sample_publisher;
     use sample_publisher_proto::sample_publisher::SampleMessage;
 

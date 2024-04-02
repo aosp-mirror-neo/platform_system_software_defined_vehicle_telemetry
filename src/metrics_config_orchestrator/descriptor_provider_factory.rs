@@ -108,8 +108,8 @@ mod tests {
     const PUBLISHER_3: &str = "pub_3";
     const SERVICE_NAME: &str = "service";
     const TOPIC_NAME: &str = "topic";
-    const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
-    const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestNestedMessage";
+    const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
+    const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestNestedMessage";
 
     fn create_default_service_publisher_manager() -> Arc<dyn ServicePublisherManager> {
         create_service_publisher_manager(None)

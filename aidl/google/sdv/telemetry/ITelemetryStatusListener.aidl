@@ -1,0 +1,15 @@
+// Copyright 2023 Google LLC. All Rights Reserved.
+
+package google.sdv.telemetry;
+
+/**
+ * Enables clients to receive telemetry report ready notifications.
+ */
+@VintfStability
+oneway interface ITelemetryStatusListener {
+    /**
+     * Called by telemetry service to provide notifications on finished reports.
+     */
+    void sendStatus(
+            in int apiCallId, in int statusCode, in @utf8InCpp String statusMessage);
+}

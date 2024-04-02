@@ -2,7 +2,7 @@
 
 syntax = "proto3";
 
-package android.sdv.telemetry.test;
+package google.sdv.telemetry.test;
 
 enum TestEnum {
   NONE = 0;

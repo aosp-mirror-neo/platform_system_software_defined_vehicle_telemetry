@@ -4,7 +4,7 @@
 
 #include "status_listener_impl.h"
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 const int GLOBAL_STATUS_LISTENER_UNIQUE_ID = 0;
 
@@ -35,4 +35,4 @@ android::binder::Status StatusListenerImpl::sendStatus(int api_call_id, int stat
 
     return android::binder::Status::ok();
 }
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry

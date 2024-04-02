@@ -2,10 +2,10 @@
 
 //! Binary for registering Telemetry service.
 
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{
     BnConfigurablePublisherRegistry, BpConfigurablePublisherRegistry, IConfigurablePublisherRegistry,
 };
-use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryService::{
+use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
 

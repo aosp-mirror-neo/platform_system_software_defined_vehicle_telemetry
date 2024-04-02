@@ -1,13 +1,13 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-#include <android/sdv/telemetry/BnTelemetryReportListener.h>
+#include <google/sdv/telemetry/BnTelemetryReportListener.h>
 #include <utils/Log.h>
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 typedef void (*GetReportCallbackFunction)(void*, int, const char*, const uint8_t*, size_t);
 
-class ReportListenerImpl : public android::sdv::telemetry::BnTelemetryReportListener {
+class ReportListenerImpl : public google::sdv::telemetry::BnTelemetryReportListener {
 public:
     ReportListenerImpl(void* cb, void (*cbFunc)(void*, int, const char*, const uint8_t*, size_t));
     android::binder::Status onReport(int32_t status_code, const std::string& status_message,
@@ -22,4 +22,4 @@ private:
     GetReportCallbackFunction cbFuncPtr_;
 };
 
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry
