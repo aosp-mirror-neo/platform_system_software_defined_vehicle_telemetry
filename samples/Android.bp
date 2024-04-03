@@ -65,7 +65,7 @@ rust_binary {
         "rust/sample_publisher/main.rs",
     ],
     rustlibs: [
-        "android.sdv.telemetry.configurable_publisher-V1-rust",
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libbinder_rs",
         "libsample_publisher_proto",
         "libfutures",

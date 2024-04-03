@@ -6,8 +6,8 @@ mod configurable_publisher_registry_impl;
 mod subscriber_service;
 
 // External dependencies.
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{IConfigurablePublisherRegistry::IConfigurablePublisherRegistryAsyncServer, IConfigurablePublisher::IConfigurablePublisher, PublisherInfo::PublisherInfo};
-use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisherRegistry::IConfigurablePublisherRegistryAsyncServer, IConfigurablePublisher::IConfigurablePublisher, PublisherInfo::PublisherInfo};
+use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
 use async_trait::async_trait;
 use binder::Status;
 use log::info;

@@ -106,9 +106,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::future<std::optional<android::sdv::telemetry::MetricsReport>> future_report_received =
+    std::future<std::optional<google::sdv::telemetry::MetricsReport>> future_report_received =
             report_manager->get_metrics_report();
-    std::optional<android::sdv::telemetry::MetricsReport> metrics_report =
+    std::optional<google::sdv::telemetry::MetricsReport> metrics_report =
             future_report_received.get();
 
     if (metrics_report) {

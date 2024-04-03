@@ -4,7 +4,7 @@
 
 #include "report_ready_listener_impl.h"
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 void ReportReadyListenerImpl::set_report_ready_listener(void* cbObject,
                                                         ReportReadyCallbackFunction cbFunc) {
@@ -21,4 +21,4 @@ android::binder::Status ReportReadyListenerImpl::onReady(const std::string& metr
     cbFuncPtr_(clientCb_, configUuid, reportConfigName, reportNumber);
     return android::binder::Status::ok();
 }
-}
+}  // namespace google::sdv::telemetry

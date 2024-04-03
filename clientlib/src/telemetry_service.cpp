@@ -7,10 +7,10 @@
 #include <iostream>
 
 using ::android::base::StringPrintf;
-using ::android::sdv::telemetry::ITelemetryService;
-using ::android::sdv::telemetry::TelemetryServiceStatusCodes;
+using ::google::sdv::telemetry::ITelemetryService;
+using ::google::sdv::telemetry::TelemetryServiceStatusCodes;
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 template <typename T>
 std::optional<TelemetryServiceStatusCodes> validate_params(void* listener, T cbFunc) {
@@ -30,7 +30,7 @@ TelemetryService::TelemetryService() {
     const std::string instance =
             StringPrintf("%s/default", android::String8(ITelemetryService::descriptor).c_str());
 
-    binder_service_ = android::waitForService<android::sdv::telemetry::ITelemetryService>(
+    binder_service_ = android::waitForService<google::sdv::telemetry::ITelemetryService>(
             android::String16(instance.c_str()));
     cb_container_ = new CallbackContainer();
 
@@ -177,4 +177,4 @@ TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
     ALOGI("unregisterStatusListener from CPP %s", std::string(err.toString8()).c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry

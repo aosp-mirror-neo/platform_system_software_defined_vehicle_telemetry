@@ -15,7 +15,7 @@ MetricsReportManager::~MetricsReportManager() {
     ::clear_report_ready_listener(holder_);
 }
 
-std::future<std::optional<android::sdv::telemetry::MetricsReport>>
+std::future<std::optional<google::sdv::telemetry::MetricsReport>>
 MetricsReportManager::get_metrics_report() {
     return promise_report_received_.get_future();
 }
@@ -37,7 +37,7 @@ void MetricsReportManager::on_report_received(void* listener, int32_t status_cod
 
     if (status_code ==
         static_cast<int>(TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS)) {
-        android::sdv::telemetry::MetricsReport metrics_report;
+        google::sdv::telemetry::MetricsReport metrics_report;
         metrics_report.ParseFromArray(report, size);
         report_manager->promise_report_received_.set_value(metrics_report);
     } else {

@@ -1,14 +1,13 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-#include <android/sdv/telemetry/BnTelemetryReportReadyListener.h>
+#include <google/sdv/telemetry/BnTelemetryReportReadyListener.h>
 #include <utils/Log.h>
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int32_t);
 
-class ReportReadyListenerImpl :
-      public android::sdv::telemetry::BnTelemetryReportReadyListener {
+class ReportReadyListenerImpl : public google::sdv::telemetry::BnTelemetryReportReadyListener {
 public:
     void set_report_ready_listener(void* cbObject, ReportReadyCallbackFunction cbFunc);
     android::binder::Status onReady(const std::string& metricsConfigUuid,
@@ -26,4 +25,4 @@ private:
     ReportReadyCallbackFunction cbFuncPtr_;
 };
 
-}
+}  // namespace google::sdv::telemetry

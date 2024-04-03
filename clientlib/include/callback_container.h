@@ -12,7 +12,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 // Define a function prototype for the callback function pointer
 typedef void (*CbFunction)(void*, int32_t, const char*);
@@ -33,6 +33,6 @@ private:
     std::unordered_map<int, CallbackData> cb_map_;
     std::mutex mutex_;
 };
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry
 
 #endif  // TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H

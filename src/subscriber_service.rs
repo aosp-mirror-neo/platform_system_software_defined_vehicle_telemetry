@@ -1,8 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 #![allow(missing_docs)]
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
-use android_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult};
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
+use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult};
 use binder::Status;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use tokio::sync::mpsc;
