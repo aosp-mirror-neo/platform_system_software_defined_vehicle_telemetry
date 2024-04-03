@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use android_sdv_telemetry::aidl::android::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
-use android_sdv_telemetry::binder::Strong;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
+use google_sdv_telemetry::binder::Strong;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::collections::HashMap;

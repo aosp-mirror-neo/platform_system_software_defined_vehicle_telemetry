@@ -9,15 +9,15 @@ mod metrics_report_listener;
 pub mod service_publisher_manager;
 
 // External dependencies.
-use android_sdv_telemetry::aidl::android::sdv::telemetry::{
+use async_trait::async_trait;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
     ITelemetryService::ITelemetryServiceAsyncServer,
     ITelemetryStatusListener::ITelemetryStatusListener,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
-use android_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
-use async_trait::async_trait;
+use google_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use log::{error, info};
 use protobuf::Message;
 use std::marker::{Send, Sync};
@@ -375,12 +375,12 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 #[cfg(test)]
 mod tests {
 
-    use android_sdv_telemetry::aidl::android::sdv::telemetry::{
+    use binder::BinderFeatures;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::{
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
         ITelemetryStatusListener::BnTelemetryStatusListener,
     };
-    use binder::BinderFeatures;
     use protobuf::Message;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;

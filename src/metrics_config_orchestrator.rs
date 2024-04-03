@@ -963,7 +963,7 @@ mod tests {
     const SOME_PUBLISHER_NAME: &str = "Publisher1";
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const START_TRIGGER_NAME: &str = "start_trigger";
-    const TEST_MESSAGE_TYPE_NAME: &str = ".android.sdv.telemetry.test.TestMessage";
+    const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
     struct MockMetricsReportGenerator {

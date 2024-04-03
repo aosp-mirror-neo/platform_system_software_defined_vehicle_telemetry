@@ -4,7 +4,7 @@
 
 #include "report_listener_impl.h"
 
-namespace android::sdv::telemetry {
+namespace google::sdv::telemetry {
 
 ReportListenerImpl::ReportListenerImpl(void* cb, GetReportCallbackFunction cbFunc) :
       clientReportListener_(cb), cbFuncPtr_(cbFunc) {
@@ -18,4 +18,4 @@ android::binder::Status ReportListenerImpl::onReport(int32_t status_code,
                report.size());
     return android::binder::Status::ok();
 }
-}  // namespace android::sdv::telemetry
+}  // namespace google::sdv::telemetry

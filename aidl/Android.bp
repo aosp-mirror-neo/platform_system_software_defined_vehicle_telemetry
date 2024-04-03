@@ -7,9 +7,9 @@ package {
 // See https://source.android.com/devices/architecture/aidl/stable-aidl#module-naming-rules
 // to learn how to use it.
 aidl_interface {
-    name: "android.sdv.telemetry",
+    name: "google.sdv.telemetry",
     srcs: [
-        "android/sdv/telemetry/*.aidl",
+        "google/sdv/telemetry/*.aidl",
     ],
     vendor_available: true,
     system_ext_specific: true,
@@ -29,9 +29,9 @@ aidl_interface {
 }
 
 aidl_interface {
-    name: "android.sdv.telemetry.configurable_publisher",
+    name: "google.sdv.telemetry.configurable_publisher",
     srcs: [
-        "android/sdv/telemetry/configurable_publisher/*.aidl",
+        "google/sdv/telemetry/configurable_publisher/*.aidl",
     ],
     vendor_available: true,
     system_ext_specific: true,

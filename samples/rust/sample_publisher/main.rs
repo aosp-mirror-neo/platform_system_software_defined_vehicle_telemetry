@@ -7,11 +7,11 @@
 mod random_integer_publisher;
 mod random_integer_publisher_service;
 
-use android_sdv_telemetry_configurable_publisher::aidl::android::sdv::telemetry::configurable_publisher::{
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
     PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry
 };
-use android_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
+use google_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 use crate::random_integer_publisher::RandomIntegerPublisher;

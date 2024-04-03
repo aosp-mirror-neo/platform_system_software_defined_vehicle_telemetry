@@ -19,10 +19,10 @@ public:
     explicit MetricsReportManager(ServiceHolder* holder);
     ~MetricsReportManager() override;
 
-    std::future<std::optional<android::sdv::telemetry::MetricsReport>> get_metrics_report();
+    std::future<std::optional<google::sdv::telemetry::MetricsReport>> get_metrics_report();
 
 private:
-    std::promise<std::optional<android::sdv::telemetry::MetricsReport>> promise_report_received_;
+    std::promise<std::optional<google::sdv::telemetry::MetricsReport>> promise_report_received_;
 
     ServiceHolder* holder_;
 
