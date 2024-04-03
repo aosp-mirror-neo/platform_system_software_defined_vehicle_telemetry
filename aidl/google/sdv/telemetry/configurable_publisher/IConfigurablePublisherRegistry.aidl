@@ -15,7 +15,6 @@ interface IConfigurablePublisherRegistry {
     /**
      * Registers configurable publishers with
      * telemetry service.
-     * TODO: b/331675833: add unregisterPublisher()
      *
      * @param pInfo information about the publisher. Refer to PublisherInfo for more
      *         information.
@@ -23,4 +22,13 @@ interface IConfigurablePublisherRegistry {
      *
      */
     void registerPublisher(in PublisherInfo pInfo, in IConfigurablePublisher publisher);
+
+    /**
+     * Unregisters configurable publishers from telemetry service. Unregistering an already
+     * unregistered or otherwise non-existent publisher has no effect and will be ignored.
+     *
+     * @param serviceName name of the publisher service. Must be unique across all publishers across
+     * SDV. Must be non-null
+     */
+    void unregisterPublisher(in @utf8InCpp String serviceName);
 }
