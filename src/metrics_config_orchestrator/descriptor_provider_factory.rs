@@ -51,10 +51,8 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
             publishers.iter().try_fold(HashMap::new(), |mut map, publisher| {
                 let descriptor = match &publisher.publisher_type {
                     Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
-                        service_publisher_manager.get_message_descriptor(
-                            &service_publisher_proto.service_name,
-                            &service_publisher_proto.topic_name,
-                        )?
+                        service_publisher_manager
+                            .get_message_descriptor(&service_publisher_proto.service_name)?
                     }
                     Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
                         let message_builder = aggregation_publisher_proto
@@ -107,7 +105,6 @@ mod tests {
     const PUBLISHER_2: &str = "pub_2";
     const PUBLISHER_3: &str = "pub_3";
     const SERVICE_NAME: &str = "service";
-    const TOPIC_NAME: &str = "topic";
     const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
     const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestNestedMessage";
 
@@ -156,7 +153,6 @@ mod tests {
         let mut publisher = PublisherProto::new();
         let service_publisher = publisher.mut_service_publisher();
         service_publisher.service_name = SERVICE_NAME.to_owned();
-        service_publisher.topic_name = TOPIC_NAME.to_owned();
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let err = descriptor_provider_factory

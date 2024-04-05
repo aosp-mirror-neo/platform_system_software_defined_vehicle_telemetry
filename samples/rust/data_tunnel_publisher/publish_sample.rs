@@ -12,7 +12,7 @@ use protobuf::{Message, MessageFull};
 use rand::Rng;
 
 // Hardcoded topic name and msg size for testing
-const TOPIC_NAME: &str = "DataTunnelTopic";
+const TOPIC_NAME: &str = "DataTunnelSampleService";
 const TOPIC_MSG_SIZE: usize = 64;
 
 fn main() {

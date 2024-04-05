@@ -23,7 +23,6 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn subscribe(
         &self,
         _service_name: &str,
-        _topic_name: &str,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
         self.new_message_callback.lock().await.replace(new_message_callback);
@@ -31,11 +30,7 @@ impl ServiceAdapter for MockServiceAdapter {
             self.notify_subscribing.notify_one();
             future::pending::<()>().await;
         }
-        Ok(ServiceSubscription {
-            service_name: String::default(),
-            subscription_id: u32::MAX,
-            topic_name: String::default(),
-        })
+        Ok(ServiceSubscription { service_name: String::default(), subscription_id: u32::MAX })
     }
 
     async fn unsubscribe(

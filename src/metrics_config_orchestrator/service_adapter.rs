@@ -14,13 +14,11 @@ use crate::service_publisher_manager::ServicePublisherManager;
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
 pub(crate) trait ServiceAdapter {
-    /// Subscribe to new messages from the specified topic published by the service
-    /// with the specified name.
+    /// Subscribe to new messages from the service with the specified name.
     /// The callback mustn't block because it's executed on the adapter thread.
     async fn subscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError>;
 
@@ -34,7 +32,6 @@ pub(crate) trait ServiceAdapter {
 
 pub(crate) struct ServiceSubscription {
     service_name: String,
-    topic_name: String,
     subscription_id: u32,
 }
 
@@ -74,7 +71,7 @@ pub(crate) struct ServiceAdapterImpl {
     // the callback shouldn't process messages.
     service_subscriptions: AsyncMutex<
         HashMap<
-            (String, String),
+            String,
             Arc<AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>>,
         >,
     >,
@@ -85,17 +82,11 @@ impl ServiceAdapter for ServiceAdapterImpl {
     async fn subscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
         let subscription_id = self.next_subscription_id.fetch_add(1, Ordering::SeqCst);
 
-        match self
-            .service_subscriptions
-            .lock()
-            .await
-            .entry((service_name.to_owned(), topic_name.to_owned()))
-        {
+        match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
             Entry::Occupied(o) => {
                 // If there's already an active subscription, add callback to its map.
                 o.get().lock().await.insert(subscription_id, new_message_callback);
@@ -110,7 +101,6 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 self.service_publisher_manager
                     .try_subscribe(
                         service_name,
-                        topic_name,
                         Arc::new(move |msg| Self::on_new_message(msg, &subscriptions_container)),
                         None,
                     )
@@ -118,23 +108,14 @@ impl ServiceAdapter for ServiceAdapterImpl {
             }
         };
 
-        Ok(ServiceSubscription {
-            service_name: service_name.to_owned(),
-            subscription_id,
-            topic_name: topic_name.to_owned(),
-        })
+        Ok(ServiceSubscription { service_name: service_name.to_owned(), subscription_id })
     }
 
     async fn unsubscribe(
         &self,
         subscription: ServiceSubscription,
     ) -> Result<(), ServiceAdapterUnsubscribeError> {
-        match self
-            .service_subscriptions
-            .lock()
-            .await
-            .entry((subscription.service_name.clone(), subscription.topic_name.clone()))
-        {
+        match self.service_subscriptions.lock().await.entry(subscription.service_name.clone()) {
             Entry::Occupied(o) => {
                 let is_last_subscription = {
                     let mut subscriptions = o.get().lock().await;
@@ -148,7 +129,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
 
                 if is_last_subscription {
                     self.service_publisher_manager
-                        .unsubscribe(&subscription.service_name, &subscription.topic_name, None)
+                        .unsubscribe(&subscription.service_name, None)
                         .await?;
 
                     o.remove_entry();
@@ -216,8 +197,7 @@ pub(super) mod tests {
     use crate::service_publisher_manager::mock::MockServicePublisherManager;
 
     const SERVICE_NAME: &str = "service";
-    const TOPIC_NAME: &str = "topic";
-    const TOPIC_NAME_2: &str = "topic2";
+    const SERVICE_NAME_2: &str = "service2";
 
     lazy_static! {
         static ref VALUE_FIELD_DESCRIPTOR: FieldDescriptor =
@@ -233,11 +213,7 @@ pub(super) mod tests {
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
-        ServiceSubscription {
-            service_name: String::default(),
-            subscription_id: u32::MAX,
-            topic_name: String::default(),
-        }
+        ServiceSubscription { service_name: String::default(), subscription_id: u32::MAX }
     }
 
     #[tokio::test]
@@ -247,11 +223,8 @@ pub(super) mod tests {
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
-        let err = service_adapter
-            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
-            .await
-            .err()
-            .unwrap();
+        let err =
+            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.err().unwrap();
 
         assert!(
             matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { .. }),
@@ -262,7 +235,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_different_topics_subscribes_to_registry() {
+    async fn subscribe_different_services_subscribes_to_registry() {
         let registry = Arc::new(MockServicePublisherManager::default());
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(1);
@@ -271,30 +244,25 @@ pub(super) mod tests {
         let mut msg2 = Box::new(Int32Value::new());
         msg2.value = 2;
 
-        // Create two subscriptions to different topics.
+        // Create two subscriptions to different services.
         let tx_clone = tx.clone();
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                TOPIC_NAME,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
             .unwrap();
         service_adapter
-            .subscribe(
-                SERVICE_NAME,
-                TOPIC_NAME_2,
-                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
-            )
+            .subscribe(SERVICE_NAME_2, Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()))
             .await
             .unwrap();
 
-        // Notify about a new message in each topic and receive the message.
-        registry.notify_subscriber(SERVICE_NAME.to_owned(), TOPIC_NAME.to_owned(), msg1.clone());
+        // Notify about a new message from each service and receive the message.
+        registry.notify_subscriber(SERVICE_NAME, msg1.clone());
         let msg1_received = with_timeout(rx.recv()).await.unwrap();
 
-        registry.notify_subscriber(SERVICE_NAME.to_owned(), TOPIC_NAME_2.to_owned(), msg2.clone());
+        registry.notify_subscriber(SERVICE_NAME_2, msg2.clone());
         let msg2_received = with_timeout(rx.recv()).await.unwrap();
 
         // Verify that the received messages are the same as the ones sent.
@@ -306,34 +274,30 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_same_topic_subscribes_to_registry() {
+    async fn subscribe_same_service_subscribes_to_registry() {
         let registry = Arc::new(MockServicePublisherManager::default());
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
 
-        // Create two subscriptions to the same topic.
+        // Create two subscriptions to the same service.
         let tx_clone = tx.clone();
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                TOPIC_NAME,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
             .unwrap();
         service_adapter
-            .subscribe(
-                SERVICE_NAME,
-                TOPIC_NAME,
-                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
-            )
+            .subscribe(SERVICE_NAME, Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()))
             .await
             .unwrap();
 
-        // Notify about a new message in the topic and receive messages from the two subscriptions.
-        registry.notify_subscriber(SERVICE_NAME.to_owned(), TOPIC_NAME.to_owned(), msg.clone());
+        // Notify about a new message from the service
+        // and receive messages from the two subscriptions.
+        registry.notify_subscriber(SERVICE_NAME, msg.clone());
         let msg1_received = with_timeout(rx.recv()).await.unwrap();
         let msg2_received = with_timeout(rx.recv()).await.unwrap();
 
@@ -351,7 +315,7 @@ pub(super) mod tests {
         let service_adapter = create_default_service_adapter();
 
         // Create subscription for a different service.
-        service_adapter.subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box()).await.unwrap();
+        service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
 
         // Try unsubscribing using invalid subscription.
         let err = service_adapter.unsubscribe(create_invalid_subscription()).await.err().unwrap();
@@ -369,10 +333,8 @@ pub(super) mod tests {
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
-        let subscription = service_adapter
-            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
-            .await
-            .unwrap();
+        let subscription =
+            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
@@ -385,15 +347,11 @@ pub(super) mod tests {
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
-        let subscription = service_adapter
-            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
-            .await
-            .unwrap();
+        let subscription =
+            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
 
-        let _subscription2 = service_adapter
-            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
-            .await
-            .unwrap();
+        let _subscription2 =
+            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
 
         service_adapter.unsubscribe(subscription).await.unwrap();
 
@@ -407,15 +365,11 @@ pub(super) mod tests {
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
-        let subscription = service_adapter
-            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
-            .await
-            .unwrap();
+        let subscription =
+            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
 
-        let subscription2 = service_adapter
-            .subscribe(SERVICE_NAME, TOPIC_NAME, create_empty_fn_box())
-            .await
-            .unwrap();
+        let subscription2 =
+            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
 
         service_adapter.unsubscribe(subscription).await.unwrap();
         service_adapter.unsubscribe(subscription2).await.unwrap();

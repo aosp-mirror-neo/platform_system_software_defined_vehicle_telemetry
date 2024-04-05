@@ -20,7 +20,6 @@ pub trait ServicePublisherManager: Send + Sync {
     fn get_message_descriptor(
         &self,
         service_name: &str,
-        topic_name: &str,
     ) -> Result<Option<MessageDescriptor>, anyhow::Error>;
 
     /// Subscribes specified callback to the new messages from the specified topic
@@ -28,7 +27,6 @@ pub trait ServicePublisherManager: Send + Sync {
     async fn try_subscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
     ) -> Result<bool, anyhow::Error>;
@@ -37,7 +35,6 @@ pub trait ServicePublisherManager: Send + Sync {
     async fn unsubscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         configuration: Option<&[u8]>,
     ) -> Result<(), anyhow::Error>;
 }

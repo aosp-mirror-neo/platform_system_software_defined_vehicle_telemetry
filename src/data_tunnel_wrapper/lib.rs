@@ -174,7 +174,6 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
     /// Returns a DT reader implementation that can be used to read messages.
     async fn try_subscribe(
         &self,
-        service_name: &str,
         topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
@@ -240,10 +239,9 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 }
             };
 
-        let message_descriptor =
-            self.get_message_descriptor(service_name, topic_name)?.ok_or_else(|| {
-                anyhow!("Metadata not found for service: {}, topic: {}", service_name, topic_name)
-            })?;
+        let message_descriptor = self
+            .get_message_descriptor(topic_name)?
+            .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?;
         let topic_name_clone = topic_name.to_owned();
         let data_tunnel_subscriptions = self.data_tunnel_subscriptions.clone();
         // Tokio task for fetching data from data tunnel and pushing it to telemetry service
@@ -295,7 +293,6 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
     /// Unsubscribes from the specified topic and service name.
     async fn unsubscribe(
         &self,
-        _service_name: &str,
         _topic_name: &str,
         _configuration: Option<&[u8]>,
     ) -> Result<(), anyhow::Error> {
@@ -306,7 +303,6 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
     /// Checks if topic with given name exists in data tunnel
     fn get_message_descriptor(
         &self,
-        _service_name: &str,
         topic_name: &str,
     ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         let message_descriptor = match self

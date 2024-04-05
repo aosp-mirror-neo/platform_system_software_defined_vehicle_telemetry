@@ -147,10 +147,9 @@ message ServicePublisher {
   // Unique service name.
   string service_name = 1;
 
-  // Required.
-  // The name of the topic that is published by the service.
-  // Must be unique within the service.
-  string topic_name = 2;
+  // Deprecated.
+  // The value of the field is ignored.
+  string topic_name = 2 [deprecated = true];
 
   // Optional.
   // Service-specific configuration.
