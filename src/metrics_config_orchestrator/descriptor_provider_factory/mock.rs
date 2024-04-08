@@ -10,7 +10,7 @@ impl DescriptorProviderFactory for MockDescriptorProviderFactory {
         &self,
         _fds: &[FileDescriptor],
         _publishers: &[PublisherProto],
-        _service_publisher_manager: &Arc<dyn ServicePublisherManager>,
+        _service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         Ok(Box::new(MockDescriptorProvider::new()))
     }

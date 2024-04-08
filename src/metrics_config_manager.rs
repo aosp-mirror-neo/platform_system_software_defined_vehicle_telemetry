@@ -20,7 +20,8 @@ use crate::metrics_config_orchestrator::{
     MetricsConfigOrchestrator, MetricsConfigOrchestratorError as ConfigOrchestratorError,
     MetricsConfigOrchestratorImpl,
 };
-use crate::ServicePublisherManager;
+use crate::service_publisher_accessor::ServicePublisherAccessor;
+
 /// Interface of a service that manages Metrics Configurations.
 #[async_trait]
 pub trait MetricsConfigManager {
@@ -97,7 +98,7 @@ impl MetricsConfigManagerImpl {
         active_data_dir: String,
         inactive_data_dir: String,
         config_store_size: usize,
-        service_publisher_manager: Arc<dyn ServicePublisherManager>,
+        service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
         let config_manager = Arc::new_cyclic(
@@ -453,7 +454,7 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
 
-    use crate::service_publisher_manager::mock::MockServicePublisherManager;
+    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
     use protobuf::Message;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
 
@@ -560,7 +561,7 @@ mod tests {
                 num_validate_config_calls.clone(),
             ));
 
-            let service_publisher_manager = Arc::new(MockServicePublisherManager::default());
+            let service_publisher_manager = Arc::new(MockServicePublisherAccessor::default());
 
             // Used to initialize/create root directories
             MetricsConfigManagerImpl::new(

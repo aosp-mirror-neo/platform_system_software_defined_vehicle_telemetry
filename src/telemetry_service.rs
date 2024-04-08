@@ -6,6 +6,7 @@ mod expr;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
+pub mod service_publisher_accessor;
 pub mod service_publisher_manager;
 
 // External dependencies.
@@ -26,7 +27,7 @@ use std::sync::{Arc, Mutex};
 use tracing::instrument;
 
 // Child module dependencies.
-pub use service_publisher_manager::ServicePublisherManager;
+pub use service_publisher_accessor::ServicePublisherAccessor;
 
 use metrics_config_manager::MetricsConfigManager;
 use metrics_config_manager::{
@@ -119,7 +120,7 @@ impl SdvTelemetryService {
     pub async fn new(
         root_path: &str,
         config_store_size: usize,
-        service_publisher_manager: Arc<dyn ServicePublisherManager>,
+        service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
     ) -> Option<Self> {
         let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
             (
@@ -385,7 +386,7 @@ mod tests {
 
     use super::*;
     use crate::metrics_config_manager::mock::MockMetricsConfigManager;
-    use crate::service_publisher_manager::mock::MockServicePublisherManager;
+    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
     const REPORT_NUMBER: i32 = 42;
@@ -578,7 +579,7 @@ mod tests {
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-                Arc::new(MockServicePublisherManager::default()),
+                Arc::new(MockServicePublisherAccessor::default()),
             )
             .await
             .unwrap();

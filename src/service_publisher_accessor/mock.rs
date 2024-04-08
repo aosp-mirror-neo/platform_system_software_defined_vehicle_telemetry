@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::ServicePublisherManager;
+use crate::service_publisher_accessor::ServicePublisherAccessor;
 
-pub(crate) struct MockServicePublisherManager {
+pub(crate) struct MockServicePublisherAccessor {
     /// When set, the descriptor will be returned on the next call to get_message_descriptor.
     pub next_descriptor: Mutex<Option<MessageDescriptor>>,
     /// When set, the error will be returned on the next call to get_message_descriptor or subscribe.
@@ -26,7 +26,7 @@ pub(crate) struct MockServicePublisherManager {
 }
 
 #[async_trait]
-impl ServicePublisherManager for MockServicePublisherManager {
+impl ServicePublisherAccessor for MockServicePublisherAccessor {
     fn get_message_descriptor(
         &self,
         _service_name: &str,
@@ -73,13 +73,13 @@ impl ServicePublisherManager for MockServicePublisherManager {
     }
 }
 
-impl Default for MockServicePublisherManager {
+impl Default for MockServicePublisherAccessor {
     fn default() -> Self {
         Self::new(None)
     }
 }
 
-impl MockServicePublisherManager {
+impl MockServicePublisherAccessor {
     pub(crate) fn new_with_descriptor(descriptor: MessageDescriptor) -> Self {
         Self::new(Some(descriptor))
     }

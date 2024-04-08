@@ -10,10 +10,8 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryService::{
 };
 
 use rustutils::system_properties::PropertyWatcher;
-use sdv_telemetry::{
-    service_publisher_manager::service_publisher_manager_impl::ServicePublisherManagerImpl,
-    SdvTelemetryService, ServicePublisherManager,
-};
+use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
+use sdv_telemetry::{SdvTelemetryService, ServicePublisherAccessor};
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistryImpl, ConfigurablePublisherRegistryService,
 };
@@ -41,12 +39,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistryImpl::new());
 
     // Add all service publishers to the manager in order of priority
-    let service_publishers: Vec<Arc<dyn ServicePublisherManager>> =
+    let service_publishers: Vec<Arc<dyn ServicePublisherAccessor>> =
         vec![data_tunnel_wrapper, configurable_publisher_registry.clone()];
 
     // Create Service Publisher Manager
-    let service_publisher_manager_impl =
-        Arc::new(ServicePublisherManagerImpl::new(service_publishers));
+    let service_publisher_manager_impl = Arc::new(ServicePublisherManager::new(service_publishers));
 
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
     let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap_or("1".to_string());

@@ -19,7 +19,7 @@ use sdv_dt::{
     c_void, Result as SdvResult, SubscriptionHandle, SubscriptionNotificationType, TopicHandle,
     TopicTypedMetadata,
 };
-use sdv_telemetry::ServicePublisherManager;
+use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 
@@ -168,7 +168,7 @@ impl DataTunnelWrapperImpl {
 }
 
 #[async_trait]
-impl ServicePublisherManager for DataTunnelWrapperImpl {
+impl ServicePublisherAccessor for DataTunnelWrapperImpl {
     /// Subscribe to a Data Tunnel topic sample.
     /// The method returns a struct containing the topic information and the subscription topic handle.
     /// Returns a DT reader implementation that can be used to read messages.

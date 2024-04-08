@@ -9,7 +9,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::service_publisher_manager::ServicePublisherManager;
+use crate::service_publisher_accessor::ServicePublisherAccessor;
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
@@ -63,7 +63,7 @@ pub(crate) struct ServiceAdapterImpl {
     next_subscription_id: AtomicU32,
 
     // The registry of available service publishers.
-    service_publisher_manager: Arc<dyn ServicePublisherManager>,
+    service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
 
     // The map of functions that need to be called when a new message is available.
     // The first subscription to service creates a new map and passes it to the callback that
@@ -145,7 +145,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
 }
 
 impl ServiceAdapterImpl {
-    pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherManager>) -> Self {
+    pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherAccessor>) -> Self {
         Self {
             next_subscription_id: AtomicU32::new(1),
             service_publisher_manager,
@@ -194,7 +194,7 @@ pub(super) mod tests {
     use tokio::sync::mpsc;
 
     use super::*;
-    use crate::service_publisher_manager::mock::MockServicePublisherManager;
+    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
     const SERVICE_NAME: &str = "service";
     const SERVICE_NAME_2: &str = "service2";
@@ -209,7 +209,7 @@ pub(super) mod tests {
     }
 
     fn create_default_service_adapter() -> ServiceAdapterImpl {
-        ServiceAdapterImpl::new(Arc::new(MockServicePublisherManager::default()))
+        ServiceAdapterImpl::new(Arc::new(MockServicePublisherAccessor::default()))
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
@@ -218,7 +218,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_registry_returns_error_fails() {
-        let registry = MockServicePublisherManager::default();
+        let registry = MockServicePublisherAccessor::default();
         registry.next_error.lock().unwrap().replace(anyhow!("Error"));
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
@@ -236,7 +236,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_different_services_subscribes_to_registry() {
-        let registry = Arc::new(MockServicePublisherManager::default());
+        let registry = Arc::new(MockServicePublisherAccessor::default());
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg1 = Box::new(Int32Value::new());
@@ -275,7 +275,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_same_service_subscribes_to_registry() {
-        let registry = Arc::new(MockServicePublisherManager::default());
+        let registry = Arc::new(MockServicePublisherAccessor::default());
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
@@ -329,7 +329,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_success() {
-        let registry = MockServicePublisherManager::default();
+        let registry = MockServicePublisherAccessor::default();
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
@@ -343,7 +343,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_not_called_unless_last_subscriber_unsubscribes() {
-        let registry = MockServicePublisherManager::default();
+        let registry = MockServicePublisherAccessor::default();
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
@@ -361,7 +361,7 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_called_after_last_subscriber_unsubscribes() {
-        let registry = MockServicePublisherManager::default();
+        let registry = MockServicePublisherAccessor::default();
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
 
