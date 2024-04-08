@@ -3,125 +3,112 @@
 
 uuid: "c6115cea-8fde-436a-9f29-c12f06a10c102504"
 version: 01
-descriptor_protos: [
-  {
-    name: "metrics.proto"
-    package: "android.automotive.telemetry.messages"
-    message_type: [
-      {
-        name: "VehicleConnectivity"
-        field: [
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_INT32
-            name: "vector_vehicle_connection_status"
+descriptor_protos {
+  name: "metrics.proto"
+  package: "android.automotive.telemetry.messages"
 
-            number: 1
-          },
-          {
-            label: LABEL_REPEATED
-            type: TYPE_FLOAT
-            name: "vector_vehicle_connection_signal_strength"
+  message_type {
+    name: "VehicleConnectivity"
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "vector_vehicle_connection_status"
 
-            number: 2
-          },
-          {
-            label: LABEL_REPEATED
-            type: TYPE_UINT64
-            name: "vector_connection_status_timestamps"
+      number: 1
+    }
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_FLOAT
+      name: "vector_vehicle_connection_signal_strength"
 
-            number: 3
-          }
-        ]
-      },
-      {
-        name: "VehicleConnectivityReport"
-        field: [
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_INT32
-            name: "vector_vehicle_connection_status"
+      number: 2
+    }
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_UINT64
+      name: "vector_connection_status_timestamps"
 
-            number: 1
-          },
-          {
-            label: LABEL_REPEATED
-            type: TYPE_FLOAT
-            name: "vector_vehicle_connection_signal_strength"
-
-            number: 2
-          },
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_FLOAT
-            name: "max_speed"
-
-            number: 3
-          },
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_UINT32
-            name: "count_airbag_isDeployed"
-
-            number: 4
-          },
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_UINT32
-            name: "latest_hmi_car_settings_clicks"
-
-            number: 5
-          }
-        ]
-      }
-    ]
+      number: 3
+    }
   }
-]
-publishers: [
-{
+
+  message_type {
+    name: "VehicleConnectivityReport"
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "vector_vehicle_connection_status"
+
+      number: 1
+    }
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_FLOAT
+      name: "vector_vehicle_connection_signal_strength"
+
+      number: 2
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      name: "max_speed"
+
+      number: 3
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT32
+      name: "count_airbag_isDeployed"
+
+      number: 4
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT32
+      name: "latest_hmi_car_settings_clicks"
+
+      number: 5
+    }
+  }
+}
+
+publishers {
   name: "TestPublisher"
-    service_publisher: {
-      service_name: "DataTunnelSampleService"
-      topic_name: "DataTunnelTopic"
-    }
+  service_publisher {
+    service_name: "DataTunnelSampleService"
+    topic_name: "DataTunnelTopic"
   }
-]
-expression_nodes: [
-  {
-    field_leaf_node {
-      publisher_name: "TestPublisher"
-      field_names: ["sample_data"]
-    }
-  }
-]
+}
 
-triggers: [
-  {
-    name: "start_trigger"
-    periodic_trigger: {
-      interval_ms: 2000
-    }
-  },
-  {
-    name: "period_2s"
-    periodic_trigger: {
-      interval_ms: 2000
-    }
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "TestPublisher"
+    field_names: "sample_data"
   }
-]
+}
+
+triggers {
+  name: "start_trigger"
+  periodic_trigger {
+    interval_ms: 2000
+  }
+}
+triggers {
+  name: "period_2s"
+  periodic_trigger {
+    interval_ms: 2000
+  }
+}
+
 start_trigger_name: "start_trigger"
-metrics_report_configs: {
+metrics_report_configs {
   name: "SampleReport"
   trigger_names: "period_2s"
-  message_builder: {
+  message_builder {
     message_type: ".android.automotive.telemetry.messages.VehicleConnectivityReport"
-    field_assignments: [
-      {
-        field_name: "vector_vehicle_connection_status"
-        max_aggregation: {
-          expression_node_index: 0,
-        }
-      }
-    ]
+    field_assignments {
+      field_name: "vector_vehicle_connection_status"
+      max_aggregation { expression_node_index: 0 }
+    }
   }
 }

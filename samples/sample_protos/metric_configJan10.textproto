@@ -3,116 +3,103 @@
 
 uuid: "d3456chu-8fde-436a-9f29-c12f06a10c102504"
 version: 01
-descriptor_protos: [
-  {
-    name: "multi_config_test.proto"
-    package: "android.automotive.telemetry.messages"
-    message_type: [
-      {
-        name: "VehicleConnectivity"
-        field: [
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_INT32
-            name: "vector_vehicle_connection_status"
+descriptor_protos {
+  name: "multi_config_test.proto"
+  package: "android.automotive.telemetry.messages"
 
-            number: 1
-          },
-          {
-            label: LABEL_REPEATED
-            type: TYPE_FLOAT
-            name: "vector_vehicle_connection_signal_strength"
+  message_type {
+    name: "VehicleConnectivity"
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "vector_vehicle_connection_status"
 
-            number: 2
-          },
-          {
-            label: LABEL_REPEATED
-            type: TYPE_UINT64
-            name: "vector_connection_status_timestamps"
+      number: 1
+    }
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_FLOAT
+      name: "vector_vehicle_connection_signal_strength"
 
-            number: 3
-          }
-        ]
-      },
-      {
-        name: "VehicleConnectivityReport"
-        field: [
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_INT32
-            name: "vector_vehicle_connection_status"
+      number: 2
+    }
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_UINT64
+      name: "vector_connection_status_timestamps"
 
-            number: 1
-          },
-          {
-            label: LABEL_REPEATED
-            type: TYPE_FLOAT
-            name: "vector_vehicle_connection_signal_strength"
-
-            number: 2
-          },
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_FLOAT
-            name: "max_speed"
-
-            number: 3
-          },
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_UINT32
-            name: "count_airbag_isDeployed"
-
-            number: 4
-          },
-          {
-            label: LABEL_OPTIONAL
-            type: TYPE_UINT32
-            name: "latest_hmi_car_settings_clicks"
-
-            number: 5
-          }
-        ]
-      }
-    ]
-  }
-]
-expression_nodes: [
-
-  {
-    constant_leaf_node: {
-      int32_value: 0
+      number: 3
     }
   }
-]
 
-triggers: [
-  {
-    name: "start_trigger"
-    periodic_trigger: {
-      interval_ms: 3000
+  message_type {
+    name: "VehicleConnectivityReport"
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "vector_vehicle_connection_status"
+
+      number: 1
     }
-  },
-  {
-    name: "period_3s"
-    periodic_trigger: {
-      interval_ms: 3000
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_FLOAT
+      name: "vector_vehicle_connection_signal_strength"
+
+      number: 2
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      name: "max_speed"
+
+      number: 3
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT32
+      name: "count_airbag_isDeployed"
+
+      number: 4
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_UINT32
+      name: "latest_hmi_car_settings_clicks"
+
+      number: 5
     }
   }
-]
+}
+
+expression_nodes {
+  constant_leaf_node {
+    int32_value: 0
+  }
+}
+
+triggers {
+  name: "start_trigger"
+  periodic_trigger {
+    interval_ms: 3000
+  }
+}
+triggers {
+  name: "period_3s"
+  periodic_trigger {
+    interval_ms: 3000
+  }
+}
+
 start_trigger_name: "start_trigger"
-metrics_report_configs: {
+metrics_report_configs {
   name: "multi_config_report"
   trigger_names: "period_3s"
-  message_builder: {
+  message_builder {
     message_type: ".android.automotive.telemetry.messages.VehicleConnectivityReport"
-    field_assignments: [
-      {
-        field_name: "vector_vehicle_connection_status"
-        no_aggregation: {
-          expression_node_index: 0,
-        }
-      }
-    ]
+    field_assignments {
+      field_name: "vector_vehicle_connection_status"
+      no_aggregation { expression_node_index: 0 }
+    }
   }
 }
