@@ -625,7 +625,7 @@ where
         &self,
         config_proto: &MetricsConfigProto,
         context: &NodeFactoryContext,
-    ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), MetricsConfigOrchestratorError> {
+    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), MetricsConfigOrchestratorError> {
         self.node_factory
             .create_nodes(&config_proto.expression_nodes, context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })
@@ -1086,18 +1086,18 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             _context: &NodeFactoryContext,
-        ) -> Result<Vec<NodeValueType>, NodeError> {
+        ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
             if self.fail_validate {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
-            Ok(vec![NodeValueType::Int; proto_nodes.len()])
+            Ok(vec![None; proto_nodes.len()])
         }
 
         fn create_nodes(
             &self,
             proto_nodes: &[NodeProto],
             context: &NodeFactoryContext,
-        ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), NodeError> {
+        ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
             if self.fail_create_nodes {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
@@ -1110,8 +1110,7 @@ mod tests {
 
             let size = proto_nodes.len();
             let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
-            let node_type = NodeValueType::None;
-            Ok((vec![empty_node; size], vec![node_type; size]))
+            Ok((vec![empty_node; size], vec![None; size]))
         }
     }
 

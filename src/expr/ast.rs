@@ -29,7 +29,7 @@ pub trait NodeFactory {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<Vec<NodeValueType>, NodeError>;
+    ) -> Result<Vec<Option<NodeValueType>>, NodeError>;
 
     /// Creates rust Nodes from protobuf Nodes,.
     /// Protobuf nodes use indices to represent left and right children.
@@ -40,7 +40,7 @@ pub trait NodeFactory {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), NodeError>;
+    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError>;
 }
 
 /// Provides necessary information for node validation and creation.
@@ -149,7 +149,7 @@ impl NodeFactoryImpl {
         proto_nodes: &[NodeProto],
         visit_status: &mut [VisitStatus],
         nodes: &mut [Option<Arc<Node>>],
-        node_value_types: &mut [NodeValueType],
+        node_value_types: &mut [Option<NodeValueType>],
         context: &NodeFactoryContext,
     ) -> Result<Option<Arc<Node>>, NodeError> {
         // get visit status, `?` returns early if error
@@ -175,7 +175,7 @@ impl NodeFactoryImpl {
                 let rust_node = match &proto_nodes[index].node_type {
                     // base case 1: constant leaf node, can return from match block immediately
                     Some(NodeTypeProto::ConstantLeafNode(constant_leaf)) => {
-                        node_value_types[index] = constant_leaf.get_node_value_type()?;
+                        node_value_types[index] = Some(constant_leaf.get_node_value_type()?);
                         Self::maybe_create_node(nodes, index, || {
                             Ok(Arc::new(Node::ConstantLeaf {
                                 value: NodeValue::from_constant_leaf_node(constant_leaf)?,
@@ -281,10 +281,10 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<Vec<NodeValueType>, NodeError> {
+    ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
         let n = proto_nodes.len();
         let mut visit_status = vec![VisitStatus::NotVisited; n];
-        let mut node_value_types = vec![NodeValueType::None; n];
+        let mut node_value_types = vec![None; n];
         for i in 0..n {
             Self::visit(
                 i,
@@ -302,10 +302,10 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<(Vec<Arc<Node>>, Vec<NodeValueType>), NodeError> {
+    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
         let n = proto_nodes.len();
         let mut visit_status = vec![VisitStatus::NotVisited; n];
-        let mut node_value_types = vec![NodeValueType::None; n];
+        let mut node_value_types = vec![None; n];
         let mut rust_nodes: Vec<Option<Arc<Node>>> = vec![None; n];
 
         for i in 0..n {
@@ -418,6 +418,9 @@ impl fmt::Debug for Node {
 
 #[cfg(test)]
 mod tests {
+    use paste::paste;
+    use protobuf::MessageFull;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdvtelemetry_proto_rust::expression::{
         combination_node::{
             ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -429,15 +432,52 @@ mod tests {
     use super::*;
     use crate::expr::mock::*;
 
-    const PUBLISHER_NAME: &str = "publisher_foo";
+    const BOOL_FIELD_NAME: &str = "bool_field";
+    const FLOAT_FIELD_NAME: &str = "float_field";
+    const INT_FIELD_NAME: &str = "int_field";
+    const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
+    const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
+    const UNKNOWN_PUBLISHER_NAME: &str = "publisher_bar";
 
     fn create_factory_context() -> NodeFactoryContext {
         let mut descriptor_provider = MockDescriptorProvider::new();
-        descriptor_provider.return_descriptor = true;
+        descriptor_provider
+            .descriptors
+            .insert(KNOWN_PUBLISHER_NAME.to_owned(), TestMessage::descriptor());
         NodeFactoryContext {
             message_provider: Some(MOCK_MESSAGE_PROVIDER.clone()),
             descriptor_provider: Box::new(descriptor_provider),
         }
+    }
+
+    /// Create a combination node with two leaf nodes.
+    fn create_combination_node(
+        operator: OperatorProto,
+        is_left_known: bool,
+        left_field_name: &str,
+        is_right_known: bool,
+        right_field_name: &str,
+    ) -> Vec<NodeProto> {
+        let mut left_node = NodeProto::new();
+        let left_field_node = left_node.mut_field_leaf_node();
+
+        left_field_node.publisher_name =
+            if is_left_known { KNOWN_PUBLISHER_NAME } else { UNKNOWN_PUBLISHER_NAME }.to_owned();
+        left_field_node.field_names = vec![left_field_name.to_owned()];
+
+        let mut right_node = NodeProto::new();
+        let right_field_node = right_node.mut_field_leaf_node();
+        right_field_node.publisher_name =
+            if is_right_known { KNOWN_PUBLISHER_NAME } else { UNKNOWN_PUBLISHER_NAME }.to_owned();
+        right_field_node.field_names = vec![right_field_name.to_owned()];
+
+        let mut node = NodeProto::new();
+        let combination_node = node.mut_combination_node();
+        combination_node.left_index = Some(0);
+        combination_node.right_index = Some(1);
+        combination_node.operator = Some(operator);
+
+        vec![left_node, right_node, node]
     }
 
     /// Helper function that returns this tree:
@@ -467,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_node_type_not_set_fails() {
+    fn validate_node_type_not_set_fails() {
         let all_proto_nodes = vec![NodeProto::new()];
         let node_factory = NodeFactoryImpl::new();
         let context = create_factory_context();
@@ -476,11 +516,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::NodeTypeNotSet { .. }));
+        assert!(matches!(&err, NodeError::NodeTypeNotSet { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_node_value_not_set_fails() {
+    fn validate_node_value_not_set_fails() {
         let mut node = NodeProto::new();
         node.set_constant_leaf_node(ConstantLeafNode::new());
         let all_proto_nodes = vec![node];
@@ -491,11 +531,15 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::ConstantValueNotSet { .. }));
+        assert!(
+            matches!(&err, NodeError::ConstantValueNotSet { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_node_operator_not_set_fails() {
+    fn validate_node_operator_not_set_fails() {
         let mut node = NodeProto::new();
         node.set_combination_node(CombinationNode::new());
         let all_proto_nodes = vec![node];
@@ -506,14 +550,14 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::OperatorNotSet { .. }));
+        assert!(matches!(&err, NodeError::OperatorNotSet { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_node_has_string_field_fails() {
+    fn validate_node_has_string_field_fails() {
         let mut node_0 = NodeProto::new();
         let mut leaf = FieldLeafNode::new();
-        leaf.publisher_name = PUBLISHER_NAME.to_string();
+        leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_string();
         leaf.field_names = vec!["string_field".to_string()];
         node_0.set_field_leaf_node(leaf);
         let all_proto_nodes = vec![node_0];
@@ -524,11 +568,15 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::UnsupportedSingularFieldType { .. }));
+        assert!(
+            matches!(&err, NodeError::UnsupportedSingularFieldType { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_child_is_self_fails() {
+    fn validate_child_is_self_fails() {
         // setup node_0 whose child is itself
         let mut node_0 = NodeProto::new();
         let mut combination_node = CombinationNode::new();
@@ -543,11 +591,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::CyclicDependency { .. }));
+        assert!(matches!(&err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_cyclic_dependency_fails() {
+    fn validate_cyclic_dependency_fails() {
         // setup node_0 depends on node_1 and node_1 depends on node_0
         let mut node_0 = NodeProto::new();
         let mut node_1 = NodeProto::new();
@@ -565,11 +613,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::CyclicDependency { .. }));
+        assert!(matches!(&err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_child_node_index_out_of_bound_fails() {
+    fn validate_child_node_index_out_of_bound_fails() {
         // setup node_0 whose child is at index 42
         let mut node_0 = NodeProto::new();
         let mut combination_node = CombinationNode::new();
@@ -584,11 +632,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::IndexOutOfBound { .. }));
+        assert!(matches!(&err, NodeError::IndexOutOfBound { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_combination_node_did_not_specify_operator_fails() {
+    fn validate_combination_node_did_not_specify_operator_fails() {
         let mut node_0 = NodeProto::new();
         node_0.set_combination_node(CombinationNode::new());
         let all_proto_nodes = vec![node_0];
@@ -599,11 +647,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::OperatorNotSet { .. }));
+        assert!(matches!(&err, NodeError::OperatorNotSet { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_missing_left_child_fails() {
+    fn validate_missing_left_child_fails() {
         let mut node_0 = NodeProto::new();
         let mut combination_node = CombinationNode::new();
         combination_node.set_relational_operator(RelationalOperator::EQ);
@@ -617,11 +665,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::LeftChildNotSet { .. }));
+        assert!(matches!(&err, NodeError::LeftChildNotSet { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_validate_binary_operator_no_right_child_fails() {
+    fn validate_binary_operator_no_right_child_fails() {
         let mut node_0 = NodeProto::new();
         let mut node_1 = NodeProto::new();
         let mut constant_leaf = ConstantLeafNode::new();
@@ -641,11 +689,15 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::BinaryOperatorIncorrectChildren));
+        assert!(
+            matches!(&err, NodeError::BinaryOperatorIncorrectChildren),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_unary_operator_with_two_children_fails() {
+    fn validate_unary_operator_with_two_children_fails() {
         // setup - root node has 2 child nodes but unary operator (NOT)
         let all_proto_nodes = create_true_false_branch(LogicalOperator::NOT);
         let node_factory = NodeFactoryImpl::new();
@@ -655,11 +707,15 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::UnaryOperatorIncorrectChildren));
+        assert!(
+            matches!(&err, NodeError::UnaryOperatorIncorrectChildren),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_unary_operator_no_right_child_ok() {
+    fn validate_unary_operator_no_right_child_ok() {
         // setup
         let node_factory = NodeFactoryImpl::new();
         let context = create_factory_context();
@@ -689,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_arithmetic_operator_incompatible_types_should_fail() {
+    fn validate_arithmetic_operator_incompatible_types_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
         let mut node_0 = NodeProto::new();
@@ -710,11 +766,15 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
-        assert!(matches!(err, NodeError::ArithmeticOperatorIncompatibleOperands));
+        assert!(
+            matches!(&err, NodeError::ArithmeticOperatorIncompatibleOperands),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_relational_operator_incompatible_types_should_fail() {
+    fn validate_relational_operator_incompatible_types_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
         let mut node_0 = NodeProto::new();
@@ -722,7 +782,7 @@ mod tests {
         let mut node_2 = NodeProto::new();
 
         let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = PUBLISHER_NAME.to_string();
+        field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_string();
         field_leaf.field_names = vec!["message_field".to_string(), "repeated_i32s".to_string()];
         node_0.set_field_leaf_node(field_leaf);
 
@@ -741,11 +801,15 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
-        assert!(matches!(err, NodeError::ContainsOperatorIncompatibleOperands));
+        assert!(
+            matches!(&err, NodeError::ContainsOperatorIncompatibleOperands),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_logical_operator_incompatible_types_should_fail() {
+    fn validate_logical_operator_incompatible_types_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
         let mut node_0 = NodeProto::new();
@@ -766,11 +830,15 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
-        assert!(matches!(err, NodeError::LogicalOperatorIncompatibleOperands));
+        assert!(
+            matches!(&err, NodeError::LogicalOperatorIncompatibleOperands),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_rounding_operator_incompatible_types_should_fail() {
+    fn validate_rounding_operator_incompatible_types_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
         let mut node_0 = NodeProto::new();
@@ -790,11 +858,15 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
-        assert!(matches!(err, NodeError::RoundingOperatorIncompatibleOperands));
+        assert!(
+            matches!(&err, NodeError::RoundingOperatorIncompatibleOperands),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_rounding_operator_has_two_children_should_fail() {
+    fn validate_rounding_operator_has_two_children_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
         let mut node_0 = NodeProto::new();
@@ -815,40 +887,31 @@ mod tests {
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
-        assert!(matches!(err, NodeError::UnaryOperatorIncorrectChildren));
+        assert!(
+            matches!(&err, NodeError::UnaryOperatorIncorrectChildren),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_validate_published_message_no_descriptor_should_fail() {
-        let mut node = NodeProto::new();
-        let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = PUBLISHER_NAME.to_string();
-        field_leaf.field_names = vec!["int_field".to_string()];
-        node.set_field_leaf_node(field_leaf);
-        let all_proto_nodes = vec![node];
-
+    fn validate_field_leaf_node_no_descriptor_success() {
         let node_factory = NodeFactoryImpl {};
-        // create descriptor provider that returns no descriptors
-        let context = NodeFactoryContext {
-            message_provider: None,
-            descriptor_provider: Box::new(MockDescriptorProvider::new()),
-        };
+        let context = create_factory_context();
+
+        let mut node = NodeProto::new();
+        let field_leaf = node.mut_field_leaf_node();
+        field_leaf.publisher_name = UNKNOWN_PUBLISHER_NAME.to_owned();
+        field_leaf.field_names = vec![INT_FIELD_NAME.to_owned()];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let res = node_factory.validate(&[node], &context).unwrap();
 
-        assert!(matches!(err, NodeError::InternalError { .. }));
+        assert_eq!(&res, &[None]);
     }
 
     #[test]
-    fn test_validate_published_message_descriptor_provider_error_should_fail() {
-        let mut node = NodeProto::new();
-        let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = PUBLISHER_NAME.to_string();
-        field_leaf.field_names = vec!["int_field".to_string()];
-        node.set_field_leaf_node(field_leaf);
-        let all_proto_nodes = vec![node];
-
+    fn validate_field_leaf_node_descriptor_provider_error_fails() {
         let node_factory = NodeFactoryImpl {};
         // make descriptor provider return error
         let mut descriptor_provider = MockDescriptorProvider::new();
@@ -860,14 +923,213 @@ mod tests {
             descriptor_provider: Box::new(descriptor_provider),
         };
 
+        let mut node = NodeProto::new();
+        let mut field_leaf = FieldLeafNode::new();
+        field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_owned();
+        field_leaf.field_names = vec![INT_FIELD_NAME.to_owned()];
+        node.set_field_leaf_node(field_leaf);
+        let all_proto_nodes = vec![node];
+
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
 
-        assert!(matches!(err, NodeError::DescriptorProviderError { .. }));
+        assert!(
+            matches!(&err, NodeError::DescriptorProviderError { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    macro_rules! validate_combination_node_relational_operator_success {
+        ($($name:ident: $operator:expr, $is_left_known:expr, $is_right_known:expr, $is_list:expr,)*) => {
+            $(
+                paste! {
+                    #[test]
+                    fn [<validate_combination_node_ $name _success>]() {
+                        let node_factory = NodeFactoryImpl {};
+                        let context = create_factory_context();
+                        let all_proto_nodes = create_combination_node(
+                            OperatorProto::RelationalOperator(RelationalOperator::$operator.into()),
+                            $is_left_known,
+                            { if $is_list { REPEATED_INT_FIELD_NAME } else { INT_FIELD_NAME } },
+                            $is_right_known,
+                            INT_FIELD_NAME);
+
+                        let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
+
+                        assert_eq!(&res[2], &Some(NodeValueType::Bool));
+                    }
+                }
+            )*
+        }
+    }
+
+    // Validates relational operators with different operand availability combinations.
+    validate_combination_node_relational_operator_success! {
+        gt_left_unknown_type: GT, false, true, false,
+        gt_right_unknown_type: GT, true, false, false,
+        gt_both_unknown_types: GT, false, false, false,
+        gt_or_eq_left_unknown_type: GT_OR_EQ, false, true, false,
+        gt_or_eq_right_unknown_type: GT_OR_EQ, true, false, false,
+        gt_or_eq_both_unknown_types: GT_OR_EQ, false, false, false,
+        lt_left_unknown_type: LT, false, true, false,
+        lt_right_unknown_type: LT, true, false, false,
+        lt_both_unknown_types: LT, false, false, false,
+        lt_or_eq_left_unknown_type: LT_OR_EQ, false, true, false,
+        lt_or_eq_right_unknown_type: LT_OR_EQ, true, false, false,
+        lt_or_eq_both_unknown_types: LT_OR_EQ, false, false, false,
+        contains_left_unknown_type: CONTAINS, false, true, true,
+        contains_right_unknown_type: CONTAINS, true, false, true,
+        contains_both_unknown_types: CONTAINS, false, false, true,
+        does_not_contain_left_unknown_type: DOES_NOT_CONTAIN, false, true, true,
+        does_not_contain_right_unknown_type: DOES_NOT_CONTAIN, true, false, true,
+        does_not_contain_both_unknown_types: DOES_NOT_CONTAIN, false, false, true,
+        all_eq_left_unknown_type: ALL_EQ, false, true, true,
+        all_eq_right_unknown_type: ALL_EQ, true, false, true,
+        all_eq_both_unknown_types: ALL_EQ, false, false, true,
+    }
+
+    macro_rules! validate_combination_node_logical_operator_success {
+        ($($name:ident: $operator:expr, $is_left_known:expr, $is_right_known:expr,)*) => {
+            $(
+                paste! {
+                    #[test]
+                    fn [<validate_combination_node_ $name _success>]() {
+                        let node_factory = NodeFactoryImpl {};
+                        let context = create_factory_context();
+                        let all_proto_nodes = create_combination_node(
+                            OperatorProto::LogicalOperator(LogicalOperator::$operator.into()),
+                            $is_left_known,
+                            BOOL_FIELD_NAME,
+                            $is_right_known,
+                            BOOL_FIELD_NAME);
+
+                        let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
+
+                        assert_eq!(&res[2], &Some(NodeValueType::Bool));
+                    }
+                }
+            )*
+        }
+    }
+
+    // Validates logical operators with different operand availability combinations.
+    validate_combination_node_logical_operator_success! {
+        and_left_unknown_type: AND, false, true,
+        and_right_unknown_type: AND, true, false,
+        and_both_unknown_types: AND, false, false,
+        or_left_unknown_type: OR, false, true,
+        or_right_unknown_type: OR, true, false,
+        or_both_unknown_types: OR, false, false,
+        xor_left_unknown_type: XOR, false, true,
+        xor_right_unknown_type: XOR, true, false,
+        xor_both_unknown_types: XOR, false, false,
     }
 
     #[test]
-    fn test_validate_ok() {
+    fn validate_combination_node_not_unknown_type_success() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+
+        let mut left_node = NodeProto::new();
+        let left_field_node = left_node.mut_field_leaf_node();
+        left_field_node.publisher_name = UNKNOWN_PUBLISHER_NAME.to_owned();
+        left_field_node.field_names = vec![BOOL_FIELD_NAME.to_owned()];
+
+        let mut node = NodeProto::new();
+        let combination_node = node.mut_combination_node();
+        combination_node.left_index = Some(0);
+        combination_node.set_logical_operator(LogicalOperator::NOT);
+
+        let all_proto_nodes = &[left_node, node];
+
+        let res = node_factory.validate(all_proto_nodes, &context).unwrap();
+
+        assert_eq!(&res[1], &Some(NodeValueType::Bool));
+    }
+
+    macro_rules! validate_combination_node_arithmetic_operator_success {
+        ($($name:ident: $operator:expr, $are_float_operands:expr, $is_left_known:expr, $is_right_known:expr, $expected_result:expr,)*) => {
+            $(
+                paste! {
+                    #[test]
+                    fn [<validate_combination_node_ $name _success>]() {
+                        let node_factory = NodeFactoryImpl {};
+                        let context = create_factory_context();
+                        let all_proto_nodes = create_combination_node(
+                            OperatorProto::ArithmeticOperator(ArithmeticOperator::$operator.into()),
+                            $is_left_known,
+                            { if $are_float_operands { FLOAT_FIELD_NAME } else { INT_FIELD_NAME } },
+                            $is_right_known,
+                            { if $are_float_operands { FLOAT_FIELD_NAME } else { INT_FIELD_NAME } });
+
+                        let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
+
+                        assert_eq!(&res[2], &$expected_result);
+                    }
+                }
+            )*
+        }
+    }
+
+    // Validates arithmetic operators with different operand availability combinations.
+    validate_combination_node_arithmetic_operator_success! {
+        add_int_left_unknown_type: ADD, false, false, true, None,
+        add_int_right_unknown_type: ADD, false, true, false, None,
+        add_int_both_unknown_types: ADD, false, false, false, None,
+        add_float_left_unknown_type: ADD, true, false, true, Some(NodeValueType::Float),
+        add_float_right_unknown_type: ADD, true, true, false, Some(NodeValueType::Float),
+        add_float_both_unknown_types: ADD, true, false, false, None,
+        subtract_int_left_unknown_type: SUBTRACT, false, false, true, None,
+        subtract_int_right_unknown_type: SUBTRACT, false, true, false, None,
+        subtract_int_both_unknown_types: SUBTRACT, false, false, false, None,
+        subtract_float_left_unknown_type: SUBTRACT, true, false, true, Some(NodeValueType::Float),
+        subtract_float_right_unknown_type: SUBTRACT, true, true, false, Some(NodeValueType::Float),
+        subtract_float_both_unknown_types: SUBTRACT, true, false, false, None,
+        multiply_int_left_unknown_type: MULTIPLY, false, false, true, None,
+        multiply_int_right_unknown_type: MULTIPLY, false, true, false, None,
+        multiply_int_both_unknown_types: MULTIPLY, false, false, false, None,
+        multiply_float_left_unknown_type: MULTIPLY, true, false, true, Some(NodeValueType::Float),
+        multiply_float_right_unknown_type: MULTIPLY, true, true, false, Some(NodeValueType::Float),
+        multiply_float_both_unknown_types: MULTIPLY, true, false, false, None,
+        power_int_left_unknown_type: POWER, false, false, true, None,
+        power_int_right_unknown_type: POWER, false, true, false, None,
+        power_int_both_unknown_types: POWER, false, false, false, None,
+        power_float_left_unknown_type: POWER, true, false, true, Some(NodeValueType::Float),
+        power_float_right_unknown_type: POWER, true, true, false, Some(NodeValueType::Float),
+        power_float_both_unknown_types: POWER, true, false, false, None,
+        divide_left_unknown_type: DIVIDE, false, false, true, Some(NodeValueType::Float),
+        divide_right_unknown_type: DIVIDE, false, true, false, Some(NodeValueType::Float),
+        divide_both_unknown_types: DIVIDE, false, false, false, Some(NodeValueType::Float),
+        modulo_left_unknown_type: MODULO, false, false, true, Some(NodeValueType::Int),
+        modulo_right_unknown_type: MODULO, false, true, false, Some(NodeValueType::Int),
+        modulo_both_unknown_types: MODULO, false, false, false, Some(NodeValueType::Int),
+    }
+
+    #[test]
+    fn validate_combination_node_rounding_unknown_type_success() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+
+        let mut left_node = NodeProto::new();
+        let left_field_node = left_node.mut_field_leaf_node();
+        left_field_node.publisher_name = UNKNOWN_PUBLISHER_NAME.to_owned();
+        left_field_node.field_names = vec![INT_FIELD_NAME.to_owned()];
+
+        let mut node = NodeProto::new();
+        let combination_node = node.mut_combination_node();
+        combination_node.left_index = Some(0);
+        combination_node.set_rounding_operator(RoundingOperator::ROUND);
+
+        let all_proto_nodes = &[left_node, node];
+
+        let res = node_factory.validate(all_proto_nodes, &context).unwrap();
+
+        assert_eq!(&res[1], &Some(NodeValueType::Int));
+    }
+
+    #[test]
+    fn validate_success() {
         let node_factory = NodeFactoryImpl::new();
         let context = create_factory_context();
         // setup tree containing all 4 types of operators
@@ -927,12 +1189,12 @@ mod tests {
 
         // assert
         for (actual_type, expected_type) in node_value_types.into_iter().zip(expected_types) {
-            assert_eq!(actual_type, expected_type);
+            assert_eq!(actual_type, Some(expected_type));
         }
     }
 
     #[test]
-    fn test_create_nodes_ok() -> Result<(), NodeError> {
+    fn create_nodes_success() -> Result<(), NodeError> {
         // setup
         let op = LogicalOperator::AND;
         let node_factory = NodeFactoryImpl {};
@@ -976,26 +1238,30 @@ mod tests {
             }
         }
         // assert all nodes in this tree output boolean results
-        assert!(node_types.iter().all(|value_type| *value_type == NodeValueType::Bool));
+        assert!(node_types.iter().all(|value_type| *value_type == Some(NodeValueType::Bool)));
         Ok(())
     }
 
     #[test]
-    fn test_create_nodes_unary_operator_cannot_have_two_children() {
+    fn create_nodes_unary_operator_two_children_fails() {
         // setup - root node has 2 child nodes but unary operator (NOT)
         let all_proto_nodes = create_true_false_branch(LogicalOperator::NOT);
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
 
         // action
-        let res = node_factory.create_nodes(&all_proto_nodes, &context);
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(res.err().unwrap(), NodeError::UnaryOperatorIncorrectChildren));
+        assert!(
+            matches!(&err, NodeError::UnaryOperatorIncorrectChildren),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_create_nodes_unary_operator_missing_right_child_ok() {
+    fn create_nodes_unary_operator_success() {
         // setup
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
@@ -1018,14 +1284,11 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let res = node_factory.create_nodes(&all_proto_nodes, &context);
-
-        // assert
-        assert!(res.is_ok());
+        node_factory.create_nodes(&all_proto_nodes, &context).unwrap();
     }
 
     #[test]
-    fn test_create_nodes_binary_operator_missing_right_child_errors() {
+    fn create_nodes_binary_operator_no_right_child_fails() {
         // setup
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
@@ -1048,14 +1311,18 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let res = node_factory.create_nodes(&all_proto_nodes, &context);
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
 
         // assert error because binary operator needs 2 children
-        assert!(matches!(res.err().unwrap(), NodeError::BinaryOperatorIncorrectChildren));
+        assert!(
+            matches!(&err, NodeError::BinaryOperatorIncorrectChildren),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_create_nodes_handles_index_out_bound() {
+    fn create_nodes_index_out_of_bounds_fails() {
         // setup root node with children at index 10 and 20 (out of bound)
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
@@ -1069,14 +1336,14 @@ mod tests {
         let all_proto_nodes = vec![proto_node];
 
         // action
-        let res = node_factory.create_nodes(&all_proto_nodes, &context);
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(res.err().unwrap(), NodeError::IndexOutOfBound { .. }));
+        assert!(matches!(&err, NodeError::IndexOutOfBound { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_create_nodes_cyclic_dependency_fails() {
+    fn create_nodes_cyclic_dependency_fails() {
         // setup node_0 depends on node_1 and node_1 depends on node_0
         let mut node_0 = NodeProto::new();
         let mut node_1 = NodeProto::new();
@@ -1094,11 +1361,11 @@ mod tests {
         let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
 
         // assert
-        assert!(matches!(err, NodeError::CyclicDependency { .. }));
+        assert!(matches!(err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
     }
 
     #[test]
-    fn test_evaluate_logical_operator_ok() -> Result<(), NodeError> {
+    fn evaluate_logical_operator_success() -> Result<(), NodeError> {
         // setup this tree:
         //               XOR
         //          /             \
@@ -1136,7 +1403,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_arithmetic_operator_ok() -> Result<(), NodeError> {
+    fn evaluate_arithmetic_operator_success() -> Result<(), NodeError> {
         // setup this tree: 5 / 2 * 5^2
         //              MULTIPLY
         //          /             \
@@ -1179,7 +1446,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_relational_operator_ok() -> Result<(), NodeError> {
+    fn evaluate_relational_operator_success() -> Result<(), NodeError> {
         // setup this tree which uses the protobuf message in the expr/mock.rs
         //                                 EQ
         //                           /              \
@@ -1187,7 +1454,7 @@ mod tests {
         //               /                  \
         // TestMessage.repeated_doubles       Pi
         let repeated_doubles_node = Arc::new(Node::FieldLeaf {
-            publisher_name: PUBLISHER_NAME.to_string(),
+            publisher_name: KNOWN_PUBLISHER_NAME.to_string(),
             fields: vec!["repeated_doubles".to_string()],
             message_provider: MOCK_MESSAGE_PROVIDER.clone(),
         });
@@ -1222,7 +1489,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_rounding_operator_ok() -> Result<(), NodeError> {
+    fn evaluate_rounding_operator_success() -> Result<(), NodeError> {
         let pi_node =
             Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
         let round_node = Arc::new(Node::Combination {
@@ -1246,7 +1513,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_mixed_operators() -> Result<(), NodeError> {
+    fn evaluate_mixed_operators_success() -> Result<(), NodeError> {
         // setup tree containing all 4 types of operators
         //                       logical (&&)
         //                    /               \
@@ -1297,7 +1564,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_mixed_leaf_node_types() -> Result<(), NodeError> {
+    fn evaluate_mixed_leaf_node_types_success() -> Result<(), NodeError> {
         // setup this tree which uses the message initialized in expr/mock.rs
         //                           index 4 (<)
         //                       /               \
@@ -1307,8 +1574,8 @@ mod tests {
         //     index 0               index 1
         // TestMessage.float_field       2
         let float_field_node = Arc::new(Node::FieldLeaf {
-            publisher_name: PUBLISHER_NAME.to_string(),
-            fields: vec!["float_field".to_string()],
+            publisher_name: KNOWN_PUBLISHER_NAME.to_string(),
+            fields: vec![FLOAT_FIELD_NAME.to_owned()],
             message_provider: MOCK_MESSAGE_PROVIDER.clone(),
         });
         let divide_node = Arc::new(Node::Combination {
@@ -1317,7 +1584,7 @@ mod tests {
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(2) })),
         });
         let int_field_node = Arc::new(Node::FieldLeaf {
-            publisher_name: PUBLISHER_NAME.to_string(),
+            publisher_name: KNOWN_PUBLISHER_NAME.to_string(),
             fields: vec!["int_field".to_string()],
             message_provider: MOCK_MESSAGE_PROVIDER.clone(),
         });
@@ -1345,7 +1612,7 @@ mod tests {
     }
 
     #[test]
-    fn test_evaluate_incompatible_types_should_fail() {
+    fn evaluate_incompatible_types_fails() {
         let zero_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) });
         let true_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) });
         let lt_node = Arc::new(Node::Combination {
@@ -1355,14 +1622,18 @@ mod tests {
         });
 
         // expr is "0 < True"
-        let result = lt_node.evaluate();
+        let err = lt_node.evaluate().err().unwrap();
 
         // 0 cannot be less than True
-        assert!(matches!(result.err().unwrap(), NodeError::ComparisonOperatorIncomptaibleOperands));
+        assert!(
+            matches!(&err, NodeError::ComparisonOperatorIncomptaibleOperands),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_evaluate_message_provider_invalid_publisher_name_fails() {
+    fn evaluate_message_provider_invalid_publisher_name_fails() {
         let message_provider = Arc::new(MockMessageProvider::new());
         message_provider.set_next_result(Err(MessageProviderError::InvalidPublisherName));
         let node =
@@ -1370,11 +1641,15 @@ mod tests {
 
         let err = node.evaluate().err().unwrap();
 
-        assert!(matches!(err, NodeError::MessageProviderError { .. }));
+        assert!(
+            matches!(&err, NodeError::MessageProviderError { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
-    fn test_evaluate_no_provided_message_returns_none() {
+    fn evaluate_no_provided_message_returns_none() {
         let message_provider = Arc::new(MockMessageProvider::new());
         message_provider.set_next_result(Ok(None));
         let node =

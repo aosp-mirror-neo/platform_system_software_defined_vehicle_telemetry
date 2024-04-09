@@ -44,13 +44,13 @@ pub(crate) trait PublisherFactory<
 pub(crate) struct PublisherFactoryCreateContext<'a, TTrigger: Trigger = TriggerImpl> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
     pub triggers: &'a HashMap<String, Arc<TTrigger>>,
 }
 
 pub(crate) struct PublisherFactoryValidateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
-    pub node_types: &'a [NodeValueType],
+    pub node_types: &'a [Option<NodeValueType>],
 }
 
 #[allow(dead_code)]

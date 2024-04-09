@@ -3,6 +3,7 @@
 //! Helper functions used for AST tree validation.
 
 use protobuf::reflect::{MessageDescriptor, RuntimeFieldType, RuntimeType};
+use sdv_telemetry_utils::option_extension::OptionExtension;
 use sdvtelemetry_proto_rust::expression::{
     combination_node::Operator as OperatorProto,
     combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
@@ -17,7 +18,6 @@ use crate::expr::{ast::DescriptorProvider, node_errors::NodeError};
 #[derive(Clone, PartialEq, Debug)]
 #[allow(missing_docs)]
 pub enum NodeValueType {
-    None,
     Bool,
     Int,
     Float,
@@ -34,7 +34,11 @@ impl NodeValueType {
     }
 
     pub fn is_numeric(&self) -> bool {
-        self.is_int() || matches!(self, NodeValueType::Float)
+        self.is_int() || self.is_float()
+    }
+
+    fn is_float(&self) -> bool {
+        matches!(self, NodeValueType::Float)
     }
 
     fn is_int(&self) -> bool {
@@ -45,13 +49,15 @@ impl NodeValueType {
         matches!(self, NodeValueType::Message)
     }
 
-    // returns true iff `self` is a list type, and `other` is a singular & compatible
+    // returns true ff `self` is a list type, and `other` is a singular & compatible
     // type to the list
-    fn can_apply_list_operator(&self, other: &NodeValueType) -> bool {
+    fn can_apply_list_operator(&self, other: &Option<NodeValueType>) -> bool {
         match self {
-            NodeValueType::BoolList => other.is_bool(),
-            NodeValueType::IntList | NodeValueType::FloatList => other.is_numeric(),
-            NodeValueType::MessageList => other.is_message(),
+            NodeValueType::BoolList => other.is_none_or(|o| o.is_bool()),
+            NodeValueType::IntList | NodeValueType::FloatList => {
+                other.is_none_or(|o| o.is_numeric())
+            }
+            NodeValueType::MessageList => other.is_none_or(|o| o.is_message()),
             _ => false,
         }
     }
@@ -83,25 +89,24 @@ pub trait FieldLeafNodeExtension {
     fn get_node_value_type(
         &self,
         descriptor_provider: &dyn DescriptorProvider,
-    ) -> Result<NodeValueType, NodeError>;
+    ) -> Result<Option<NodeValueType>, NodeError>;
 }
 
 impl FieldLeafNodeExtension for FieldLeafNode {
     fn get_node_value_type(
         &self,
         descriptor_provider: &dyn DescriptorProvider,
-    ) -> Result<NodeValueType, NodeError> {
+    ) -> Result<Option<NodeValueType>, NodeError> {
         if self.field_names.is_empty() {
-            return Ok(NodeValueType::Message);
+            return Ok(Some(NodeValueType::Message));
         }
 
         let maybe_descriptor = descriptor_provider.get_descriptor(&self.publisher_name)?;
 
         if let Some(descriptor) = maybe_descriptor {
-            get_nested_field_type(descriptor, &self.field_names)
+            get_nested_field_type(descriptor, &self.field_names).map(Some)
         } else {
-            // TODO(b/331482267): Don't fail validation if the publisher metadata is not available yet.
-            Err(NodeError::InternalError { msg: "Publisher metadata not found".to_owned() })
+            Ok(None)
         }
     }
 }
@@ -146,10 +151,10 @@ pub trait OperatorProtoExtension {
     /// Checks if operands are compatible with operator, and return the node value type
     fn get_node_value_type(
         &self,
-        node_value_types: &[NodeValueType],
+        node_value_types: &[Option<NodeValueType>],
         left: usize,
         right: &Option<u32>,
-    ) -> Result<NodeValueType, NodeError>;
+    ) -> Result<Option<NodeValueType>, NodeError>;
 }
 
 impl OperatorProtoExtension for OperatorProto {
@@ -177,43 +182,47 @@ impl OperatorProtoExtension for OperatorProto {
 
     fn get_node_value_type(
         &self,
-        node_value_types: &[NodeValueType],
+        node_value_types: &[Option<NodeValueType>],
         left_idx: usize,
         right_idx: &Option<u32>,
-    ) -> Result<NodeValueType, NodeError> {
+    ) -> Result<Option<NodeValueType>, NodeError> {
         let left = &node_value_types[left_idx];
-        let right = if let Some(right_idx) = right_idx {
-            &node_value_types[*right_idx as usize]
-        } else {
-            &NodeValueType::None
+        let get_right = || {
+            let idx = right_idx.expect("check_right_child should verify right child exists");
+            &node_value_types[idx as usize]
         };
+
         match self {
             // relational operator output type = boolean
             OperatorProto::RelationalOperator(op) => {
                 match op.enum_value().map_err(|i| NodeError::UnknownOperator {
                     op: format!("Relational operator with enum value {}", i),
                 })? {
-                    RelationalOperator::EQ | RelationalOperator::NOT_EQ => Ok(NodeValueType::Bool),
+                    RelationalOperator::EQ | RelationalOperator::NOT_EQ => {
+                        Ok(Some(NodeValueType::Bool))
+                    }
                     RelationalOperator::GT
                     | RelationalOperator::GT_OR_EQ
                     | RelationalOperator::LT
                     | RelationalOperator::LT_OR_EQ => {
-                        if left.is_numeric() && right.is_numeric() {
-                            Ok(NodeValueType::Bool)
+                        if (left.is_none_or(|l| l.is_numeric()))
+                            && get_right().is_none_or(|r| r.is_numeric())
+                        {
+                            Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeError::ComparisonOperatorIncomptaibleOperands)
                         }
                     }
                     RelationalOperator::CONTAINS | RelationalOperator::DOES_NOT_CONTAIN => {
-                        if left.can_apply_list_operator(right) {
-                            Ok(NodeValueType::Bool)
+                        if left.is_none_or(|l| l.can_apply_list_operator(get_right())) {
+                            Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeError::ContainsOperatorIncompatibleOperands)
                         }
                     }
                     RelationalOperator::ALL_EQ => {
-                        if left.can_apply_list_operator(right) {
-                            Ok(NodeValueType::Bool)
+                        if left.is_none_or(|l| l.can_apply_list_operator(get_right())) {
+                            Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeError::AllEqualsOperatorIncompatibleOperands)
                         }
@@ -225,17 +234,15 @@ impl OperatorProtoExtension for OperatorProto {
                 NodeError::UnknownOperator { op: format!("Logical operator with enum value {}", i) }
             })? {
                 LogicalOperator::AND | LogicalOperator::OR | LogicalOperator::XOR => {
-                    if left.is_bool() && right.is_bool() {
-                        Ok(NodeValueType::Bool)
+                    if left.is_none_or(|l| l.is_bool()) && get_right().is_none_or(|r| r.is_bool()) {
+                        Ok(Some(NodeValueType::Bool))
                     } else {
                         Err(NodeError::LogicalOperatorIncompatibleOperands)
                     }
                 }
                 LogicalOperator::NOT => {
-                    if right != &NodeValueType::None {
-                        Err(NodeError::UnaryOperatorIncorrectChildren)
-                    } else if left.is_bool() {
-                        Ok(NodeValueType::Bool)
+                    if left.is_none_or(|l| l.is_bool()) {
+                        Ok(Some(NodeValueType::Bool))
                     } else {
                         Err(NodeError::LogicalOperatorIncompatibleOperands)
                     }
@@ -250,24 +257,42 @@ impl OperatorProtoExtension for OperatorProto {
                     | ArithmeticOperator::SUBTRACT
                     | ArithmeticOperator::MULTIPLY
                     | ArithmeticOperator::POWER => {
-                        if left.is_int() && right.is_int() {
-                            Ok(NodeValueType::Int)
-                        } else if left.is_numeric() && right.is_numeric() {
-                            Ok(NodeValueType::Float)
+                        if left.as_ref().is_some_and(|l| l.is_int())
+                            && get_right().as_ref().is_some_and(|r| r.is_int())
+                        {
+                            Ok(Some(NodeValueType::Int))
+                        } else if left.as_ref().is_some_and(|l| l.is_numeric())
+                            && get_right().as_ref().is_some_and(|l| l.is_numeric())
+                        {
+                            Ok(Some(NodeValueType::Float))
+                        } else if left.is_none_or(|l| l.is_int())
+                            && get_right().is_none_or(|r| r.is_int())
+                        {
+                            // Type cannot be determined because it can be either int or float.
+                            Ok(None)
+                        } else if left.is_none_or(|l| l.is_numeric())
+                            && get_right().is_none_or(|r| r.is_numeric())
+                        {
+                            // If the known argument is a float, the result will
+                            // always be float, not int.
+                            Ok(Some(NodeValueType::Float))
                         } else {
                             Err(NodeError::ArithmeticOperatorIncompatibleOperands)
                         }
                     }
                     ArithmeticOperator::DIVIDE => {
-                        if left.is_numeric() && right.is_numeric() {
-                            Ok(NodeValueType::Float)
+                        if left.is_none_or(|l| l.is_numeric())
+                            && get_right().is_none_or(|r| r.is_numeric())
+                        {
+                            Ok(Some(NodeValueType::Float))
                         } else {
                             Err(NodeError::ArithmeticOperatorIncompatibleOperands)
                         }
                     }
                     ArithmeticOperator::MODULO => {
-                        if left.is_int() && right.is_int() {
-                            Ok(NodeValueType::Int)
+                        if left.is_none_or(|l| l.is_int()) && get_right().is_none_or(|r| r.is_int())
+                        {
+                            Ok(Some(NodeValueType::Int))
                         } else {
                             Err(NodeError::ArithmeticOperatorIncompatibleOperands)
                         }
@@ -276,13 +301,11 @@ impl OperatorProtoExtension for OperatorProto {
             }
             // rounding operator output type = int
             OperatorProto::RoundingOperator(_) => {
-                if right != &NodeValueType::None {
-                    return Err(NodeError::UnaryOperatorIncorrectChildren);
+                if left.is_none_or(|l| l.is_float()) {
+                    Ok(Some(NodeValueType::Int))
+                } else {
+                    Err(NodeError::RoundingOperatorIncompatibleOperands)
                 }
-                if left != &NodeValueType::Float {
-                    return Err(NodeError::RoundingOperatorIncompatibleOperands);
-                }
-                Ok(NodeValueType::Int)
             }
             _ => Err(NodeError::UnknownOperator { op: format!("{:?}", self) }),
         }
