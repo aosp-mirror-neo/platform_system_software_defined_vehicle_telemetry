@@ -1497,10 +1497,10 @@ mod tests {
             left: Some(pi_node.clone()),
             right: None,
         });
-        let nodes = vec![pi_node, round_node];
+        let nodes = [pi_node, round_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
-        let expected_results = vec![
+        let expected_results = [
             NodeValue::Float(std::f32::consts::PI), // constant value of Pi
             NodeValue::Int64(3),                    // Pi rounded to the nearest int
         ];
@@ -1547,7 +1547,7 @@ mod tests {
         let nodes = vec![point_three_node, ceil_node, five_node, add_node, lt_or_eq_node, and_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
-        let expected_results = vec![
+        let expected_results = [
             NodeValue::Float(0.3), // constant of 0.3
             NodeValue::Int64(1),   // 0.3 rounded up
             NodeValue::Int32(5),   // constant of 5
@@ -1594,7 +1594,7 @@ mod tests {
             right: Some(int_field_node.clone()),
         });
 
-        let nodes = vec![float_field_node, divide_node, int_field_node, lt_node];
+        let nodes = [float_field_node, divide_node, int_field_node, lt_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = [
