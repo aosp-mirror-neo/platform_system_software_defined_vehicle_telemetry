@@ -1093,10 +1093,10 @@ mod tests {
             left: Some(true_node.clone()),
             right: Some(or_node.clone()),
         };
-        let nodes = vec![true_node, false_node, or_node, xor_node.into()];
+        let nodes = [true_node, false_node, or_node, xor_node.into()];
 
         // we will evaluate every node in `nodes`, and we expect these results:
-        let expected_results = vec![
+        let expected_results = [
             NodeValue::Bool(true),  // true_node
             NodeValue::Bool(false), // false_node
             NodeValue::Bool(true),  // true || false = true
@@ -1136,10 +1136,10 @@ mod tests {
             left: Some(divide_node.clone()),
             right: Some(power_node.clone()),
         });
-        let nodes = vec![five_node, two_node, divide_node, power_node, multiply_node];
+        let nodes = [five_node, two_node, divide_node, power_node, multiply_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
-        let expected_results = vec![
+        let expected_results = [
             NodeValue::Int32(5),     // index 0 = constant value of 5
             NodeValue::Int32(2),     // index 1 = constant value of 2
             NodeValue::Double(2.5),  // index 2 = 5 / 2 = 2.5
@@ -1179,10 +1179,10 @@ mod tests {
             left: Some(contains_node.clone()),
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
         });
-        let nodes = vec![repeated_doubles_node, pi_node, contains_node, eq_node];
+        let nodes = [repeated_doubles_node, pi_node, contains_node, eq_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
-        let expected_results = vec![
+        let expected_results = [
             // index 0 = [Pi, Tau, e]
             NodeValue::DoubleList(TEST_MESSAGE.repeated_doubles.clone()),
             NodeValue::Float(std::f32::consts::PI), // constant value of Pi
@@ -1306,7 +1306,7 @@ mod tests {
         let nodes = vec![float_field_node, divide_node, int_field_node, lt_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
-        let expected_results = vec![
+        let expected_results = [
             NodeValue::Float(100.0), // field_field has value of 100
             NodeValue::Double(50.0), // 100 / 2 = 50
             NodeValue::Int32(80),    // int_field has value 80
