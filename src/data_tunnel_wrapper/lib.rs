@@ -121,52 +121,49 @@ impl DataTunnelWrapperImpl {
         topic_name: &str,
         buffer: &mut [u8],
     ) -> anyhow::Result<usize> {
-        if let Some(subscription) = data_tunnel_subscriptions.lock().unwrap().get_mut(topic_name) {
-            let mut read_message_count = 0usize;
-            let result =
-                sdv_dt::AvailableToRead(subscription.subscription_handle, &mut read_message_count);
-            if result != SdvResult::Success {
-                return Err(anyhow!("Error: {:?}", result));
-            };
+        let mut subscriptions_lock = data_tunnel_subscriptions.lock().unwrap();
+        let Some(subscription) = subscriptions_lock.get_mut(topic_name) else {
+            return Err(anyhow!("Subscription not found for topic {}", topic_name));
+        };
 
-            if read_message_count == 0 {
-                return Ok(0);
-            }
+        let mut read_message_count = 0usize;
+        let result =
+            sdv_dt::AvailableToRead(subscription.subscription_handle, &mut read_message_count);
+        if result != SdvResult::Success {
+            return Err(anyhow!("Error when calling AvailableToRead: {:?}", result));
+        };
 
-            // Safety:
-            // `buffer` points to a buffer of size at least `message_count` * `message_size`
-            // bytes, where `message_size` and `message_count` can be fetched from metadata argument
-            // in `SubscribeToTopic()` method.
-            let result = unsafe {
-                sdv_dt::ReadMessages(
-                    subscription.subscription_handle,
-                    buffer.as_mut_ptr() as *mut c_void,
-                    read_message_count,
-                )
-            };
-
-            let answer = match result {
-                SdvResult::Success => Ok(read_message_count),
-                _ => {
-                    // The first ReadMessage() invocation could return error if the first
-                    // message in the queue was overwritten
-                    if subscription.first_message {
-                        Ok(0usize)
-                    } else {
-                        Err(anyhow!("Unable to read data from topic: {}", topic_name))
-                    }
-                }
-            };
-
-            subscription.first_message = false;
-            answer
-        } else {
-            Err(ServicePublisherManagerSubscribeError::TopicNotFound {
-                service_name: "data_tunnel".to_string(),
-                topic_name: topic_name.to_string(),
-            }
-            .into())
+        if read_message_count == 0 {
+            return Ok(0);
         }
+
+        // Safety:
+        // `buffer` points to a buffer of size at least `message_count` * `message_size`
+        // bytes, where `message_size` and `message_count` can be fetched from metadata argument
+        // in `SubscribeToTopic()` method.
+        let result = unsafe {
+            sdv_dt::ReadMessages(
+                subscription.subscription_handle,
+                buffer.as_mut_ptr() as *mut c_void,
+                read_message_count,
+            )
+        };
+
+        let answer = match result {
+            SdvResult::Success => Ok(read_message_count),
+            _ => {
+                // The first ReadMessage() invocation could return error if the first
+                // message in the queue was overwritten
+                if subscription.first_message {
+                    Ok(0usize)
+                } else {
+                    Err(anyhow!("Unable to read data from topic: {}", topic_name))
+                }
+            }
+        };
+
+        subscription.first_message = false;
+        answer
     }
 }
 
@@ -178,42 +175,41 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
     async fn try_subscribe(
         &self,
         service_name: &str,
-        topic: &str,
+        topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
     ) -> Result<bool, ServicePublisherManagerSubscribeError> {
-        info!("Subscribing to data tunnel topic {}", topic);
+        info!("Subscribing to data tunnel topic {}", topic_name);
 
         let (message_size, message_count, notification_receiver) =
-            match self.data_tunnel_subscriptions.lock().unwrap().entry(topic.to_string()) {
+            match self.data_tunnel_subscriptions.lock().unwrap().entry(topic_name.to_owned()) {
                 Entry::Occupied(_) => {
-                    return Err(ServicePublisherManagerSubscribeError::TopicSubscriptionsExists {
-                        topic_name: topic.to_string(),
+                    return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
+                        error: anyhow!("Already subscribed to the given topic: {}", topic_name),
                     })
                 }
                 Entry::Vacant(v) => {
-                    cxx::let_cxx_string!(topic_name = topic);
-                    let mut subscription_handle = SubscriptionHandle::default();
+                    cxx::let_cxx_string!(cxx_topic_name = topic_name);
                     let mut topic_exists = true;
-
-                    let mut subscribe_meta_data =
-                        TopicTypedMetadata { message_count_: 0, message_size_: 0 };
-
-                    let metadata: Pin<&mut TopicTypedMetadata> = Pin::new(&mut subscribe_meta_data);
-
-                    let result = sdv_dt::TopicExists(&topic_name, &mut topic_exists);
+                    let result = sdv_dt::TopicExists(&cxx_topic_name, &mut topic_exists);
                     if result != SdvResult::Success {
                         return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
                             error: anyhow!("Data Tunnel Result: {:?}", result),
                         });
                     };
-
                     if !topic_exists {
                         return Ok(false);
                     }
 
-                    let result =
-                        sdv_dt::SubscribeToTopic(&topic_name, metadata, &mut subscription_handle);
+                    let mut subscribe_meta_data =
+                        TopicTypedMetadata { message_count_: 0, message_size_: 0 };
+                    let metadata: Pin<&mut TopicTypedMetadata> = Pin::new(&mut subscribe_meta_data);
+                    let mut subscription_handle = SubscriptionHandle::default();
+                    let result = sdv_dt::SubscribeToTopic(
+                        &cxx_topic_name,
+                        metadata,
+                        &mut subscription_handle,
+                    );
                     if result != SdvResult::Success {
                         return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
                             error: anyhow!("Data Tunnel Result: {:?}", result),
@@ -252,8 +248,16 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                 }
             };
 
-        let message_descriptor = self.get_message_descriptor(service_name, topic)?;
-        let topic_clone = topic.to_owned();
+        let message_descriptor = self
+            .get_message_descriptor(service_name, topic_name)?
+            .ok_or_else(|| ServicePublisherManagerSubscribeError::SubscribeFailed {
+                error: anyhow!(
+                    "Metadata not found for service: {}, topic: {}",
+                    service_name,
+                    topic_name
+                ),
+            })?;
+        let topic_name_clone = topic_name.to_owned();
         let data_tunnel_subscriptions = self.data_tunnel_subscriptions.clone();
         // Tokio task for fetching data from data tunnel and pushing it to telemetry service
         tokio::spawn(async move {
@@ -265,7 +269,8 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
             // Logic to stop the loop will be added once data tunnel provides support for unsubscribe calls
             loop {
                 notification_receiver.notified().await;
-                match Self::read(data_tunnel_subscriptions.clone(), &topic_clone, &mut buffer) {
+                match Self::read(data_tunnel_subscriptions.clone(), &topic_name_clone, &mut buffer)
+                {
                     Ok(0) => {
                         info!("No new messages.");
                     }
@@ -275,14 +280,17 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
                             let mut is = protobuf::CodedInputStream::from_bytes(message_bytes);
                             // Get number of bytes that need to be read
                             let size = is.read_raw_varint32().unwrap().into();
-                            let _ = is.push_limit(size);
+                            if let Err(e) = is.push_limit(size) {
+                                error!("Error when pushing the limit: {}", e);
+                                return;
+                            }
 
                             match message_descriptor.parse_from(&mut is) {
                                 Ok(msg) => {
                                     (callback)(msg);
                                 }
                                 Err(e) => {
-                                    error!("Error in parsing message {}", e);
+                                    error!("Error when parsing the message: {}", e);
                                 }
                             };
                         }
@@ -312,22 +320,31 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
     fn get_message_descriptor(
         &self,
         _service_name: &str,
-        topic: &str,
-    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
+        topic_name: &str,
+    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
         let message_descriptor = match self
             .data_tunnel_topic_message_descriptors
             .lock()
             .unwrap()
-            .entry(topic.to_string())
+            .entry(topic_name.to_owned())
         {
             Entry::Occupied(o) => o.get().clone(),
             Entry::Vacant(v) => {
-                cxx::let_cxx_string!(topic_name = topic);
+                cxx::let_cxx_string!(cxx_topic_name = topic_name);
+                let mut topic_exists = true;
+                let result = sdv_dt::TopicExists(&cxx_topic_name, &mut topic_exists);
+                if result != SdvResult::Success {
+                    return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
+                        error: anyhow!("Data Tunnel Result: {:?}", result),
+                    });
+                };
+                if !topic_exists {
+                    return Ok(None);
+                }
 
                 let mut cxx_metadata_vec = CxxVector::<u8>::new();
                 let pinned_metadata = cxx_metadata_vec.pin_mut();
-
-                let result = sdv_dt::GetTopicMetadata(&topic_name, pinned_metadata);
+                let result = sdv_dt::GetTopicMetadata(&cxx_topic_name, pinned_metadata);
                 if result != SdvResult::Success {
                     return Err(ServicePublisherManagerSubscribeError::SubscribeFailed {
                         error: anyhow!("Data Tunnel Result: {:?}", result),
@@ -371,7 +388,7 @@ impl ServicePublisherManager for DataTunnelWrapperImpl {
             }
         };
 
-        Ok(message_descriptor)
+        Ok(Some(message_descriptor))
     }
 }
 

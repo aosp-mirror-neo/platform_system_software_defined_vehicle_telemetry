@@ -1,5 +1,5 @@
 use lazy_static::lazy_static;
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use protobuf::{reflect::MessageDescriptor, MessageDyn, MessageFull};
 use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdvtelemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -94,6 +94,8 @@ lazy_static! {
     };
     pub static ref EMPTY_TEST_MESSAGE: TestMessage = TestMessage::new();
     pub static ref MOCK_MESSAGE_PROVIDER: Arc<MockMessageProvider> = Arc::new(MockMessageProvider::new());
+
+    static ref TEST_MESSAGE_DESCRIPTOR: MessageDescriptor = TestMessage::descriptor();
 }
 
 pub struct MockMessageProvider {
@@ -127,13 +129,16 @@ impl MessageProvider for MockMessageProvider {
 }
 
 pub struct MockDescriptorProvider {
-    pub result_provider:
-        Option<Box<dyn Fn() -> Result<MessageDescriptor, DescriptorProviderError> + Send + Sync>>,
+    /// If set, the function will be used to return an error.
+    pub error_provider: Option<Box<dyn Fn() -> DescriptorProviderError + Send + Sync>>,
+
+    /// If set to true, provider will return test descriptor.
+    pub return_descriptor: bool,
 }
 
 impl MockDescriptorProvider {
     pub fn new() -> Self {
-        Self { result_provider: None }
+        Self { error_provider: None, return_descriptor: false }
     }
 }
 
@@ -141,11 +146,13 @@ impl DescriptorProvider for MockDescriptorProvider {
     fn get_descriptor(
         &self,
         _publisher_name: &str,
-    ) -> Result<MessageDescriptor, DescriptorProviderError> {
-        if let Some(provider) = &self.result_provider {
-            provider()
+    ) -> Result<Option<&MessageDescriptor>, DescriptorProviderError> {
+        if let Some(error_provider) = &self.error_provider {
+            Err(error_provider())
+        } else if self.return_descriptor {
+            Ok(Some(&TEST_MESSAGE_DESCRIPTOR))
         } else {
-            Ok(TEST_MESSAGE.descriptor_dyn())
+            Ok(None)
         }
     }
 }

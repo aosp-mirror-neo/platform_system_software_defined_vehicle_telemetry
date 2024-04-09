@@ -18,11 +18,13 @@ use thiserror::Error;
 #[async_trait]
 pub trait ServicePublisherManager: Send + Sync {
     /// Returns message descriptor of the specified topic published by the specified service.
+    /// Returns None if the service and topic combination is not registered.
+    /// Returns error if the service and topic combination is registered, but metadata retrieval failed.
     fn get_message_descriptor(
         &self,
         service_name: &str,
         topic_name: &str,
-    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError>;
+    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError>;
 
     /// Subscribes specified callback to the new messages from the specified topic
     /// with certain configuration, if provided.
@@ -46,12 +48,6 @@ pub trait ServicePublisherManager: Send + Sync {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ServicePublisherManagerSubscribeError {
-    #[error("Topic {topic_name} is not registered for publisher {service_name}")]
-    TopicNotFound { service_name: String, topic_name: String },
-    #[error("Already subscribed to the given topic: {topic_name}")]
-    TopicSubscriptionsExists { topic_name: String },
-    #[error("Publisher {service_name} is not registered")]
-    ServiceNotFound { service_name: String },
     #[error("Unable to subscribe to the publisher: {error}")]
     SubscribeFailed { error: anyhow::Error },
     #[error("Unable to unsubscribe from the topic: {error}")]

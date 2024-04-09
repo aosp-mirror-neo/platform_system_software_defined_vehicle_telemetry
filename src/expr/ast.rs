@@ -67,7 +67,7 @@ pub trait DescriptorProvider: Send + Sync {
     fn get_descriptor(
         &self,
         publisher_name: &str,
-    ) -> Result<MessageDescriptor, DescriptorProviderError>;
+    ) -> Result<Option<&MessageDescriptor>, DescriptorProviderError>;
 }
 
 /// Rust representation of a protobuf Node.
@@ -432,9 +432,11 @@ mod tests {
     const PUBLISHER_NAME: &str = "publisher_foo";
 
     fn create_factory_context() -> NodeFactoryContext {
+        let mut descriptor_provider = MockDescriptorProvider::new();
+        descriptor_provider.return_descriptor = true;
         NodeFactoryContext {
             message_provider: Some(MOCK_MESSAGE_PROVIDER.clone()),
-            descriptor_provider: Box::new(MockDescriptorProvider::new()),
+            descriptor_provider: Box::new(descriptor_provider),
         }
     }
 
@@ -826,14 +828,36 @@ mod tests {
         let all_proto_nodes = vec![node];
 
         let node_factory = NodeFactoryImpl {};
-        // make descriptor provider return error
+        // create descriptor provider that returns no descriptors
         let context = NodeFactoryContext {
             message_provider: None,
-            descriptor_provider: Box::new(MockDescriptorProvider {
-                result_provider: Some(Box::new(|| {
-                    Err(DescriptorProviderError::InvalidPublisherName)
-                })),
-            }),
+            descriptor_provider: Box::new(MockDescriptorProvider::new()),
+        };
+
+        // action
+        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+
+        assert!(matches!(err, NodeError::InternalError { .. }));
+    }
+
+    #[test]
+    fn test_validate_published_message_descriptor_provider_error_should_fail() {
+        let mut node = NodeProto::new();
+        let mut field_leaf = FieldLeafNode::new();
+        field_leaf.publisher_name = PUBLISHER_NAME.to_string();
+        field_leaf.field_names = vec!["int_field".to_string()];
+        node.set_field_leaf_node(field_leaf);
+        let all_proto_nodes = vec![node];
+
+        let node_factory = NodeFactoryImpl {};
+        // make descriptor provider return error
+        let mut descriptor_provider = MockDescriptorProvider::new();
+        descriptor_provider
+            .error_provider
+            .replace(Box::new(|| DescriptorProviderError::InvalidPublisherName));
+        let context = NodeFactoryContext {
+            message_provider: None,
+            descriptor_provider: Box::new(descriptor_provider),
         };
 
         // action

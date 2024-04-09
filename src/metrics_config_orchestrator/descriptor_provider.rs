@@ -7,16 +7,17 @@ use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError}
 
 pub struct DescriptorProviderImpl {
     // key = publisher name, value = MessageDescriptor for the data it publishes
-    pub(super) publisher_message_descriptor: HashMap<String, MessageDescriptor>,
+    // value may be None if runtime type information for the publisher is not available yet.
+    pub(super) publisher_message_descriptor: HashMap<String, Option<MessageDescriptor>>,
 }
 
 impl DescriptorProvider for DescriptorProviderImpl {
     fn get_descriptor(
         &self,
         publisher_name: &str,
-    ) -> Result<MessageDescriptor, DescriptorProviderError> {
-        if let Some(msg_descriptor) = self.publisher_message_descriptor.get(publisher_name) {
-            Ok(msg_descriptor.clone())
+    ) -> Result<Option<&MessageDescriptor>, DescriptorProviderError> {
+        if let Some(descriptor) = self.publisher_message_descriptor.get(publisher_name) {
+            Ok(descriptor.as_ref())
         } else {
             Err(DescriptorProviderError::InvalidPublisherName)
         }
@@ -36,7 +37,7 @@ mod tests {
     fn create_descriptor_provider() -> DescriptorProviderImpl {
         // Add publishers and publisher_message_descriptor to the map
         let publisher_message_descriptor =
-            HashMap::from([(PUBLISHER_1.to_owned(), TestMessage::descriptor())]);
+            HashMap::from([(PUBLISHER_1.to_owned(), Some(TestMessage::descriptor()))]);
 
         // Return the instance
         DescriptorProviderImpl { publisher_message_descriptor }
@@ -46,15 +47,15 @@ mod tests {
     fn get_descriptor_valid_publisher_name_success() {
         let descriptor_provider = create_descriptor_provider();
 
-        assert_eq!(
-            descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().proto(),
-            TestMessage::descriptor().proto()
-        )
+        let res = descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().unwrap().proto();
+
+        assert_eq!(res, TestMessage::descriptor().proto())
     }
 
     #[test]
     fn get_descriptor_invalid_publisher_name_fails() {
         let descriptor_provider = create_descriptor_provider();
+
         let err = descriptor_provider.get_descriptor(PUBLISHER_2).err().unwrap();
 
         assert!(

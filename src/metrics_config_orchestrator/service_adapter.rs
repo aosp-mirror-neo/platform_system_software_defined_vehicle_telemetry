@@ -206,6 +206,7 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 pub(super) mod tests {
+    use anyhow::anyhow;
     use lazy_static::lazy_static;
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
@@ -245,10 +246,7 @@ pub(super) mod tests {
     async fn subscribe_registry_returns_error_fails() {
         let registry = MockServicePublisherManager::default();
         registry.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::TopicNotFound {
-                service_name: SERVICE_NAME.to_owned(),
-                topic_name: TOPIC_NAME.to_owned(),
-            },
+            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
         );
         let registry = Arc::new(registry);
         let service_adapter = ServiceAdapterImpl::new(registry.clone());
@@ -261,7 +259,7 @@ pub(super) mod tests {
 
         let ServiceAdapterSubscribeError::SubscriptionFailed { error } = &err;
         assert!(
-            matches!(error, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME ),
+            matches!(error, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
             "Unexpected inner error: {:?}",
             error
         );
