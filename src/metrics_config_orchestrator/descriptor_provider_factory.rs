@@ -11,7 +11,6 @@ use thiserror::Error;
 use crate::expr::ast::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
 use crate::service_publisher_manager::ServicePublisherManager;
-use crate::ServicePublisherManagerSubscribeError;
 
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
     fn create(
@@ -35,7 +34,7 @@ pub(crate) enum DescriptorProviderFactoryError {
     #[error("Error when calling ServicePublisherManager: {error}")]
     ServicePublisherManagerError {
         #[from]
-        error: ServicePublisherManagerSubscribeError,
+        error: anyhow::Error,
     },
 }
 
@@ -152,9 +151,7 @@ mod tests {
     #[test]
     fn create_descriptor_provider_service_publisher_manager_error_fails() {
         let service_publisher_manager = Arc::new(MockServicePublisherManager::new(None));
-        service_publisher_manager.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
-        );
+        service_publisher_manager.next_error.lock().unwrap().replace(anyhow!("Error"));
 
         let mut publisher = PublisherProto::new();
         let service_publisher = publisher.mut_service_publisher();
@@ -171,16 +168,10 @@ mod tests {
             .err()
             .unwrap();
 
-        let DescriptorProviderFactoryError::ServicePublisherManagerError { error: inner_error } =
-            &err
-        else {
-            panic!("Unexpected error: {:?}", err)
-        };
-
         assert!(
-            matches!(&inner_error, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
-            "Unexpected inner error: {:?}",
-            inner_error
+            matches!(&err, DescriptorProviderFactoryError::ServicePublisherManagerError { .. }),
+            "Unexpected error: {:?}",
+            err
         );
     }
 
