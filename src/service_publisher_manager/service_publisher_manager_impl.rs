@@ -10,8 +10,7 @@ use std::collections::HashMap;
 use std::result::Result;
 use std::sync::{Arc, Mutex};
 
-// use sdv_telemetry::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
-use crate::{ServicePublisherManager, ServicePublisherManagerSubscribeError};
+use crate::ServicePublisherManager;
 
 /// Struct for managing all implementations of ServicePublisherManager trait
 pub struct ServicePublisherManagerImpl {
@@ -40,7 +39,7 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
         &self,
         service_name: &str,
         topic_name: &str,
-    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
+    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             let msg_descriptor =
                 service_publisher_manager_impl.get_message_descriptor(service_name, topic_name)?;
@@ -59,7 +58,7 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
         topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
-    ) -> Result<bool, ServicePublisherManagerSubscribeError> {
+    ) -> Result<bool, anyhow::Error> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             if service_publisher_manager_impl
                 .try_subscribe(service_name, topic_name, callback.clone(), configuration)
@@ -87,7 +86,7 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
         service_name: &str,
         topic_name: &str,
         configuration: Option<&[u8]>,
-    ) -> Result<(), ServicePublisherManagerSubscribeError> {
+    ) -> Result<(), anyhow::Error> {
         let service_publisher = self
             .service_publisher_subscriptions
             .lock()
@@ -118,10 +117,10 @@ mod tests {
     use super::*;
     use crate::service_publisher_manager::mock::MockServicePublisherManager;
 
+    const ERROR_MESSAGE: &str = "ERROR_MESSAGE";
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
-    const TOPIC_NAME: &str = "TEST_TOPIC_NAME";
-
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
+    const TOPIC_NAME: &str = "TEST_TOPIC_NAME";
     const TOPIC_NAME2: &str = "TEST_TOPIC_NAME2";
 
     #[tokio::test]
@@ -144,9 +143,7 @@ mod tests {
     #[tokio::test]
     async fn get_message_descriptor_propagates_error() {
         let service_publisher = Arc::new(MockServicePublisherManager::default());
-        service_publisher.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
-        );
+        service_publisher.next_error.lock().unwrap().replace(anyhow!(ERROR_MESSAGE.to_owned()));
         let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherManager>];
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
@@ -155,11 +152,7 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
-            "Unexpected error: {}",
-            err
-        );
+        assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 
     #[tokio::test]
@@ -194,9 +187,7 @@ mod tests {
     #[tokio::test]
     async fn subscribe_propagates_error() {
         let service_publisher = MockServicePublisherManager::default();
-        service_publisher.next_error.lock().unwrap().replace(
-            ServicePublisherManagerSubscribeError::SubscribeFailed { error: anyhow!("Error") },
-        );
+        service_publisher.next_error.lock().unwrap().replace(anyhow!(ERROR_MESSAGE.to_owned()));
         let service_publisher = Arc::new(service_publisher);
 
         let service_publishers =
@@ -210,11 +201,7 @@ mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::SubscribeFailed { .. }),
-            "Unexpected error: {}",
-            err
-        );
+        assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 
     #[tokio::test]
