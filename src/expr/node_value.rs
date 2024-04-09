@@ -149,7 +149,7 @@ impl NodeValue {
                 &op.enum_value().map_err(|i| NodeError::UnknownOperator {
                     op: format!("Arithmetic operator with enum value {}", i),
                 })?,
-                &get_right_operand()?,
+                get_right_operand,
             ),
             OperatorProto::LogicalOperator(op) => self.handle_logical(
                 &op.enum_value().map_err(|i| NodeError::UnknownOperator {
@@ -358,8 +358,22 @@ impl NodeValue {
     fn handle_arithmetic(
         &self,
         op: &ArithmeticOperator,
-        other: &NodeValue,
+        get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError>,
     ) -> Result<NodeValue, NodeError> {
+        if *op == ArithmeticOperator::UNARY_MINUS {
+            let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
+            if self.is_int() {
+                return Ok(NodeValue::Int64(-self.get_int(&err_provider)?));
+            } else if self.is_numeric() {
+                return Ok(NodeValue::Double(-self.get_double(&err_provider)?));
+            } else if self.is_none() {
+                return Ok(self.clone());
+            } else {
+                return Err(err_provider());
+            }
+        }
+
+        let other = get_right_operand()?;
         // None occurs when message is missing or incomplete, and None propagates up.
         if other.is_none() {
             return Ok(other.clone());
@@ -371,19 +385,19 @@ impl NodeValue {
         }
         match op {
             ArithmeticOperator::ADD => self.apply_numeric(
-                other,
+                &other,
                 |a, b| NodeValue::Int64(a + b),
                 |a, b| NodeValue::Double(a + b),
                 &err_provider,
             ),
             ArithmeticOperator::SUBTRACT => self.apply_numeric(
-                other,
+                &other,
                 |a, b| NodeValue::Int64(a - b),
                 |a, b| NodeValue::Double(a - b),
                 &err_provider,
             ),
             ArithmeticOperator::MULTIPLY => self.apply_numeric(
-                other,
+                &other,
                 |a, b| NodeValue::Int64(a * b),
                 |a, b| NodeValue::Double(a * b),
                 &err_provider,
@@ -406,11 +420,14 @@ impl NodeValue {
                 Ok(NodeValue::Int64(self.get_int(&err_provider)? % other.get_int(&err_provider)?))
             }
             ArithmeticOperator::POWER => self.apply_numeric(
-                other,
+                &other,
                 |a, b| NodeValue::Int64(a.pow(b as u32)),
                 |a, b| NodeValue::Double(a.powf(b)),
                 &err_provider,
             ),
+            ArithmeticOperator::UNARY_MINUS => {
+                unreachable!("Unary operators should be handled outside of this match statement")
+            }
         }
     }
 
@@ -1168,6 +1185,15 @@ mod tests {
         assert_eq!(int_val.operate(&OP_ADD, || provide(&none_val)).unwrap(), NodeValue::None);
         // None + 1 = None
         assert_eq!(none_val.operate(&OP_ADD, || provide(&int_val)).unwrap(), NodeValue::None);
+        // - None = None
+        assert_eq!(
+            none_val
+                .operate(&OP_ADD, || panic!(
+                    "Unary operator should not call right operand provider"
+                ))
+                .unwrap(),
+            NodeValue::None
+        );
     }
 
     #[test]
@@ -1301,6 +1327,37 @@ mod tests {
             two_point_five.operate(&OP_POWER, || provide(&two_point_five))?,
             NodeValue::Double(expected)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn operate_arithmetic_unary_minus() -> Result<(), NodeError> {
+        let two = NodeValue::Int32(2);
+        let five = NodeValue::Float(5.5);
+        let true_val = NodeValue::Bool(true);
+
+        assert_eq!(
+            two.operate(&OP_UNARY_MINUS, || panic!(
+                "Unary operator should not call right operand provider"
+            ))?,
+            NodeValue::Int64(-2)
+        );
+        assert_eq!(
+            five.operate(&OP_UNARY_MINUS, || panic!(
+                "Unary operator should not call right operand provider"
+            ))?,
+            NodeValue::Double(-5.5)
+        );
+        // fails for non-numeric operand
+        assert!(matches!(
+            true_val
+                .operate(&OP_UNARY_MINUS, || panic!(
+                    "Unary operator should not call right operand provider"
+                ))
+                .unwrap_err(),
+            NodeError::ArithmeticOperatorIncompatibleOperands
+        ));
+
         Ok(())
     }
 
