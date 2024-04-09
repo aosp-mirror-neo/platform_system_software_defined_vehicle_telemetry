@@ -57,8 +57,8 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
         &self,
         service_name: &str,
         topic_name: &str,
-    ) -> Result<MessageDescriptor, ServicePublisherManagerSubscribeError> {
-        self.visit_entry(service_name, topic_name, |entry| entry.message_descriptor.clone())
+    ) -> Result<Option<MessageDescriptor>, ServicePublisherManagerSubscribeError> {
+        Ok(self.visit_entry(service_name, topic_name, |entry| entry.message_descriptor.clone()))
     }
 
     async fn try_subscribe(
@@ -72,10 +72,8 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
             (entry.message_descriptor.clone(), entry.publisher.clone())
         });
 
-        let (message_descriptor, publisher) = match result {
-            Ok((message_descriptor, publisher)) => (message_descriptor, publisher),
-            Err(ServicePublisherManagerSubscribeError::ServiceNotFound { .. }) => return Ok(false),
-            Err(err) => return Err(err),
+        let Some((message_descriptor, publisher)) = result else {
+            return Ok(false);
         };
 
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
@@ -109,8 +107,11 @@ impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
         topic_name: &str,
         configuration: Option<&[u8]>,
     ) -> Result<(), ServicePublisherManagerSubscribeError> {
-        let publisher =
-            self.visit_entry(service_name, topic_name, |entry| entry.publisher.clone())?;
+        let maybe_publisher =
+            self.visit_entry(service_name, topic_name, |entry| entry.publisher.clone());
+        let Some(publisher) = maybe_publisher else {
+            panic!("Unable to find publisher for service {} and topic {}", service_name, topic_name)
+        };
 
         let handle = self
             .tokio_handles
@@ -193,25 +194,15 @@ impl ConfigurablePublisherRegistryImpl {
         service_name: &str,
         topic_name: &str,
         visitor: impl FnOnce(&PublisherEntry) -> T,
-    ) -> Result<T, ServicePublisherManagerSubscribeError> {
+    ) -> Option<T> {
         let publisher_entries_lock = self.publisher_entries.lock().unwrap();
-        let entry = publisher_entries_lock
-            .get(service_name)
-            .ok_or_else(|| ServicePublisherManagerSubscribeError::ServiceNotFound {
-                service_name: service_name.to_owned(),
-            })?
-            .get(topic_name)
-            .ok_or_else(|| ServicePublisherManagerSubscribeError::TopicNotFound {
-                service_name: service_name.to_owned(),
-                topic_name: topic_name.to_owned(),
-            })?;
-        Ok(visitor(entry))
+        let entry = publisher_entries_lock.get(service_name)?.get(topic_name)?;
+        Some(visitor(entry))
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use protobuf::{Message, MessageFull};
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
@@ -272,7 +263,7 @@ mod tests {
         }
     }
 
-    async fn create_new_configurable_publisher_registry_impl(
+    async fn create_configurable_publisher_registry(
         configurable_publisher: MockConfigurablePublisher,
     ) -> ConfigurablePublisherRegistryImpl {
         let configurable_publisher_registry = ConfigurablePublisherRegistryImpl::new();
@@ -299,110 +290,126 @@ mod tests {
         configurable_publisher_registry
     }
 
+    #[test]
+    fn get_message_descriptor_incorrect_service_name_returns_none() {
+        let configurable_publisher_registry = ConfigurablePublisherRegistryImpl::new();
+
+        let res = configurable_publisher_registry
+            .get_message_descriptor(SERVICE_NAME, TOPIC_NAME)
+            .unwrap();
+
+        assert!(res.is_none(), "Unexpected result: {:?}", res);
+    }
+
+    #[tokio::test]
+    async fn get_message_descriptor_incorrect_topic_name_returns_none() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
+
+        let res = configurable_publisher_registry
+            .get_message_descriptor(SERVICE_NAME, TOPIC_NAME2)
+            .unwrap();
+
+        assert!(res.is_none(), "Unexpected result: {:?}", res);
+    }
+
+    #[tokio::test]
+    async fn get_message_descriptor_success() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
+
+        let res = configurable_publisher_registry
+            .get_message_descriptor(SERVICE_NAME, TOPIC_NAME)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(res.proto(), SampleMessage::descriptor().proto());
+    }
+
     #[tokio::test]
     async fn subscribe_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry_impl =
-            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        configurable_publisher_registry_impl
+        let is_subscribed = configurable_publisher_registry
             .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
 
+        assert!(is_subscribed);
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
     }
 
     #[tokio::test]
-    async fn subscribe_incorrect_service_name_return_false() {
-        let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry_impl =
-            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+    async fn subscribe_incorrect_service_name_returns_false() {
+        let configurable_publisher_registry = ConfigurablePublisherRegistryImpl::new();
 
-        let res = configurable_publisher_registry_impl
-            .try_subscribe(SERVICE_NAME2, TOPIC_NAME, Arc::new(|_| {}), None)
+        let is_subscribed = configurable_publisher_registry
+            .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
 
-        assert!(matches!(&res, false), "Unexpected error: {}", res);
+        assert!(!is_subscribed);
     }
 
     #[tokio::test]
-    async fn subscribe_incorrect_topic_name_fail() {
+    async fn subscribe_incorrect_topic_name_returns_false() {
         let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry_impl =
-            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
 
-        let err = configurable_publisher_registry_impl
+        let is_subscribed = configurable_publisher_registry
             .try_subscribe(SERVICE_NAME, TOPIC_NAME2, Arc::new(|_| {}), None)
             .await
-            .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
-            "Unexpected error: {}",
-            err
-        );
+        assert!(!is_subscribed);
     }
 
     #[tokio::test]
     async fn unsubscribe_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry_impl =
-            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        let _ = configurable_publisher_registry_impl
+        configurable_publisher_registry
             .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
-            .await;
-        let _ =
-            configurable_publisher_registry_impl.unsubscribe(SERVICE_NAME, TOPIC_NAME, None).await;
+            .await
+            .unwrap();
+        configurable_publisher_registry.unsubscribe(SERVICE_NAME, TOPIC_NAME, None).await.unwrap();
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 1);
     }
 
     #[tokio::test]
-    async fn unsubscribe_incorrect_service_name_fail() {
+    #[should_panic]
+    async fn unsubscribe_incorrect_service_name_panics() {
         let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry_impl =
-            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
 
-        let _ = configurable_publisher_registry_impl
+        configurable_publisher_registry
             .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
-            .await;
-        let err = configurable_publisher_registry_impl
-            .unsubscribe(SERVICE_NAME2, TOPIC_NAME, None)
             .await
-            .err()
             .unwrap();
-
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::ServiceNotFound { service_name } if service_name == SERVICE_NAME2),
-            "Unexpected error: {}",
-            err
-        );
+        configurable_publisher_registry.unsubscribe(SERVICE_NAME2, TOPIC_NAME, None).await.unwrap();
     }
 
     #[tokio::test]
-    async fn unsubscribe_incorrect_topic_name_fail() {
+    #[should_panic]
+    async fn unsubscribe_incorrect_topic_name_panics() {
         let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry_impl =
-            create_new_configurable_publisher_registry_impl(configurable_publisher.clone()).await;
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
 
-        let _ = configurable_publisher_registry_impl
+        configurable_publisher_registry
             .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
-            .await;
-        let err = configurable_publisher_registry_impl
-            .unsubscribe(SERVICE_NAME, TOPIC_NAME2, None)
             .await
-            .err()
             .unwrap();
-
-        assert!(
-            matches!(&err, ServicePublisherManagerSubscribeError::TopicNotFound { service_name, topic_name } if service_name == SERVICE_NAME && topic_name == TOPIC_NAME2),
-            "Unexpected error: {}",
-            err
-        );
+        configurable_publisher_registry.unsubscribe(SERVICE_NAME, TOPIC_NAME2, None).await.unwrap();
     }
 }

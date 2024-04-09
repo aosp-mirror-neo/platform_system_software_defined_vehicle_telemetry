@@ -30,7 +30,10 @@ pub enum NodeError {
     #[error("Field leaf node encountered error: {e}")]
     MessageProviderError { e: MessageProviderError },
     #[error("Descriptor not found: {e}")]
-    DescriptorProviderError { e: DescriptorProviderError },
+    DescriptorProviderError {
+        #[from]
+        e: DescriptorProviderError,
+    },
     #[error("Field {field_name} does not exist in message {message_name}")]
     FieldNotFound { field_name: String, message_name: String },
     #[error("Nested field {field_name} is illegal: {e}")]
