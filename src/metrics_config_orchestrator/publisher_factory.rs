@@ -88,7 +88,6 @@ impl PublisherFactory for PublisherFactoryImpl {
                 return Ok(Arc::new(PublisherImpl::new_service_publisher(
                     publisher_name,
                     service_publisher.service_name.clone(),
-                    service_publisher.topic_name.clone(),
                     self.service_adapter.clone(),
                 )));
             }
@@ -192,7 +191,6 @@ mod tests {
     const INTERVAL_MS: u64 = 42;
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
-    const TOPIC_NAME: &str = "topic";
     const TRIGGER_NAME: &str = "trigger";
 
     struct MockServiceAdapter {}
@@ -202,7 +200,6 @@ mod tests {
         async fn subscribe(
             &self,
             _service_name: &str,
-            _topic_name: &str,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
         ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
             panic!("The function should never be called")
@@ -241,7 +238,6 @@ mod tests {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let service_publisher = publisher.mut_service_publisher();
         service_publisher.service_name = SERVICE_NAME.to_owned();
-        service_publisher.topic_name = TOPIC_NAME.to_owned();
         publisher
     }
 
@@ -322,18 +318,13 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        let PublisherType::Service {
-            service_name,
-            service_adapter: _,
-            service_subscription,
-            topic_name,
-        } = &res.publisher_type
+        let PublisherType::Service { service_name, service_adapter: _, service_subscription } =
+            &res.publisher_type
         else {
             panic!("Unexpected publisher type");
         };
         assert_eq!(service_name, SERVICE_NAME);
         assert!(service_subscription.lock().unwrap().is_none());
-        assert_eq!(topic_name, TOPIC_NAME);
     }
 
     #[test]

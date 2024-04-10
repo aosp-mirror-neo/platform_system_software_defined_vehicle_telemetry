@@ -211,7 +211,6 @@ mod tests {
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service_name";
-    const TOPIC_NAME: &str = "topic_name";
     const TRIGGER_NAME: &str = "trigger";
 
     fn create_factory() -> TriggerFactoryImpl {
@@ -236,7 +235,6 @@ mod tests {
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
-            TOPIC_NAME.to_owned(),
             Arc::new(MockServiceAdapter::new()),
         ));
 

@@ -76,7 +76,6 @@ pub(crate) enum PublisherState {
 pub(crate) enum PublisherType {
     Service {
         service_name: String,
-        topic_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         service_subscription: Mutex<Option<ServiceSubscription>>,
     },
@@ -134,12 +133,7 @@ impl Publisher for PublisherImpl {
                         .await;
                 }
             }
-            PublisherType::Service {
-                service_name,
-                topic_name,
-                service_adapter,
-                service_subscription,
-            } => {
+            PublisherType::Service { service_name, service_adapter, service_subscription } => {
                 assert!(service_subscription.lock().unwrap().is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
 
                 // Subscribe to the service adapter.
@@ -147,7 +141,6 @@ impl Publisher for PublisherImpl {
                 let subscription = service_adapter
                     .subscribe(
                         service_name,
-                        topic_name,
                         Box::new(move |msg| self_clone.on_service_publisher_new_message(msg)),
                     )
                     .await?;
@@ -264,14 +257,12 @@ impl PublisherImpl {
     pub(super) fn new_service_publisher(
         name: String,
         service_name: String,
-        topic_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     ) -> Self {
         Self::new(
             name,
             PublisherType::Service {
                 service_name,
-                topic_name,
                 service_adapter,
                 service_subscription: None.into(),
             },
@@ -349,7 +340,6 @@ mod tests {
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
-    const TOPIC_NAME: &str = "topic";
     const TRIGGER_NAME: &str = "trigger";
 
     fn create_inactive_service_publisher(
@@ -358,7 +348,6 @@ mod tests {
         Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
-            TOPIC_NAME.to_owned(),
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
         ))
     }

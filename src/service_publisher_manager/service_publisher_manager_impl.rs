@@ -17,8 +17,7 @@ pub struct ServicePublisherManagerImpl {
     /// Hashmap to store Service Publisher Manager Implementation
     service_publisher_registry: Vec<Arc<dyn ServicePublisherManager>>,
     /// Hashmap to store subscriptions
-    service_publisher_subscriptions:
-        Arc<Mutex<HashMap<(String, String), Arc<dyn ServicePublisherManager>>>>,
+    service_publisher_subscriptions: Arc<Mutex<HashMap<String, Arc<dyn ServicePublisherManager>>>>,
 }
 
 /// Subscriber struct impl that encapsulates the data required for reading messages.
@@ -38,11 +37,10 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
     fn get_message_descriptor(
         &self,
         service_name: &str,
-        topic_name: &str,
     ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             let msg_descriptor =
-                service_publisher_manager_impl.get_message_descriptor(service_name, topic_name)?;
+                service_publisher_manager_impl.get_message_descriptor(service_name)?;
 
             if msg_descriptor.is_some() {
                 return Ok(msg_descriptor);
@@ -55,24 +53,23 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
     async fn try_subscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         configuration: Option<&[u8]>,
     ) -> Result<bool, anyhow::Error> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             if service_publisher_manager_impl
-                .try_subscribe(service_name, topic_name, callback.clone(), configuration)
+                .try_subscribe(service_name, callback.clone(), configuration)
                 .await?
             {
                 self.service_publisher_subscriptions
                     .lock()
                     .unwrap()
                     .try_insert_value(
-                        (service_name.to_owned(), topic_name.to_owned()),
+                        service_name.to_owned(),
                         service_publisher_manager_impl.clone(),
                     )
                     .unwrap_or_else(|_| {
-                        panic!("Only one subscription per service name and topic name is supported")
+                        panic!("Only one subscription per service name is supported")
                     });
                 return Ok(true);
             }
@@ -84,25 +81,18 @@ impl ServicePublisherManager for ServicePublisherManagerImpl {
     async fn unsubscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         configuration: Option<&[u8]>,
     ) -> Result<(), anyhow::Error> {
         let service_publisher = self
             .service_publisher_subscriptions
             .lock()
             .unwrap()
-            .get(&(service_name.to_string(), topic_name.to_string()))
+            .remove(service_name)
             .unwrap_or_else(|| {
-                panic!("Publisher with {} and {} does not exist", service_name, topic_name)
-            })
-            .clone();
+                panic!("Publisher with service name {} does not exist", service_name)
+            });
 
-        service_publisher.unsubscribe(service_name, topic_name, configuration).await?;
-
-        self.service_publisher_subscriptions
-            .lock()
-            .unwrap()
-            .remove(&(service_name.to_string(), topic_name.to_string()));
+        service_publisher.unsubscribe(service_name, configuration).await?;
         Ok(())
     }
 }
@@ -120,8 +110,6 @@ mod tests {
     const ERROR_MESSAGE: &str = "ERROR_MESSAGE";
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
-    const TOPIC_NAME: &str = "TEST_TOPIC_NAME";
-    const TOPIC_NAME2: &str = "TEST_TOPIC_NAME2";
 
     #[tokio::test]
     async fn get_message_descriptor_success() {
@@ -131,10 +119,8 @@ mod tests {
             vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
-        let res = service_publisher_manager_impl
-            .get_message_descriptor(SERVICE_NAME, TOPIC_NAME)
-            .unwrap()
-            .unwrap();
+        let res =
+            service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME).unwrap().unwrap();
 
         assert_eq!(service_publisher.get_num_get_message_descriptor_calls(), 1);
         assert_eq!(res, Empty::descriptor());
@@ -147,10 +133,8 @@ mod tests {
         let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherManager>];
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
-        let err = service_publisher_manager_impl
-            .get_message_descriptor(SERVICE_NAME2, TOPIC_NAME)
-            .err()
-            .unwrap();
+        let err =
+            service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME2).err().unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
@@ -161,9 +145,7 @@ mod tests {
         let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherManager>];
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
-        let res = service_publisher_manager_impl
-            .get_message_descriptor(SERVICE_NAME, TOPIC_NAME2)
-            .unwrap();
+        let res = service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME2).unwrap();
 
         assert!(res.is_none(), "Unexpected result: {:?}", res);
     }
@@ -176,7 +158,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         let res = service_publisher_manager_impl
-            .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
+            .try_subscribe(SERVICE_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
 
@@ -196,7 +178,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         let err = service_publisher_manager_impl
-            .try_subscribe(SERVICE_NAME2, TOPIC_NAME, Arc::new(|_| {}), None)
+            .try_subscribe(SERVICE_NAME2, Arc::new(|_| {}), None)
             .await
             .err()
             .unwrap();
@@ -214,10 +196,10 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         service_publisher_manager_impl
-            .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
+            .try_subscribe(SERVICE_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
-        let res = service_publisher_manager_impl.unsubscribe(SERVICE_NAME, TOPIC_NAME, None).await;
+        let res = service_publisher_manager_impl.unsubscribe(SERVICE_NAME, None).await;
 
         assert!(res.is_ok());
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
@@ -235,26 +217,9 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
 
         service_publisher_manager_impl
-            .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
+            .try_subscribe(SERVICE_NAME, Arc::new(|_| {}), None)
             .await
             .unwrap();
-        service_publisher_manager_impl.unsubscribe(SERVICE_NAME2, TOPIC_NAME, None).await.unwrap();
-    }
-
-    #[tokio::test]
-    #[should_panic]
-    async fn unsubscribe_incorrect_topic_name_fails() {
-        let service_publisher = Arc::new(MockServicePublisherManager::default());
-
-        let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherManager>];
-
-        let service_publisher_manager_impl = ServicePublisherManagerImpl::new(service_publishers);
-
-        service_publisher_manager_impl
-            .try_subscribe(SERVICE_NAME, TOPIC_NAME, Arc::new(|_| {}), None)
-            .await
-            .unwrap();
-        service_publisher_manager_impl.unsubscribe(SERVICE_NAME, TOPIC_NAME2, None).await.unwrap();
+        service_publisher_manager_impl.unsubscribe(SERVICE_NAME2, None).await.unwrap();
     }
 }

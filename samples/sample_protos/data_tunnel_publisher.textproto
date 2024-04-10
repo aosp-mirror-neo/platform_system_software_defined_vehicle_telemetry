@@ -81,7 +81,7 @@ publishers: [
 {
   name: "TestPublisher"
     service_publisher: {
-      service_name: "SampleService"
+      service_name: "DataTunnelSampleService"
       topic_name: "DataTunnelTopic"
     }
   }

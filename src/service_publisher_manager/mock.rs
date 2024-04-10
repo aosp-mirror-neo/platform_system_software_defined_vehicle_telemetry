@@ -22,7 +22,7 @@ pub(crate) struct MockServicePublisherManager {
     /// The number of times get message descriptor function of the mock was called.
     num_get_message_descriptor_calls: AtomicU32,
     /// The map of provided subscriber functions.
-    subscribers: Mutex<HashMap<(String, String), Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
+    subscribers: Mutex<HashMap<String, Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
 }
 
 #[async_trait]
@@ -30,7 +30,6 @@ impl ServicePublisherManager for MockServicePublisherManager {
     fn get_message_descriptor(
         &self,
         _service_name: &str,
-        _topic_name: &str,
     ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
         self.num_get_message_descriptor_calls.fetch_add(1, Ordering::SeqCst);
 
@@ -44,7 +43,6 @@ impl ServicePublisherManager for MockServicePublisherManager {
     async fn try_subscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         subscriber: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
         _configuration: Option<&[u8]>,
     ) -> Result<bool, anyhow::Error> {
@@ -54,26 +52,17 @@ impl ServicePublisherManager for MockServicePublisherManager {
             return Err(err);
         }
 
-        self.subscribers
-            .lock()
-            .unwrap()
-            .insert((service_name.to_owned(), topic_name.to_owned()), subscriber.clone());
+        self.subscribers.lock().unwrap().insert(service_name.to_owned(), subscriber.clone());
         Ok(true)
     }
 
     async fn unsubscribe(
         &self,
         service_name: &str,
-        topic_name: &str,
         _configuration: Option<&[u8]>,
     ) -> Result<(), anyhow::Error> {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
-        match self
-            .subscribers
-            .lock()
-            .unwrap()
-            .entry((service_name.to_string(), topic_name.to_string()))
-        {
+        match self.subscribers.lock().unwrap().entry(service_name.to_owned()) {
             Entry::Occupied(o) => {
                 let _ = o.remove_entry();
             }
@@ -118,14 +107,7 @@ impl MockServicePublisherManager {
         self.num_get_message_descriptor_calls.load(Ordering::SeqCst)
     }
 
-    pub(crate) fn notify_subscriber(
-        &self,
-        service_name: String,
-        topic_name: String,
-        message: Box<dyn MessageDyn>,
-    ) {
-        (self.subscribers.lock().unwrap().get(&(service_name, topic_name)).as_ref().unwrap())(
-            message,
-        );
+    pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
+        (self.subscribers.lock().unwrap().get(service_name).as_ref().unwrap())(message);
     }
 }
