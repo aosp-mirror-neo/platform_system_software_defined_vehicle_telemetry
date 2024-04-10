@@ -15,11 +15,35 @@ command line argument.
 
 ## How to Test
 
+Lunch Target:
+
+For Core:
+
+`lunch sdv_core_cf-trunk_staging-userdebug`
+
+For IVI:
+
+`lunch sdv_ivi_cf-trunk_staging-userdebug`
+
 Start Guest:
+
+For Core:
 
 `$ cvd start -guest-enforce-security false`
 
-Steps to reproduce:
+For IVI:
+
+```
+cvd start -vsock_guest_cid=4 -guest-enforce-security=false -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4
+```
+
+Note: if testing on ivi, telemetry service needs to be started explicity. To do that launch a new terminal, and start telemetry service using the following steps:
+
+```
+adb shell
+
+sdv_ivi_telemetry_service_agent
+```
 
 1.  LAUNCH NEW TERMINAL (**Terminal #1**), switch to root, start logcat:
 
