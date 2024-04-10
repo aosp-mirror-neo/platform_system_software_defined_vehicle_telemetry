@@ -127,8 +127,26 @@ impl DataTunnelWrapperImpl {
         };
 
         let mut read_message_count = 0usize;
-        let result =
+        let mut result =
             sdv_dt::AvailableToRead(subscription.subscription_handle, &mut read_message_count);
+
+        // We have to invoke ReadMessages() after Overflow error to reset the Overflow flag
+        if result == sdv_dt::Result::Overflow {
+            // SAFETY: buffer always has enough size to fit a single message.
+            if unsafe {
+                sdv_dt::ReadMessages(
+                    subscription.subscription_handle,
+                    buffer.as_mut_ptr() as *mut c_void,
+                    1,
+                )
+            } == sdv_dt::Result::Overflow
+            {
+                return Err(anyhow!("Error: {:?}", result));
+            }
+            result =
+                sdv_dt::AvailableToRead(subscription.subscription_handle, &mut read_message_count);
+        }
+
         if result != SdvResult::Success {
             return Err(anyhow!("Error when calling AvailableToRead: {:?}", result));
         };
