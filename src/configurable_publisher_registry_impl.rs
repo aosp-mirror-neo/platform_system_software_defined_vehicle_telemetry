@@ -8,7 +8,7 @@ use binder::BinderFeatures;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::ServicePublisherManager;
+use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::{hash_map::Entry, HashMap};
@@ -53,7 +53,7 @@ pub enum ConfigurablePublisherRegistryRegisterError {
 }
 
 #[async_trait]
-impl ServicePublisherManager for ConfigurablePublisherRegistryImpl {
+impl ServicePublisherAccessor for ConfigurablePublisherRegistryImpl {
     fn get_message_descriptor(
         &self,
         service_name: &str,

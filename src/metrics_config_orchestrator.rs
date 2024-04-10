@@ -35,7 +35,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_errors::{MessageProviderError, NodeError};
 use crate::expr::node_value_type::NodeValueType;
-use crate::service_publisher_manager::ServicePublisherManager;
+use crate::service_publisher_accessor::ServicePublisherAccessor;
 
 // Child module dependencies.
 use descriptor_provider_factory::{
@@ -155,7 +155,7 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     trigger_factory: TTriggerFactory,
 
     /// Used to fetch data from service publishers
-    service_publisher_manager: Arc<dyn ServicePublisherManager>,
+    service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
 
     /// The function that is called when finish trigger of a Metrics Config is fired.
     finish_trigger_fired_callback: Arc<dyn Fn(String) + Send + Sync>,
@@ -567,7 +567,7 @@ where
 
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
-        service_publisher_manager: Arc<dyn ServicePublisherManager>,
+        service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         finish_trigger_fired_callback: impl Fn(String) + Send + Sync + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
@@ -936,7 +936,7 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
-    use crate::service_publisher_manager::mock::MockServicePublisherManager;
+    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
     type MockedMetricsConfigOrchestratorImpl<'a> = MetricsConfigOrchestratorImpl<
         MockMetricsReportGenerator,
@@ -1276,7 +1276,7 @@ mod tests {
                 finish_trigger_fired_callback: Arc::new(|_| {}),
                 report_ready_callback: Arc::new(|_| {}),
                 service_publisher_manager: Arc::new(
-                    MockServicePublisherManager::new_with_descriptor(Empty::descriptor()),
+                    MockServicePublisherAccessor::new_with_descriptor(Empty::descriptor()),
                 ),
                 phantom_generator: PhantomData,
             }

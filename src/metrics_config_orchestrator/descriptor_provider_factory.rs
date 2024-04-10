@@ -10,14 +10,14 @@ use thiserror::Error;
 
 use crate::expr::ast::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
-use crate::service_publisher_manager::ServicePublisherManager;
+use crate::service_publisher_accessor::ServicePublisherAccessor;
 
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
     fn create(
         &self,
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
-        service_publisher_manager: &Arc<dyn ServicePublisherManager>,
+        service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError>;
 }
 
@@ -45,7 +45,7 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
         &self,
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
-        service_publisher_manager: &Arc<dyn ServicePublisherManager>,
+        service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         let publisher_message_descriptor =
             publishers.iter().try_fold(HashMap::new(), |mut map, publisher| {
@@ -99,7 +99,7 @@ mod tests {
     use super::*;
     use crate::expr::node_errors::DescriptorProviderError;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
-    use crate::service_publisher_manager::mock::MockServicePublisherManager;
+    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
     const PUBLISHER_1: &str = "pub_1";
     const PUBLISHER_2: &str = "pub_2";
@@ -108,14 +108,14 @@ mod tests {
     const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
     const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestNestedMessage";
 
-    fn create_default_service_publisher_manager() -> Arc<dyn ServicePublisherManager> {
+    fn create_default_service_publisher_manager() -> Arc<dyn ServicePublisherAccessor> {
         create_service_publisher_manager(None)
     }
 
     fn create_service_publisher_manager(
         next_descriptor: Option<MessageDescriptor>,
-    ) -> Arc<dyn ServicePublisherManager> {
-        Arc::new(MockServicePublisherManager::new(next_descriptor))
+    ) -> Arc<dyn ServicePublisherAccessor> {
+        Arc::new(MockServicePublisherAccessor::new(next_descriptor))
     }
 
     fn create_aggregation_publisher_with_no_proto_message_builder(
@@ -147,7 +147,7 @@ mod tests {
 
     #[test]
     fn create_descriptor_provider_service_publisher_manager_error_fails() {
-        let service_publisher_manager = Arc::new(MockServicePublisherManager::new(None));
+        let service_publisher_manager = Arc::new(MockServicePublisherAccessor::new(None));
         service_publisher_manager.next_error.lock().unwrap().replace(anyhow!("Error"));
 
         let mut publisher = PublisherProto::new();
@@ -159,7 +159,7 @@ mod tests {
             .create(
                 get_test_file_descriptors(),
                 &[publisher],
-                &(service_publisher_manager as Arc<dyn ServicePublisherManager>),
+                &(service_publisher_manager as Arc<dyn ServicePublisherAccessor>),
             )
             .err()
             .unwrap();
