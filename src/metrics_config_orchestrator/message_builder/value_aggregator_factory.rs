@@ -1,4 +1,4 @@
-use protobuf::reflect::FieldDescriptor;
+use protobuf::{reflect::FieldDescriptor, well_known_types::any::Any, MessageFull};
 use sdv_telemetry_utils::option_extension::OptionExtension;
 use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
 use std::sync::Arc;
@@ -174,10 +174,14 @@ impl ValueAggregatorFactoryImpl {
     }
 
     fn is_compatible(expected: &NodeValueType, actual: &NodeValueType) -> bool {
-        // MessageBuilder can convert integers to floating points, so assigning an
-        // integer to a float field is valid. But the reverse is not true.
         expected == actual
+            // MessageBuilder can convert integers to floating points, so assigning an
+            // integer to a float field is valid. But the reverse is not true.
             || (matches!(expected, NodeValueType::Float) && matches!(actual, NodeValueType::Int))
+            // If the actual type not known yet, it's valid to assign it to any message field.
+            || (matches!(expected, NodeValueType::Message { .. }) && matches!(actual, NodeValueType::Message { descriptor } if descriptor.is_none()))
+            // If the expected type is protobuf Any, it's valid to assign any message field.
+            || (matches!(expected, NodeValueType::Message { descriptor } if descriptor.as_ref().is_some_and(|d| d == &Any::descriptor())) && matches!(actual, NodeValueType::Message { .. }))
     }
 }
 
@@ -355,8 +359,8 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
-    use protobuf::MessageFull;
-    use sdv_telemetry_test_proto::test_message::TestMessage;
+    use protobuf::well_known_types::timestamp::Timestamp;
+    use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::{
         AvgAggregation, CountAggregation, DeltaAggregation, MaxAggregation, MinAggregation,
         NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
@@ -366,6 +370,8 @@ mod tests {
     use crate::expr::node_value::NodeValue;
 
     // See all valid field names in src/utils/test_utils/test_message.proto
+    const ANY_FIELD_NAME: &str = "any_field";
+    const MESSAGE_FIELD_NAME: &str = "message_field";
     const INT_FIELD_NAME: &str = "int_field";
     const FLOAT_FIELD_NAME: &str = "float_field";
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
@@ -384,6 +390,10 @@ mod tests {
         let node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) });
         let node_type = Some(NodeValueType::Int);
         (vec![node; n], vec![node_type; n])
+    }
+
+    fn create_node_vec() -> Vec<Arc<Node>> {
+        vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })]
     }
 
     fn create_no_aggregation_proto(idx: Option<u32>) -> NoAggregation {
@@ -581,7 +591,7 @@ mod tests {
         let aggregated_field_value =
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(None));
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::MissingExpressionNodeIndex),
@@ -600,7 +610,7 @@ mod tests {
         let aggregated_field_value =
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(10)));
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::IndexOutOfBound { .. }),
@@ -618,7 +628,7 @@ mod tests {
         let aggregated_field_value =
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::UnsupportedFieldType { .. }),
@@ -639,7 +649,7 @@ mod tests {
             create_no_aggregation_proto(Some(0)),
         );
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
@@ -661,6 +671,64 @@ mod tests {
     }
 
     #[test]
+    fn validate_node_output_message_type_incompatible_fails() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
+        let node_types =
+            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
+
+        assert!(
+            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_node_output_message_type_unknown_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::Message { descriptor: None })];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn validate_node_output_message_type_any_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(ANY_FIELD_NAME);
+        let node_types =
+            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn validate_node_output_message_type_compatible_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::Message {
+            descriptor: Some(TestNestedMessage::descriptor()),
+        })];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
     fn validate_vector_aggregation_with_list_typed_node_fails() {
         let factory = ValueAggregatorFactoryImpl {};
         let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
@@ -671,7 +739,7 @@ mod tests {
             create_vector_aggregation_proto(Some(0), None),
         );
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::IncompatibleAggregation { .. }),
@@ -690,7 +758,7 @@ mod tests {
             create_vector_aggregation_proto(Some(0), Some(0)),
         );
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::InvalidMaxLengthForVectorAggregation),
@@ -709,7 +777,7 @@ mod tests {
         let aggregated_field_value =
             AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0)));
 
-        let err = factory.validate(&aggregated_field_value, &context).err().unwrap();
+        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
@@ -900,7 +968,7 @@ mod tests {
         let factory = ValueAggregatorFactoryImpl {};
         let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
         let node_types = vec![Some(NodeValueType::Bool)];
-        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })];
+        let nodes = create_node_vec();
         let context =
             ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
         let aggregated_field_value = AggregatedFieldValueProto::NoAggregation(
@@ -924,6 +992,72 @@ mod tests {
         let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
         let node_types = create_int_node_type();
         let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })];
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.create(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn create_node_output_message_type_incompatible_fails() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
+        let node_types =
+            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
+        let nodes = create_node_vec();
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
+
+        assert!(
+            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
+            "Unexpected error: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_node_output_message_type_unknown_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::Message { descriptor: None })];
+        let nodes = create_node_vec();
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.create(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn create_node_output_any_type_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(ANY_FIELD_NAME);
+        let node_types =
+            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
+        let nodes = create_node_vec();
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.create(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn create_node_output_message_type_compatible_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::Message {
+            descriptor: Some(TestNestedMessage::descriptor()),
+        })];
+        let nodes = create_node_vec();
         let context =
             ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
         let aggregated_field_value =

@@ -21,11 +21,11 @@ pub enum NodeValueType {
     Bool,
     Int,
     Float,
-    Message,
+    Message { descriptor: Option<MessageDescriptor> },
     BoolList,
     IntList,
     FloatList,
-    MessageList,
+    MessageList { descriptor: Option<MessageDescriptor> },
 }
 
 impl NodeValueType {
@@ -45,11 +45,7 @@ impl NodeValueType {
         matches!(self, NodeValueType::Int)
     }
 
-    fn is_message(&self) -> bool {
-        matches!(self, NodeValueType::Message)
-    }
-
-    // returns true ff `self` is a list type, and `other` is a singular & compatible
+    // returns true if `self` is a list type, and `other` is a singular & compatible
     // type to the list
     fn can_apply_list_operator(&self, other: &Option<NodeValueType>) -> bool {
         match self {
@@ -57,7 +53,22 @@ impl NodeValueType {
             NodeValueType::IntList | NodeValueType::FloatList => {
                 other.is_none_or(|o| o.is_numeric())
             }
-            NodeValueType::MessageList => other.is_none_or(|o| o.is_message()),
+            NodeValueType::MessageList { descriptor } => {
+                other.is_none_or(|o| {
+                    // Compatible if the other type is a message and the descriptors
+                    // match or not specified in either.
+                    let NodeValueType::Message { descriptor: other_descriptor } = o else {
+                        return false;
+                    };
+                    if let (Some(descriptor), Some(other_descriptor)) =
+                        (descriptor, other_descriptor)
+                    {
+                        descriptor == other_descriptor
+                    } else {
+                        true
+                    }
+                })
+            }
             _ => false,
         }
     }
@@ -97,14 +108,12 @@ impl FieldLeafNodeExtension for FieldLeafNode {
         &self,
         descriptor_provider: &dyn DescriptorProvider,
     ) -> Result<Option<NodeValueType>, NodeError> {
-        if self.field_names.is_empty() {
-            return Ok(Some(NodeValueType::Message));
-        }
-
         let maybe_descriptor = descriptor_provider.get_descriptor(&self.publisher_name)?;
 
-        if let Some(descriptor) = maybe_descriptor {
-            get_nested_field_type(descriptor, &self.field_names).map(Some)
+        if self.field_names.is_empty() {
+            Ok(Some(NodeValueType::Message { descriptor: maybe_descriptor.cloned() }))
+        } else if let Some(descriptor) = maybe_descriptor {
+            Ok(Some(get_nested_field_type(descriptor, &self.field_names)?))
         } else {
             Ok(None)
         }
@@ -324,7 +333,9 @@ impl NodeValueTypeExtension for RuntimeFieldType {
                     NodeValueType::Bool => Ok(NodeValueType::BoolList),
                     NodeValueType::Int => Ok(NodeValueType::IntList),
                     NodeValueType::Float => Ok(NodeValueType::FloatList),
-                    NodeValueType::Message => Ok(NodeValueType::MessageList),
+                    NodeValueType::Message { descriptor } => {
+                        Ok(NodeValueType::MessageList { descriptor: descriptor.clone() })
+                    }
                     _ => Err(NodeError::UnsupportedRepeatedFieldType),
                 }
             }
@@ -343,7 +354,9 @@ impl NodeValueTypeExtension for RuntimeType {
             | RuntimeType::Enum(_) => Ok(NodeValueType::Int),
             RuntimeType::F32 | RuntimeType::F64 => Ok(NodeValueType::Float),
             RuntimeType::Bool => Ok(NodeValueType::Bool),
-            RuntimeType::Message(_) => Ok(NodeValueType::Message),
+            RuntimeType::Message(descriptor) => {
+                Ok(NodeValueType::Message { descriptor: Some(descriptor.clone()) })
+            }
             RuntimeType::String | RuntimeType::VecU8 => {
                 Err(NodeError::UnsupportedSingularFieldType)
             }
