@@ -1544,7 +1544,7 @@ mod tests {
             left: Some(lt_or_eq_node.clone()),
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
         });
-        let nodes = vec![point_three_node, ceil_node, five_node, add_node, lt_or_eq_node, and_node];
+        let nodes = [point_three_node, ceil_node, five_node, add_node, lt_or_eq_node, and_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = [
