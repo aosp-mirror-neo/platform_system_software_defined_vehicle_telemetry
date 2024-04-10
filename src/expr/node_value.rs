@@ -956,7 +956,7 @@ mod tests {
         let field_names = ["string_field".to_string()];
 
         assert!(matches!(
-            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).err().unwrap(),
+            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).unwrap_err(),
             NodeError::UnsupportedSingularFieldType { .. }
         ));
     }
@@ -966,7 +966,7 @@ mod tests {
         let field_names = ["repeated_messages".to_string(), "bool_field".to_string()];
 
         assert!(matches!(
-            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).err().unwrap(),
+            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).unwrap_err(),
             NodeError::WrongNestedFieldType { .. }
         ));
     }
@@ -976,7 +976,7 @@ mod tests {
         let field_names = ["foo".to_string()];
 
         assert!(matches!(
-            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).err().unwrap(),
+            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).unwrap_err(),
             NodeError::FieldNotFound { .. }
         ));
     }
@@ -987,11 +987,11 @@ mod tests {
         let int_val = NodeValue::Int32(1);
 
         assert!(matches!(
-            true_val.operate(&OP_AND, || provide(&int_val)).err().unwrap(),
+            true_val.operate(&OP_AND, || provide(&int_val)).unwrap_err(),
             NodeError::LogicalOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            int_val.operate(&OP_AND, || provide(&true_val)).err().unwrap(),
+            int_val.operate(&OP_AND, || provide(&true_val)).unwrap_err(),
             NodeError::LogicalOperatorIncompatibleOperands
         ));
     }
@@ -1147,11 +1147,11 @@ mod tests {
         let int_val = NodeValue::Int32(1);
 
         assert!(matches!(
-            true_val.operate(&OP_ADD, || provide(&int_val)).err().unwrap(),
+            true_val.operate(&OP_ADD, || provide(&int_val)).unwrap_err(),
             NodeError::ArithmeticOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            int_val.operate(&OP_ADD, || provide(&true_val)).err().unwrap(),
+            int_val.operate(&OP_ADD, || provide(&true_val)).unwrap_err(),
             NodeError::ArithmeticOperatorIncompatibleOperands
         ));
     }
@@ -1223,7 +1223,7 @@ mod tests {
         let zero = NodeValue::Int32(0);
 
         assert!(matches!(
-            five.operate(&OP_DIVIDE, || provide(&zero)).err().unwrap(),
+            five.operate(&OP_DIVIDE, || provide(&zero)).unwrap_err(),
             NodeError::DivideByZero
         ));
     }
@@ -1244,7 +1244,7 @@ mod tests {
         let zero = NodeValue::Int32(0);
 
         assert!(matches!(
-            five.operate(&OP_MODULO, || provide(&zero)).err().unwrap(),
+            five.operate(&OP_MODULO, || provide(&zero)).unwrap_err(),
             NodeError::DivideByZero
         ));
     }
@@ -1266,7 +1266,7 @@ mod tests {
 
         // both operands must be integers
         assert!(matches!(
-            five.operate(&OP_MODULO, || provide(&two)).err().unwrap(),
+            five.operate(&OP_MODULO, || provide(&two)).unwrap_err(),
             NodeError::ModuloOperatorIncompatibleOperands
         ));
     }
@@ -1348,7 +1348,7 @@ mod tests {
         assert_eq!(two.operate(&OP_GT, || provide(&five))?, NodeValue::Bool(false));
         assert_eq!(five.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(true));
         assert!(matches!(
-            five.operate(&OP_GT, || provide(&true_val)).err().unwrap(),
+            five.operate(&OP_GT, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
@@ -1365,7 +1365,7 @@ mod tests {
         assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&five))?, NodeValue::Bool(false));
         assert_eq!(five.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
         assert!(matches!(
-            five.operate(&OP_GT_OR_EQ, || provide(&true_val)).err().unwrap(),
+            five.operate(&OP_GT_OR_EQ, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
@@ -1383,7 +1383,7 @@ mod tests {
         assert_eq!(two.operate(&OP_LT, || provide(&five))?, NodeValue::Bool(true));
         assert_eq!(five.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
         assert!(matches!(
-            five.operate(&OP_LT, || provide(&true_val)).err().unwrap(),
+            five.operate(&OP_LT, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
@@ -1400,7 +1400,7 @@ mod tests {
         assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&five))?, NodeValue::Bool(true));
         assert_eq!(five.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(false));
         assert!(matches!(
-            five.operate(&OP_LT_OR_EQ, || provide(&true_val)).err().unwrap(),
+            five.operate(&OP_LT_OR_EQ, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
@@ -1411,7 +1411,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
-            two.operate(&OP_CONTAINS, || provide(&two)).err().unwrap(),
+            two.operate(&OP_CONTAINS, || provide(&two)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
@@ -1422,7 +1422,7 @@ mod tests {
         let five = NodeValue::Float(5.5);
 
         assert!(matches!(
-            bool_list.operate(&OP_CONTAINS, || provide(&five)).err().unwrap(),
+            bool_list.operate(&OP_CONTAINS, || provide(&five)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
@@ -1454,7 +1454,7 @@ mod tests {
         assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&three))?, NodeValue::Bool(true));
         assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&thirty))?, NodeValue::Bool(true));
         assert!(matches!(
-            int_list.operate(&OP_CONTAINS, || provide(&three_hundred)).err().unwrap(),
+            int_list.operate(&OP_CONTAINS, || provide(&three_hundred)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
         Ok(())
@@ -1497,7 +1497,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
-            two.operate(&OP_DOES_NOT_CONTAIN, || provide(&two)).err().unwrap(),
+            two.operate(&OP_DOES_NOT_CONTAIN, || provide(&two)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
@@ -1508,7 +1508,7 @@ mod tests {
         let five = NodeValue::Float(5.5);
 
         assert!(matches!(
-            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&five)).err().unwrap(),
+            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&five)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
@@ -1552,7 +1552,7 @@ mod tests {
             NodeValue::Bool(false)
         );
         assert!(matches!(
-            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&three_hundred)).err().unwrap(),
+            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&three_hundred)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
         Ok(())
@@ -1610,7 +1610,7 @@ mod tests {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
-            two.operate(&OP_ALL_EQ, || provide(&two)).err().unwrap(),
+            two.operate(&OP_ALL_EQ, || provide(&two)).unwrap_err(),
             NodeError::AllEqualsOperatorIncompatibleOperands
         ));
     }
@@ -1621,7 +1621,7 @@ mod tests {
         let five = NodeValue::Float(5.5);
 
         assert!(matches!(
-            bool_list.operate(&OP_ALL_EQ, || provide(&five)).err().unwrap(),
+            bool_list.operate(&OP_ALL_EQ, || provide(&five)).unwrap_err(),
             NodeError::AllEqualsOperatorIncompatibleOperands
         ));
     }
@@ -1693,11 +1693,11 @@ mod tests {
         let one = NodeValue::Int32(1);
 
         assert!(matches!(
-            true_val.operate(&OP_ROUND, || provide(&NodeValue::None)).err().unwrap(),
+            true_val.operate(&OP_ROUND, || provide(&NodeValue::None)).unwrap_err(),
             NodeError::RoundingOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            one.operate(&OP_CEIL, || provide(&NodeValue::None)).err().unwrap(),
+            one.operate(&OP_CEIL, || provide(&NodeValue::None)).unwrap_err(),
             NodeError::RoundingOperatorIncompatibleOperands
         ));
     }

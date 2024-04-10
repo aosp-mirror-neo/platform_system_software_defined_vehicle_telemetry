@@ -513,7 +513,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::NodeTypeNotSet { .. }), "Unexpected error: {:?}", err);
@@ -528,7 +528,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(
@@ -547,7 +547,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::OperatorNotSet { .. }), "Unexpected error: {:?}", err);
@@ -565,7 +565,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(
@@ -588,7 +588,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
@@ -610,7 +610,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
@@ -629,7 +629,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::IndexOutOfBound { .. }), "Unexpected error: {:?}", err);
@@ -644,7 +644,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::OperatorNotSet { .. }), "Unexpected error: {:?}", err);
@@ -662,7 +662,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::LeftChildNotSet { .. }), "Unexpected error: {:?}", err);
@@ -686,7 +686,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(
@@ -704,7 +704,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(
@@ -764,7 +764,7 @@ mod tests {
         let all_proto_nodes = vec![node_0, node_1];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::ArithmeticOperatorIncompatibleOperands),
@@ -799,7 +799,7 @@ mod tests {
         let all_proto_nodes = vec![node_0, node_1, node_2];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::ContainsOperatorIncompatibleOperands),
@@ -828,7 +828,7 @@ mod tests {
         let all_proto_nodes = vec![node_0, node_1];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::LogicalOperatorIncompatibleOperands),
@@ -856,7 +856,7 @@ mod tests {
         let all_proto_nodes = vec![node_0, node_1];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::RoundingOperatorIncompatibleOperands),
@@ -885,7 +885,7 @@ mod tests {
         let all_proto_nodes = vec![node_0, node_1];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::UnaryOperatorIncorrectChildren),
@@ -931,7 +931,7 @@ mod tests {
         let all_proto_nodes = vec![node];
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::DescriptorProviderError { .. }),
@@ -1250,7 +1250,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(
@@ -1311,7 +1311,7 @@ mod tests {
         let all_proto_nodes = vec![leaf_true, root_node];
 
         // action
-        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert error because binary operator needs 2 children
         assert!(
@@ -1336,7 +1336,7 @@ mod tests {
         let all_proto_nodes = vec![proto_node];
 
         // action
-        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(&err, NodeError::IndexOutOfBound { .. }), "Unexpected error: {:?}", err);
@@ -1358,7 +1358,7 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.create_nodes(&all_proto_nodes, &context).err().unwrap();
+        let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
         assert!(matches!(err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
@@ -1622,7 +1622,7 @@ mod tests {
         });
 
         // expr is "0 < True"
-        let err = lt_node.evaluate().err().unwrap();
+        let err = lt_node.evaluate().unwrap_err();
 
         // 0 cannot be less than True
         assert!(
@@ -1639,7 +1639,7 @@ mod tests {
         let node =
             Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
-        let err = node.evaluate().err().unwrap();
+        let err = node.evaluate().unwrap_err();
 
         assert!(
             matches!(&err, NodeError::MessageProviderError { .. }),
