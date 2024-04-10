@@ -54,6 +54,13 @@ impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistry
 
         to_binder_result(res)
     }
+
+    async fn unregisterPublisher(&self, service_name: &str) -> BinderResult<()> {
+        info!("Unregistering publisher with telemetry service name {}", service_name);
+        let res = self.configurable_publisher_registry.unregister_publisher(service_name).await;
+
+        to_binder_result(res)
+    }
 }
 
 impl ConfigurablePublisherRegistryService {

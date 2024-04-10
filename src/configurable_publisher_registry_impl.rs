@@ -5,6 +5,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 use google_sdv_telemetry_configurable_publisher::binder::Strong;
 use async_trait::async_trait;
 use binder::BinderFeatures;
+use log::info;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
@@ -156,6 +157,24 @@ impl ConfigurablePublisherRegistryImpl {
             }
             Entry::Vacant(v) => {
                 v.insert(PublisherEntry { message_descriptor, publisher: publisher.clone() });
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(crate) async fn unregister_publisher(&self, service_name: &str) -> crate::BinderResult<()> {
+        let mut publisher_entries_lock = self.publisher_entries.lock().unwrap();
+
+        match publisher_entries_lock.entry(service_name.to_string()) {
+            Entry::Occupied(o) => {
+                let _ = o.remove_entry();
+            }
+            Entry::Vacant(_) => {
+                info!(
+                    "{} not found. It might have been unregistered already.",
+                    service_name.to_string()
+                );
             }
         }
 
@@ -335,5 +354,51 @@ mod tests {
             .await
             .unwrap();
         configurable_publisher_registry.unsubscribe(SERVICE_NAME2, None).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn unregister_success() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
+
+        let is_subscribed = configurable_publisher_registry
+            .try_subscribe(SERVICE_NAME, Arc::new(|_| {}), None)
+            .await
+            .unwrap();
+
+        assert!(is_subscribed);
+        assert!(configurable_publisher_registry
+            .publisher_entries
+            .lock()
+            .unwrap()
+            .contains_key(SERVICE_NAME));
+
+        configurable_publisher_registry.unregister_publisher(SERVICE_NAME).await.unwrap();
+        assert!(!configurable_publisher_registry
+            .publisher_entries
+            .lock()
+            .unwrap()
+            .contains_key(SERVICE_NAME));
+    }
+
+    #[tokio::test]
+    async fn unregister_incorrect_service_name_gets_ignored() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
+
+        let is_subscribed = configurable_publisher_registry
+            .try_subscribe(SERVICE_NAME, Arc::new(|_| {}), None)
+            .await
+            .unwrap();
+
+        assert!(is_subscribed);
+        configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await.unwrap();
+        assert!(configurable_publisher_registry
+            .publisher_entries
+            .lock()
+            .unwrap()
+            .contains_key(SERVICE_NAME));
     }
 }
