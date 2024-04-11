@@ -154,7 +154,7 @@ Steps to reproduce:
     was already printed in step 2):
 
     ```
-    11-20 22:29:05.206   237   243 I SdvTelemetryService: sdv_telemetry_configurable_publisher: Registering publisher with telemetry service with topic SampleData
+    11-20 22:29:05.206   237   243 I SdvTelemetryService: sdv_telemetry_configurable_publisher: Registering publisher with telemetry service name SampleService
     ```
 
 3.  LAUNCH NEW TERMINAL (**Terminal #3**)

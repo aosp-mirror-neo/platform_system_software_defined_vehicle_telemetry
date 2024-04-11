@@ -11,10 +11,6 @@ parcelable PublisherInfo {
     // across SDV. Must be non-null
     @utf8InCpp String serviceName;
 
-    // Name of the publisher topic. Must be unique across one service name.
-    // Must be non-null
-    @utf8InCpp String topicName;
-
     // Protobuf descriptor that contains root published message and all its
     // nested sub-messages. Must be non-null. This schema is used by the telemetry
     // service to deserialize the data sent by the publisher.
