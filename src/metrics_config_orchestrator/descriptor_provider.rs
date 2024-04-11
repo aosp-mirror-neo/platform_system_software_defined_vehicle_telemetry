@@ -56,7 +56,7 @@ mod tests {
     fn get_descriptor_invalid_publisher_name_fails() {
         let descriptor_provider = create_descriptor_provider();
 
-        let err = descriptor_provider.get_descriptor(PUBLISHER_2).err().unwrap();
+        let err = descriptor_provider.get_descriptor(PUBLISHER_2).unwrap_err();
 
         assert!(
             matches!(&err, DescriptorProviderError::InvalidPublisherName),

@@ -89,7 +89,7 @@ mod tests {
         let mut bad_avg =
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        let err = bad_avg.compute().err().unwrap();
+        let err = bad_avg.compute().unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),

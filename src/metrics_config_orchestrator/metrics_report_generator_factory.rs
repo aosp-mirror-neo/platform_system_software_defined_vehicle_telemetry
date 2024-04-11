@@ -415,7 +415,7 @@ mod tests {
         let factory = create_factory();
         let config = create_config_with_invalid_name();
 
-        let err = factory.validate_using_empty_context(&config).err().unwrap();
+        let err = factory.validate_using_empty_context(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
@@ -429,7 +429,7 @@ mod tests {
         let factory = create_factory();
         let config = create_config_without_message_builder();
 
-        let err = factory.validate_using_empty_context(&config).err().unwrap();
+        let err = factory.validate_using_empty_context(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
@@ -443,7 +443,7 @@ mod tests {
         let factory = create_factory();
         let config = create_config_with_invalid_trigger_name();
 
-        let err = factory.validate_using_empty_context(&config).err().unwrap();
+        let err = factory.validate_using_empty_context(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
@@ -475,7 +475,7 @@ mod tests {
     fn validate_empty_trigger_names_with_complete_report_fails() {
         let factory = create_factory();
         let config = create_config_with_empty_trigger_names(/*incomplete_report=*/ false);
-        let err = factory.validate_using_empty_context(&config).err().unwrap();
+        let err = factory.validate_using_empty_context(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::TriggerNameRequired),

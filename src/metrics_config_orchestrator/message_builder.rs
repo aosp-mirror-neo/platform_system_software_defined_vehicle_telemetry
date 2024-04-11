@@ -332,10 +332,7 @@ mod tests {
         // action
         let res = builder.build();
 
-        assert!(matches!(
-            res.err().unwrap(),
-            MessageBuilderError::FailedToAssignValueToField { .. }
-        ));
+        assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
     }
 
     #[test]
@@ -349,10 +346,7 @@ mod tests {
         // action
         let res = builder.build();
 
-        assert!(matches!(
-            res.err().unwrap(),
-            MessageBuilderError::FailedToAssignValueToField { .. }
-        ));
+        assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
     }
 
     #[test]
@@ -374,6 +368,6 @@ mod tests {
         // action
         let res = builder.build();
 
-        assert!(matches!(res.err().unwrap(), MessageBuilderError::BadAggregation { .. }));
+        assert!(matches!(res.unwrap_err(), MessageBuilderError::BadAggregation { .. }));
     }
 }

@@ -567,7 +567,7 @@ mod tests {
     fn validate_no_name_fails() {
         let factory = create_factory();
 
-        let err = factory.validate_using_default_context(&TriggerProto::new()).err().unwrap();
+        let err = factory.validate_using_default_context(&TriggerProto::new()).unwrap_err();
 
         assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
@@ -595,7 +595,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_no_parent_triggers();
 
-        let err = factory.validate_using_default_context(&trigger).err().unwrap();
+        let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
         assert!(
             matches!(err, TriggerFactoryError::NoParentTriggers),
@@ -609,7 +609,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_missing_node_index();
 
-        let err = factory.validate_using_default_context(&trigger).err().unwrap();
+        let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
         assert!(
             matches!(err, TriggerFactoryError::MissingNodeIndex),
@@ -623,7 +623,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_incorrect_node_index();
 
-        let err = factory.validate_using_default_context(&trigger).err().unwrap();
+        let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
         assert!(
             matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
@@ -637,7 +637,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_unknown_condition_type();
 
-        let err = factory.validate_using_context_with(&trigger, vec![None]).err().unwrap();
+        let err = factory.validate_using_context_with(&trigger, vec![None]).unwrap_err();
 
         assert!(
             matches!(err, TriggerFactoryError::UnknownConditionType { condition_type: -1 }),
@@ -651,7 +651,7 @@ mod tests {
         let factory = create_factory();
         let trigger = create_conditional_trigger_with_unspecified_condition_type();
 
-        let err = factory.validate_using_context_with(&trigger, vec![None]).err().unwrap();
+        let err = factory.validate_using_context_with(&trigger, vec![None]).unwrap_err();
 
         assert!(
             matches!(err, TriggerFactoryError::UnspecifiedConditionType),

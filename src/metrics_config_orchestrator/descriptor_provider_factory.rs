@@ -199,7 +199,7 @@ mod tests {
             .create(get_test_file_descriptors(), &[], &create_default_service_publisher_manager())
             .unwrap();
 
-        let err = descriptor_provider.get_descriptor(PUBLISHER_3).err().unwrap();
+        let err = descriptor_provider.get_descriptor(PUBLISHER_3).unwrap_err();
 
         assert!(
             matches!(&err, DescriptorProviderError::InvalidPublisherName),

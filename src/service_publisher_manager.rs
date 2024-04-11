@@ -134,8 +134,7 @@ mod tests {
         let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let err =
-            service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME2).err().unwrap();
+        let err = service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME2).unwrap_err();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }

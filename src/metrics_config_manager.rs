@@ -661,7 +661,7 @@ mod tests {
         let serialized_config = create_serialized_config(UUID);
 
         let err =
-            test_environment.manager.add_metrics_config(&serialized_config).await.err().unwrap();
+            test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. }),
             "Unexpected error: {:?}",
@@ -682,7 +682,7 @@ mod tests {
         let serialized_config = create_serialized_config(UUID);
 
         let err =
-            test_environment.manager.add_metrics_config(&serialized_config).await.err().unwrap();
+            test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::PersistentStorageLimitExceeded),
             "Unexpected error: {:?}",
@@ -735,7 +735,7 @@ mod tests {
             ConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid: UUID.to_string() },
         );
 
-        let err = test_environment.manager.activate_metrics_config(UUID).await.err().unwrap();
+        let err = test_environment.manager.activate_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. }),
             "Unexpected error: {:?}",
@@ -798,7 +798,7 @@ mod tests {
             ConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid: UUID.to_string() },
         );
 
-        let err = test_environment.manager.deactivate_metrics_config(UUID).await.err().unwrap();
+        let err = test_environment.manager.deactivate_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. }),
             "Unexpected error: {:?}",
@@ -845,7 +845,7 @@ mod tests {
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
-        let err = test_environment.manager.remove_metrics_config(UUID).await.err().unwrap();
+        let err = test_environment.manager.remove_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { uuid } if uuid == UUID),
             "Unexpected error: {:?}",
