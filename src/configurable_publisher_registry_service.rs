@@ -2,6 +2,8 @@
 
 //! This module implements the IConfigurablePublisherRegistry AIDL interface
 
+#![deny(clippy::cast_lossless)]
+
 mod configurable_publisher_registry;
 mod subscriber_service;
 

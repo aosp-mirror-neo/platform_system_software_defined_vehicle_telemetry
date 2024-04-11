@@ -111,7 +111,7 @@ impl NodeValueExtension for NodeValue {
             AggregationError::NumericAggregationTypeMismatch { value: format!("{:?}", new_value) }
         })?;
         if let NodeValue::Double(avg) = self {
-            let n = n as f64;
+            let n = f64::from(n);
             let sum = *avg * n;
             *avg = (sum + new_sample) / (n + 1.0)
         } else {

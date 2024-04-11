@@ -2,6 +2,8 @@
 
 //! Binary for registering Telemetry service.
 
+#![deny(clippy::cast_lossless)]
+
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{
     BnConfigurablePublisherRegistry, BpConfigurablePublisherRegistry, IConfigurablePublisherRegistry,
 };

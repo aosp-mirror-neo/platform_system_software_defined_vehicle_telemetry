@@ -127,7 +127,7 @@ impl ToReflectValueBox for i32 {
             ProtobufRuntimeType::Enum(enum_descriptor) => {
                 Ok(ReflectValueBox::Enum(enum_descriptor.clone(), *self))
             }
-            _ => (*self as i64).to_reflect_value_box(protobuf_type),
+            _ => i64::from(*self).to_reflect_value_box(protobuf_type),
         }
     }
 }
@@ -175,7 +175,7 @@ impl ToReflectValueBox for f32 {
     ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self)),
-            _ => (*self as f64).to_reflect_value_box(protobuf_type),
+            _ => f64::from(*self).to_reflect_value_box(protobuf_type),
         }
     }
 }
