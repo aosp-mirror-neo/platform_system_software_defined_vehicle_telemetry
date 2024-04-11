@@ -46,6 +46,6 @@ mod tests {
 
         let res = bad_value.compute();
 
-        assert!(matches!(res.err().unwrap(), AggregationError::ExpressionEvaluationError { .. }));
+        assert!(matches!(res.unwrap_err(), AggregationError::ExpressionEvaluationError { .. }));
     }
 }

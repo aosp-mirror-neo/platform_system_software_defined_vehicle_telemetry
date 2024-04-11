@@ -100,7 +100,7 @@ mod tests {
         let mut bad_max =
             MaxAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        let err = bad_max.compute().err().unwrap();
+        let err = bad_max.compute().unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),

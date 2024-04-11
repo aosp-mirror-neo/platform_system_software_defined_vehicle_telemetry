@@ -362,7 +362,7 @@ mod tests {
     fn validate_no_name_fails() {
         let factory = create_default_factory();
 
-        let err = factory.validate_using_default_context(&PublisherProto::new()).err().unwrap();
+        let err = factory.validate_using_default_context(&PublisherProto::new()).unwrap_err();
 
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
@@ -382,7 +382,7 @@ mod tests {
         let factory = create_factory(Some(message_builder_factory));
         let (publisher, _) = create_valid_aggregation_publisher();
 
-        let err = factory.validate_using_default_context(&publisher).err().unwrap();
+        let err = factory.validate_using_default_context(&publisher).unwrap_err();
 
         assert!(matches!(&err, PublisherFactoryError::InvalidProtoMessageBuilder { .. }));
     }

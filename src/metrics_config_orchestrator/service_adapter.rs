@@ -318,7 +318,7 @@ pub(super) mod tests {
         service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
 
         // Try unsubscribing using invalid subscription.
-        let err = service_adapter.unsubscribe(create_invalid_subscription()).await.err().unwrap();
+        let err = service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap_err();
 
         assert!(
             matches!(&err, ServiceAdapterUnsubscribeError::InvalidServiceSubscription),

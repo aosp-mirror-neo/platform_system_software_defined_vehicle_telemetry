@@ -298,7 +298,7 @@ mod tests {
             }],
         );
 
-        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+        let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
@@ -318,7 +318,7 @@ mod tests {
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
         );
 
-        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+        let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
@@ -341,7 +341,7 @@ mod tests {
             ],
         );
 
-        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+        let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
@@ -364,7 +364,7 @@ mod tests {
             ],
         );
 
-        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+        let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::FieldNotFound { .. }),
@@ -387,7 +387,7 @@ mod tests {
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
         );
 
-        let err = factory.validate(&proto_message_builder, &context).err().unwrap();
+        let err = factory.validate(&proto_message_builder, &context).unwrap_err();
 
         assert!(
             matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. }),

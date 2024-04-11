@@ -1645,7 +1645,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_name();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -1660,7 +1660,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_trigger_name();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -1675,7 +1675,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
@@ -1690,7 +1690,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_publisher_trigger_cycle();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
@@ -1705,7 +1705,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1720,7 +1720,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_data_trigger_publisher();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
@@ -1735,7 +1735,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1750,7 +1750,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_metrics_report_config_name();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
@@ -1766,7 +1766,7 @@ mod tests {
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).await.unwrap();
 
-        let err = orchestrator.initialize_config(&config2).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config2).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
@@ -1784,7 +1784,7 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
@@ -1802,7 +1802,7 @@ mod tests {
             .set_create_callback(|_| Some(PublisherFactoryError::UnknownPublisherType));
         let config = create_valid_config_with_publisher();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -1821,7 +1821,7 @@ mod tests {
 
         let config = create_valid_config_with_trigger();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -1841,7 +1841,7 @@ mod tests {
         );
         let config = create_valid_config_with_metrics_report_config();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
             report_config_name,
@@ -1935,7 +1935,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.start_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1952,7 +1952,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.end_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1969,7 +1969,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.finish_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -1999,7 +1999,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.publishers.push(publisher);
 
-        let err = orchestrator.initialize_config(&config).await.err().unwrap();
+        let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::ServiceAdapterError { .. })),
@@ -2328,7 +2328,7 @@ mod tests {
     async fn finish_config_invalid_config_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
 
-        let err = orchestrator.finish_config(UUID).await.err().unwrap();
+        let err = orchestrator.finish_config(UUID).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } if uuid == UUID),
@@ -2624,7 +2624,7 @@ mod tests {
         orchestrator.node_factory.fail_validate();
         let config = create_valid_config_with_dependencies();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
@@ -2638,7 +2638,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_name();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -2653,7 +2653,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_trigger_name();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -2668,7 +2668,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
@@ -2683,7 +2683,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_publisher_trigger_cycle();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
@@ -2698,7 +2698,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2713,7 +2713,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_data_trigger_publisher();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
@@ -2728,7 +2728,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2743,7 +2743,7 @@ mod tests {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let config = create_config_with_duplicate_metrics_report_config_name();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
@@ -2759,7 +2759,7 @@ mod tests {
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).await.unwrap();
 
-        let err = orchestrator.validate_config(&config2).err().unwrap();
+        let err = orchestrator.validate_config(&config2).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
@@ -2777,7 +2777,7 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
@@ -2795,7 +2795,7 @@ mod tests {
             .set_validate_callback(|_| Some(PublisherFactoryError::UnknownPublisherType));
         let config = create_valid_config_with_publisher();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -2813,7 +2813,7 @@ mod tests {
             .set_validate_callback(|_| Some(TriggerFactoryError::UnknownTriggerType));
         let config = create_valid_config_with_trigger();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -2833,7 +2833,7 @@ mod tests {
         );
         let config = create_valid_config_with_metrics_report_config();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
             report_config_name,
@@ -2894,7 +2894,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.start_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2911,7 +2911,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.end_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2928,7 +2928,7 @@ mod tests {
         config.uuid = UUID.to_owned();
         config.finish_trigger_name = SOME_TRIGGER_NAME.to_owned();
 
-        let err = orchestrator.validate_config(&config).err().unwrap();
+        let err = orchestrator.validate_config(&config).unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),

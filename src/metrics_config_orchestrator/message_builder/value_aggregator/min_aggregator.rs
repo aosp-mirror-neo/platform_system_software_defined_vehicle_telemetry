@@ -100,7 +100,7 @@ mod tests {
         let mut bad_min =
             MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        let err = bad_min.compute().err().unwrap();
+        let err = bad_min.compute().unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
