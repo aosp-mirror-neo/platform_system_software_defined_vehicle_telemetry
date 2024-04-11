@@ -64,19 +64,6 @@ typedef void (*GetReportCallbackFunction)(void*, int, const char*, const uint8_t
 ServiceHolder* get_telemetry_service();
 
 /**
- * Disconnects the telemetry service binder connection held by ServiceHolder, and tells the
- * telemetry binder service to release all resources to free up memory and cpu. A stopped
- * service can be started again by calling get_telemetry_service defined above.
- * TODO: b/298456137: Trigger release of resources in telemetry binder service when
- * stop telemetry service is called.
- *
- * @param holder An opaque pointer holding a reference to the telemetry_service
- *
- * @return an integer status code that validates the parameters provided to the API
- */
-int stop_telemetry_service(ServiceHolder* holder);
-
-/**
  * Adds a metrics config to the telemetry service passed as a byte array. Any metrics
  * config added is inactive by default and needs to be activated explicitly. Client can receive
  * errors related to the config if a status listener is added to the telemetry service.
@@ -96,9 +83,7 @@ int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t si
                        StatusCallbackFunction cbFunc);
 
 /**
- * Activates a previously added metrics config or a deactivated metrics config. Client can
- * receive errors related to the params passed to the API call of the config if a status
- * listener is added to the telemetry service.
+ * Activates a previously added metrics config or a deactivated metrics config.
  * TODO: b/298456859: Handle case when ServiceHolder is null or invalid
  * TODO: b/298457300: Handle cases when API calls are made after service is stopped
  *

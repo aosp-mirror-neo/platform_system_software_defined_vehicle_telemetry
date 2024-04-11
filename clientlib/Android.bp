@@ -48,3 +48,26 @@ cc_library {
     vendor_available: true,
     system_ext_specific: true,
 }
+
+rust_library {
+    name: "libsdv_telemetry_rust_wrapper",
+    crate_name: "sdv_telemetry_rust_wrapper",
+    srcs: ["rust_wrapper/telemetry_service_rust_wrapper.rs"],
+    rustlibs: [
+        "libfutures",
+        "liblog_rust",
+        "libbinder_rs",
+        "liblogger",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+        "libsdv_telemetry_bindgen",
+        "libstatus_codes_bindgen",
+        "libtokio",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
+    ],
+    system_ext_specific: true,
+    vendor_available: true,
+}

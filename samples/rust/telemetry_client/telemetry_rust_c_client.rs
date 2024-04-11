@@ -1,8 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 //! Binary for testing Telemetry service.
-mod metrics_config_manager;
-mod metrics_report_manager;
+#![allow(missing_docs)]
 
 extern crate protobuf;
 
@@ -10,59 +9,41 @@ use futures::future::join_all;
 use log::{error, info, LevelFilter};
 use std::collections::HashSet;
 use std::env;
-use std::ffi::CStr;
 use std::fs;
-use std::pin::Pin;
-use std::sync::Arc;
+use tokio::sync::mpsc;
 
-use crate::metrics_config_manager::MetricsConfigManager;
-use crate::metrics_report_manager::MetricsReportManager;
-use sdv_telemetry_bindgen as rust_to_c;
+use rust_to_c::TelemetryServiceHolder;
+use sdv_telemetry_rust_wrapper as rust_to_c;
 
-unsafe extern "C" fn on_status(
-    _listener: *mut std::ffi::c_void,
-    status_code: i32,
-    status_msg: *const std::ffi::c_char,
-) {
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
-    let msg = unsafe {
-        // Convert *const std::ffi::c_char to &CStr
-        let c_str = CStr::from_ptr(status_msg);
-
-        // Convert &CStr to String
-        c_str.to_str().unwrap().to_string()
-    };
-
-    info!("Status code: {} status message: {}", status_code, msg);
-}
+// Arbitrarily chosen buffer capacity
+const MPSC_CHANNEL_CAPACITY: usize = 32;
 
 async fn process_config(
     path: String,
-    config_manager: Arc<Pin<Box<MetricsConfigManager>>>,
-) -> Option<String> {
+    service: &TelemetryServiceHolder,
+) -> Result<String, (i32, String)> {
     // Read binary into a vector
     let serialized_config = fs::read(path).unwrap();
 
     let config_name;
-    let add_config_res = config_manager.add_metrics_config(&serialized_config).await;
+    let add_config_res = service.add_metrics_config(&serialized_config).await;
 
     let activate_config_res = match add_config_res {
         Ok(message) => {
             config_name = message.clone();
-            config_manager.activate_metrics_config(&message).await
+            service.activate_metrics_config(&message).await
         }
         Err(e) => {
-            error!("Error in adding config: {}", e);
-            return None;
+            error!("Error in adding config: {:?}", e);
+            return Err(e);
         }
     };
 
     match activate_config_res {
-        Ok(_) => Some(config_name),
+        Ok(_) => Ok(config_name),
         Err(e) => {
-            error!("Error in activating config: {}", e);
-            None
+            error!("Error in activating config: {:?}", e);
+            Err(e)
         }
     }
 }
@@ -84,68 +65,61 @@ async fn main() -> Result<(), binder::Status> {
             .with_max_level(LevelFilter::Trace),
     );
 
-    let mut service;
-
     info!("Connecting to service");
-    // Unsafe block needed to be able to call C API functions
-    // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
-    // for on_status are passed.
-    unsafe {
-        service = rust_to_c::get_telemetry_service();
-        rust_to_c::set_status_listener(
-            service,
-            &mut service as *mut _ as *mut std::ffi::c_void,
-            Some(on_status),
-        );
-    }
+    let service = TelemetryServiceHolder::get().unwrap();
 
-    let mut report_manager = MetricsReportManager::new(service);
-    let config_manager = Arc::new(MetricsConfigManager::new(service));
+    let (status_sender, _receiver) = mpsc::channel(MPSC_CHANNEL_CAPACITY);
+    service
+        .set_status_listener(move |status_code, status_msg| {
+            status_sender.try_send((status_code, status_msg)).unwrap();
+        })
+        .await
+        .unwrap();
 
-    let mut add_config_futures = Vec::with_capacity(args.len() - 1);
+    let (sender, mut receiver) = mpsc::channel(MPSC_CHANNEL_CAPACITY);
 
-    let config_paths: Vec<String> = args.iter().skip(1).cloned().collect();
-    for path in config_paths {
-        add_config_futures.push(process_config(path, config_manager.clone()));
-    }
+    service
+        .set_report_ready_listener(move |metrics_config_uuid, report_config_name, report_number| {
+            sender.try_send((metrics_config_uuid, report_config_name, report_number)).unwrap();
+        })
+        .await
+        .unwrap();
+
+    let add_config_futures: Vec<_> =
+        args.iter().skip(1).cloned().map(|path| process_config(path, &service)).collect();
 
     let add_config_results = join_all(add_config_futures).await;
     let mut active_configs = HashSet::new();
 
     // Collect all activated configs
     for res in add_config_results.into_iter().flatten() {
-        info!("Config added successfully: {}", res.clone());
+        info!("Config added successfully: {:?}", res);
         active_configs.insert(res);
     }
 
     while !active_configs.is_empty() {
-        let metrics_report = report_manager.as_mut().get_metrics_report().await.unwrap();
-        info!("Report received: {:?}", metrics_report);
+        // SAFETY: The data inside the mutable reference will never move out of the
+        // mutable reference and the function is safe to call.
+        let (config_uuid, config_name, report_number) = receiver.recv().await.unwrap();
+        let metrics_report =
+            service.get_metrics_report(config_uuid, config_name, report_number).await.unwrap();
         if active_configs.contains(&metrics_report.metrics_config_uuid) {
-            let remove_config_res = config_manager
-                .as_ref()
-                .remove_metrics_config(&metrics_report.metrics_config_uuid)
-                .await;
+            let remove_config_res =
+                service.remove_metrics_config(&metrics_report.metrics_config_uuid).await;
             match remove_config_res {
                 Ok(_) => {
                     info!("Successfully removed config");
                     active_configs.remove(&metrics_report.metrics_config_uuid);
                 }
                 Err(e) => {
-                    error!("Error in removing config: {}", e);
+                    error!("Error in removing config: {:?}", e);
                 }
             }
         }
     }
 
-    // Unsafe block needed to be able to call C API functions
-    // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: safe to use as service is a valid pointer to ServiceHolder.
-    unsafe {
-        rust_to_c::clear_status_listener(service);
-        rust_to_c::clear_report_ready_listener(service);
-    }
+    service.clear_status_listener().await.unwrap();
+    service.clear_report_ready_listener().await.unwrap();
 
     Ok(())
 }
