@@ -20,6 +20,7 @@
 package google.sdv.telemetry.configurable_publisher;
 @VintfStability
 interface IConfigurablePublisher {
-  void subscribe(in google.sdv.telemetry.configurable_publisher.ISubscriber subscriber, in @nullable byte[] configuration);
-  void unsubscribe(in @nullable byte[] configuration);
+    google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription
+    create_subscription(in google.sdv.telemetry.configurable_publisher.ISubscriber subscriber,
+            in @nullable byte[] configuration);
 }

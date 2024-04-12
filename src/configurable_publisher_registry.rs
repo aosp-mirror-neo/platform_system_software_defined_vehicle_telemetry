@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 // External dependencies.
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::IConfigurablePublisher, ISubscriber::BnSubscriber, PublisherInfo::PublisherInfo};
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::IConfigurablePublisher, ISubscriber::BnSubscriber, PublisherInfo::PublisherInfo, IConfigurablePublisherSubscription::IConfigurablePublisherSubscription};
 use google_sdv_telemetry_configurable_publisher::binder::Strong;
 use async_trait::async_trait;
 use binder::BinderFeatures;
@@ -14,7 +14,7 @@ use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::{fmt::Debug, sync::Mutex};
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -33,10 +33,8 @@ pub struct ConfigurablePublisherRegistry {
 pub struct ConfigurablePublisherRegistrySubscription {
     /// Handles for the spawned tokio task that reads the data.
     join_handle: tokio::task::JoinHandle<()>,
-    /// Reference configurable publishers store.
-    publisher_entries: Weak<Mutex<HashMap<String, PublisherEntry>>>,
-    /// The name of the service.
-    service_name: String,
+    /// The underlying configurable publisher subscription.
+    configurable_publisher_subscription: Strong<dyn IConfigurablePublisherSubscription>,
 }
 
 /// Publisher registry entry.
@@ -116,13 +114,12 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             BinderFeatures::default(),
         );
 
-        publisher.subscribe(&listener_wrapper, configuration)?;
+        let subscription = publisher.create_subscription(&listener_wrapper, configuration)?;
 
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
             ConfigurablePublisherRegistrySubscription {
                 join_handle,
-                publisher_entries: Arc::downgrade(&self.publisher_entries),
-                service_name: service_name.to_owned(),
+                configurable_publisher_subscription: subscription,
             },
         )))
     }
@@ -189,33 +186,21 @@ impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription 
             self.join_handle.abort();
         }
 
-        let maybe_publisher =
-            visit_entry(&self.publisher_entries.upgrade().unwrap(), &self.service_name, |entry| {
-                entry.publisher.clone()
-            });
-        if let Some(publisher) = maybe_publisher {
-            publisher.unsubscribe(None)?;
-        } else {
-            info!(
-                "Unable to unsubscribe from service {}. It might have been unregistered already.",
-                self.service_name
-            );
-        };
-
+        self.configurable_publisher_subscription.unsubscribe()?;
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, ISubscriber::ISubscriber};
+    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}, ISubscriber::ISubscriber};
     use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
     use protobuf::{Message, MessageFull};
     use sample_publisher_proto::sample_publisher;
     use sample_publisher_proto::sample_publisher::SampleMessage;
     use sdv_telemetry_utils::test_utils::create_empty_fn_box;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Weak};
 
     use super::*;
 
@@ -230,21 +215,34 @@ mod tests {
         num_unsubscribe_calls: Arc<AtomicU32>,
     }
 
+    struct ConfigurablePublisherSubscription {
+        num_unsubscribe_calls: Weak<AtomicU32>,
+    }
+
     impl Interface for MockConfigurablePublisher {}
+    impl Interface for ConfigurablePublisherSubscription {}
+
+    impl IConfigurablePublisherSubscription for ConfigurablePublisherSubscription {
+        fn unsubscribe(&self) -> BinderResult<()> {
+            self.num_unsubscribe_calls.upgrade().unwrap().fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
 
     impl IConfigurablePublisher for MockConfigurablePublisher {
-        fn subscribe(
+        fn create_subscription(
             &self,
             _subscriber: &Strong<dyn ISubscriber>,
             _config: Option<&[u8]>,
-        ) -> BinderResult<()> {
+        ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
+            let binder_subscription = BnConfigurablePublisherSubscription::new_binder(
+                ConfigurablePublisherSubscription {
+                    num_unsubscribe_calls: Arc::downgrade(&self.num_unsubscribe_calls),
+                },
+                BinderFeatures::default(),
+            );
             self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-
-        fn unsubscribe(&self, _config: Option<&[u8]>) -> BinderResult<()> {
-            self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
-            Ok(())
+            Ok(binder_subscription)
         }
     }
 
@@ -361,28 +359,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_unregistered_no_publisher_calls() {
-        let configurable_publisher = MockConfigurablePublisher::new();
-        let configurable_publisher_registry =
-            create_configurable_publisher_registry(configurable_publisher.clone()).await;
-
-        let subscription = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
-            .await
-            .unwrap()
-            .unwrap();
-        configurable_publisher_registry.unregister_publisher(SERVICE_NAME).await.unwrap();
-        subscription.unsubscribe().await.unwrap();
-
-        assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
-        assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 0);
-    }
-
-    #[tokio::test]
     async fn unregister_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
         let configurable_publisher_registry =
-            create_configurable_publisher_registry(configurable_publisher).await;
+            create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
             .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
@@ -396,6 +376,9 @@ mod tests {
             .lock()
             .unwrap()
             .contains_key(SERVICE_NAME));
+
+        // Unregistering doesn't unsubscribe from the publisher.
+        assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 0);
     }
 
     #[tokio::test]

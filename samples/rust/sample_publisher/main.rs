@@ -6,6 +6,7 @@
 
 mod random_integer_publisher;
 mod random_integer_publisher_service;
+mod random_integer_publisher_subscription;
 
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
