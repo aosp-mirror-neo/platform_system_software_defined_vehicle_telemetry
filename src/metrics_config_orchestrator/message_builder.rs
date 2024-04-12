@@ -94,6 +94,7 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use lazy_static::lazy_static;
+    use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 
@@ -112,6 +113,7 @@ mod tests {
     }
 
     // For all available field names, see src/test_utils/test_message.proto
+    const ANY_FIELD_NAME: &str = "any_field";
     const INT_FIELD_NAME: &str = "int_field";
     const FLOAT_FIELD_NAME: &str = "float_field";
     const ENUM_FIELD_NAME: &str = "enum_field";
@@ -171,14 +173,14 @@ mod tests {
     #[test]
     fn build_message_field_ok() -> Result<(), MessageBuilderError> {
         let mut expected_message = TestMessage::new();
-        expected_message.int_field = 42;
+        expected_message.any_field = MessageField::some(Any::pack(&*TEST_NESTED_MESSAGE).unwrap());
         expected_message.message_field = MessageField::some(TEST_NESTED_MESSAGE.clone());
 
         // create MessageBuilderImpl struct object, this is the subject of the test
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
-                (INT_FIELD_NAME, NodeValue::Int64(42)),
+                (ANY_FIELD_NAME, NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone()))),
                 (MESSAGE_FIELD_NAME, NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone()))),
             ],
         );
@@ -347,6 +349,22 @@ mod tests {
         let res = builder.build();
 
         assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
+    }
+
+    #[test]
+    fn build_node_value_incompatible_with_message_field_fails() {
+        let builder = create_message_builder(
+            TestMessage::descriptor(),
+            vec![(MESSAGE_FIELD_NAME, NodeValue::Message(Box::new(Timestamp::new())))],
+        );
+
+        // action
+        let res = builder.build();
+
+        assert!(matches!(
+            res.err().unwrap(),
+            MessageBuilderError::FailedToAssignValueToField { .. }
+        ));
     }
 
     #[test]

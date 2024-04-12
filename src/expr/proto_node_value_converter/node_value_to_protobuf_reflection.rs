@@ -2,10 +2,9 @@
 
 //! Helper functions for converting NodeValue into protobuf reflection types.
 
-use protobuf::{
-    reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType},
-    MessageDyn,
-};
+use protobuf::reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType};
+use protobuf::well_known_types::any::Any;
+use protobuf::{MessageDyn, MessageFull};
 
 use crate::expr::{node_errors::NodeError, node_value::NodeValue};
 
@@ -83,8 +82,18 @@ impl ToReflectValueBox for NodeValue {
             ProtobufRuntimeType::Bool => {
                 self.get_bool(&err_provider)?.to_reflect_value_box(protobuf_type)
             }
-            ProtobufRuntimeType::Message(_) => {
-                Ok(ReflectValueBox::Message(self.get_message(err_provider)?.clone_box()))
+            ProtobufRuntimeType::Message(descriptor) => {
+                let msg = self.get_message(err_provider)?;
+                let msg_descriptor = msg.descriptor_dyn();
+                if &msg_descriptor != descriptor {
+                    if descriptor == &Any::descriptor() {
+                        Ok(ReflectValueBox::Message(Box::new(Any::pack_dyn(msg).unwrap())))
+                    } else {
+                        Err(err_provider())
+                    }
+                } else {
+                    Ok(ReflectValueBox::Message(msg.clone_box()))
+                }
             }
             _ => Err(err_provider()),
         }

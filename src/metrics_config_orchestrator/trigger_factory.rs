@@ -498,7 +498,7 @@ mod tests {
             .create_using_context_with(
                 &trigger,
                 Some(vec![Arc::new(create_node())]),
-                vec![Some(NodeValueType::Message)],
+                vec![Some(NodeValueType::BoolList)],
                 None,
                 None,
             )
@@ -666,7 +666,7 @@ mod tests {
         let trigger = create_conditional_trigger_with_all_changes_condition_type();
 
         let err = factory
-            .validate_using_context_with(&trigger, vec![Some(NodeValueType::Message)])
+            .validate_using_context_with(&trigger, vec![Some(NodeValueType::BoolList)])
             .err()
             .unwrap();
 

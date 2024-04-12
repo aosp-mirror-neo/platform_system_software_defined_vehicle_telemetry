@@ -421,11 +421,11 @@ mod tests {
     use paste::paste;
     use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdvtelemetry_proto_rust::expression::combination_node::{
+        ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+        RoundingOperator,
+    };
     use sdvtelemetry_proto_rust::expression::{
-        combination_node::{
-            ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
-            RoundingOperator,
-        },
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
 
@@ -434,6 +434,7 @@ mod tests {
 
     const BOOL_FIELD_NAME: &str = "bool_field";
     const FLOAT_FIELD_NAME: &str = "float_field";
+    const MESSAGE_FIELD_NAME: &str = "message_field";
     const INT_FIELD_NAME: &str = "int_field";
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
@@ -478,6 +479,33 @@ mod tests {
         combination_node.operator = Some(operator);
 
         vec![left_node, right_node, node]
+    }
+
+    /// Create a combination node that checks whether the specified message list
+    /// contains a message.
+    fn create_contains_message_node(message_list_field_names: &[&str]) -> Vec<NodeProto> {
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+        let mut node_2 = NodeProto::new();
+
+        let mut message_list_field_leaf = FieldLeafNode::new();
+        message_list_field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_owned();
+        message_list_field_leaf.field_names =
+            message_list_field_names.iter().map(|s| s.to_string()).collect();
+        node_0.set_field_leaf_node(message_list_field_leaf);
+
+        let mut message_field_leaf = FieldLeafNode::new();
+        message_field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_owned();
+        message_field_leaf.field_names = vec![MESSAGE_FIELD_NAME.to_owned()];
+        node_1.set_field_leaf_node(message_field_leaf);
+
+        let mut contains_node = CombinationNode::new();
+        contains_node.left_index = Some(0); // list of messages
+        contains_node.right_index = Some(1); // a single message
+        contains_node.set_relational_operator(RelationalOperator::CONTAINS);
+        node_2.set_combination_node(contains_node);
+
+        vec![node_0, node_1, node_2]
     }
 
     /// Helper function that returns this tree:
@@ -777,26 +805,7 @@ mod tests {
     fn validate_relational_operator_incompatible_types_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
-        let mut node_0 = NodeProto::new();
-        let mut node_1 = NodeProto::new();
-        let mut node_2 = NodeProto::new();
-
-        let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_string();
-        field_leaf.field_names = vec!["message_field".to_string(), "repeated_i32s".to_string()];
-        node_0.set_field_leaf_node(field_leaf);
-
-        let mut constant_leaf_true = ConstantLeafNode::new();
-        constant_leaf_true.set_bool_value(true);
-        node_1.set_constant_leaf_node(constant_leaf_true);
-
-        let mut contains_node = CombinationNode::new();
-        contains_node.left_index = Some(0); // list of ints
-        contains_node.right_index = Some(1); // a single boolean
-        contains_node.set_relational_operator(RelationalOperator::CONTAINS);
-        node_2.set_combination_node(contains_node);
-
-        let all_proto_nodes = vec![node_0, node_1, node_2];
+        let all_proto_nodes = create_contains_message_node(&[MESSAGE_FIELD_NAME, "repeated_i32s"]);
 
         // action
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
@@ -806,6 +815,32 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
+    }
+
+    #[test]
+    fn validate_relational_operator_incompatible_message_types_fails() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+        let all_proto_nodes = create_contains_message_node(&["repeated_empty"]);
+
+        // action
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
+
+        assert!(
+            matches!(&err, NodeError::ContainsOperatorIncompatibleOperands),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_relational_operator_message_types_success() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+        let all_proto_nodes = create_contains_message_node(&["repeated_messages"]);
+
+        // action
+        node_factory.validate(&all_proto_nodes, &context).unwrap();
     }
 
     #[test]

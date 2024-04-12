@@ -4,6 +4,9 @@ syntax = "proto3";
 
 package google.sdv.telemetry.test;
 
+import "google/protobuf/any.proto";
+import "google/protobuf/empty.proto";
+
 enum TestEnum {
   NONE = 0;
   SOME = 1;
@@ -17,17 +20,19 @@ message TestMessage {
   string string_field = 4;
   TestEnum enum_field = 5;
   TestNestedMessage message_field = 6;
+  google.protobuf.Any any_field = 7;
 
   // Repeated fields
-  repeated bool repeated_bools = 7;
-  repeated int64 repeated_i64s = 8;
-  repeated double repeated_doubles = 9;
-  repeated TestEnum repeated_enums = 10;
-  repeated TestNestedMessage repeated_messages = 11;
+  repeated bool repeated_bools = 8;
+  repeated int64 repeated_i64s = 9;
+  repeated double repeated_doubles = 10;
+  repeated TestEnum repeated_enums = 11;
+  repeated TestNestedMessage repeated_messages = 12;
+  repeated google.protobuf.Empty repeated_empty = 13;
 
   // Optional fields
-  optional bool optional_bool_field = 12;
-  optional int64 optional_int64_field = 13;
+  optional bool optional_bool_field = 14;
+  optional int64 optional_int64_field = 15;
 }
 
 message TestNestedMessage {
