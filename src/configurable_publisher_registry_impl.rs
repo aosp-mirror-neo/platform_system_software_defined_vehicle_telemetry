@@ -171,10 +171,7 @@ impl ConfigurablePublisherRegistryImpl {
                 let _ = o.remove_entry();
             }
             Entry::Vacant(_) => {
-                info!(
-                    "{} not found. It might have been unregistered already.",
-                    service_name.to_string()
-                );
+                info!("{} not found. It might have been unregistered already.", service_name);
             }
         }
 
