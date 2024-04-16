@@ -40,25 +40,76 @@ mod tests {
     use super::*;
 
     #[test]
-    fn serialized_bytes_from_legacy_textproto_and_bin_file_match() {
-        let serialized_binary_config = fs::read("sample_protos/metric_configJan10.bin").unwrap();
+    fn serialized_bytes_match_legacy_textproto_file_contents() {
         let serialized_legacy_textproto_config =
             read(&PathBuf::from("sample_protos/metric_configJan10.textproto")).unwrap();
-
-        // The bytes generated from the .textproto file should match with the bytes read from
-        // corresponding manually generated .bin file.
-        assert!(!serialized_binary_config.is_empty());
-        assert_eq!(serialized_binary_config, serialized_legacy_textproto_config);
-
-        // The deserialized bytes should contain the same information as the read .textproto.
-        // Since the bytes already match, it's enough to check the contents of either of the files.
         let config: MetricsConfig =
-            protobuf::Message::parse_from_bytes(&serialized_binary_config).unwrap();
+            protobuf::Message::parse_from_bytes(&serialized_legacy_textproto_config).unwrap();
+
         assert_eq!(&config.uuid, "d3456chu-8fde-436a-9f29-c12f06a10c102504");
-        assert_eq!(&config.start_trigger_name, "start_trigger");
-        assert_eq!(config.triggers.len(), 2);
+
         assert_eq!(config.descriptor_protos.len(), 1);
+        assert_eq!(config.descriptor_protos[0].name.as_ref().unwrap(), "multi_config_test.proto");
+        assert_eq!(
+            config.descriptor_protos[0].package.as_ref().unwrap(),
+            "android.automotive.telemetry.messages"
+        );
+        assert_eq!(config.descriptor_protos[0].message_type.len(), 2);
+
+        let msg_type0 = config.descriptor_protos[0].message_type[0].clone();
+        assert_eq!(msg_type0.name.unwrap(), "VehicleConnectivity");
+        assert_eq!(msg_type0.field[0].name.as_ref().unwrap(), "vector_vehicle_connection_status");
+        assert_eq!(
+            msg_type0.field[1].name.as_ref().unwrap(),
+            "vector_vehicle_connection_signal_strength"
+        );
+        assert_eq!(
+            msg_type0.field[2].name.as_ref().unwrap(),
+            "vector_connection_status_timestamps"
+        );
+
+        let msg_type1 = config.descriptor_protos[0].message_type[1].clone();
+        assert_eq!(msg_type1.name.unwrap(), "VehicleConnectivityReport");
+        assert_eq!(msg_type1.field[0].name.as_ref().unwrap(), "vector_vehicle_connection_status");
+        assert_eq!(
+            msg_type1.field[1].name.as_ref().unwrap(),
+            "vector_vehicle_connection_signal_strength"
+        );
+        assert_eq!(msg_type1.field[2].name.as_ref().unwrap(), "max_speed");
+        assert_eq!(msg_type1.field[3].name.as_ref().unwrap(), "count_airbag_isDeployed");
+        assert_eq!(msg_type1.field[4].name.as_ref().unwrap(), "latest_hmi_car_settings_clicks");
+
         assert_eq!(config.expression_nodes.len(), 1);
-        assert_eq!(config.metrics_report_configs.len(), 1);
+        assert_eq!(config.expression_nodes[0].constant_leaf_node().int32_value(), 0);
+
+        assert_eq!(config.triggers.len(), 2);
+        assert_eq!(config.triggers[0].name, "start_trigger");
+        assert_eq!(config.triggers[0].periodic_trigger().interval_ms, 3000);
+
+        assert_eq!(config.triggers[1].name, "period_3s");
+        assert_eq!(config.triggers[1].periodic_trigger().interval_ms, 3000);
+
+        assert_eq!(&config.start_trigger_name, "start_trigger");
+
+        let report_config = config.metrics_report_configs.clone();
+        assert_eq!(report_config.len(), 1);
+        assert_eq!(report_config[0].name, "multi_config_report");
+        assert_eq!(report_config[0].trigger_names[0], "period_3s");
+        assert_eq!(
+            report_config[0].message_builder.message_type,
+            ".android.automotive.telemetry.messages.VehicleConnectivityReport"
+        );
+        assert_eq!(report_config[0].message_builder.field_assignments.len(), 1);
+        assert_eq!(
+            report_config[0].message_builder.field_assignments[0].field_name,
+            "vector_vehicle_connection_status"
+        );
+        assert_eq!(
+            report_config[0].message_builder.field_assignments[0]
+                .no_aggregation()
+                .expression_node_index
+                .unwrap(),
+            0
+        );
     }
 }
