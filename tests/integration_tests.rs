@@ -80,7 +80,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Connecting to service");
     // Unsafe block needed to be able to call C API functions
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // SAFETY: safe to use as all pointers needed to satisfy the safety requirements
     // for on_status are passed.
     unsafe {
         service = rust_to_c::get_telemetry_service();

@@ -17,6 +17,7 @@ use tokio::sync::mpsc;
 
 use rust_to_c::TelemetryServiceHolder;
 use sdv_telemetry_rust_wrapper as rust_to_c;
+use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 
 // Arbitrarily chosen buffer capacity
 const MPSC_CHANNEL_CAPACITY: usize = 32;
@@ -34,8 +35,9 @@ async fn process_config(
         ));
     }
 
-    // Read binary into a vector
-    let serialized_config = fs::read(path).unwrap();
+    // Metrics config is either read directly from a binary file into serialized config or from a
+    // textproto file and then converted into serialized config.
+    let serialized_config = metrics_config_reader_utils::read(&path).unwrap();
 
     let config_name;
     let add_config_res = service.add_metrics_config(&serialized_config).await;
