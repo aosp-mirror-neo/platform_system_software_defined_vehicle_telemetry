@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 package {
+    default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
 }
 
@@ -40,6 +41,7 @@ rust_binary {
         "libprotobuf",
         "libsdv_telemetry_bindgen",
         "libsdv_telemetry_rust_wrapper",
+        "libsdv_telemetry_sample_utils",
         "libstatus_codes_bindgen",
         "libtokio",
     ],
@@ -96,4 +98,42 @@ rust_binary {
         "librand",
     ],
     vendor: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_sample_utils",
+    crate_name: "sdv_telemetry_sample_utils",
+    defaults: ["telemetry@rust_defaults"],
+    srcs: [
+        "rust/utils/lib.rs",
+    ],
+    rustlibs: [
+        "libsdvtelemetry_proto_rust",
+    ],
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_test {
+    name: "sdv_telemetry_sample_utils_unit_tests",
+    defaults: ["telemetry@rust_defaults"],
+    srcs: [
+        "rust/utils/lib.rs",
+    ],
+    rustlibs: [
+        "libsdv_telemetry_sample_utils",
+        "libsdvtelemetry_proto_rust",
+    ],
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    data: [
+        "sample_protos/metric_configJan10.bin",
+        "sample_protos/metric_configJan10.textproto",
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
 }
