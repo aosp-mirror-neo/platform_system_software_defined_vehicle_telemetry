@@ -235,7 +235,7 @@ fn parse_operator(buf: &str) -> Result<Token, String> {
         "*" => Token::Arithmetic(ArithmeticOperatorProto::MULTIPLY),
         "/" => Token::Arithmetic(ArithmeticOperatorProto::DIVIDE),
         "**" => Token::Arithmetic(ArithmeticOperatorProto::POWER),
-        "%" => Token::Arithmetic(ArithmeticOperatorProto::MODULO),
+        "%" => Token::Arithmetic(ArithmeticOperatorProto::MODULO_TRUNC),
         "&&" => Token::Logical(LogicalOperatorProto::AND),
         "||" => Token::Logical(LogicalOperatorProto::OR),
         "^" => Token::Logical(LogicalOperatorProto::XOR),
@@ -313,7 +313,7 @@ impl Token {
                 ArithmeticOperatorProto::ADD | ArithmeticOperatorProto::SUBTRACT => 12,
                 ArithmeticOperatorProto::MULTIPLY
                 | ArithmeticOperatorProto::DIVIDE
-                | ArithmeticOperatorProto::MODULO => 13,
+                | ArithmeticOperatorProto::MODULO_TRUNC => 13,
                 ArithmeticOperatorProto::POWER => 14,
             },
             Token::Relational(op) => match op {
@@ -584,7 +584,7 @@ mod tests {
         add_node.set_combination_node(add);
 
         let mut modulo = CombinationNode::new();
-        modulo.set_arithmetic_operator(ArithmeticOperator::MODULO);
+        modulo.set_arithmetic_operator(ArithmeticOperator::MODULO_TRUNC);
         modulo.left_index = Some(3);
         modulo.right_index = Some(0);
         modulo_node.set_combination_node(modulo);

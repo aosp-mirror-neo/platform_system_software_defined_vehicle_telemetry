@@ -393,7 +393,7 @@ impl NodeValue {
                     self.get_double(&err_provider)? / other.get_double(&err_provider)?,
                 ))
             }
-            ArithmeticOperator::MODULO => {
+            ArithmeticOperator::MODULO_TRUNC => {
                 if !self.is_int() || !other.is_int() {
                     return Err(NodeError::ModuloOperatorIncompatibleOperands);
                 }
@@ -1239,34 +1239,42 @@ mod tests {
     }
 
     #[test]
-    fn operate_arithmetic_modulo_by_zero() {
+    fn operate_arithmetic_modulo_trunc_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
         assert!(matches!(
-            five.operate(&OP_MODULO, || provide(&zero)).unwrap_err(),
+            five.operate(&OP_MODULO_TRUNC, || provide(&zero)).unwrap_err(),
             NodeError::DivideByZero
         ));
     }
 
     #[test]
-    fn operate_arithmetic_modulo_ok() -> Result<(), NodeError> {
-        let five = NodeValue::Int32(5);
-        let two = NodeValue::Int32(2);
-
-        // 5 % 2 = 1
-        assert_eq!(five.operate(&OP_MODULO, || provide(&two))?, NodeValue::Int64(1));
+    fn operate_arithmetic_modulo_trunc_ok() -> Result<(), NodeError> {
+        let cases = [
+            (8, /*%*/ 3, /*=*/ 2),
+            (8, /*%*/ -3, /*=*/ 2),
+            (-8, /*%*/ 3, /*=*/ -2),
+            (-8, /*%*/ -3, /*=*/ -2),
+        ];
+        for (dividend, divisor, expected) in cases {
+            assert_eq!(
+                NodeValue::Int32(dividend)
+                    .operate(&OP_MODULO_TRUNC, || provide(&NodeValue::Int32(divisor)))?,
+                NodeValue::Int64(expected)
+            );
+        }
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_modulo_no_floating_points() {
+    fn operate_arithmetic_modulo_trunc_no_floating_points() {
         let five = NodeValue::Float(5.0);
         let two = NodeValue::Int32(2);
 
         // both operands must be integers
         assert!(matches!(
-            five.operate(&OP_MODULO, || provide(&two)).unwrap_err(),
+            five.operate(&OP_MODULO_TRUNC, || provide(&two)).unwrap_err(),
             NodeError::ModuloOperatorIncompatibleOperands
         ));
     }
