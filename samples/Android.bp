@@ -129,7 +129,6 @@ rust_test {
         "automotive-sdv-tests",
     ],
     data: [
-        "sample_protos/metric_configJan10.bin",
         "sample_protos/metric_configJan10.textproto",
     ],
     auto_gen_config: true,
