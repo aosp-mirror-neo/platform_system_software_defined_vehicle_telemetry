@@ -108,14 +108,14 @@ mod tests {
     const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
     const TEST_NESTED_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestNestedMessage";
 
-    fn create_default_service_publisher_manager() -> Arc<dyn ServicePublisherAccessor> {
-        create_service_publisher_manager(None)
+    fn create_default_service_publisher_accessor() -> Arc<dyn ServicePublisherAccessor> {
+        Arc::new(MockServicePublisherAccessor::new())
     }
 
-    fn create_service_publisher_manager(
-        next_descriptor: Option<MessageDescriptor>,
+    fn create_service_publisher_accessor(
+        next_descriptor: MessageDescriptor,
     ) -> Arc<dyn ServicePublisherAccessor> {
-        Arc::new(MockServicePublisherAccessor::new(next_descriptor))
+        Arc::new(MockServicePublisherAccessor::new().with_next_descriptor(next_descriptor))
     }
 
     fn create_aggregation_publisher_with_no_proto_message_builder(
@@ -147,8 +147,8 @@ mod tests {
 
     #[test]
     fn create_descriptor_provider_service_publisher_manager_error_fails() {
-        let service_publisher_manager = Arc::new(MockServicePublisherAccessor::new(None));
-        service_publisher_manager.next_error.lock().unwrap().replace(anyhow!("Error"));
+        let service_publisher_manager =
+            Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!("Error")));
 
         let mut publisher = PublisherProto::new();
         let service_publisher = publisher.mut_service_publisher();
@@ -180,7 +180,7 @@ mod tests {
             .create(
                 get_test_file_descriptors(),
                 &[publisher],
-                &create_default_service_publisher_manager(),
+                &create_default_service_publisher_accessor(),
             )
             .err()
             .unwrap();
@@ -196,7 +196,7 @@ mod tests {
     fn get_descriptor_invalid_publisher_name_fails() {
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let descriptor_provider = descriptor_provider_factory
-            .create(get_test_file_descriptors(), &[], &create_default_service_publisher_manager())
+            .create(get_test_file_descriptors(), &[], &create_default_service_publisher_accessor())
             .unwrap();
 
         let err = descriptor_provider.get_descriptor(PUBLISHER_3).unwrap_err();
@@ -219,7 +219,7 @@ mod tests {
             .create(
                 get_test_file_descriptors(),
                 &[publisher],
-                &create_service_publisher_manager(Some(TestMessage::descriptor())),
+                &create_service_publisher_accessor(TestMessage::descriptor()),
             )
             .unwrap();
 
@@ -241,7 +241,7 @@ mod tests {
             .create(
                 get_test_file_descriptors(),
                 &[publisher_1, publisher_2],
-                &create_default_service_publisher_manager(),
+                &create_default_service_publisher_accessor(),
             )
             .unwrap();
 

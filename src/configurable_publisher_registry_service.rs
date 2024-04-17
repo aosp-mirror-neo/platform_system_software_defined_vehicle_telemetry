@@ -2,7 +2,7 @@
 
 //! This module implements the IConfigurablePublisherRegistry AIDL interface
 
-mod configurable_publisher_registry_impl;
+mod configurable_publisher_registry;
 mod subscriber_service;
 
 // External dependencies.
@@ -15,12 +15,12 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 // Child module dependencies.
-pub use configurable_publisher_registry_impl::ConfigurablePublisherRegistryImpl;
+pub use configurable_publisher_registry::ConfigurablePublisherRegistry;
 
 /// Implementation of IConfigurablePublisherRegistryAsyncServer binder interface
 /// that uses ConfigurablePublisherRegistryImpl to maintain the registry in memory.
 pub struct ConfigurablePublisherRegistryService {
-    configurable_publisher_registry: Arc<ConfigurablePublisherRegistryImpl>,
+    configurable_publisher_registry: Arc<ConfigurablePublisherRegistry>,
 }
 
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
@@ -65,7 +65,7 @@ impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistry
 
 impl ConfigurablePublisherRegistryService {
     /// Instantiates an instance of ConfigurablePublisherRegistryService
-    pub fn new(configurable_publisher_registry: Arc<ConfigurablePublisherRegistryImpl>) -> Self {
+    pub fn new(configurable_publisher_registry: Arc<ConfigurablePublisherRegistry>) -> Self {
         Self { configurable_publisher_registry }
     }
 }
