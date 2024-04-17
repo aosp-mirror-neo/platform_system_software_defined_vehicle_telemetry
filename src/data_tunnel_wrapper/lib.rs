@@ -311,10 +311,11 @@ impl ServicePublisherAccessor for DataTunnelWrapperImpl {
     /// Unsubscribes from the specified topic and service name.
     async fn unsubscribe(
         &self,
-        _topic_name: &str,
+        topic_name: &str,
         _configuration: Option<&[u8]>,
     ) -> Result<(), anyhow::Error> {
         // This logic will be replaced once data tunnel has support for unsubscribe
+        self.data_tunnel_subscriptions.lock().unwrap().remove(topic_name);
         Ok(())
     }
 
