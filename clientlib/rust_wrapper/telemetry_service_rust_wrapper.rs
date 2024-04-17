@@ -2,8 +2,7 @@
 
 //! This module acts as a wrapper around C Client library for telemetry service
 
-mod metrics_config_manager;
-mod metrics_report_manager;
+mod managers;
 
 use crate::rust_to_c::ServiceHolder;
 use log::{error, info};
@@ -12,6 +11,9 @@ use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 use status_codes_bindgen as status_codes;
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
+
+use managers::metrics_config_manager;
+use managers::metrics_report_manager;
 
 /// Struct used to wrap ServiceHolder received from C in a typesafe manner
 #[repr(transparent)]
