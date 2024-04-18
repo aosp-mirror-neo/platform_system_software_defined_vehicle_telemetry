@@ -3,7 +3,7 @@
 //! Test the rust wrapper for telemetry and DT.
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
-use sdv_telemetry_dt_wrapper::register_topic;
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::register_topic;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::thread;
 
