@@ -9,7 +9,7 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::service_publisher_accessor::ServicePublisherAccessor;
+use crate::service_publisher_accessor::{ServicePublisherAccessor, ServicePublisherSubscription};
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
@@ -63,16 +63,25 @@ pub(crate) struct ServiceAdapterImpl {
     next_subscription_id: AtomicU32,
 
     // The registry of available service publishers.
-    service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
+    service_publisher_accessor: Arc<dyn ServicePublisherAccessor>,
 
-    // The map of functions that need to be called when a new message is available.
-    // The first subscription to service creates a new map and passes it to the callback that
-    // handles new messages. Last unsubscription to service clears the map signaling that
+    // The map with service name as a key and a tuple as a value that consists of:
+    // 1. Underlying ServicePublisherSubscription.
+    // 2. The map of functions that need to be called when a new message is available.
+    // The first subscription to service creates a new function map and passes it to the callback
+    // that handles new messages. Last unsubscription to service clears the map signaling that
     // the callback shouldn't process messages.
     service_subscriptions: AsyncMutex<
         HashMap<
             String,
-            Arc<AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>>,
+            (
+                Box<dyn ServicePublisherSubscription>,
+                Arc<
+                    AsyncMutex<
+                        HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>,
+                    >,
+                >,
+            ),
         >,
     >,
 }
@@ -89,22 +98,34 @@ impl ServiceAdapter for ServiceAdapterImpl {
         match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
             Entry::Occupied(o) => {
                 // If there's already an active subscription, add callback to its map.
-                o.get().lock().await.insert(subscription_id, new_message_callback);
+                let (_, callback_container) = o.get();
+                callback_container.lock().await.insert(subscription_id, new_message_callback);
             }
             Entry::Vacant(v) => {
-                // If there is no active subscription, create a new map.
-                let mut subscriptions = HashMap::new();
-                subscriptions.insert(subscription_id, new_message_callback);
-                let subscriptions_container = Arc::new(AsyncMutex::new(subscriptions));
-                v.insert(subscriptions_container.clone());
-
-                self.service_publisher_manager
-                    .try_subscribe(
+                // If there is no active subscription, create a new one and store it.
+                let callbacks = HashMap::from([(subscription_id, new_message_callback)]);
+                let callback_container = Arc::new(AsyncMutex::new(callbacks));
+                let callback_container_clone = callback_container.clone();
+                let maybe_underlying_subscription = self
+                    .service_publisher_accessor
+                    .create_subscription(
                         service_name,
-                        Arc::new(move |msg| Self::on_new_message(msg, &subscriptions_container)),
                         None,
+                        Arc::new(move |msg| Self::on_new_message(msg, &callback_container_clone)),
                     )
                     .await?;
+
+                if let Some(underlying_subscription) = maybe_underlying_subscription {
+                    v.insert((underlying_subscription, callback_container));
+                } else {
+                    // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
+                    return Err(ServiceAdapterSubscribeError::SubscriptionFailed {
+                        error: anyhow::anyhow!(
+                            "Service with name {} is not available",
+                            service_name
+                        ),
+                    });
+                }
             }
         };
 
@@ -115,24 +136,22 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         subscription: ServiceSubscription,
     ) -> Result<(), ServiceAdapterUnsubscribeError> {
-        match self.service_subscriptions.lock().await.entry(subscription.service_name.clone()) {
+        match self.service_subscriptions.lock().await.entry(subscription.service_name) {
             Entry::Occupied(o) => {
-                let is_last_subscription = {
-                    let mut subscriptions = o.get().lock().await;
-
-                    if subscriptions.remove(&subscription.subscription_id).is_none() {
+                let (_, callback_container) = o.get();
+                let is_last_callback = {
+                    let mut callbacks = callback_container.lock().await;
+                    if callbacks.remove(&subscription.subscription_id).is_none() {
                         return Err(ServiceAdapterUnsubscribeError::InvalidServiceSubscription);
                     }
-
-                    subscriptions.is_empty()
+                    callbacks.is_empty()
                 };
 
-                if is_last_subscription {
-                    self.service_publisher_manager
-                        .unsubscribe(&subscription.service_name, None)
-                        .await?;
-
-                    o.remove_entry();
+                if is_last_callback {
+                    // Remove entry and unsubscribe from the underlying subscription
+                    // if the last callback was removed.
+                    let (_, (underlying_subscription, _)) = o.remove_entry();
+                    underlying_subscription.unsubscribe().await?;
                 }
             }
             Entry::Vacant(_) => {
@@ -148,7 +167,7 @@ impl ServiceAdapterImpl {
     pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherAccessor>) -> Self {
         Self {
             next_subscription_id: AtomicU32::new(1),
-            service_publisher_manager,
+            service_publisher_accessor: service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
         }
     }
@@ -209,7 +228,7 @@ pub(super) mod tests {
     }
 
     fn create_default_service_adapter() -> ServiceAdapterImpl {
-        ServiceAdapterImpl::new(Arc::new(MockServicePublisherAccessor::default()))
+        ServiceAdapterImpl::new(Arc::new(MockServicePublisherAccessor::new()))
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
@@ -218,10 +237,9 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn subscribe_registry_returns_error_fails() {
-        let registry = MockServicePublisherAccessor::default();
-        registry.next_error.lock().unwrap().replace(anyhow!("Error"));
-        let registry = Arc::new(registry);
-        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+        let accessor =
+            Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!("Error")));
+        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
 
         let err =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.err().unwrap();
@@ -231,13 +249,13 @@ pub(super) mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(registry.get_num_subscribe_calls(), 1);
+        assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
     #[tokio::test]
     async fn subscribe_different_services_subscribes_to_registry() {
-        let registry = Arc::new(MockServicePublisherAccessor::default());
-        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg1 = Box::new(Int32Value::new());
         msg1.value = 1;
@@ -259,10 +277,10 @@ pub(super) mod tests {
             .unwrap();
 
         // Notify about a new message from each service and receive the message.
-        registry.notify_subscriber(SERVICE_NAME, msg1.clone());
+        accessor.notify_subscriber(SERVICE_NAME, msg1.clone());
         let msg1_received = with_timeout(rx.recv()).await.unwrap();
 
-        registry.notify_subscriber(SERVICE_NAME_2, msg2.clone());
+        accessor.notify_subscriber(SERVICE_NAME_2, msg2.clone());
         let msg2_received = with_timeout(rx.recv()).await.unwrap();
 
         // Verify that the received messages are the same as the ones sent.
@@ -270,13 +288,13 @@ pub(super) mod tests {
         assert_eq!(&msg2_received, &(msg2 as Box<dyn MessageDyn>));
 
         // Verify the number of registry subscribe calls.
-        assert_eq!(registry.get_num_subscribe_calls(), 2);
+        assert_eq!(accessor.get_num_subscribe_calls(), 2);
     }
 
     #[tokio::test]
     async fn subscribe_same_service_subscribes_to_registry() {
-        let registry = Arc::new(MockServicePublisherAccessor::default());
-        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
@@ -297,7 +315,7 @@ pub(super) mod tests {
 
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
-        registry.notify_subscriber(SERVICE_NAME, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, msg.clone());
         let msg1_received = with_timeout(rx.recv()).await.unwrap();
         let msg2_received = with_timeout(rx.recv()).await.unwrap();
 
@@ -307,7 +325,7 @@ pub(super) mod tests {
         assert_eq!(&msg2_received, &msg);
 
         // Verify the number of registry subscribe calls.
-        assert_eq!(registry.get_num_subscribe_calls(), 1);
+        assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
     #[tokio::test]
@@ -329,23 +347,21 @@ pub(super) mod tests {
 
     #[tokio::test]
     async fn unsubscribe_success() {
-        let registry = MockServicePublisherAccessor::default();
-        let registry = Arc::new(registry);
-        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
 
         let subscription =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
-        assert_eq!(registry.get_num_unsubscribe_calls(), 1);
+        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
     #[tokio::test]
     async fn unsubscribe_not_called_unless_last_subscriber_unsubscribes() {
-        let registry = MockServicePublisherAccessor::default();
-        let registry = Arc::new(registry);
-        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
 
         let subscription =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
@@ -356,14 +372,13 @@ pub(super) mod tests {
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
-        assert_eq!(registry.get_num_unsubscribe_calls(), 0);
+        assert_eq!(accessor.get_num_unsubscribe_calls(), 0);
     }
 
     #[tokio::test]
     async fn unsubscribe_called_after_last_subscriber_unsubscribes() {
-        let registry = MockServicePublisherAccessor::default();
-        let registry = Arc::new(registry);
-        let service_adapter = ServiceAdapterImpl::new(registry.clone());
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
 
         let subscription =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
@@ -375,6 +390,6 @@ pub(super) mod tests {
         service_adapter.unsubscribe(subscription2).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
-        assert_eq!(registry.get_num_unsubscribe_calls(), 1);
+        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 }

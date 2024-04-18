@@ -13,9 +13,9 @@ use rustutils::system_properties::PropertyWatcher;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry::{SdvTelemetryService, ServicePublisherAccessor};
 use sdv_telemetry_configurable_publisher::{
-    ConfigurablePublisherRegistryImpl, ConfigurablePublisherRegistryService,
+    ConfigurablePublisherRegistry, ConfigurablePublisherRegistryService,
 };
-use sdv_telemetry_dt_wrapper::DataTunnelWrapperImpl;
+use sdv_telemetry_dt_wrapper::DataTunnelSubscriber;
 
 use binder_tokio::TokioRuntime;
 use log::{error, info};
@@ -33,10 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_tracing::init_tracing();
 
     // Data Tunnel Wrapper to manage subcriptions
-    let data_tunnel_wrapper = Arc::new(DataTunnelWrapperImpl::new());
+    let data_tunnel_wrapper = Arc::new(DataTunnelSubscriber::new());
 
     // Create Configurable Publishers
-    let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistryImpl::new());
+    let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
 
     // Add all service publishers to the manager in order of priority
     let service_publishers: Vec<Arc<dyn ServicePublisherAccessor>> =

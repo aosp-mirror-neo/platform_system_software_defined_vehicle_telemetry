@@ -3,26 +3,34 @@
 use anyhow::anyhow;
 use async_trait::async_trait;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use std::collections::hash_map::Entry;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
-use crate::service_publisher_accessor::ServicePublisherAccessor;
+use super::*;
 
 pub(crate) struct MockServicePublisherAccessor {
+    data: Arc<Mutex<MockServicePublisherAccessorData>>,
+}
+
+struct MockServicePublisherAccessorData {
     /// When set, the descriptor will be returned on the next call to get_message_descriptor.
-    pub next_descriptor: Mutex<Option<MessageDescriptor>>,
-    /// When set, the error will be returned on the next call to get_message_descriptor or subscribe.
-    pub next_error: Mutex<Option<anyhow::Error>>,
-    /// The number of times subscribe function of the mock was called.
-    num_subscribe_calls: AtomicU32,
-    /// The number of times subscribe function of the mock was called.
-    num_unsubscribe_calls: AtomicU32,
+    next_descriptor: Option<MessageDescriptor>,
+    /// When set, the error will be returned on the next call to the adapter.
+    next_error: Option<anyhow::Error>,
     /// The number of times get message descriptor function of the mock was called.
-    num_get_message_descriptor_calls: AtomicU32,
-    /// The map of provided subscriber functions.
-    subscribers: Mutex<HashMap<String, Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>>,
+    num_get_message_descriptor_calls: u32,
+    /// The number of times subscribe function of the mock was called.
+    num_subscribe_calls: u32,
+    /// The number of times unsubscribe function of the mock was called.
+    num_unsubscribe_calls: u32,
+    /// The map of subscribed callbacks, keyed by service name.
+    callbacks: HashMap<String, Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>,
+}
+
+struct MockServicePublisherSubscription {
+    data: Weak<Mutex<MockServicePublisherAccessorData>>,
+    service_name: String,
 }
 
 #[async_trait]
@@ -31,83 +39,91 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         _service_name: &str,
     ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
-        self.num_get_message_descriptor_calls.fetch_add(1, Ordering::SeqCst);
+        let mut data = self.data.lock().unwrap();
+        data.num_get_message_descriptor_calls += 1;
+        data.check_next_error()?;
 
-        if let Some(err) = self.next_error.lock().unwrap().take() {
-            return Err(err);
-        }
-
-        Ok(self.next_descriptor.lock().unwrap().take())
+        Ok(data.next_descriptor.take())
     }
 
-    async fn try_subscribe(
-        &self,
-        service_name: &str,
-        subscriber: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-        _configuration: Option<&[u8]>,
-    ) -> Result<bool, anyhow::Error> {
-        self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
-
-        if let Some(err) = self.next_error.lock().unwrap().take() {
-            return Err(err);
-        }
-
-        self.subscribers.lock().unwrap().insert(service_name.to_owned(), subscriber.clone());
-        Ok(true)
-    }
-
-    async fn unsubscribe(
+    async fn create_subscription(
         &self,
         service_name: &str,
         _configuration: Option<&[u8]>,
-    ) -> Result<(), anyhow::Error> {
-        self.num_unsubscribe_calls.fetch_add(1, Ordering::SeqCst);
-        match self.subscribers.lock().unwrap().entry(service_name.to_owned()) {
-            Entry::Occupied(o) => {
-                let _ = o.remove_entry();
-            }
-            Entry::Vacant(_) => return Err(anyhow!("Publisher Not Found")),
-        }
+        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+    ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error> {
+        let mut data = self.data.lock().unwrap();
+        data.num_subscribe_calls += 1;
+        data.check_next_error()?;
 
-        Ok(())
-    }
-}
-
-impl Default for MockServicePublisherAccessor {
-    fn default() -> Self {
-        Self::new(None)
+        let subscription = MockServicePublisherSubscription {
+            service_name: service_name.to_owned(),
+            data: Arc::downgrade(&self.data),
+        };
+        data.callbacks
+            .try_insert_value(service_name.to_owned(), callback)
+            .map_err(|_| anyhow!("Subscription already exists for service {}", service_name))?;
+        Ok(Some(Box::new(subscription)))
     }
 }
 
 impl MockServicePublisherAccessor {
-    pub(crate) fn new_with_descriptor(descriptor: MessageDescriptor) -> Self {
-        Self::new(Some(descriptor))
-    }
-
-    pub(crate) fn new(descriptor: Option<MessageDescriptor>) -> Self {
-        Self {
-            next_descriptor: descriptor.into(),
-            next_error: None.into(),
-            num_subscribe_calls: AtomicU32::new(0),
-            num_unsubscribe_calls: AtomicU32::new(0),
-            num_get_message_descriptor_calls: AtomicU32::new(0),
-            subscribers: HashMap::new().into(),
-        }
+    pub(crate) fn new() -> Self {
+        let data = Arc::new(Mutex::new(MockServicePublisherAccessorData {
+            next_descriptor: None,
+            next_error: None,
+            num_subscribe_calls: 0,
+            num_unsubscribe_calls: 0,
+            num_get_message_descriptor_calls: 0,
+            callbacks: HashMap::new(),
+        }));
+        Self { data }
     }
 
     pub(crate) fn get_num_subscribe_calls(&self) -> u32 {
-        self.num_subscribe_calls.load(Ordering::SeqCst)
+        self.data.lock().unwrap().num_subscribe_calls
     }
 
     pub(crate) fn get_num_unsubscribe_calls(&self) -> u32 {
-        self.num_unsubscribe_calls.load(Ordering::SeqCst)
+        self.data.lock().unwrap().num_unsubscribe_calls
     }
 
     pub(crate) fn get_num_get_message_descriptor_calls(&self) -> u32 {
-        self.num_get_message_descriptor_calls.load(Ordering::SeqCst)
+        self.data.lock().unwrap().num_get_message_descriptor_calls
     }
 
     pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
-        (self.subscribers.lock().unwrap().get(service_name).as_ref().unwrap())(message);
+        let callback = self.data.lock().unwrap().callbacks.get(service_name).unwrap().clone();
+        (callback)(message);
+    }
+
+    pub(crate) fn with_next_descriptor(self, descriptor: MessageDescriptor) -> Self {
+        self.data.lock().unwrap().next_descriptor.replace(descriptor);
+        self
+    }
+
+    pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
+        self.data.lock().unwrap().next_error.replace(error);
+        self
+    }
+}
+
+impl MockServicePublisherAccessorData {
+    /// Return next error if it's set or Ok otherwise.
+    fn check_next_error(&mut self) -> anyhow::Result<()> {
+        self.next_error.take().map_or_else(|| Ok(()), Err)
+    }
+}
+
+#[async_trait]
+impl ServicePublisherSubscription for MockServicePublisherSubscription {
+    async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error> {
+        let data_reference = self.data.upgrade().unwrap();
+        let mut data = data_reference.lock().unwrap();
+        data.num_unsubscribe_calls += 1;
+        data.check_next_error()?;
+
+        data.callbacks.remove(&self.service_name).unwrap();
+        Ok(())
     }
 }

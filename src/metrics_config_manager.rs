@@ -561,14 +561,12 @@ mod tests {
                 num_validate_config_calls.clone(),
             ));
 
-            let service_publisher_manager = Arc::new(MockServicePublisherAccessor::default());
-
             // Used to initialize/create root directories
             MetricsConfigManagerImpl::new(
                 active_data_dir.clone(),
                 inactive_data_dir.clone(),
                 max_persistent_config_store_size,
-                service_publisher_manager,
+                Arc::new(MockServicePublisherAccessor::new()),
                 |_| {},
             )
             .await

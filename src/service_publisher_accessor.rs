@@ -20,21 +20,22 @@ pub trait ServicePublisherAccessor: Send + Sync {
         service_name: &str,
     ) -> Result<Option<MessageDescriptor>, anyhow::Error>;
 
-    /// Subscribes specified callback to the new messages from the specified topic
-    /// with certain configuration, if provided.
-    async fn try_subscribe(
+    /// Attempts to create subscription to the new messages from the publisher
+    /// specified by the service name with certain configuration, if provided.
+    /// Returns None if the service with the specified service name is not available.
+    async fn create_subscription(
         &self,
         service_name: &str,
+        configuration: Option<&[u8]>,
         callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-        configuration: Option<&[u8]>,
-    ) -> Result<bool, anyhow::Error>;
+    ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error>;
+}
 
-    /// Unsubscribes from the specified topic and service name.
-    async fn unsubscribe(
-        &self,
-        service_name: &str,
-        configuration: Option<&[u8]>,
-    ) -> Result<(), anyhow::Error>;
+/// Interface of the Service Publisher subscription.
+#[async_trait]
+pub trait ServicePublisherSubscription: Send + Sync {
+    /// Ends the underlying subscription.
+    async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error>;
 }
 
 #[cfg(test)]
