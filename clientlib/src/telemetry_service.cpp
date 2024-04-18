@@ -29,7 +29,7 @@ TelemetryService::TelemetryService() {
     api_id_ = 1;
     const std::string instance =
             StringPrintf("%s/default", android::String8(ITelemetryService::descriptor).c_str());
-
+    ALOGI("Fetching %s", instance.c_str());
     binder_service_ = android::waitForService<google::sdv::telemetry::ITelemetryService>(
             android::String16(instance.c_str()));
     cb_container_ = new CallbackContainer();

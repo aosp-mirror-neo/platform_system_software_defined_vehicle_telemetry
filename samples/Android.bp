@@ -48,6 +48,29 @@ rust_binary {
     vendor: true,
 }
 
+// TODO(b/335224692): Remove IVI-specific target when Telemetry clients are allowed to be on Vendor partition
+// in IVI and telemetry_rust_c_client works there.
+rust_binary {
+    name: "telemetry_ivi_rust_c_client",
+    srcs: [
+        "rust/telemetry_client/telemetry_rust_c_client.rs",
+    ],
+    rustlibs: [
+        "libclap",
+        "libfutures",
+        "liblog_rust",
+        "libbinder_rs",
+        "liblogger",
+        "libsdvtelemetry_proto_rust",
+        "libprotobuf",
+        "libsdv_telemetry_bindgen",
+        "libstatus_codes_bindgen",
+        "libsdv_telemetry_rust_wrapper",
+        "libsdv_telemetry_sample_utils",
+        "libtokio",
+    ],
+}
+
 rust_protobuf {
     name: "libsample_publisher_proto",
     crate_name: "sample_publisher_proto",
