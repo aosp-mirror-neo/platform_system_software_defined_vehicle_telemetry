@@ -84,7 +84,7 @@ impl PartialEq for NodeValue {
             (NodeValue::Int32(v1), NodeValue::Int32(v2)) => *v1 == *v2,
             (NodeValue::Int64(v1), NodeValue::Int64(v2)) => *v1 == *v2,
             (NodeValue::Float(v1), NodeValue::Float(v2)) => {
-                approximately_equal(*v1 as f64, *v2 as f64)
+                approximately_equal(f64::from(*v1), f64::from(*v2))
             }
             (NodeValue::Double(v1), NodeValue::Double(v2)) => approximately_equal(*v1, *v2),
             (NodeValue::Message(v1), NodeValue::Message(v2)) => v1 == v2,
@@ -93,7 +93,10 @@ impl PartialEq for NodeValue {
             (NodeValue::Int64List(v1), NodeValue::Int64List(v2)) => *v1 == *v2,
             (NodeValue::FloatList(v1), NodeValue::FloatList(v2)) => {
                 v1.len() == v2.len()
-                    && v1.iter().zip(v2).all(|(a, b)| approximately_equal(*a as f64, *b as f64))
+                    && v1
+                        .iter()
+                        .zip(v2)
+                        .all(|(a, b)| approximately_equal(f64::from(*a), f64::from(*b)))
             }
             (NodeValue::DoubleList(v1), NodeValue::DoubleList(v2)) => {
                 v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| approximately_equal(*a, *b))
@@ -199,7 +202,7 @@ impl NodeValue {
         E: Error,
     {
         Ok(match self {
-            NodeValue::Int32(val) => *val as i64,
+            NodeValue::Int32(val) => i64::from(*val),
             NodeValue::Int64(val) => *val,
             _ => return Err(err_provider()),
         })
@@ -211,9 +214,9 @@ impl NodeValue {
         E: Error,
     {
         Ok(match self {
-            NodeValue::Int32(val) => *val as f64,
+            NodeValue::Int32(val) => f64::from(*val),
             NodeValue::Int64(val) => *val as f64,
-            NodeValue::Float(val) => *val as f64,
+            NodeValue::Float(val) => f64::from(*val),
             NodeValue::Double(val) => *val,
             _ => return Err(err_provider()),
         })
@@ -504,7 +507,7 @@ impl NodeValue {
             NodeValue::Int64List(v) => v.contains(&element.get_int(&err_provider)?),
             NodeValue::FloatList(v) => {
                 let target_value = element.get_double(&err_provider)?;
-                v.iter().any(|x| approximately_equal(*x as f64, target_value))
+                v.iter().any(|x| approximately_equal(f64::from(*x), target_value))
             }
             NodeValue::DoubleList(v) => {
                 let target_value = element.get_double(&err_provider)?;
@@ -538,7 +541,7 @@ impl NodeValue {
             }
             NodeValue::FloatList(v) => {
                 let target_value = element.get_double(&err_provider)?;
-                v.iter().all(|x| approximately_equal(*x as f64, target_value))
+                v.iter().all(|x| approximately_equal(f64::from(*x), target_value))
             }
             NodeValue::DoubleList(v) => {
                 let target_value = element.get_double(&err_provider)?;

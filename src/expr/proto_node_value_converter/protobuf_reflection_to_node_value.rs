@@ -77,7 +77,7 @@ impl ToNodeValue for ReflectValueRef<'_> {
     /// Converts a protobuf reflection on a singular field into a NodeValue.
     fn to_node_value(&self) -> Result<NodeValue, NodeError> {
         Ok(match &self {
-            ReflectValueRef::U32(v) => NodeValue::Int64(*v as i64),
+            ReflectValueRef::U32(v) => NodeValue::Int64(i64::from(*v)),
             ReflectValueRef::U64(v) => NodeValue::Int64(*v as i64),
             ReflectValueRef::I32(v) => NodeValue::Int32(*v),
             ReflectValueRef::I64(v) => NodeValue::Int64(*v),
@@ -120,7 +120,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
             ProtobufRuntimeType::U32 => {
                 NodeValue::Int64List(self.to_vec(|val: ReflectValueRef<'_>| {
                     // map Option<u32> into Option<i64> and convert it to a Result
-                    val.to_u32().map(|x| x as i64).ok_or(NodeError::TypeMismatch {
+                    val.to_u32().map(i64::from).ok_or(NodeError::TypeMismatch {
                         msg: format!("Repeated field {:?} type expected to be u32", self),
                     })
                 })?)

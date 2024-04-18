@@ -33,7 +33,7 @@ fn update_running_standard_deviation(
         return Ok(());
     }
 
-    let n = n as f64;
+    let n = f64::from(n);
 
     let get_double = |node_value: &NodeValue| -> Result<f64, AggregationError> {
         node_value.get_double(&|| AggregationError::NumericAggregationTypeMismatch {

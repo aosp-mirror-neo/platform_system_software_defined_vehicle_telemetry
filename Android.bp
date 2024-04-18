@@ -256,6 +256,7 @@ rust_test {
 
 rust_test {
     name: "sdv_telemetry_integration_tests",
+    defaults: ["telemetry@rust_defaults"],
     srcs: [
         "tests/integration_tests.rs",
     ],
