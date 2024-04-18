@@ -21,7 +21,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
 use google_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
-use log::{error, info};
+use log::{error, info, warn};
 use protobuf::Message;
 use std::marker::{Send, Sync};
 use std::ops::Deref;
@@ -169,7 +169,14 @@ impl SdvTelemetryService {
     ) -> BinderResult<()> {
         if let Ok(listener) = self.status_listener.lock() {
             if let Some(listener_ref) = listener.as_ref() {
-                let _ = listener_ref.deref().sendStatus(api_call_id, status_code, status_message);
+                if let Err(e) =
+                    listener_ref.deref().sendStatus(api_call_id, status_code, status_message)
+                {
+                    warn!(
+                        "Error when sending status code {} for API call {} to the client: {:?}",
+                        status_code, api_call_id, e
+                    );
+                }
             }
         }
         Ok(())
@@ -338,17 +345,19 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             report_number,
         ) {
             let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
-            let _ = report_listener.deref().onReport(
+            if let Err(e) = report_listener.deref().onReport(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
                 metrics_config_uuid,
                 serialized_report,
-            );
-        } else {
-            let _ = report_listener.deref().onReport(
-                StatusCodes::GET_FINISHED_REPORT_FAILED.0,
-                metrics_config_uuid,
-                &[],
-            );
+            ) {
+                warn!("Unable to send report to the client: {:?}", e);
+            }
+        } else if let Err(e) = report_listener.deref().onReport(
+            StatusCodes::GET_FINISHED_REPORT_FAILED.0,
+            metrics_config_uuid,
+            &[],
+        ) {
+            warn!("Unable to send report retrieval error to the client: {:?}", e);
         }
 
         Ok(())
@@ -612,7 +621,7 @@ mod tests {
                 BinderFeatures::default(),
             );
 
-            let _ = self.service.registerStatusListener(&binder_status_listener).await;
+            self.service.registerStatusListener(&binder_status_listener).await.unwrap();
             self.status_listener = Some(status_listener);
 
             assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0, self.get_status_code());
@@ -713,7 +722,7 @@ mod tests {
         let serialized_config = create_serialized_config(UUID);
         test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
-        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
+        test_environment.service.activateMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
@@ -731,7 +740,7 @@ mod tests {
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_status_listener().await;
 
-        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
+        test_environment.service.activateMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
             test_environment.get_status_code()
@@ -753,10 +762,10 @@ mod tests {
         test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
 
-        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
+        test_environment.service.activateMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
 
-        let _ = test_environment.service.deactivateMetricsConfig(-1, UUID).await;
+        test_environment.service.deactivateMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
@@ -774,7 +783,7 @@ mod tests {
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_status_listener().await;
 
-        let _ = test_environment.service.deactivateMetricsConfig(-1, UUID).await;
+        test_environment.service.deactivateMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
             test_environment.get_status_code()
@@ -796,10 +805,10 @@ mod tests {
         test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
 
-        let _ = test_environment.service.activateMetricsConfig(-1, UUID).await;
+        test_environment.service.activateMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
 
-        let _ = test_environment.service.removeMetricsConfig(-1, UUID).await;
+        test_environment.service.removeMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(1, test_environment.get_num_remove_config_calls());
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -817,7 +826,7 @@ mod tests {
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_status_listener().await;
 
-        let _ = test_environment.service.removeMetricsConfig(-1, UUID).await;
+        test_environment.service.removeMetricsConfig(-1, UUID).await.unwrap();
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
             test_environment.get_status_code()
@@ -845,7 +854,7 @@ mod tests {
         assert_eq!(2, test_environment.get_num_add_metrics_config_calls());
 
         // Remove all configs
-        let _ = test_environment.service.removeAllMetricsConfigs(-1).await;
+        test_environment.service.removeAllMetricsConfigs(-1).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
@@ -868,17 +877,18 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment
+        test_environment
             .service
             .registerReportReadyListener(&binder_report_ready_listener)
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
         );
 
-        let _ = test_environment.service.unregisterReportReadyListener().await;
+        test_environment.service.unregisterReportReadyListener().await.unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -902,10 +912,11 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment
+        test_environment
             .service
             .registerReportReadyListener(&binder_report_ready_listener)
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -930,10 +941,11 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment
+        test_environment
             .service
             .registerReportReadyListener(&binder_report_ready_listener)
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -941,7 +953,7 @@ mod tests {
         );
 
         // Call onReady on report ready listener
-        let _ = report_ready_listener.onReady(UUID, &String::default(), REPORT_NUMBER);
+        report_ready_listener.onReady(UUID, &String::default(), REPORT_NUMBER).unwrap();
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID, &report_ready_listener.get_uuid());
@@ -958,14 +970,14 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment.service.registerReportReadyListener(&report_listener).await;
+        test_environment.service.registerReportReadyListener(&report_listener).await.unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
         );
 
-        let _ = test_environment.service.registerReportReadyListener(&report_listener).await;
+        test_environment.service.registerReportReadyListener(&report_listener).await.unwrap();
         assert_eq!(
             StatusCodes::SET_REPORT_READY_LISTENER_FAILED.0,
             test_environment.get_status_code()
@@ -988,13 +1000,13 @@ mod tests {
         );
 
         let serialized_config = create_serialized_config(UUID);
-        let _ = test_environment.service.registerStatusListener(&binder_listener).await;
+        test_environment.service.registerStatusListener(&binder_listener).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             status_listener.get_status_code()
         );
 
-        let _ = test_environment.service.addMetricsConfig(-1, &serialized_config).await;
+        test_environment.service.addMetricsConfig(-1, &serialized_config).await.unwrap();
 
         assert_eq!(2, status_listener.get_num_send_status_calls());
     }
@@ -1013,13 +1025,13 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment.service.registerStatusListener(&binder_listener).await;
+        test_environment.service.registerStatusListener(&binder_listener).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             status_listener.get_status_code()
         );
 
-        let _ = test_environment.service.registerStatusListener(&binder_listener).await;
+        test_environment.service.registerStatusListener(&binder_listener).await.unwrap();
         assert_eq!(StatusCodes::SET_STATUS_LISTENER_FAILED.0, status_listener.get_status_code());
     }
 
@@ -1055,10 +1067,11 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let _ = test_environment
+        test_environment
             .service
             .registerReportReadyListener(&binder_report_ready_listener)
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -1081,10 +1094,11 @@ mod tests {
 
         // Call on_report_ready callback on metrics report listener
         test_environment.service.metrics_report_listener.on_report_ready(report);
-        let _ = test_environment
+        test_environment
             .service
             .getMetricsReport(UUID, &String::default(), REPORT_NUMBER, &binder_report_listener)
-            .await;
+            .await
+            .unwrap();
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,

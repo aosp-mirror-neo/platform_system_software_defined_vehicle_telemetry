@@ -46,7 +46,10 @@ fn main() {
 
         let mut raw_message: Vec<u8> = Vec::with_capacity(TOPIC_MSG_SIZE);
         // Prepend message length to be read
-        let _ = message.write_length_delimited_to_vec(&mut raw_message);
+        if let Err(e) = message.write_length_delimited_to_vec(&mut raw_message) {
+            println!("Could not serialize message, result={:?}", e);
+            return;
+        }
 
         let result = publisher.publish(&raw_message);
         match result {
