@@ -153,9 +153,7 @@ message ServicePublisher {
 
   // Optional.
   // Service-specific configuration.
-  oneof option {
-    SamplePublisherConfig sample_publisher_config = 10001;
-  }
+  google.protobuf.Any configuration = 3;
 }
 
 // When triggered uses message builder to create a new message according

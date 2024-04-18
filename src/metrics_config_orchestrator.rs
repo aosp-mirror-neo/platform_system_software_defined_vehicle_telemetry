@@ -1276,7 +1276,7 @@ mod tests {
                 finish_trigger_fired_callback: Arc::new(|_| {}),
                 report_ready_callback: Arc::new(|_| {}),
                 service_publisher_manager: Arc::new(
-                    MockServicePublisherAccessor::new_with_descriptor(Empty::descriptor()),
+                    MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
                 ),
                 phantom_generator: PhantomData,
             }

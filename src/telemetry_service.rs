@@ -579,7 +579,7 @@ mod tests {
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-                Arc::new(MockServicePublisherAccessor::default()),
+                Arc::new(MockServicePublisherAccessor::new()),
             )
             .await
             .unwrap();
