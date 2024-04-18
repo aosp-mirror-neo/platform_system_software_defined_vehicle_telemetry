@@ -58,7 +58,7 @@ async fn main() -> Result<(), binder::Status> {
         BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
 
     info!("Registering publisher");
-    let _ = service.registerPublisher(&publisher_info, &binder_publisher);
+    service.registerPublisher(&publisher_info, &binder_publisher)?;
 
     info!("Waiting for subscription");
     notify_subscribed.notified().await;
