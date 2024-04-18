@@ -824,7 +824,7 @@ mod tests {
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
-        let _ = test_environment.manager.activate_metrics_config(UUID).await;
+        test_environment.manager.activate_metrics_config(UUID).await.unwrap();
         assert!(new_file_path.is_file());
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
 

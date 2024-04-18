@@ -2,6 +2,7 @@
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
 use google_sdv_telemetry::binder::Strong;
+use log::warn;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::collections::HashMap;
@@ -48,11 +49,13 @@ impl MetricsReportListener {
 
         let listener = self.report_ready_listener.lock().unwrap();
         if let Some(listener_ref) = listener.as_ref() {
-            let _ = listener_ref.deref().onReady(
+            if let Err(e) = listener_ref.deref().onReady(
                 &metrics_config_uuid,
                 &report_config_name,
                 report_number,
-            );
+            ) {
+                warn!("Error when trying to notify client about a new report: {:?}", e);
+            }
         }
     }
 

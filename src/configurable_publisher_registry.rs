@@ -162,7 +162,7 @@ impl ConfigurablePublisherRegistry {
 
         match publisher_entries_lock.entry(service_name.to_string()) {
             Entry::Occupied(o) => {
-                let _ = o.remove_entry();
+                o.remove_entry();
             }
             Entry::Vacant(_) => {
                 info!(
