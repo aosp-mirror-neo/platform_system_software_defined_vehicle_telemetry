@@ -45,10 +45,7 @@ impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistry
         publisher_info: &PublisherInfo,
         publisher: &Strong<dyn IConfigurablePublisher>,
     ) -> BinderResult<()> {
-        info!(
-            "Registering publisher with telemetry service with topic {}",
-            publisher_info.topicName
-        );
+        info!("Registering publisher with telemetry service name {}", publisher_info.serviceName);
         let res = self
             .configurable_publisher_registry
             .register_publisher(publisher_info, publisher)

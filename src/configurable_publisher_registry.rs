@@ -270,7 +270,6 @@ mod tests {
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
-            topicName: String::default(),
             fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
             messageTypeName: format!(".{}", descriptor.full_name()),
         };

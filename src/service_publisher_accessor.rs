@@ -12,9 +12,9 @@ use std::sync::Arc;
 /// Interface of an entity that provides access to Service Publishers.
 #[async_trait]
 pub trait ServicePublisherAccessor: Send + Sync {
-    /// Returns message descriptor of the specified topic published by the specified service.
-    /// Returns None if the service and topic combination is not registered.
-    /// Returns error if the service and topic combination is registered, but metadata retrieval failed.
+    /// Returns message descriptor of the specified service.
+    /// Returns None if the service is not registered.
+    /// Returns error if the service is registered, but metadata retrieval failed.
     fn get_message_descriptor(
         &self,
         service_name: &str,

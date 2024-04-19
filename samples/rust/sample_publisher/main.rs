@@ -49,7 +49,6 @@ async fn main() -> Result<(), binder::Status> {
 
     let publisher_info = PublisherInfo {
         serviceName: "SampleService".to_string(),
-        topicName: "SampleData".to_string(),
         fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
         messageTypeName: format!(".{}", descriptor.full_name()),
     };
