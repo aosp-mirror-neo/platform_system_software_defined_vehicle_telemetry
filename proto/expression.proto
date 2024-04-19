@@ -90,8 +90,17 @@ message CombinationNode {
     SUBTRACT = 1;
     MULTIPLY = 2;
     DIVIDE = 3;
-    // Modulo operator requires both operands to be integer types.
-    MODULO = 4;
+    // The modulo operator requires both operands to be integer types. The
+    // operator is implemented in terms of truncated division:
+    // ```
+    // +8 mod +3 = +2
+    // +8 mod -3 = +2
+    // -8 mod +3 = -2
+    // -8 mod -3 = -2
+    // ```
+    // The sign of the modulus is always the same as the sign of the dividend,
+    // which, among others, matches the definition used in the ISO C99 standard.
+    MODULO_TRUNC = 4;
     POWER = 5;
   }
 

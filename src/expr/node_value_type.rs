@@ -298,7 +298,7 @@ impl OperatorProtoExtension for OperatorProto {
                             Err(NodeError::ArithmeticOperatorIncompatibleOperands)
                         }
                     }
-                    ArithmeticOperator::MODULO => {
+                    ArithmeticOperator::MODULO_TRUNC => {
                         if left.is_none_or(|l| l.is_int()) && get_right().is_none_or(|r| r.is_int())
                         {
                             Ok(Some(NodeValueType::Int))
