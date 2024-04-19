@@ -147,10 +147,6 @@ message ServicePublisher {
   // Unique service name.
   string service_name = 1;
 
-  // Deprecated.
-  // The value of the field is ignored.
-  string topic_name = 2 [deprecated = true];
-
   // Optional.
   // Service-specific configuration.
   google.protobuf.Any configuration = 3;
