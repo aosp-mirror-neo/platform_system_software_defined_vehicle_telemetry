@@ -9,7 +9,7 @@ mod telemetry_setup;
 use log::error;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry::ServicePublisherAccessor;
-use sdv_telemetry_dt_wrapper::DataTunnelSubscriber;
+use sdv_telemetry_dt_wrapper::data_tunnel_subscriber::DataTunnelSubscriber;
 
 use std::sync::Arc;
 
