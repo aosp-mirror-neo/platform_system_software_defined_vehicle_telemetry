@@ -376,6 +376,17 @@ impl NodeValue {
             } else {
                 return Err(err_provider());
             }
+        } else if *op == ArithmeticOperator::ABSOLUTE {
+            let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
+            if self.is_int() {
+                return Ok(NodeValue::Int64(self.get_int(&err_provider)?.abs()));
+            } else if self.is_numeric() {
+                return Ok(NodeValue::Double(self.get_double(&err_provider)?.abs()));
+            } else if self.is_none() {
+                return Ok(self.clone());
+            } else {
+                return Err(err_provider());
+            }
         }
 
         let other = get_right_operand()?;
@@ -433,7 +444,7 @@ impl NodeValue {
                 |a, b| NodeValue::Double(a.powf(b)),
                 &err_provider,
             ),
-            ArithmeticOperator::UNARY_MINUS => {
+            ArithmeticOperator::UNARY_MINUS | ArithmeticOperator::ABSOLUTE => {
                 unreachable!("Unary operators should be handled outside of this match statement")
             }
         }
@@ -1204,6 +1215,15 @@ mod tests {
                 .unwrap(),
             NodeValue::None
         );
+        // |None| = None
+        assert_eq!(
+            none_val
+                .operate(&OP_ABSOLUTE, || panic!(
+                    "Unary operator should not call right operand provider"
+                ))
+                .unwrap(),
+            NodeValue::None
+        );
     }
 
     #[test]
@@ -1372,6 +1392,34 @@ mod tests {
             NodeError::ArithmeticOperatorIncompatibleOperands
         ));
 
+        Ok(())
+    }
+
+    #[test]
+    fn operate_arithmetic_absolute() -> Result<(), NodeError> {
+        let one = NodeValue::Int64(1);
+        let negative_three = NodeValue::Int64(-3);
+        let two_point_seven = NodeValue::Float(2.7);
+        let negative_two_point_seven = NodeValue::Float(-2.7);
+        let zero = NodeValue::Float(0.0);
+
+        assert_eq!(one.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?, NodeValue::Int64(1));
+        assert_eq!(
+            negative_three.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            NodeValue::Int64(3)
+        );
+        assert_eq!(
+            two_point_seven.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            NodeValue::Double(2.7)
+        );
+        assert_eq!(
+            negative_two_point_seven.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            NodeValue::Double(2.7)
+        );
+        assert_eq!(
+            zero.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            NodeValue::Double(0.0)
+        );
         Ok(())
     }
 

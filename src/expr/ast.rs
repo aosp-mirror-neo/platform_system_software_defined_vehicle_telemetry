@@ -769,6 +769,36 @@ mod tests {
     }
 
     #[test]
+    fn validate_unary_arithmetic_operator_no_right_child_ok() {
+        // setup
+        let node_factory = NodeFactoryImpl::new();
+        let context = create_factory_context();
+        let mut leaf_num = NodeProto::new();
+        let mut root_node = NodeProto::new();
+
+        let mut constant_leaf_negative_four_point_eight = ConstantLeafNode::new();
+        constant_leaf_negative_four_point_eight.set_float_value(-4.8);
+        leaf_num.set_constant_leaf_node(constant_leaf_negative_four_point_eight);
+
+        //            index 1 (ABSOLUTE)
+        //          /              \
+        //    index 0              no right child
+        //    -4.8
+        let mut absolute_node = CombinationNode::new();
+        absolute_node.left_index = Some(0);
+        absolute_node.set_arithmetic_operator(ArithmeticOperator::ABSOLUTE);
+        root_node.set_combination_node(absolute_node);
+
+        let all_proto_nodes = vec![leaf_num, root_node];
+
+        // action
+        let nodes = node_factory.validate(&all_proto_nodes, &context);
+
+        // assert
+        assert!(nodes.is_ok());
+    }
+
+    #[test]
     fn validate_arithmetic_operator_incompatible_types_fails() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();
@@ -1466,8 +1496,10 @@ mod tests {
 
     #[test]
     fn evaluate_arithmetic_operator_success() -> Result<(), NodeError> {
-        // setup this tree: -( 5 / 2 * 5^2 )
-        //              UNARY_MINUS
+        // setup this tree: |-( 5 / 2 * 5^2 )|
+        //             ABSOLUTE
+        //                 |
+        //            UNARY_MINUS
         //                 |
         //              MULTIPLY
         //          /             \
@@ -1496,7 +1528,20 @@ mod tests {
             left: Some(Arc::clone(&multiply_node)),
             right: None,
         });
-        let nodes = [five_node, two_node, divide_node, power_node, multiply_node, unary_minus_node];
+        let absolute_node = Arc::new(Node::Combination {
+            operator: OP_ABSOLUTE.clone(),
+            left: Some(Arc::clone(&unary_minus_node)),
+            right: None,
+        });
+        let nodes = [
+            five_node,
+            two_node,
+            divide_node,
+            power_node,
+            multiply_node,
+            unary_minus_node,
+            absolute_node,
+        ];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = [
@@ -1506,6 +1551,7 @@ mod tests {
             NodeValue::Int64(25),     // index 3 = 5^2 = 25
             NodeValue::Double(62.5),  // index 4 = 2.5 * 25 = 62.5
             NodeValue::Double(-62.5), // index 5 = -(62.5) = -62.5
+            NodeValue::Double(62.5),  // index 6 = |-62.5|= 62.5
         ];
 
         let context = NodeEvaluationContext::new();

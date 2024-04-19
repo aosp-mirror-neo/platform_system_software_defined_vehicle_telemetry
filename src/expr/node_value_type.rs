@@ -174,9 +174,10 @@ impl OperatorProtoExtension for OperatorProto {
             OperatorProto::LogicalOperator(op) => {
                 op.enum_value_or_default() == LogicalOperator::NOT
             }
-            OperatorProto::ArithmeticOperator(op) => {
-                op.enum_value_or_default() == ArithmeticOperator::UNARY_MINUS
-            }
+            OperatorProto::ArithmeticOperator(op) => matches!(
+                op.enum_value_or_default(),
+                ArithmeticOperator::UNARY_MINUS | ArithmeticOperator::ABSOLUTE
+            ),
             _ => false,
         }
     }
@@ -311,6 +312,18 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                     ArithmeticOperator::UNARY_MINUS => match left {
+                        None => Ok(None),
+                        Some(left) => {
+                            if left.is_int() {
+                                Ok(Some(NodeValueType::Int))
+                            } else if left.is_numeric() {
+                                Ok(Some(NodeValueType::Float))
+                            } else {
+                                Err(NodeError::ArithmeticOperatorIncompatibleOperands)
+                            }
+                        }
+                    },
+                    ArithmeticOperator::ABSOLUTE => match left {
                         None => Ok(None),
                         Some(left) => {
                             if left.is_int() {

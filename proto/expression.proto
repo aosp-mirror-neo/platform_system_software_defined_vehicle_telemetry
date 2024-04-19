@@ -104,6 +104,18 @@ message CombinationNode {
     POWER = 5;
     // Arithmetic negation operator.
     UNARY_MINUS = 6;
+
+    // Unary Operator
+    // Output: the positive numeric value of the input numeric value.
+    // Type requirement: only left child node must hold numeric value.
+    // right child node should be none.
+    // Examples:
+    // * Absolute value of -2.7 is 2.7
+    // * Absolute value of 2.7 is 2.7
+    // * Absolute value of -1.0 is 1.0
+    // * Absolute value of -1 is 1
+    // * Absolute value of 0 is 0
+    ABSOLUTE = 7;
   }
 
   // Unary operator.
