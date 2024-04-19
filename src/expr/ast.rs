@@ -1136,9 +1136,9 @@ mod tests {
         divide_left_unknown_type: DIVIDE, false, false, true, Some(NodeValueType::Float),
         divide_right_unknown_type: DIVIDE, false, true, false, Some(NodeValueType::Float),
         divide_both_unknown_types: DIVIDE, false, false, false, Some(NodeValueType::Float),
-        modulo_left_unknown_type: MODULO, false, false, true, Some(NodeValueType::Int),
-        modulo_right_unknown_type: MODULO, false, true, false, Some(NodeValueType::Int),
-        modulo_both_unknown_types: MODULO, false, false, false, Some(NodeValueType::Int),
+        modulo_trunc_left_unknown_type: MODULO_TRUNC, false, false, true, Some(NodeValueType::Int),
+        modulo_trunc_right_unknown_type: MODULO_TRUNC, false, true, false, Some(NodeValueType::Int),
+        modulo_trunc_both_unknown_types: MODULO_TRUNC, false, false, false, Some(NodeValueType::Int),
     }
 
     #[test]
