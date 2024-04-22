@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::{sync::Mutex as AsyncMutex, task};
 
+use crate::expr::ast::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
@@ -106,7 +107,10 @@ impl MetricsReportGeneratorImpl {
     }
 
     fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str) {
-        match self.message_builder.build() {
+        // TODO(b/327009845): This should use the same evaluation context that
+        // was used as part of determining that a trigger fired.
+        let context = NodeEvaluationContext::new();
+        match self.message_builder.build(&context) {
             Ok(report_data) => {
                 let mut report = MetricsReport::new();
                 report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);

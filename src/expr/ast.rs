@@ -327,9 +327,17 @@ impl NodeFactory for NodeFactoryImpl {
     }
 }
 
+pub struct NodeEvaluationContext {}
+
+impl NodeEvaluationContext {
+    pub fn new() -> Self {
+        NodeEvaluationContext {}
+    }
+}
+
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
-    pub fn evaluate(&self) -> Result<NodeValue, NodeError> {
+    pub fn evaluate(&self, _context: &NodeEvaluationContext) -> Result<NodeValue, NodeError> {
         match &self {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
@@ -354,7 +362,7 @@ impl Node {
                          every non-leaf Node has a left child, but evaluate() encountered \
                          a node without left child",
                     )
-                    .evaluate()?;
+                    .evaluate(_context)?;
 
                 // If unary operator, then operate on self.
                 // If binary operator, then [left] <operator> [right]
@@ -375,7 +383,7 @@ impl Node {
                                 );
                             }
                         })
-                        .evaluate()
+                        .evaluate(_context)
                 })
             }
         }
@@ -1449,10 +1457,11 @@ mod tests {
             NodeValue::Bool(false), // true ^ (true || false) = false
         ];
 
+        let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             // action + assertion
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1501,9 +1510,10 @@ mod tests {
             NodeValue::Double(-62.5), // index 5 = -(62.5) = -62.5
         ];
 
+        let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1544,9 +1554,10 @@ mod tests {
             NodeValue::Bool(true),                  // true == true
         ];
 
+        let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1568,9 +1579,10 @@ mod tests {
             NodeValue::Int64(3),                    // Pi rounded to the nearest int
         ];
 
+        let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1619,9 +1631,10 @@ mod tests {
             NodeValue::Bool(true), // True && True = True
         ];
 
+        let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1667,9 +1680,10 @@ mod tests {
             NodeValue::Bool(true),   // 50 < 80 = true
         ];
 
+        let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1684,8 +1698,9 @@ mod tests {
             right: Some(true_node),
         });
 
+        let context = NodeEvaluationContext::new();
         // expr is "0 < True"
-        let err = lt_node.evaluate().unwrap_err();
+        let err = lt_node.evaluate(&context).unwrap_err();
 
         // 0 cannot be less than True
         assert!(
@@ -1702,7 +1717,8 @@ mod tests {
         let node =
             Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
-        let err = node.evaluate().unwrap_err();
+        let context = NodeEvaluationContext::new();
+        let err = node.evaluate(&context).unwrap_err();
 
         assert!(
             matches!(&err, NodeError::MessageProviderError { .. }),
@@ -1718,7 +1734,8 @@ mod tests {
         let node =
             Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
-        let res = node.evaluate().unwrap();
+        let context = NodeEvaluationContext::new();
+        let res = node.evaluate(&context).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }

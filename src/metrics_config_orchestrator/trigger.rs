@@ -16,7 +16,10 @@ use std::{
 };
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
-use crate::expr::{ast::Node, node_value::NodeValue};
+use crate::expr::{
+    ast::{Node, NodeEvaluationContext},
+    node_value::NodeValue,
+};
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, CallbackFn, SubscriptionManager, SubscriptionManagerImpl,
 };
@@ -371,7 +374,8 @@ impl TriggerImpl {
             panic!("Unexpected trigger type");
         };
 
-        let node_value = match selector_expression.evaluate() {
+        let context = NodeEvaluationContext::new();
+        let node_value = match selector_expression.evaluate(&context) {
             Ok(value) => value,
             Err(err) => {
                 error!(

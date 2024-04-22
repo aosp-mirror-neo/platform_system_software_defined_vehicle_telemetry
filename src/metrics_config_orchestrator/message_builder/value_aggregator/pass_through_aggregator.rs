@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
@@ -15,8 +16,8 @@ impl PassThroughAggregator {
 }
 
 impl ValueAggregator for PassThroughAggregator {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError> {
-        self.node.evaluate().map_err(|e| AggregationError::ExpressionEvaluationError { e })
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+        self.node.evaluate(context).map_err(|e| AggregationError::ExpressionEvaluationError { e })
     }
 }
 
@@ -31,7 +32,8 @@ mod tests {
         let mut int64_field_value =
             PassThroughAggregator::new(&Arc::new(Node::ConstantLeaf { value: int64_val.clone() }));
 
-        assert_eq!(int64_field_value.compute().unwrap(), int64_val);
+        let context = NodeEvaluationContext::new();
+        assert_eq!(int64_field_value.compute(&context).unwrap(), int64_val);
     }
 
     #[test]
@@ -44,7 +46,8 @@ mod tests {
         });
         let mut bad_value = PassThroughAggregator::new(&bad_node);
 
-        let res = bad_value.compute();
+        let context = NodeEvaluationContext::new();
+        let res = bad_value.compute(&context);
 
         assert!(matches!(res.unwrap_err(), AggregationError::ExpressionEvaluationError { .. }));
     }

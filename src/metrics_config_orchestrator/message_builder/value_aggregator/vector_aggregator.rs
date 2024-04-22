@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
+use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
@@ -22,8 +23,8 @@ impl VectorAggregator {
 }
 
 impl ValueAggregator for VectorAggregator {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate()?;
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+        let latest_value = self.node.evaluate(context)?;
         if latest_value.is_none() {
             return Ok(latest_value);
         }
@@ -54,12 +55,13 @@ mod tests {
             &None,
         );
 
+        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
             let expected_vec = vec![test_int; i + 1];
 
             // action
-            let res = aggregate_int_value.compute().unwrap();
+            let res = aggregate_int_value.compute(&context).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int32List(expected_vec));
@@ -81,6 +83,7 @@ mod tests {
             vec![2, 3, 4],
         ];
 
+        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector aggregation output is as expected
         for (i, expected_vec) in expected_vectors.into_iter().enumerate() {
             // make the next expression output equals to i
@@ -88,7 +91,7 @@ mod tests {
                 Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(i as i64) });
 
             // action
-            let res = aggregate_int_value.compute().unwrap();
+            let res = aggregate_int_value.compute(&context).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int64List(expected_vec));
@@ -103,12 +106,13 @@ mod tests {
             &None,
         );
 
+        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
             let expected_vec = vec![test_double; i + 1];
 
             // action
-            let res = aggregate_double_value.compute().unwrap();
+            let res = aggregate_double_value.compute(&context).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::DoubleList(expected_vec));
@@ -130,6 +134,7 @@ mod tests {
             vec![0.4, 0.6, 0.8],
         ];
 
+        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector aggregation output is as expected
         for (i, expected_vec) in expected_vectors.into_iter().enumerate() {
             // make the next expression output equals to i / 5 as a float
@@ -137,7 +142,7 @@ mod tests {
                 Arc::new(Node::ConstantLeaf { value: NodeValue::Float(i as f32 / 5.0) });
 
             // action
-            let res = aggregate_int_value.compute().unwrap();
+            let res = aggregate_int_value.compute(&context).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::FloatList(expected_vec));
@@ -152,12 +157,13 @@ mod tests {
             &None,
         );
 
+        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
             let expected_vec = vec![boxed_message.clone(); i + 1];
 
             // action
-            let res = aggregate_message_value.compute().unwrap();
+            let res = aggregate_message_value.compute(&context).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::MessageList(expected_vec));
@@ -173,6 +179,7 @@ mod tests {
             &Some(max_len as u32),
         );
 
+        let context = NodeEvaluationContext::new();
         // compute 5 times and verify the output never exceeds max_len
         for i in 0..5 {
             let expected_vec = if i < max_len {
@@ -182,7 +189,7 @@ mod tests {
             };
 
             // action
-            let res = aggregate_message_value.compute().unwrap();
+            let res = aggregate_message_value.compute(&context).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::MessageList(expected_vec));
@@ -194,7 +201,8 @@ mod tests {
         let mut aggregator =
             VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }), &None);
 
-        let res = aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        let res = aggregator.compute(&context).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -206,6 +214,7 @@ mod tests {
             &None,
         );
 
-        assert!(aggregate_list_of_list.compute().is_err());
+        let context = NodeEvaluationContext::new();
+        assert!(aggregate_list_of_list.compute(&context).is_err());
     }
 }

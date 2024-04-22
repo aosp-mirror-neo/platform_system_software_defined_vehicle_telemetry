@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use super::{MessageBuilder, MessageBuilderError};
+use crate::expr::ast::NodeEvaluationContext;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use std::sync::{Arc, Mutex};
@@ -12,7 +13,10 @@ pub(crate) struct MockMessageBuilder {
 }
 
 impl MessageBuilder for MockMessageBuilder {
-    fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
+    fn build(
+        &self,
+        _context: &NodeEvaluationContext,
+    ) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
         if let Some(error) = self.next_error.lock().unwrap().take() {
             return Err(error);
         }
