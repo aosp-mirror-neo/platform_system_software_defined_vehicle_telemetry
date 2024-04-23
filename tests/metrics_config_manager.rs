@@ -119,7 +119,6 @@ unsafe extern "C" fn on_config_removed(
         .unwrap();
 }
 
-#[derive(Clone)]
 #[repr(C)]
 pub struct MetricsConfigManager {
     service: *mut rust_to_c::ServiceHolder,
