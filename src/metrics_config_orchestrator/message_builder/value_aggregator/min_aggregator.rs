@@ -14,7 +14,7 @@ pub struct MinAggregator {
 
 impl MinAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
-        Self { node: node.clone(), current_min: None }
+        Self { node: Arc::clone(node), current_min: None }
     }
 }
 

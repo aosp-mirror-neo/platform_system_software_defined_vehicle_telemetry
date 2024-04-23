@@ -117,7 +117,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
                 context
                     .triggers
                     .get(name)
-                    .map(|trigger| trigger.clone() as Arc<dyn Trigger>)
+                    .map(|trigger| Arc::clone(trigger) as Arc<dyn Trigger>)
                     .ok_or_else(|| MetricsReportGeneratorFactoryError::InvalidTriggerName {
                         trigger_name: name.clone(),
                     })
@@ -129,7 +129,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             metrics_report_config,
             context.config_proto.uuid.clone(),
             context.config_proto.version,
-            context.report_ready_callback.clone(),
+            Arc::clone(context.report_ready_callback),
             triggers,
             message_builder,
         )))
@@ -370,7 +370,7 @@ mod tests {
             TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval_ms: 0 });
 
         let err = factory
-            .create_using_context(&config, None, None, Some(vec![trigger.clone()]))
+            .create_using_context(&config, None, None, Some(vec![Arc::clone(&trigger)]))
             .err()
             .unwrap();
 
@@ -396,8 +396,8 @@ mod tests {
             .create_using_context(
                 &report_config,
                 Some(metrics_config),
-                Some(report_ready_callback.clone()),
-                Some(vec![trigger.clone()]),
+                Some(Arc::clone(&report_ready_callback)),
+                Some(vec![Arc::clone(&trigger)]),
             )
             .unwrap();
 

@@ -133,7 +133,7 @@ impl SdvTelemetryService {
 
         // Create manager and its dependencies
         let report_listener = Arc::new(MetricsReportListener::new());
-        let report_listener_clone = report_listener.clone(); // Clone the Arc to share ownership
+        let report_listener_clone = Arc::clone(&report_listener);
         let config_manager = match MetricsConfigManagerImpl::new(
             active_data_dir,
             inactive_data_dir,
@@ -593,21 +593,23 @@ mod tests {
             .await
             .unwrap();
             service.metrics_config_manager = Arc::new(MockMetricsConfigManager::new(
-                num_add_metrics_config_calls.clone(),
-                num_activate_metrics_config_calls.clone(),
-                num_deactivate_metrics_config_calls.clone(),
-                num_remove_config_calls.clone(),
-                num_remove_all_config_calls.clone(),
+                Arc::clone(&num_add_metrics_config_calls),
+                Arc::clone(&num_activate_metrics_config_calls),
+                Arc::clone(&num_deactivate_metrics_config_calls),
+                Arc::clone(&num_remove_config_calls),
+                Arc::clone(&num_remove_all_config_calls),
             ));
 
             TestEnvironment {
                 service,
                 status_listener: None,
-                num_add_metrics_config_calls: num_add_metrics_config_calls.clone(),
-                num_activate_metrics_config_calls: num_activate_metrics_config_calls.clone(),
-                num_deactivate_metrics_config_calls: num_deactivate_metrics_config_calls.clone(),
-                num_remove_config_calls: num_remove_config_calls.clone(),
-                num_remove_all_config_calls: num_remove_all_config_calls.clone(),
+                num_add_metrics_config_calls: Arc::clone(&num_add_metrics_config_calls),
+                num_activate_metrics_config_calls: Arc::clone(&num_activate_metrics_config_calls),
+                num_deactivate_metrics_config_calls: Arc::clone(
+                    &num_deactivate_metrics_config_calls,
+                ),
+                num_remove_config_calls: Arc::clone(&num_remove_config_calls),
+                num_remove_all_config_calls: Arc::clone(&num_remove_all_config_calls),
             }
         }
 

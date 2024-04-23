@@ -91,7 +91,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     let config_manager = Arc::new(MetricsConfigManager::new(service));
 
     let config_path = CONFIG_PATH.to_string();
-    let config_name = process_config(config_path, config_manager.clone()).await.unwrap();
+    let config_name = process_config(config_path, Arc::clone(&config_manager)).await.unwrap();
     info!("Config added: {:?}", config_name);
 
     let metrics_report = report_manager.as_mut().get_metrics_report().await.unwrap();

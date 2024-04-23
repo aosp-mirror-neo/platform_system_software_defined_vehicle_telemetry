@@ -50,7 +50,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             let maybe_subscription = service_publisher_manager_impl
-                .create_subscription(service_name, configuration, callback.clone())
+                .create_subscription(service_name, configuration, Arc::clone(&callback))
                 .await?;
             if maybe_subscription.is_some() {
                 return Ok(maybe_subscription);
@@ -80,7 +80,7 @@ mod tests {
         let service_publisher =
             Arc::new(MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()));
         let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherAccessor>];
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let res =
@@ -95,7 +95,8 @@ mod tests {
         let service_publisher = Arc::new(
             MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
         );
-        let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherAccessor>];
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME2).unwrap_err();
@@ -106,7 +107,8 @@ mod tests {
     #[tokio::test]
     async fn get_message_descriptor_no_match_returns_none() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
-        let service_publishers = vec![service_publisher as Arc<dyn ServicePublisherAccessor>];
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let res = service_publisher_manager_impl.get_message_descriptor(SERVICE_NAME2).unwrap();
@@ -118,7 +120,7 @@ mod tests {
     async fn create_subscription_success() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
         let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherAccessor>];
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let res = service_publisher_manager_impl
@@ -136,7 +138,7 @@ mod tests {
             MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
         );
         let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherAccessor>];
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl
@@ -153,7 +155,7 @@ mod tests {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
 
         let service_publishers =
-            vec![service_publisher.clone() as Arc<dyn ServicePublisherAccessor>];
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
 
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 

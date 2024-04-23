@@ -52,10 +52,9 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         // Subscribing to triggers one by one. In theory, it should be possible to also spawn
         // subscription tasks in parallel as an optimization.
         for trigger in &self.triggers {
-            let self_clone = self.clone();
+            let self_clone = Arc::clone(self);
             let trigger_name_clone = trigger.get_name().to_owned();
-            trigger
-                .clone()
+            Arc::clone(trigger)
                 .subscribe(
                     &self.subscriber,
                     Box::new(move || self_clone.on_trigger_fired(&trigger_name_clone)),
@@ -198,7 +197,7 @@ mod test {
     async fn activate_subscribes_to_trigger() {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
-        let num_fired_clone = num_fired.clone();
+        let num_fired_clone = Arc::clone(&num_fired);
         trigger.subscribe_callback.replace(Box::new(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
         }));
@@ -216,10 +215,10 @@ mod test {
         let trigger = Arc::new(create_trigger());
 
         let message_builder = Box::new(MockMessageBuilder::new());
-        let mut generator = create_generator(message_builder.clone());
+        let mut generator = create_generator(Box::clone(&message_builder));
         let (tx, mut rx) = mpsc::channel(2);
         generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
-        generator.triggers.push(trigger.clone());
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
 
         // Activate the generator.
         Arc::new(generator).activate().await;
@@ -257,7 +256,7 @@ mod test {
 
         let mut generator = create_default_generator();
         generator.report_ready_callback = Arc::new(|_| thread::sleep(Duration::MAX));
-        generator.triggers.push(trigger.clone());
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
         Arc::new(generator).activate().await;
 
         trigger.fire().await;
@@ -275,7 +274,7 @@ mod test {
     async fn deactivate_unsubscribes_from_trigger() {
         let mut trigger = create_trigger();
         let num_fired = Arc::new(AtomicU32::new(0));
-        let num_fired_clone = num_fired.clone();
+        let num_fired_clone = Arc::clone(&num_fired);
         trigger.set_unsubscribe_callback(move |_| {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
         });

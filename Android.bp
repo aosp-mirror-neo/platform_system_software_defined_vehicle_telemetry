@@ -37,7 +37,14 @@ rust_defaults {
         "libsdv_log_rust",
     ],
     flags: [
+        // By enforcing this lint, we make it a lot more obvious when a conversion
+        // is potentially lossy, because lossless conversions are no longer
+        // allowed to be written as `a as XX`.
         "-D clippy::cast_lossless",
+        // By enabling this lint, we make it easier to understand whether
+        // something being cloned is actually just cloning a pointer, or cloning
+        // the actual object.
+        "-D clippy::clone_on_ref_ptr",
     ],
 }
 
