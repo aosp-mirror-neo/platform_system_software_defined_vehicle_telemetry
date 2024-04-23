@@ -70,4 +70,5 @@ rust_library {
     ],
     system_ext_specific: true,
     vendor_available: true,
+    visibility: ["//visibility:public"],
 }
