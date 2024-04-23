@@ -1,0 +1,181 @@
+# proto-file: proto/metrics_configuration.proto
+# proto-message: MetricsConfig
+
+uuid: "c6115cea-8fde-436a-9f29-c12f06a10c102510"
+version: 01
+descriptor_protos {
+  name: "metrics.proto"
+  package: "android.automotive.telemetry.messages"
+  message_type {
+    name: "VehicleConnectivityReport"
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_INT32
+      name: "vector_vehicle_connection_status"
+      number: 1
+    }
+    field {
+      label: LABEL_REPEATED
+      type: TYPE_INT32
+      name: "sample_vector"
+      number: 3
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_FLOAT
+      name: "sample_std_dev"
+      number: 4
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "sample_min"
+      number: 5
+    }
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "sample_max"
+      number: 6
+    }
+  }
+}
+
+publishers {
+  name: "TestPublisher"
+  service_publisher {
+    service_name: "DataTunnelSampleService"
+  }
+}
+publishers {
+  name: "TestPublisher2"
+  aggregation_publisher {
+    trigger_names: "period_2s"
+    message_builder {
+      message_type: ".android.automotive.telemetry.messages.VehicleConnectivityReport"
+      field_assignments {
+        field_name: "sample_vector"
+        vector_aggregation {
+          expression_node_index: 0
+          max_length: 50
+        }
+      }
+      field_assignments {
+        field_name: "sample_std_dev"
+        std_dev_aggregation {
+          expression_node_index: 0
+        }
+      }
+      field_assignments {
+        field_name: "sample_max"
+        max_aggregation {
+          expression_node_index: 0
+        }
+      }
+      field_assignments {
+        field_name: "sample_min"
+        min_aggregation {
+          expression_node_index: 0
+        }
+      }
+    }
+  }
+}
+
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "TestPublisher"
+    field_names: "sample_data"
+  }
+}
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "TestPublisher2"
+    field_names: "sample_vector"
+  }
+}
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "TestPublisher2"
+    field_names: "sample_std_dev"
+  }
+}
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "TestPublisher2"
+    field_names: "sample_min"
+  }
+}
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "TestPublisher2"
+    field_names: "sample_max"
+  }
+}
+
+
+triggers {
+  name: "start_trigger"
+  periodic_trigger {
+    interval_ms: 2000
+  }
+}
+triggers {
+  name: "period_2s"
+  periodic_trigger {
+    interval_ms: 2000
+  }
+}
+triggers {
+  name: "end_trigger"
+  periodic_trigger {
+    interval_ms: 30200
+  }
+}
+triggers {
+  name: "agg_trigger"
+  periodic_trigger {
+    interval_ms: 1000
+  }
+}
+
+start_trigger_name: "start_trigger"
+finish_trigger_name: "end_trigger"
+metrics_report_configs {
+  name: "SampleReport"
+  trigger_names: "end_trigger"
+  message_builder {
+    message_type: ".android.automotive.telemetry.messages.VehicleConnectivityReport"
+    field_assignments {
+      field_name: "vector_vehicle_connection_status"
+      vector_aggregation {
+        expression_node_index: 0
+        max_length: 50
+      }
+    }
+    field_assignments {
+      field_name: "sample_vector"
+      no_aggregation {
+        expression_node_index: 1
+      }
+    }
+    field_assignments {
+      field_name: "sample_std_dev"
+      no_aggregation {
+        expression_node_index: 2
+      }
+    }
+    field_assignments {
+      field_name: "sample_min"
+      no_aggregation {
+        expression_node_index: 3
+      }
+    }
+    field_assignments {
+      field_name: "sample_max"
+      no_aggregation {
+        expression_node_index: 4
+      }
+    }
+  }
+}
