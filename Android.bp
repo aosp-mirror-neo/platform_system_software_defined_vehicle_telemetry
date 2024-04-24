@@ -36,6 +36,9 @@ rust_defaults {
         "libthiserror",
         "libsdv_log_rust",
     ],
+    flags: [
+        "-D clippy::cast_lossless",
+    ],
 }
 
 rust_protobuf {
