@@ -2,8 +2,6 @@
 
 //! Binary for registering Telemetry service.
 
-#![deny(clippy::cast_lossless)]
-
 mod telemetry_setup;
 
 use log::error;

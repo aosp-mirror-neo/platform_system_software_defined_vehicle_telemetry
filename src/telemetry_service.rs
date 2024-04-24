@@ -2,8 +2,6 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
-#![deny(clippy::cast_lossless)]
-
 mod expr;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
