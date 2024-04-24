@@ -16,20 +16,12 @@ files or without a command line argument to run all configs in
 
 You need to have
 [gqui](https://g3doc.corp.google.com/util/tools/gqui/g3doc/overview.md)
-installed:
+installed (go/gqui#installation):
 
-`sudo apt install gqui`
-
-The script needs some symlinks to work to find the right proto files:
-
-`ln -s $T/external/protobuf/src/google ./google && ln -s $T/system ./system`
-
-Without these symlinks in place, you will likely get these errors:
-
-```text
-Couldn't find file 'google/protobuf/descriptor.proto' (protodb fallback).
-Couldn't load proto "proto/metrics_configuration.proto"
-Could not detect type. Please provide a 'proto' statement.
+```bash
+sudo glinux-add-repo gqui
+sudo apt update
+sudo apt install gqui
 ```
 
 ## What it does

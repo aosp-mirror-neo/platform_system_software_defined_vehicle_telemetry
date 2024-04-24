@@ -7,6 +7,12 @@ log() {
     echo -e "\n$1\n"
 }
 
+if [[ -z "$ANDROID_BUILD_TOP" ]]
+then
+  log "[ERROR] ANDROID_BUILD_TOP is missing. Please, lunch the Android target."
+  exit -1
+fi
+
 cvd clear
 
 log "Starting VM"
@@ -24,6 +30,21 @@ TEMP_DIR=$(mktemp -d)
 # Remove temp dir when the script is done or cancelled
 trap "rm -rf $TEMP_DIR" 0 2 3 15 # Run the command when one of these signals is received: 0=exit shell, 2=interrupt, 3=quit, 15=terminate
 
+# These are necessary for gqui to pick up the right protos.
+ln -s $ANDROID_BUILD_TOP/external/protobuf/src/google $TEMP_DIR/google
+ln -s $ANDROID_BUILD_TOP/system                       $TEMP_DIR/system
+
+convert_proto() {
+  log "Converting $1 to $2"
+
+  cd $TEMP_DIR
+  gqui from "$1" \
+      proto \
+      system/software_defined_vehicle/telemetry/proto/metrics_configuration.proto:MetricsConfig \
+      --outfile="$2"
+  cd -
+}
+
 if [[ $# -eq 0 ]]; then
     FILES="tests/manual_testing/configs/*.textproto"
 else
@@ -35,10 +56,9 @@ for FILE in $FILES; do
     NAME=${FILE_PATH##*/}
     BASE=${NAME%.textproto}
     # Convert config file from 'textproto' to binary 'pb' format
-    gqui from "textproto:$FILE_PATH" \
-        proto \
-        proto/metrics_configuration.proto:MetricsConfig \
-        --outfile="rawproto:$TEMP_DIR/$BASE.pb"
+    convert_proto \
+      "textproto:$FILE_PATH" \
+      "rawproto:$TEMP_DIR/$BASE.pb"
 done
 
 # The vm seems to take a bit of time to be ready after the command finishes
@@ -93,10 +113,9 @@ for FILE in $TEMP_DIR/binary_reports/*.pb; do
     NAME=${FILE##*/}
     BASE=${NAME%.pb}
     # Convert report from binary 'pb' to human-readable 'textproto' format
-    gqui from "rawproto:$TEMP_DIR/binary_reports/$BASE.pb" \
-        proto \
-        proto/metrics_configuration.proto:MetricsReport \
-        --outfile="textproto:$OUT_DIR/reports/$BASE.textproto"
+    convert_proto \
+      "rawproto:$TEMP_DIR/binary_reports/$BASE.pb" \
+      "textproto:$OUT_DIR/reports/$BASE.textproto"
     ((num_reports += 1))
 done
 
