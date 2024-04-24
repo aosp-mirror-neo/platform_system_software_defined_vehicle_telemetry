@@ -106,61 +106,55 @@ impl MetricsReportGeneratorImpl {
     }
 
     fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str) {
-        // Send report in a non-blocking task since it's handled outside of orchestrator
-        // by a function that is not allowed to mutate itself.
-        let self_clone = self.clone();
-        let trigger_name = trigger_name.to_owned();
-        task::spawn(async move {
-            match self_clone.message_builder.build() {
-                Ok(report_data) => {
-                    let mut report = MetricsReport::new();
-                    report.report_number = self_clone.report_number.fetch_add(1, Ordering::SeqCst);
-                    report.report_timestamp = Some(Timestamp::now()).into();
-                    report.report_reason = ReportReason::REGULAR.into();
-                    report.metrics_config_uuid = self_clone.config_uuid.clone();
-                    report.metrics_config_version = self_clone.config_version;
-                    report.report_config_name = self_clone.name.clone();
-                    report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+        match self.message_builder.build() {
+            Ok(report_data) => {
+                let mut report = MetricsReport::new();
+                report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);
+                report.report_timestamp = Some(Timestamp::now()).into();
+                report.report_reason = ReportReason::REGULAR.into();
+                report.metrics_config_uuid = self.config_uuid.clone();
+                report.metrics_config_version = self.config_version;
+                report.report_config_name = self.name.clone();
+                report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
 
-                    debug!(
-                        "Metrics Report {} #{} was generated on trigger {} for metrics config {}",
-                        report.report_config_name,
-                        report.report_number,
-                        trigger_name,
-                        report.metrics_config_uuid
-                    );
+                debug!(
+                    "Metrics Report {} #{} was generated on trigger {} for metrics config {}",
+                    report.report_config_name,
+                    report.report_number,
+                    trigger_name,
+                    report.metrics_config_uuid
+                );
 
+                let self_clone = self.clone();
+                task::spawn(async move {
+                    // Send report in a non-blocking task since it's handled outside of orchestrator
+                    // by a function that is not allowed to mutate itself.
                     (self_clone.report_ready_callback)(report);
-                }
-                Err(e) => {
-                    error!("Unable to build report due to error in MessageBuilder: {:?}", e);
-                }
+                });
             }
-        });
+            Err(e) => {
+                error!("Unable to build report due to error in MessageBuilder: {:?}", e);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use lazy_static::lazy_static;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::{sync::atomic::AtomicU32, thread, time::Duration};
-    use tokio::sync::watch;
+    use tokio::sync::mpsc;
 
     use super::*;
-    use crate::metrics_config_orchestrator::{
-        message_builder::mock::MockMessageBuilder, trigger::mock::MockTrigger,
+    use crate::metrics_config_orchestrator::message_builder::{
+        mock::MockMessageBuilder, MessageBuilderError,
     };
-    use sdv_telemetry_test_proto::test_message::TestMessage;
+    use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
+    use crate::metrics_config_orchestrator::NodeError;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
     const REPORT_CONFIG_NAME: &str = "name";
-
-    lazy_static! {
-        static ref NOOP_REPORT_READY_CALLBACK: Arc<dyn Fn(MetricsReport) + Send + Sync> =
-            Arc::new(|_| {});
-        static ref MOCK_MESSAGE_BUILDER: MockMessageBuilder = MockMessageBuilder::new();
-    }
 
     fn create_report_config_proto() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
@@ -169,14 +163,18 @@ mod test {
         config
     }
 
-    fn create_generator() -> MetricsReportGeneratorImpl {
+    fn create_default_generator() -> MetricsReportGeneratorImpl {
+        create_generator(Box::new(MockMessageBuilder::new()))
+    }
+
+    fn create_generator(message_builder: Box<MockMessageBuilder>) -> MetricsReportGeneratorImpl {
         MetricsReportGeneratorImpl::new(
             &create_report_config_proto(),
             CONFIG_UUID.to_owned(),
             CONFIG_VERSION,
-            NOOP_REPORT_READY_CALLBACK.clone(),
+            Arc::new(|_| {}),
             vec![],
-            Box::new(MOCK_MESSAGE_BUILDER.clone()),
+            message_builder,
         )
     }
 
@@ -190,7 +188,7 @@ mod test {
     #[tokio::test]
     #[should_panic]
     async fn activate_already_active_panics() {
-        let generator = Arc::new(create_generator());
+        let generator = Arc::new(create_default_generator());
 
         generator.activate().await;
         generator.activate().await;
@@ -205,7 +203,7 @@ mod test {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
         }));
 
-        let mut generator = create_generator();
+        let mut generator = create_default_generator();
         generator.triggers.push(Arc::new(trigger));
 
         Arc::new(generator).activate().await;
@@ -217,21 +215,29 @@ mod test {
     async fn on_trigger_fired_creates_reports() {
         let trigger = Arc::new(create_trigger());
 
-        let mut generator = create_generator();
-        let (tx, mut rx) = watch::channel(None);
-        generator.report_ready_callback = Arc::new(move |report| tx.send(Some(report)).unwrap());
+        let message_builder = Box::new(MockMessageBuilder::new());
+        let mut generator = create_generator(message_builder.clone());
+        let (tx, mut rx) = mpsc::channel(2);
+        generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
         generator.triggers.push(trigger.clone());
+
+        // Activate the generator.
         Arc::new(generator).activate().await;
 
         // Fire twice to make sure report number is incremented.
         trigger.fire().await;
-        rx.changed().await.unwrap();
-
         trigger.fire().await;
-        rx.changed().await.unwrap();
 
-        let report_container = rx.borrow();
-        let report = report_container.as_ref().unwrap();
+        // Setup generator to return an error to make sure no reports can be generated past this point.
+        message_builder.set_next_error(MessageBuilderError::FailedToAssignValueToField {
+            e: NodeError::ConstantValueNotSet,
+        });
+
+        // Wait for reports to be delivered.
+        rx.recv().await.unwrap();
+        let report = rx.recv().await.unwrap();
+
+        // Verify the report.
         assert_eq!(report.report_number, 2);
         // Less than 1 hour old.
         assert!(
@@ -249,7 +255,7 @@ mod test {
     async fn report_ready_callback_doesnt_block_trigger_fire() {
         let trigger = Arc::new(create_trigger());
 
-        let mut generator = create_generator();
+        let mut generator = create_default_generator();
         generator.report_ready_callback = Arc::new(|_| thread::sleep(Duration::MAX));
         generator.triggers.push(trigger.clone());
         Arc::new(generator).activate().await;
@@ -260,7 +266,7 @@ mod test {
     #[tokio::test]
     #[should_panic]
     async fn deactivate_already_inactive_panics() {
-        let generator = Arc::new(create_generator());
+        let generator = Arc::new(create_default_generator());
 
         generator.deactivate().await;
     }
@@ -274,7 +280,7 @@ mod test {
             num_fired_clone.fetch_add(1, Ordering::SeqCst);
         });
 
-        let mut generator = create_generator();
+        let mut generator = create_default_generator();
         generator.triggers.push(Arc::new(trigger));
         let generator = Arc::new(generator);
 
