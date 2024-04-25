@@ -150,7 +150,7 @@ impl MetricsConfigManager {
 
         // Unsafe block needed to be able to call C API functions
         // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-        // SAFETY: safe to use as all pointers needed to satify safety requirements
+        // SAFETY: safe to use as all pointers needed to satisfy safety requirements
         // for on_config_added are passed.
         unsafe {
             rust_to_c::add_metrics_config(
@@ -184,7 +184,7 @@ impl MetricsConfigManager {
         let uuid_cstring = CString::new(config_uuid).unwrap();
         // Unsafe block needed to be able to call C API functions
         // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-        // SAFETY: safe to use as all pointers needed to satify safety requirements
+        // SAFETY: safe to use as all pointers needed to satisfy safety requirements
         // for on_config_activated are passed.
         unsafe {
             rust_to_c::activate_metrics_config(
@@ -217,7 +217,7 @@ impl MetricsConfigManager {
         let uuid_cstring = CString::new(config_uuid).unwrap();
         // Unsafe block needed to be able to call C API functions
         // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-        // SAFETY: safe to use as all pointers needed to satify safety requirements
+        // SAFETY: safe to use as all pointers needed to satisfy safety requirements
         // for on_config_removed are passed.
         unsafe {
             rust_to_c::remove_metrics_config(

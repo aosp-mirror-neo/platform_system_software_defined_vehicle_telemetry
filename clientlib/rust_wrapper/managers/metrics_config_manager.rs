@@ -45,7 +45,7 @@ pub async fn add_metrics_config(
     let (add_config_sender, add_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(add_config_sender);
 
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // SAFETY: safe to use as all pointers needed to satisfy safety requirements
     // for api_callback are passed.
     unsafe {
         let raw_ptr = Box::into_raw(sender_wrapper) as *mut c_void;
@@ -81,7 +81,7 @@ pub async fn activate_metrics_config(
 
     let uuid_cstring = CString::new(config_uuid).unwrap();
 
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // SAFETY: safe to use as all pointers needed to satisfy safety requirements
     // for api_callback are passed.
     unsafe {
         let raw_ptr = Box::into_raw(sender_wrapper) as *mut c_void;
@@ -116,7 +116,7 @@ pub async fn deactivate_metrics_config(
 
     let uuid_cstring = CString::new(config_uuid).unwrap();
 
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // SAFETY: safe to use as all pointers needed to satisfy safety requirements
     // for api_callback are passed.
     unsafe {
         let raw_ptr = Box::into_raw(sender_wrapper) as *mut c_void;
@@ -151,7 +151,7 @@ pub async fn remove_metrics_config(
 
     let uuid_cstring = CString::new(config_uuid).unwrap();
 
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // SAFETY: safe to use as all pointers needed to satisfy safety requirements
     // for api_callback are passed.
     unsafe {
         let raw_ptr = Box::into_raw(sender_wrapper) as *mut c_void;
@@ -183,7 +183,7 @@ pub async fn remove_all_metrics_configs(
     let (remove_config_sender, remove_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(remove_config_sender);
 
-    // SAFETY: safe to use as all pointers needed to satify safety requirements
+    // SAFETY: safe to use as all pointers needed to satisfy safety requirements
     // for api_callback are passed.
     unsafe {
         let raw_ptr = Box::into_raw(sender_wrapper) as *mut c_void;
