@@ -306,6 +306,7 @@ rust_test {
     ],
     data: [
         "tests/config.bin",
+        "**/*.textproto",
     ],
     auto_gen_config: true,
 }
