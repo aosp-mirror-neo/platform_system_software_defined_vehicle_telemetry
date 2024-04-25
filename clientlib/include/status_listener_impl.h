@@ -10,13 +10,13 @@ namespace google::sdv::telemetry {
 
 class StatusListenerImpl : public google::sdv::telemetry::BnTelemetryStatusListener {
 public:
-    explicit StatusListenerImpl(android::sp<CallbackContainer> cb_container);
+    explicit StatusListenerImpl(CallbackContainer& cb_container);
     void set_status_listener(void* listener, CbFunction cbFunc);
     android::binder::Status sendStatus(int api_call_id, int status_code,
                                        const std::string& message) override;
 
 private:
-    android::sp<CallbackContainer> cb_container_;
+    CallbackContainer& cb_container_;
 };
 
 }  // namespace google::sdv::telemetry

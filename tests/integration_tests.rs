@@ -7,19 +7,23 @@ mod metrics_report_manager;
 use crate::metrics_config_manager::MetricsConfigManager;
 use crate::metrics_report_manager::MetricsReportManager;
 extern crate protobuf;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use protobuf::text_format::parse_from_str;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 
-use log::{error, info, LevelFilter};
+use log::{info, LevelFilter};
 use std::ffi::{CStr, OsStr};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::Arc;
 
 const CONFIG_PATH: &str = "tests/config.bin";
+const LOG_TAG: &str = "telemetry_integr_test";
+const _: () = assert!(
+    LOG_TAG.len() <= 23,
+    "LOG_TAG should be less than or equal to 23 characters, as it will otherwise be truncated by adb."
+);
 
 unsafe extern "C" fn on_status(
     _listener: *mut std::ffi::c_void,
@@ -41,32 +45,24 @@ unsafe extern "C" fn on_status(
 
 async fn process_config(
     path: String,
-    config_manager: Arc<Pin<Box<MetricsConfigManager>>>,
-) -> Option<String> {
-    // Read binary into a vector
-    let serialized_config = fs::read(path).unwrap();
+    config_manager: &Pin<Box<MetricsConfigManager>>,
+) -> anyhow::Result<String> {
+    let serialized_config = fs::read(&path)
+        .with_context(|| format!("Error in reading serialized config: {}", &path))?;
 
-    let config_name;
-    let add_config_res = config_manager.add_metrics_config(&serialized_config).await;
+    let config_name = config_manager
+        .add_metrics_config(&serialized_config)
+        .await
+        .map_err(|e| anyhow!(e))
+        .with_context(|| format!("Error in adding config: {}", &path))?;
 
-    let activate_config_res = match add_config_res {
-        Ok(message) => {
-            config_name = message.clone();
-            config_manager.activate_metrics_config(&message).await
-        }
-        Err(e) => {
-            error!("Error in adding config: {}", e);
-            return None;
-        }
-    };
+    config_manager
+        .activate_metrics_config(&config_name)
+        .await
+        .map_err(|e| anyhow!(e))
+        .with_context(|| format!("Error in activating config: {}", &config_name))?;
 
-    match activate_config_res {
-        Ok(_) => Some(config_name),
-        Err(e) => {
-            error!("Error in activating config: {}", e);
-            None
-        }
-    }
+    Ok(config_name)
 }
 
 /// Communicate with the telemetry service.
@@ -74,9 +70,7 @@ async fn process_config(
 async fn telemetry_service_simple_config_end_to_end_test() {
     binder::ProcessState::start_thread_pool();
     logger::init(
-        logger::Config::default()
-            .with_tag_on_device("telemetry_service_integration_test")
-            .with_max_level(LevelFilter::Trace),
+        logger::Config::default().with_tag_on_device(LOG_TAG).with_max_level(LevelFilter::Trace),
     );
 
     let service;
@@ -88,24 +82,23 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     // for on_status are passed.
     unsafe {
         service = rust_to_c::get_telemetry_service();
+        assert!(!service.is_null());
         rust_to_c::set_status_listener(service, std::ptr::null_mut(), Some(on_status));
     }
+    info!("Connected to service");
 
     let mut report_manager = MetricsReportManager::new(service);
-    let config_manager = Arc::new(MetricsConfigManager::new(service));
+    let config_manager = MetricsConfigManager::new(service);
 
     let config_path = CONFIG_PATH.to_string();
-    let config_name = process_config(config_path, Arc::clone(&config_manager)).await.unwrap();
+    info!("Adding config: {:?}", config_path);
+    let config_name = process_config(config_path, &config_manager).await.unwrap();
     info!("Config added: {:?}", config_name);
 
     let metrics_report = report_manager.as_mut().get_metrics_report().await.unwrap();
     info!("Report received: {:?}", metrics_report);
 
-    config_manager
-        .as_ref()
-        .remove_metrics_config(&metrics_report.metrics_config_uuid)
-        .await
-        .unwrap();
+    config_manager.remove_metrics_config(&metrics_report.metrics_config_uuid).await.unwrap();
     info!("Successfully removed config");
 
     // Unsafe block needed to be able to call C API functions

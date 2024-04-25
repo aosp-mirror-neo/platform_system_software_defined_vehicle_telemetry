@@ -4,7 +4,6 @@
 #define TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
 
 #include <utils/Log.h>
-#include <utils/RefBase.h>
 
 #include <stdlib.h>
 
@@ -24,7 +23,7 @@ struct CallbackData {
 };
 
 // Acts as the mediator between the OEM client and the telemetry service.
-class CallbackContainer : public android::RefBase {
+class CallbackContainer {
 public:
     bool insert_callback(int api_call_id, CallbackData);
     std::optional<CallbackData> extract_callback(int api_call_id);
