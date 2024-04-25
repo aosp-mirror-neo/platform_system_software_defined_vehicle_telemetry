@@ -22,6 +22,7 @@ pub enum NodeValueType {
     Int,
     Float,
     Message { descriptor: Option<MessageDescriptor> },
+    String,
     BoolList,
     IntList,
     FloatList,
@@ -354,12 +355,11 @@ impl NodeValueTypeExtension for RuntimeType {
             | RuntimeType::Enum(_) => Ok(NodeValueType::Int),
             RuntimeType::F32 | RuntimeType::F64 => Ok(NodeValueType::Float),
             RuntimeType::Bool => Ok(NodeValueType::Bool),
+            RuntimeType::String => Ok(NodeValueType::String),
             RuntimeType::Message(descriptor) => {
                 Ok(NodeValueType::Message { descriptor: Some(descriptor.clone()) })
             }
-            RuntimeType::String | RuntimeType::VecU8 => {
-                Err(NodeError::UnsupportedSingularFieldType)
-            }
+            RuntimeType::VecU8 => Err(NodeError::UnsupportedSingularFieldType),
         }
     }
 }
