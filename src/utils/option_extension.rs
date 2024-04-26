@@ -19,3 +19,22 @@ impl<T> OptionExtension<T> for Option<T> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn none_is_none_or() {
+        let option = None::<&str>;
+        assert!(option.is_none_or(|_| false));
+        assert!(option.is_none_or(|_| true));
+    }
+
+    #[test]
+    fn some_is_none_or() {
+        let option = Some("hello");
+        assert!(!option.is_none_or(|_| false));
+        assert!(option.is_none_or(|_| true));
+    }
+}
