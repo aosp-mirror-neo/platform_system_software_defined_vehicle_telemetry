@@ -139,7 +139,7 @@ impl SdvTelemetryService {
             inactive_data_dir,
             config_store_size,
             service_publisher_manager,
-            move |report| report_listener.on_report_ready(report),
+            move |report| report_listener_clone.on_report_ready(report),
         )
         .await
         {
@@ -152,7 +152,7 @@ impl SdvTelemetryService {
 
         Some(SdvTelemetryService {
             metrics_config_manager: config_manager,
-            metrics_report_listener: report_listener_clone,
+            metrics_report_listener: report_listener,
             status_listener: Mutex::new(None),
         })
     }

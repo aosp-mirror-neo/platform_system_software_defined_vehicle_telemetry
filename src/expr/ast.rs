@@ -152,7 +152,6 @@ impl NodeFactoryImpl {
         node_value_types: &mut [Option<NodeValueType>],
         context: &NodeFactoryContext,
     ) -> Result<Option<Arc<Node>>, NodeError> {
-        // get visit status, `?` returns early if error
         let status = visit_status
             .get(index)
             .ok_or(NodeError::IndexOutOfBound { i: index, n: proto_nodes.len() })?;
@@ -350,34 +349,35 @@ impl Node {
             }
             Node::Combination { operator, left, right } => {
                 // evaluate left branch recursively
-                let left_val = match left {
-                    Some(left) => left.evaluate(),
-                    None => panic!(
+                let left_val = left
+                    .as_ref()
+                    .expect(
                         "Incorrect Node! Node construction should have verified that \
-                        every non-leaf Node has a left child, but evaluate() encountered \
-                        a node without left child"
-                    ),
-                }?; // `?` returns early if error
+                         every non-leaf Node has a left child, but evaluate() encountered \
+                         a node without left child",
+                    )
+                    .evaluate()?;
 
-                // If unary operator, then operates on self.
+                // If unary operator, then operate on self.
                 // If binary operator, then [left] <operator> [right]
                 // The function short-circuits if possible. The closure provides right operand.
-                left_val.operate(operator, || match right {
-                    Some(right) => right.evaluate(),
-                    None => {
-                        if operator.is_unary_operator() {
-                            panic!(
-                                "When the operator is unary, NodeValue should not invoke \
-                                right operand's provider function"
-                            );
-                        } else {
-                            panic!(
-                                "Incorrect Node! Node construction should have verified that \
-                                nodes with binary operator specify two children, but evaluate() \
-                                encountered a node with binary operator but no right child"
-                            );
-                        }
-                    }
+                left_val.operate(operator, || {
+                    right.as_ref()
+                        .unwrap_or_else(|| {
+                            if operator.is_unary_operator() {
+                                panic!(
+                                    "When the operator is unary, NodeValue should not invoke \
+                                     right operand's provider function"
+                                );
+                            } else {
+                                panic!(
+                                    "Incorrect Node! Node construction should have verified that \
+                                     nodes with binary operator specify two children, but evaluate() \
+                                     encountered a node with binary operator but no right child"
+                                );
+                            }
+                        })
+                        .evaluate()
                 })
             }
         }

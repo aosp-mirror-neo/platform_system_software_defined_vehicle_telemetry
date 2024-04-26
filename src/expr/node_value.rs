@@ -415,13 +415,16 @@ impl NodeValue {
                 ))
             }
             ArithmeticOperator::MODULO_TRUNC => {
-                if !self.is_int() || !other.is_int() {
-                    return Err(NodeError::ModuloOperatorIncompatibleOperands);
-                }
-                if other.is_zero()? {
+                // First, verify that both operands have the corrected data
+                // types, and only then perform further checks.
+                let err_provider = || NodeError::ModuloOperatorIncompatibleOperands;
+                let dividend = self.get_int(&err_provider)?;
+                let divisor = other.get_int(&err_provider)?;
+
+                if divisor == 0 {
                     return Err(NodeError::DivideByZero);
                 }
-                Ok(NodeValue::Int64(self.get_int(&err_provider)? % other.get_int(&err_provider)?))
+                Ok(NodeValue::Int64(dividend % divisor))
             }
             ArithmeticOperator::POWER => self.apply_numeric(
                 &other,
@@ -1310,6 +1313,10 @@ mod tests {
         // both operands must be integers
         assert!(matches!(
             five.operate(&OP_MODULO_TRUNC, || provide(&two)).unwrap_err(),
+            NodeError::ModuloOperatorIncompatibleOperands
+        ));
+        assert!(matches!(
+            two.operate(&OP_MODULO_TRUNC, || provide(&five)).unwrap_err(),
             NodeError::ModuloOperatorIncompatibleOperands
         ));
     }
