@@ -125,11 +125,11 @@ impl MetricsReportGeneratorImpl {
                     report.metrics_config_uuid
                 );
 
-                let self_clone = self.clone();
+                let report_ready_callback = Arc::clone(&self.report_ready_callback);
                 task::spawn(async move {
                     // Send report in a non-blocking task since it's handled outside of orchestrator
                     // by a function that is not allowed to mutate itself.
-                    (self_clone.report_ready_callback)(report);
+                    (report_ready_callback)(report);
                 });
             }
             Err(e) => {
