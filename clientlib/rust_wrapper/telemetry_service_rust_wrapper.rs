@@ -54,7 +54,7 @@ impl TelemetryServiceHolder {
     pub fn get() -> Result<TelemetryServiceHolder, (i32, String)> {
         info!("Connecting to service");
 
-        // SAFETY: safe to use as all pointers needed to satify safety requirements
+        // SAFETY: safe to use as all pointers needed to satisfy safety requirements
         // for on_status are passed.
         let service = unsafe {
             let service_raw = rust_to_c::get_telemetry_service();
@@ -234,7 +234,7 @@ impl TelemetryServiceHolder {
     /// @return an error code and error message in case of incorrect parameters
 
     pub async fn clear_status_listener(&self) -> Result<(), (i32, String)> {
-        // SAFETY: safe to use as all pointers needed to satify safety requirements
+        // SAFETY: safe to use as all pointers needed to satisfy safety requirements
         // for cb_func are passed.
         unsafe {
             rust_to_c::clear_status_listener(self.0);
