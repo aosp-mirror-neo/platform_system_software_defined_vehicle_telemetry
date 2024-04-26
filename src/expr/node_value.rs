@@ -24,8 +24,6 @@ use crate::expr::{
     proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt,
 };
 
-const EPSILON: f32 = 1e-6;
-
 /// Holds a generic value.
 #[derive(Clone, Debug)]
 pub enum NodeValue {
@@ -71,6 +69,7 @@ pub enum NodeValue {
 
 /// Check if two floating point values are approximately equal.
 fn approximately_equal(v1: f64, v2: f64) -> bool {
+    const EPSILON: f32 = 1e-6;
     (v1 - v2).abs() < EPSILON.into()
 }
 
@@ -252,8 +251,8 @@ impl NodeValue {
         Ok(match self {
             NodeValue::Int32(val) => *val == 0,
             NodeValue::Int64(val) => *val == 0,
-            NodeValue::Float(val) => (*val).abs() < EPSILON,
-            NodeValue::Double(val) => (*val).abs() < EPSILON.into(),
+            NodeValue::Float(val) => approximately_equal(f64::from(*val), 0.0),
+            NodeValue::Double(val) => approximately_equal(*val, 0.0),
             _ => {
                 return Err(NodeError::InternalError {
                     msg: format!("is_zero() invoked on non-numeric NodeValue: {:?}", self),
