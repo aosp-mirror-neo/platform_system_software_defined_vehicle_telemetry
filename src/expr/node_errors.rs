@@ -15,6 +15,8 @@ pub enum NodeError {
     CyclicDependency { i: usize },
     #[error("Node at index {i} did not set node_type")]
     NodeTypeNotSet { i: usize },
+    #[error("Node at index {i} has an unsupported node_type")]
+    NodeTypeNotSupported { i: usize },
     #[error("Node evaluation type mismatch: {msg}")]
     TypeMismatch { msg: String },
     #[error("Internal implementation error: {msg}")]
@@ -25,6 +27,8 @@ pub enum NodeError {
     ConstantUnknownValue { v: String },
     #[error("Constant node value is not set")]
     ConstantValueNotSet,
+    #[error("Constant node has an unsupported value")]
+    ConstantValueNotSupported,
 
     // errors related to FieldLeafNode
     #[error("Field leaf node encountered error: {e}")]
