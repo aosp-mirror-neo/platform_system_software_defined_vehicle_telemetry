@@ -9,7 +9,7 @@ use protobuf::MessageDyn;
 use std::result::Result;
 use std::sync::Arc;
 
-use crate::service_publisher_accessor::{ServicePublisherAccessor, ServicePublisherSubscription};
+use crate::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherAccessor};
 
 /// Struct for managing all implementations of ServicePublisherAccessor trait.
 pub struct ServicePublisherManager {
@@ -46,18 +46,19 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         &self,
         service_name: &str,
         configuration: Option<&[u8]>,
-        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-    ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error> {
+        mut callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+    ) -> anyhow::Result<CreateSubscriptionOutcome> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
-            let maybe_subscription = service_publisher_manager_impl
-                .create_subscription(service_name, configuration, Arc::clone(&callback))
-                .await?;
-            if maybe_subscription.is_some() {
-                return Ok(maybe_subscription);
-            }
+            callback = match service_publisher_manager_impl
+                .create_subscription(service_name, configuration, callback)
+                .await?
+            {
+                outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
+                CreateSubscriptionOutcome::NotAvailable(callback) => callback,
+            };
         }
 
-        Ok(None)
+        Ok(CreateSubscriptionOutcome::NotAvailable(callback))
     }
 }
 
@@ -66,6 +67,7 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::well_known_types::empty::Empty;
     use protobuf::MessageFull;
+    use sdv_telemetry_utils::test_utils::create_empty_fn_box;
     use std::sync::Arc;
 
     use super::*;
@@ -123,13 +125,12 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+        service_publisher_manager_impl
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap();
 
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
-        assert!(res.is_some());
     }
 
     #[tokio::test]
@@ -142,7 +143,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -160,7 +161,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let subscription = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();

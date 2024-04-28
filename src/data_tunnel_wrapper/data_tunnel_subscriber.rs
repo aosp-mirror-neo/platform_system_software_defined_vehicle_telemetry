@@ -19,7 +19,9 @@ use sdv_dt::{
     c_void, Result as SdvResult, SubscriptionHandle, SubscriptionNotificationType,
     TopicTypedMetadata,
 };
-use sdv_telemetry::service_publisher_accessor::ServicePublisherSubscription;
+use sdv_telemetry::service_publisher_accessor::{
+    CreateSubscriptionOutcome, ServicePublisherSubscription,
+};
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
@@ -137,8 +139,8 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         topic_name: &str,
         _configuration: Option<&[u8]>,
-        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-    ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error> {
+        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+    ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
 
         cxx::let_cxx_string!(cxx_topic_name = topic_name);
@@ -148,7 +150,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             return Err(anyhow!("Data Tunnel Result: {:?}", result));
         };
         if !topic_exists {
-            return Ok(None);
+            return Ok(CreateSubscriptionOutcome::NotAvailable(callback));
         }
 
         let mut subscribe_meta_data = TopicTypedMetadata { message_count_: 0, message_size_: 0 };
@@ -235,7 +237,9 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             }
         });
 
-        Ok(Some(Box::new(DataTunnelSubscription { _subscription_handle: subscription_handle })))
+        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(DataTunnelSubscription {
+            _subscription_handle: subscription_handle,
+        })))
     }
 }
 

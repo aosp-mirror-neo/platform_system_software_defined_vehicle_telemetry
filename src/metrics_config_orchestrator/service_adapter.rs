@@ -9,7 +9,9 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::service_publisher_accessor::{ServicePublisherAccessor, ServicePublisherSubscription};
+use crate::service_publisher_accessor::{
+    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherSubscription,
+};
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
@@ -106,26 +108,28 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 let callbacks = HashMap::from([(subscription_id, new_message_callback)]);
                 let callback_container = Arc::new(AsyncMutex::new(callbacks));
                 let callback_container_clone = Arc::clone(&callback_container);
-                let maybe_underlying_subscription = self
+                let create_subscription_outcome = self
                     .service_publisher_accessor
                     .create_subscription(
                         service_name,
                         None,
-                        Arc::new(move |msg| Self::on_new_message(msg, &callback_container_clone)),
+                        Box::new(move |msg| Self::on_new_message(msg, &callback_container_clone)),
                     )
                     .await?;
 
-                if let Some(underlying_subscription) = maybe_underlying_subscription {
-                    v.insert((underlying_subscription, callback_container));
-                } else {
-                    // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
-                    return Err(ServiceAdapterSubscribeError::SubscriptionFailed {
-                        error: anyhow::anyhow!(
+                match create_subscription_outcome {
+                    CreateSubscriptionOutcome::Subscribed(subscription) => {
+                        v.insert((subscription, callback_container))
+                    }
+                    CreateSubscriptionOutcome::NotAvailable(_) => {
+                        // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
+                        return Err(anyhow::anyhow!(
                             "Service with name {} is not available",
                             service_name
-                        ),
-                    });
-                }
+                        )
+                        .into());
+                    }
+                };
             }
         };
 
