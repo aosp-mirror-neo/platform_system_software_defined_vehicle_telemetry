@@ -90,7 +90,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
         configuration: Option<&[u8]>,
-        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let result = visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())

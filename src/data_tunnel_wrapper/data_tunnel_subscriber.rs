@@ -139,7 +139,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         topic_name: &str,
         _configuration: Option<&[u8]>,
-        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
 

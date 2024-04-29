@@ -24,7 +24,7 @@ struct MockServicePublisherAccessorData {
     /// The number of times unsubscribe function of the mock was called.
     num_unsubscribe_calls: u32,
     /// The map of subscribed callbacks, keyed by service name.
-    callbacks: HashMap<String, Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>,
+    callbacks: HashMap<String, Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
 }
 
 struct MockServicePublisherSubscription {
@@ -49,7 +49,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         service_name: &str,
         _configuration: Option<&[u8]>,
-        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock().unwrap();
         data.num_subscribe_calls += 1;
@@ -93,8 +93,8 @@ impl MockServicePublisherAccessor {
     }
 
     pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
-        let data_lock = self.data.lock().unwrap();
-        data_lock.callbacks.get(service_name).unwrap()(message);
+        let mut data_lock = self.data.lock().unwrap();
+        data_lock.callbacks.get_mut(service_name).unwrap()(message);
     }
 
     pub(crate) fn with_next_descriptor(self, descriptor: MessageDescriptor) -> Self {
