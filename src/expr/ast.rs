@@ -1439,7 +1439,9 @@ mod tests {
 
     #[test]
     fn evaluate_arithmetic_operator_success() -> Result<(), NodeError> {
-        // setup this tree: 5 / 2 * 5^2
+        // setup this tree: -( 5 / 2 * 5^2 )
+        //              UNARY_MINUS
+        //                 |
         //              MULTIPLY
         //          /             \
         //       DIVIDE            POWER
@@ -1462,15 +1464,21 @@ mod tests {
             left: Some(divide_node.clone()),
             right: Some(power_node.clone()),
         });
-        let nodes = [five_node, two_node, divide_node, power_node, multiply_node];
+        let unary_minus_node = Arc::new(Node::Combination {
+            operator: OP_UNARY_MINUS.clone(),
+            left: Some(multiply_node.clone()),
+            right: None,
+        });
+        let nodes = [five_node, two_node, divide_node, power_node, multiply_node, unary_minus_node];
 
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = [
-            NodeValue::Int32(5),     // index 0 = constant value of 5
-            NodeValue::Int32(2),     // index 1 = constant value of 2
-            NodeValue::Double(2.5),  // index 2 = 5 / 2 = 2.5
-            NodeValue::Int64(25),    // index 3 = 5^2 = 25
-            NodeValue::Double(62.5), // index 4 = 2.5 * 25 = 62.5
+            NodeValue::Int32(5),      // index 0 = constant value of 5
+            NodeValue::Int32(2),      // index 1 = constant value of 2
+            NodeValue::Double(2.5),   // index 2 = 5 / 2 = 2.5
+            NodeValue::Int64(25),     // index 3 = 5^2 = 25
+            NodeValue::Double(62.5),  // index 4 = 2.5 * 25 = 62.5
+            NodeValue::Double(-62.5), // index 5 = -(62.5) = -62.5
         ];
 
         // assert that evaluated_result[i] == expected_result[i]  for all index i
