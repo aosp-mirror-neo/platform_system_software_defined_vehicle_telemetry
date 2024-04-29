@@ -468,7 +468,7 @@ impl NodeValue {
                 other,
                 |a, b| a & !b,
                 |a, b| a > b,
-                |a, b| a > b,
+                |a, b| a > b && !approximately_equal(a, b),
                 &err_provider,
             ),
             RelationalOperator::GT_OR_EQ => self.apply_generic_operation(
@@ -482,7 +482,7 @@ impl NodeValue {
                 other,
                 |a, b| !a & b,
                 |a, b| a < b,
-                |a, b| a < b,
+                |a, b| a < b && !approximately_equal(a, b),
                 &err_provider,
             ),
             RelationalOperator::LT_OR_EQ => self.apply_generic_operation(
@@ -1380,6 +1380,13 @@ mod tests {
 
     #[test]
     fn operate_relational_eq() -> Result<(), NodeError> {
+        let one = NodeValue::Double(1.0);
+        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
+        assert_ne!(
+            one.get_double(&|| -> NodeError { unreachable!() })?,
+            one_epsilon.get_double(&|| -> NodeError { unreachable!() })?,
+            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
+        );
         let two = NodeValue::Int32(2);
         let two_i64 = NodeValue::Int64(2);
         let two_f32 = NodeValue::Float(2.0);
@@ -1387,6 +1394,7 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
+        assert_eq!(one.operate(&OP_EQ, || provide(&one_epsilon))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_EQ, || provide(&two))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_EQ, || provide(&two_i64))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_EQ, || provide(&two_f32))?, NodeValue::Bool(true));
@@ -1398,11 +1406,19 @@ mod tests {
 
     #[test]
     fn operate_relational_not_eq() -> Result<(), NodeError> {
+        let one = NodeValue::Double(1.0);
+        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
+        assert_ne!(
+            one.get_double(&|| -> NodeError { unreachable!() })?,
+            one_epsilon.get_double(&|| -> NodeError { unreachable!() })?,
+            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
+        );
         let two = NodeValue::Int32(2);
         let two_f32 = NodeValue::Float(2.0);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
+        assert_eq!(one.operate(&OP_NOT_EQ, || provide(&one_epsilon))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_NOT_EQ, || provide(&two))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_NOT_EQ, || provide(&two_f32))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_NOT_EQ, || provide(&five))?, NodeValue::Bool(true));
@@ -1412,12 +1428,20 @@ mod tests {
 
     #[test]
     fn operate_relational_gt() -> Result<(), NodeError> {
+        let one = NodeValue::Double(1.0);
+        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
+        assert_ne!(
+          one.get_double(&|| -> NodeError { unreachable!() })?,
+          one_epsilon.get_double(&|| -> NodeError { unreachable!() })?,
+          "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
+        );
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         assert_eq!(true_val.operate(&OP_GT, || provide(&false_val))?, NodeValue::Bool(true));
+        assert_eq!(one_epsilon.operate(&OP_GT, || provide(&one))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_GT, || provide(&five))?, NodeValue::Bool(false));
         assert_eq!(five.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(true));
@@ -1430,11 +1454,19 @@ mod tests {
 
     #[test]
     fn operate_relational_gt_or_eq() -> Result<(), NodeError> {
+        let one = NodeValue::Double(1.0);
+        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
+        assert_ne!(
+            one.get_double(&|| -> NodeError { unreachable!() })?,
+            one_epsilon.get_double(&|| -> NodeError { unreachable!() })?,
+            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
+        );
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
         assert_eq!(true_val.operate(&OP_GT_OR_EQ, || provide(&true_val))?, NodeValue::Bool(true));
+        assert_eq!(one.operate(&OP_GT_OR_EQ, || provide(&one_epsilon))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&five))?, NodeValue::Bool(false));
         assert_eq!(five.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
@@ -1447,12 +1479,20 @@ mod tests {
 
     #[test]
     fn operate_relational_lt() -> Result<(), NodeError> {
+        let one = NodeValue::Double(1.0);
+        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
+        assert_ne!(
+            one.get_double(&|| -> NodeError { unreachable!() })?,
+            one_epsilon.get_double(&|| -> NodeError { unreachable!() })?,
+            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
+        );
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         assert_eq!(true_val.operate(&OP_LT, || provide(&false_val))?, NodeValue::Bool(false));
+        assert_eq!(one.operate(&OP_LT, || provide(&one_epsilon))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
         assert_eq!(two.operate(&OP_LT, || provide(&five))?, NodeValue::Bool(true));
         assert_eq!(five.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
@@ -1465,11 +1505,19 @@ mod tests {
 
     #[test]
     fn operate_relational_lt_or_eq() -> Result<(), NodeError> {
+        let one = NodeValue::Double(1.0);
+        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
+        assert_ne!(
+            one.get_double(&|| -> NodeError { unreachable!() })?,
+            one_epsilon.get_double(&|| -> NodeError { unreachable!() })?,
+            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
+        );
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
         assert_eq!(true_val.operate(&OP_LT_OR_EQ, || provide(&true_val))?, NodeValue::Bool(true));
+        assert_eq!(one_epsilon.operate(&OP_LT_OR_EQ, || provide(&one))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
         assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&five))?, NodeValue::Bool(true));
         assert_eq!(five.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(false));
