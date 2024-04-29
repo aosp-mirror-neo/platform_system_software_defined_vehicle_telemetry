@@ -41,6 +41,8 @@ lazy_static! {
         OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULO_TRUNC.into());
     pub static ref OP_POWER: OperatorProto =
         OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into());
+    pub static ref OP_UNARY_MINUS: OperatorProto =
+        OperatorProto::ArithmeticOperator(ArithmeticOperator::UNARY_MINUS.into());
     pub static ref OP_EQ: OperatorProto =
         OperatorProto::RelationalOperator(RelationalOperator::EQ.into());
     pub static ref OP_NOT_EQ: OperatorProto =

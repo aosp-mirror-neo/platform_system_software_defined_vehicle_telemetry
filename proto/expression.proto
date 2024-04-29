@@ -102,6 +102,8 @@ message CombinationNode {
     // which, among others, matches the definition used in the ISO C99 standard.
     MODULO_TRUNC = 4;
     POWER = 5;
+    // Arithmetic negation operator.
+    UNARY_MINUS = 6;
   }
 
   // Unary operator.
