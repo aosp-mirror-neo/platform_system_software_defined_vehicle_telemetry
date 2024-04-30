@@ -75,6 +75,7 @@ lazy_static! {
         test_message.float_field = 100.0;
         test_message.string_field = "Hello world".to_string();
         test_message.enum_field = TestEnum::SOME.into();
+        test_message.bytes_field = "Hello world".as_bytes().to_vec();
 
         // initialize nested field
         let mut test_nested_message = TestNestedMessage::new();

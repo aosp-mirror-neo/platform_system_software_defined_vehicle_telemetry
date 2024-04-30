@@ -87,7 +87,7 @@ impl ToNodeValue for ReflectValueRef<'_> {
             ReflectValueRef::String(v) => NodeValue::String((*v).to_owned()),
             ReflectValueRef::Enum(_, v) => NodeValue::Int32(*v),
             ReflectValueRef::Message(v) => NodeValue::Message(v.clone_box()),
-            _ => return Err(NodeError::UnsupportedSingularFieldType),
+            ReflectValueRef::Bytes(v) => NodeValue::ByteList((*v).to_vec()),
         })
     }
 }
@@ -217,8 +217,6 @@ fn get_default_node_value_from_type(
         ProtobufRuntimeType::String => NodeValue::String(String::default()),
         ProtobufRuntimeType::Enum(_) => NodeValue::Int32(0),
         ProtobufRuntimeType::Message(_) => NodeValue::None,
-        _ => {
-            return Err(NodeError::UnsupportedSingularFieldType);
-        }
+        ProtobufRuntimeType::VecU8 => NodeValue::ByteList(vec![]),
     })
 }

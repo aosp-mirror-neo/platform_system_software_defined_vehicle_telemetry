@@ -21,18 +21,19 @@ message TestMessage {
   TestEnum enum_field = 5;
   TestNestedMessage message_field = 6;
   google.protobuf.Any any_field = 7;
+  bytes bytes_field = 8;
 
   // Repeated fields
-  repeated bool repeated_bools = 8;
-  repeated int64 repeated_i64s = 9;
-  repeated double repeated_doubles = 10;
-  repeated TestEnum repeated_enums = 11;
-  repeated TestNestedMessage repeated_messages = 12;
-  repeated google.protobuf.Empty repeated_empty = 13;
+  repeated bool repeated_bools = 9;
+  repeated int64 repeated_i64s = 10;
+  repeated double repeated_doubles = 11;
+  repeated TestEnum repeated_enums = 12;
+  repeated TestNestedMessage repeated_messages = 13;
+  repeated google.protobuf.Empty repeated_empty = 14;
 
   // Optional fields
-  optional bool optional_bool_field = 14;
-  optional int64 optional_int64_field = 15;
+  optional bool optional_bool_field = 15;
+  optional int64 optional_int64_field = 16;
 }
 
 message TestNestedMessage {
