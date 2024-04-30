@@ -67,6 +67,9 @@ pub enum NodeValue {
 
     /// Repeated protobuf messages.
     MessageList(Vec<Box<dyn MessageDyn>>),
+
+    /// A string node value.
+    String(String),
 }
 
 /// Check if two floating point values are approximately equal.
@@ -81,6 +84,7 @@ impl PartialEq for NodeValue {
         match (self, other) {
             (NodeValue::None, NodeValue::None) => true,
             (NodeValue::Bool(v1), NodeValue::Bool(v2)) => *v1 == *v2,
+            (NodeValue::String(v1), NodeValue::String(v2)) => *v1 == *v2,
             (NodeValue::Int32(v1), NodeValue::Int32(v2)) => *v1 == *v2,
             (NodeValue::Int64(v1), NodeValue::Int64(v2)) => *v1 == *v2,
             (NodeValue::Float(v1), NodeValue::Float(v2)) => {
@@ -841,6 +845,14 @@ mod tests {
     }
 
     #[test]
+    fn extract_value_string_field_ok() -> Result<(), NodeError> {
+        let field_names = ["string_field".to_string()];
+        let extracted = NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names)?;
+        assert_eq!(extracted, NodeValue::String("Hello world".to_string()));
+        Ok(())
+    }
+
+    #[test]
     fn extract_value_field_has_default_value_ok() -> Result<(), NodeError> {
         let mut msg = TestMessage::new();
         msg.int_field = 0;
@@ -863,6 +875,10 @@ mod tests {
         assert_eq!(
             NodeValue::extract_value(Box::new(msg.clone()), &["optional_bool_field".to_string()])?,
             NodeValue::Bool(false)
+        );
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg.clone()), &["string_field".to_string()])?,
+            NodeValue::String(String::default())
         );
         Ok(())
     }
@@ -969,16 +985,6 @@ mod tests {
             NodeValue::Int32List(repeated_i32s)
         );
         Ok(())
-    }
-
-    #[test]
-    fn extract_value_string_field_should_err() {
-        let field_names = ["string_field".to_string()];
-
-        assert!(matches!(
-            NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names).unwrap_err(),
-            NodeError::UnsupportedSingularFieldType { .. }
-        ));
     }
 
     #[test]
