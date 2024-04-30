@@ -78,12 +78,6 @@ sdv_ivi_telemetry_service_agent
     adb shell telemetry_rust_c_client <path_to_config1> ... <path_to_configN>
     ```
 
-    For cpp client application (does not support multiple configs):
-
-    ```bash
-    adb shell telemetry_cpp_client data/local/tmp/config.bin
-    ```
-
     The client applications will keep running until at least one report is
     consumed for each valid metric config.
 
@@ -92,8 +86,6 @@ sdv_ivi_telemetry_service_agent
     In **Terminal #1**, the one with `logcat`, expect new logs (on top of what
     was already printed in step 2):
 
-    Note: The logs shown here are for the rust client application. Similar logs
-    can be expected for the cpp client.
 
     ```
     10-26 23:33:32.166  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
@@ -168,12 +160,6 @@ Steps to reproduce:
     adb shell telemetry_rust_c_client <path_to_config1> ... <path_to_configN>
     ```
 
-    For cpp client application (does not support multiple configs):
-
-    ```bash
-    adb shell telemetry_cpp_client data/local/tmp/config.bin
-    ```
-
     The client applications will keep running until at least one report is
     consumed for each valid metric config.
 
@@ -182,8 +168,6 @@ Steps to reproduce:
     In **Terminal #1**, the one with `logcat`, expect new logs (on top of what
     was already printed in step 2):
 
-    Note: The logs shown here are for the rust client application. Similar logs
-    can be expected for the cpp client.
 
     ```
     11-20 22:35:47.993   627   627 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
@@ -266,12 +250,6 @@ Steps to reproduce:
     adb shell telemetry_rust_c_client <path_to_data_tunnel_config>
     ```
 
-    For cpp client application (does not support multiple configs):
-
-    ```bash
-    adb shell telemetry_cpp_client data/local/tmp/data_tunnel_config.bin
-    ```
-
     The client applications will keep running until at least one report is
     consumed for each valid metric config.
 
@@ -279,9 +257,6 @@ Steps to reproduce:
 
     In **Terminal #1**, the one with `logcat`, expect new logs (on top of what
     was already printed in step 2):
-
-    Note: The logs shown here are for the rust client application. Similar logs
-    can be expected for the cpp client.
 
     ```
     01-25 18:47:29.422   232   232 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
