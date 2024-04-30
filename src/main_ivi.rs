@@ -18,7 +18,7 @@ use log::error;
 use std::sync::Arc;
 use tokio::runtime::Builder;
 
-static LOG_TAG: &str = "SdvTelemetryService";
+const LOG_TAG: &str = "SdvTelemetryService";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;

@@ -15,8 +15,8 @@ use tokio::runtime::Builder;
 
 const SIZE_MB: usize = 1024 * 1024;
 
-static METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.telemetry.metric_config_store_in_mb";
-static ROOT_DIR: &str = "/data/misc";
+const METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.telemetry.metric_config_store_in_mb";
+const ROOT_DIR: &str = "/data/misc";
 
 pub fn register_services(
     service_publisher_manager_impl: Arc<ServicePublisherManager>,

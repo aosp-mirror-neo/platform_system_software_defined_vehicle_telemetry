@@ -11,7 +11,7 @@ use sdv_telemetry_dt_wrapper::data_tunnel_subscriber::DataTunnelSubscriber;
 
 use std::sync::Arc;
 
-static LOG_TAG: &str = "SdvTelemetryService";
+const LOG_TAG: &str = "SdvTelemetryService";
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
