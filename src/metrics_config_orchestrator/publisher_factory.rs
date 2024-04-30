@@ -88,6 +88,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                 return Ok(Arc::new(PublisherImpl::new_service_publisher(
                     publisher_name,
                     service_publisher.service_name.clone(),
+                    service_publisher.configuration.as_ref().cloned(),
                     Arc::clone(&self.service_adapter),
                 )));
             }
@@ -175,7 +176,8 @@ impl PublisherFactoryImpl {
 #[cfg(test)]
 mod tests {
     use async_trait::async_trait;
-    use protobuf::MessageDyn;
+    use protobuf::well_known_types::{any::Any, empty::Empty};
+    use protobuf::{Message, MessageDyn, MessageField};
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdvtelemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use std::collections::HashMap;
@@ -200,16 +202,17 @@ mod tests {
         async fn subscribe(
             &self,
             _service_name: &str,
+            _configuration: &Option<Any>,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
         ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
-            panic!("The function should never be called")
+            unreachable!()
         }
 
         async fn unsubscribe(
             &self,
             _subscription: ServiceSubscription,
         ) -> Result<(), ServiceAdapterUnsubscribeError> {
-            panic!("The function should never be called")
+            unreachable!()
         }
     }
 
@@ -237,6 +240,8 @@ mod tests {
     fn create_valid_service_publisher() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let service_publisher = publisher.mut_service_publisher();
+        service_publisher.configuration =
+            MessageField::some(Any::pack(Empty::default_instance()).unwrap());
         service_publisher.service_name = SERVICE_NAME.to_owned();
         publisher
     }
@@ -318,11 +323,21 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
-        let PublisherType::Service { service_name, service_adapter: _, service_subscription } =
-            &res.publisher_type
+        let PublisherType::Service {
+            configuration,
+            service_name,
+            service_adapter: _,
+            service_subscription,
+        } = &res.publisher_type
         else {
             panic!("Unexpected publisher type");
         };
+        let configuration_value = configuration.as_ref().expect("Configuration should be set");
+        let any_value = configuration_value
+            .unpack::<Empty>()
+            .unwrap()
+            .expect("The value of Any should be an Empty");
+        assert_eq!(&any_value, Empty::default_instance());
         assert_eq!(service_name, SERVICE_NAME);
         assert!(service_subscription.lock().unwrap().is_none());
     }
