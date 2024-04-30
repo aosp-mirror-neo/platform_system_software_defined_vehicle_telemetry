@@ -620,24 +620,6 @@ mod tests {
     }
 
     #[test]
-    fn validate_field_descriptor_has_unsupported_type_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::UnsupportedFieldType { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
     fn validate_node_output_is_incompatible_with_field_fails() {
         let factory = ValueAggregatorFactoryImpl {};
         let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
@@ -707,6 +689,18 @@ mod tests {
         let field_descriptor = get_field_descriptor_from_name(ANY_FIELD_NAME);
         let node_types =
             vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn validate_node_output_message_type_string_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::String)];
         let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
         let aggregated_field_value =
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
@@ -905,6 +899,20 @@ mod tests {
     }
 
     #[test]
+    fn create_node_output_message_type_string_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::String)];
+        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })];
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.create(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
     fn create_node_index_not_set_fails() {
         let factory = ValueAggregatorFactoryImpl {};
         let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
@@ -939,25 +947,6 @@ mod tests {
 
         assert!(
             matches!(err, ValueAggregatorFactoryError::IndexOutOfBound { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_field_descriptor_has_unsupported_type_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::UnsupportedFieldType { .. }),
             "Unexpected error: {}",
             err
         );

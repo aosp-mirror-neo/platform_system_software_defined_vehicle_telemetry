@@ -582,7 +582,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_node_has_string_field_fails() {
+    fn validate_node_has_string_field_success() {
         let mut node_0 = NodeProto::new();
         let mut leaf = FieldLeafNode::new();
         leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_string();
@@ -593,14 +593,10 @@ mod tests {
         let context = create_factory_context();
 
         // action
-        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
+        let nodes = node_factory.validate(&all_proto_nodes, &context);
 
         // assert
-        assert!(
-            matches!(&err, NodeError::UnsupportedSingularFieldType { .. }),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(nodes.is_ok());
     }
 
     #[test]
