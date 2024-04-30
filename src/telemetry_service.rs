@@ -37,8 +37,8 @@ use metrics_config_manager::{
 use metrics_config_orchestrator::MetricsConfigOrchestratorError as ConfigOrchestratorError;
 use metrics_report_listener::MetricsReportListener;
 
-static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
-static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
+const ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
+const INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
 
 const GLOBAL_STATUS_LISTENER_API_CALL_ID: i32 = 0;
 

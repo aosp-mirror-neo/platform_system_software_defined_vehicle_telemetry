@@ -284,6 +284,38 @@ rust_test {
 }
 
 rust_test {
+    name: "libsdv_telemetry_utils_unit_tests",
+    defaults: ["telemetry@rust_defaults"],
+    srcs: [
+        "src/utils/lib.rs",
+    ],
+    rustlibs: [
+        "libsdv_telemetry_utils",
+    ],
+    proc_macros: [
+    ],
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    target: {
+        host: {
+            data_libs: [
+                "libcutils",
+                "libbase",
+                "libc++",
+                "libutils",
+                "liblog",
+            ],
+        },
+    },
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+}
+
+rust_test {
     name: "sdv_telemetry_integration_tests",
     defaults: ["telemetry@rust_defaults"],
     srcs: [
