@@ -194,9 +194,10 @@ impl NodeValue {
         E: Error,
     {
         if let NodeValue::Bool(val) = self {
-            return Ok(*val);
+            Ok(*val)
+        } else {
+            Err(err_provider())
         }
-        Err(err_provider())
     }
 
     /// Returns the int value or the provided error if NodeValue is not an int.

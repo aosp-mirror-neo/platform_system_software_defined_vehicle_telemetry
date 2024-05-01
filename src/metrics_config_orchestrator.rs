@@ -1033,14 +1033,10 @@ mod tests {
                 return Err(error);
             }
 
-            let report_generator = if let Some(report_generator) =
-                self.report_generators.lock().unwrap().remove(&config.name)
-            {
-                report_generator
-            } else {
-                Arc::new(MockMetricsReportGenerator::new(config.name.clone()))
-            };
-
+            let report_generator =
+                self.report_generators.lock().unwrap().remove(&config.name).unwrap_or_else(|| {
+                    Arc::new(MockMetricsReportGenerator::new(config.name.clone()))
+                });
             Ok(report_generator)
         }
 
@@ -1166,14 +1162,12 @@ mod tests {
                 }
             }
 
-            let publisher = if let Some(publisher) =
-                self.publishers.lock().unwrap().remove(publisher_proto.name.as_str())
-            {
-                publisher
-            } else {
-                Arc::new(MockPublisher::new(publisher_proto.name.clone()))
-            };
-
+            let publisher = self
+                .publishers
+                .lock()
+                .unwrap()
+                .remove(publisher_proto.name.as_str())
+                .unwrap_or_else(|| Arc::new(MockPublisher::new(publisher_proto.name.clone())));
             Ok(publisher)
         }
 
@@ -1238,14 +1232,12 @@ mod tests {
                 }
             }
 
-            let trigger = if let Some(trigger) =
-                self.triggers.lock().unwrap().remove(trigger_proto.name.as_str())
-            {
-                trigger
-            } else {
-                Arc::new(MockTrigger::new(trigger_proto.name.clone()))
-            };
-
+            let trigger = self
+                .triggers
+                .lock()
+                .unwrap()
+                .remove(trigger_proto.name.as_str())
+                .unwrap_or_else(|| Arc::new(MockTrigger::new(trigger_proto.name.clone())));
             Ok(trigger)
         }
 

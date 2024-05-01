@@ -120,11 +120,11 @@ impl MessageProvider for MockMessageProvider {
         &self,
         _publisher_name: &str,
     ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-        if let Some(result) = self.next_result.lock().unwrap().take() {
-            result
-        } else {
-            Ok(Some(Box::new(TEST_MESSAGE.clone())))
-        }
+        self.next_result
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or_else(|| Ok(Some(Box::new(TEST_MESSAGE.clone()))))
     }
 }
 
