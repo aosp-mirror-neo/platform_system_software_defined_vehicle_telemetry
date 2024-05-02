@@ -1195,7 +1195,7 @@ mod tests {
         // - None = None
         assert_eq!(
             none_val
-                .operate(&OP_ADD, || panic!(
+                .operate(&OP_UNARY_MINUS, || panic!(
                     "Unary operator should not call right operand provider"
                 ))
                 .unwrap(),
