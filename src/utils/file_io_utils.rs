@@ -1,6 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-//! This module contains sync functions for file read and write operations
+//! This module contains async functions for file read and write operations
 use std::path::PathBuf;
 use tokio::fs::File;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};

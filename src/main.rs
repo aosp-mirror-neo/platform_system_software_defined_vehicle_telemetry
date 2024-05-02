@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
     sdv_tracing::init_tracing();
 
-    // Data Tunnel Wrapper to manage subcriptions
+    // Data Tunnel Wrapper to manage subscriptions
     let data_tunnel_wrapper = Arc::new(DataTunnelSubscriber::new());
 
     // Add all service publishers to the manager in order of priority
