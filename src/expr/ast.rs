@@ -927,6 +927,36 @@ mod tests {
     }
 
     #[test]
+    fn validate_rounding_operator_no_right_child_ok() {
+        // setup
+        let node_factory = NodeFactoryImpl::new();
+        let context = create_factory_context();
+        let mut node_0 = NodeProto::new();
+        let mut node_1 = NodeProto::new();
+
+        let mut constant_leaf_negative_four_point_eight = ConstantLeafNode::new();
+        constant_leaf_negative_four_point_eight.set_float_value(-4.8);
+        node_0.set_constant_leaf_node(constant_leaf_negative_four_point_eight);
+
+        //            index 1 (CEIL)
+        //          /              \
+        //    index 0              no right child
+        //    -4.8
+        let mut ceil_node = CombinationNode::new();
+        ceil_node.left_index = Some(0);
+        ceil_node.set_rounding_operator(RoundingOperator::CEIL);
+        node_1.set_combination_node(ceil_node);
+
+        let all_proto_nodes = vec![node_0, node_1];
+
+        // action
+        let nodes = node_factory.validate(&all_proto_nodes, &context);
+
+        // assert
+        assert!(nodes.is_ok());
+    }
+
+    #[test]
     fn validate_field_leaf_node_no_descriptor_success() {
         let node_factory = NodeFactoryImpl {};
         let context = create_factory_context();

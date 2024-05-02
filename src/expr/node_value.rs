@@ -1815,6 +1815,10 @@ mod tests {
         let one = NodeValue::Int32(1);
 
         assert!(matches!(
+            one.operate(&OP_FLOOR, || provide(&NodeValue::None)).unwrap_err(),
+            NodeError::RoundingOperatorIncompatibleOperands
+        ));
+        assert!(matches!(
             true_val.operate(&OP_ROUND, || provide(&NodeValue::None)).unwrap_err(),
             NodeError::RoundingOperatorIncompatibleOperands
         ));
