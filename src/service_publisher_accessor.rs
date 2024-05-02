@@ -11,13 +11,10 @@ use std::marker::{Send, Sync};
 /// Interface of an entity that provides access to Service Publishers.
 #[async_trait]
 pub trait ServicePublisherAccessor: Send + Sync {
-    /// Returns message descriptor of the specified service.
-    /// Returns None if the service is not registered.
-    /// Returns error if the service is registered, but metadata retrieval failed.
-    fn get_message_descriptor(
-        &self,
-        service_name: &str,
-    ) -> Result<Option<MessageDescriptor>, anyhow::Error>;
+    /// Returns metadata of the specified service publisher.
+    /// Returns None if the service publisher is not registered.
+    /// Returns error if the service publisher is registered, but metadata retrieval failed.
+    fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>>;
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
@@ -27,6 +24,14 @@ pub trait ServicePublisherAccessor: Send + Sync {
         configuration: Option<&[u8]>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome>;
+}
+
+/// Service publisher metadata.
+pub struct ServicePublisherMetadata {
+    /// True if the service provides the latest message without subscription.
+    pub supports_get: bool,
+    /// Message descriptor of the root message type.
+    pub message_descriptor: MessageDescriptor,
 }
 
 /// Successful result of subscription creation.

@@ -13,14 +13,14 @@ pub(crate) struct MockServicePublisherAccessor {
 }
 
 struct MockServicePublisherAccessorData {
-    /// When set, the descriptor will be returned on the next call to get_message_descriptor.
+    /// When set, the descriptor will be returned on the next call to get_metadata.
     next_descriptor: Option<MessageDescriptor>,
     /// When set, the error will be returned on the next call to the adapter.
     next_error: Option<anyhow::Error>,
     /// When set to true, the next call to create_subscription will return a not found result.
     next_not_available: bool,
-    /// The number of times get message descriptor function of the mock was called.
-    num_get_message_descriptor_calls: u32,
+    /// The number of times get metadata function of the mock was called.
+    num_get_metadata_calls: u32,
     /// The number of times subscribe function of the mock was called.
     num_subscribe_calls: u32,
     /// The number of times unsubscribe function of the mock was called.
@@ -36,15 +36,18 @@ struct MockServicePublisherSubscription {
 
 #[async_trait]
 impl ServicePublisherAccessor for MockServicePublisherAccessor {
-    fn get_message_descriptor(
+    fn get_metadata(
         &self,
         _service_name: &str,
-    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
+    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
         let mut data = self.data.lock().unwrap();
-        data.num_get_message_descriptor_calls += 1;
+        data.num_get_metadata_calls += 1;
         data.check_next_error()?;
 
-        Ok(data.next_descriptor.take())
+        let metadata = data.next_descriptor.take().map(|message_descriptor| {
+            ServicePublisherMetadata { supports_get: false, message_descriptor }
+        });
+        Ok(metadata)
     }
 
     async fn create_subscription(
@@ -82,7 +85,7 @@ impl MockServicePublisherAccessor {
             next_not_available: false,
             num_subscribe_calls: 0,
             num_unsubscribe_calls: 0,
-            num_get_message_descriptor_calls: 0,
+            num_get_metadata_calls: 0,
             callbacks: HashMap::new(),
         }));
         Self { data }
@@ -96,8 +99,8 @@ impl MockServicePublisherAccessor {
         self.data.lock().unwrap().num_unsubscribe_calls
     }
 
-    pub(crate) fn get_num_get_message_descriptor_calls(&self) -> u32 {
-        self.data.lock().unwrap().num_get_message_descriptor_calls
+    pub(crate) fn get_num_get_metadata_calls(&self) -> u32 {
+        self.data.lock().unwrap().num_get_metadata_calls
     }
 
     pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
