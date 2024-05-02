@@ -52,9 +52,10 @@ extern "C" fn data_tunnel_callback(
     user_data: *mut c_void,
 ) {
     // SAFETY: safe to use as the user_data passed by the caller was originally allocated using a
-    // global allocator using Box::new(). For more info check
+    // global allocator using Arc::new(). For more info check
     // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let notify = unsafe { Arc::from_raw(user_data as *const Notify) };
+    // Convert pointer to reference but do not take ownership
+    let notify = unsafe { &*(user_data as *const Notify) };
 
     if notification_type == SubscriptionNotificationType::DataAvailable {
         notify.notify_one();
