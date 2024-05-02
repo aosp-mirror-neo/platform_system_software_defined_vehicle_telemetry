@@ -7,19 +7,17 @@ use sdvtelemetry_proto_rust::expression::{
     combination_node::Operator as OperatorProto, node::Node_type as NodeTypeProto,
     Node as NodeProto,
 };
-use std::{
-    fmt,
-    marker::{Send, Sync},
-    sync::Arc,
+use std::fmt;
+use std::marker::{Send, Sync};
+use std::sync::Arc;
+
+use crate::expr::node_errors::{DescriptorProviderError, MessageProviderError, NodeError};
+use crate::expr::node_value::NodeValue;
+use crate::expr::node_value_type::{
+    FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
 };
 
-use crate::expr::{
-    node_errors::{DescriptorProviderError, MessageProviderError, NodeError},
-    node_value::NodeValue,
-    node_value_type::{
-        FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
-    },
-};
+const EMPTY: &str = "Empty";
 
 /// Creates rust nodes from protobuf expression nodes.
 pub trait NodeFactory {
@@ -397,20 +395,15 @@ impl fmt::Debug for Node {
                 publisher_name, fields
             ),
             Node::Combination { operator, left, right } => {
-                let left_string = if let Some(left_child_ref) = left {
-                    format!("{:#?}", left_child_ref)
-                } else {
-                    "Empty".to_string()
-                };
-                let right_string = if let Some(right_child_ref) = right {
-                    format!("{:#?}", right_child_ref)
-                } else {
-                    "Empty".to_string()
+                let format_node = |node: &Option<Arc<Node>>| {
+                    node.as_ref().map_or_else(|| EMPTY.to_owned(), |node| format!("{:#?}", node))
                 };
                 write!(
                     f,
                     "Combination Node {{ operator: {:?},  left: {},  right: {} }}",
-                    operator, left_string, right_string
+                    operator,
+                    format_node(left),
+                    format_node(right)
                 )
             }
         }
