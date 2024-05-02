@@ -247,7 +247,8 @@ impl NodeFactoryImpl {
                             Ok(Arc::new(Node::Combination { operator: op.clone(), left, right }))
                         })?
                     } // match arm `Some(CombinationNode)`
-                    _ => return Err(NodeError::NodeTypeNotSet { i: index }),
+                    Some(_) => return Err(NodeError::NodeTypeNotSupported { i: index }),
+                    None => return Err(NodeError::NodeTypeNotSet { i: index }),
                 };
 
                 // mark index as visited and return Ok

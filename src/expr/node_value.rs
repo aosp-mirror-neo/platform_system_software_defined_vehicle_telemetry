@@ -123,7 +123,8 @@ impl NodeValue {
             Some(NodeValueProto::Int64Value(val)) => NodeValue::Int64(*val),
             Some(NodeValueProto::FloatValue(val)) => NodeValue::Float(*val),
             Some(NodeValueProto::DoubleValue(val)) => NodeValue::Double(*val),
-            _ => return Err(NodeError::ConstantValueNotSet),
+            Some(_) => return Err(NodeError::ConstantValueNotSupported),
+            None => return Err(NodeError::ConstantValueNotSet),
         })
     }
 
