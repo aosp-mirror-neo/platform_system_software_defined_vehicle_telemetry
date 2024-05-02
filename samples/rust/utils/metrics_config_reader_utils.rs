@@ -19,10 +19,12 @@ pub fn read(path: &PathBuf) -> Option<Vec<u8>> {
         }
         Some("textproto") => {
             // Note that go/textformat-spec currently only supports the legacy text proto format.
-            let str_config = fs::read_to_string(path).unwrap();
-            let mc: MetricsConfig =
-                parse_from_str::<MetricsConfig>(&str_config).map_err(|e| e.to_string()).unwrap();
-            mc.write_to_bytes().ok()
+            let result = move || -> anyhow::Result<Vec<u8>> {
+                let textproto = fs::read_to_string(path)?;
+                let mc: MetricsConfig = parse_from_str::<MetricsConfig>(&textproto)?;
+                Ok(mc.write_to_bytes()?)
+            }();
+            result.inspect_err(|err| error!("Unable to read textproto file: {}", err)).ok()
         }
         Some(unknown_ext) => {
             error!("Unsupported config file extension {}. Use .textproto or .bin.", unknown_ext);
