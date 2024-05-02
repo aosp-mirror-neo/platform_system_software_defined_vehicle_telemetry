@@ -46,12 +46,8 @@ impl MetricsConfigManager for MockMetricsConfigManager {
         &self,
         metrics_config: &[u8],
     ) -> Result<String, ConfigManagerError> {
-        let config: MetricsConfig = match protobuf::Message::parse_from_bytes(metrics_config) {
-            Ok(cfg) => cfg,
-            Err(_) => {
-                return Err(ConfigManagerError::ConfigParseError);
-            }
-        };
+        let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config)
+            .map_err(|_| ConfigManagerError::ConfigParseError)?;
         let mut num_calls = self.num_add_metrics_config_calls.lock().unwrap();
         *num_calls += 1;
         if self.inactive_configs.lock().unwrap().insert(config.uuid.clone()) {

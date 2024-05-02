@@ -107,16 +107,17 @@ impl NodeValueExtension for NodeValue {
         n: u32,
         new_value: &NodeValue,
     ) -> Result<(), AggregationError> {
+        let NodeValue::Double(avg) = self else {
+            panic!("update_running_average() should never be called on non-double");
+        };
+
         let new_sample = new_value.get_double(&|| {
             AggregationError::NumericAggregationTypeMismatch { value: format!("{:?}", new_value) }
         })?;
-        if let NodeValue::Double(avg) = self {
-            let n = f64::from(n);
-            let sum = *avg * n;
-            *avg = (sum + new_sample) / (n + 1.0)
-        } else {
-            panic!("update_running_average() should never be called on non-double");
-        }
+
+        let n = f64::from(n);
+        let sum = *avg * n;
+        *avg = (sum + new_sample) / (n + 1.0);
         Ok(())
     }
 
