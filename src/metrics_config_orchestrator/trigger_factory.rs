@@ -237,6 +237,7 @@ mod tests {
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
+            None,
             Arc::new(MockServiceAdapter::new()),
         ));
 
