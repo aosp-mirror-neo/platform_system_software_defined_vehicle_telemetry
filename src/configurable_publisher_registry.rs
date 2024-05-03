@@ -9,7 +9,8 @@ use log::info;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::{ServicePublisherAccessor, service_publisher_accessor::ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherSubscription};
+use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::{fmt::Debug, sync::Mutex};
@@ -89,14 +90,14 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
         configuration: Option<&[u8]>,
-        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-    ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error> {
+        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+    ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let result = visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
         });
 
         let Some((message_descriptor, publisher)) = result else {
-            return Ok(None);
+            return Ok(CreateSubscriptionOutcome::NotAvailable(callback));
         };
 
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
@@ -114,11 +115,13 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
 
         publisher.subscribe(&listener_wrapper, configuration)?;
 
-        Ok(Some(Box::new(ConfigurablePublisherRegistrySubscription {
-            join_handle,
-            publisher_entries: Arc::downgrade(&self.publisher_entries),
-            service_name: service_name.to_owned(),
-        })))
+        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
+            ConfigurablePublisherRegistrySubscription {
+                join_handle,
+                publisher_entries: Arc::downgrade(&self.publisher_entries),
+                service_name: service_name.to_owned(),
+            },
+        )))
     }
 }
 
@@ -202,14 +205,14 @@ impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription 
 
 #[cfg(test)]
 mod tests {
-    use protobuf::{Message, MessageFull};
-    use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::Arc;
-
     use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, ISubscriber::ISubscriber};
     use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
+    use protobuf::{Message, MessageFull};
     use sample_publisher_proto::sample_publisher;
     use sample_publisher_proto::sample_publisher::SampleMessage;
+    use sdv_telemetry_utils::test_utils::create_empty_fn_box;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
 
     use super::*;
 
@@ -307,15 +310,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_success() {
+    async fn create_subscription_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
         let configurable_publisher_registry =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
-            .unwrap()
             .unwrap();
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
@@ -327,15 +329,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_incorrect_service_name_returns_none() {
+    async fn create_subscription_incorrect_service_name_returns_not_available() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let subscription = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+        let res = configurable_publisher_registry
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap();
 
-        assert!(subscription.is_none());
+        assert!(matches!(res, CreateSubscriptionOutcome::NotAvailable(_)));
     }
 
     #[tokio::test]
@@ -345,7 +347,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         let subscription = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
@@ -362,7 +364,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         let subscription = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
@@ -380,7 +382,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
@@ -400,7 +402,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, Arc::new(|_| {}))
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
