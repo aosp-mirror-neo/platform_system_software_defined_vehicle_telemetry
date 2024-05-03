@@ -376,6 +376,7 @@ mod tests {
     const FLOAT_FIELD_NAME: &str = "float_field";
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const STRING_FIELD_NAME: &str = "string_field";
+    const BYTES_FIELD_NAME: &str = "bytes_field";
 
     fn get_field_descriptor_from_name(field_name: &str) -> FieldDescriptor {
         let msg_descriptor = TestMessage::descriptor();
@@ -709,6 +710,18 @@ mod tests {
     }
 
     #[test]
+    fn validate_node_output_message_type_bytes_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(BYTES_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::ByteList)];
+        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.validate(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
     fn validate_node_output_message_type_compatible_success() {
         let factory = ValueAggregatorFactoryImpl {};
         let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
@@ -903,6 +916,20 @@ mod tests {
         let factory = ValueAggregatorFactoryImpl {};
         let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
         let node_types = vec![Some(NodeValueType::String)];
+        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })];
+        let context =
+            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+        let aggregated_field_value =
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
+
+        factory.create(&aggregated_field_value, &context).unwrap();
+    }
+
+    #[test]
+    fn create_node_output_message_type_bytes_success() {
+        let factory = ValueAggregatorFactoryImpl {};
+        let field_descriptor = get_field_descriptor_from_name(BYTES_FIELD_NAME);
+        let node_types = vec![Some(NodeValueType::ByteList)];
         let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })];
         let context =
             ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
