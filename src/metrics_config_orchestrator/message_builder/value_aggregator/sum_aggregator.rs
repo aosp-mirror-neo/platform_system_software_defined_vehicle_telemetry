@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
+use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
@@ -19,8 +20,8 @@ impl SumAggregator {
 }
 
 impl ValueAggregator for SumAggregator {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate()?;
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+        let latest_value = self.node.evaluate(context)?;
         if latest_value.is_none() {
             return Ok(latest_value);
         }
@@ -43,8 +44,9 @@ mod tests {
             SumAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
         let mut result_sums = Vec::new();
 
+        let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            let res = sum_aggregator.compute().unwrap();
+            let res = sum_aggregator.compute(&context).unwrap();
             result_sums.push(res);
 
             // update the next exrp eval result, so we can test correctness of compute()
@@ -76,7 +78,8 @@ mod tests {
         let mut aggregator =
             SumAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
-        let res = aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        let res = aggregator.compute(&context).unwrap();
         assert_eq!(res, NodeValue::None);
     }
 
@@ -86,6 +89,7 @@ mod tests {
         let mut bad_sum_aggregator =
             SumAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        bad_sum_aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        bad_sum_aggregator.compute(&context).unwrap();
     }
 }

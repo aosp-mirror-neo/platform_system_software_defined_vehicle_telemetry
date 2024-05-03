@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
+use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
@@ -21,8 +22,8 @@ impl AvgAggregator {
 }
 
 impl ValueAggregator for AvgAggregator {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate()?;
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+        let latest_value = self.node.evaluate(context)?;
         if latest_value.is_none() {
             return Ok(latest_value);
         }
@@ -45,8 +46,9 @@ mod tests {
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
         let mut result = Vec::new();
 
+        let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            result.push(aggregator.compute().unwrap());
+            result.push(aggregator.compute(&context).unwrap());
 
             // update the next exrp eval result, so we can test correctness of compute()
             aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
@@ -79,7 +81,8 @@ mod tests {
         let mut aggregator =
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
-        let res = aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        let res = aggregator.compute(&context).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -89,7 +92,8 @@ mod tests {
         let mut bad_avg =
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        let err = bad_avg.compute().unwrap_err();
+        let context = NodeEvaluationContext::new();
+        let err = bad_avg.compute(&context).unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),

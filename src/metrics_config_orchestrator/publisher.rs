@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::expr::ast::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError,
@@ -294,7 +295,8 @@ impl PublisherImpl {
             panic!("Publisher {} that is not an Aggregation publisher received Aggregation publisher callback", self.name);
         };
 
-        let msg = match message_builder.build() {
+        let context = NodeEvaluationContext::new();
+        let msg = match message_builder.build(&context) {
             Ok(msg) => msg,
             Err(err) => {
                 error!(

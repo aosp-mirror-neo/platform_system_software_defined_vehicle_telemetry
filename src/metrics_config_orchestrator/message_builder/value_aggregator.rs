@@ -11,7 +11,7 @@ pub(super) mod vector_aggregator;
 
 use thiserror::Error;
 
-use crate::expr::{node_errors::NodeError, node_value::NodeValue};
+use crate::expr::{ast::NodeEvaluationContext, node_errors::NodeError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -32,7 +32,7 @@ pub enum AggregationError {
 /// Aggregation types should implement this trait and perform the corresponding
 /// aggregation at `compute()`.
 pub trait ValueAggregator: Send + Sync {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError>;
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError>;
 }
 
 #[cfg(test)]

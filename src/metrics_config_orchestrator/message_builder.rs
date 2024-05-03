@@ -10,6 +10,7 @@ use std::sync::Mutex;
 use thiserror::Error;
 
 use crate::expr::{
+    ast::NodeEvaluationContext,
     node_errors::NodeError,
     proto_node_value_converter::node_value_to_protobuf_reflection::{
         ReflectRepeatedMutExt, ToReflectValueBox,
@@ -19,7 +20,10 @@ use value_aggregator::{AggregationError, ValueAggregator};
 
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.
-    fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError>;
+    fn build(
+        &self,
+        context: &NodeEvaluationContext,
+    ) -> Result<Box<dyn MessageDyn>, MessageBuilderError>;
 }
 
 pub(crate) struct MessageBuilderImpl {
@@ -46,7 +50,10 @@ pub enum MessageBuilderError {
 }
 
 impl MessageBuilder for MessageBuilderImpl {
-    fn build(&self) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
+    fn build(
+        &self,
+        context: &NodeEvaluationContext,
+    ) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
         let mut msg = self.message_descriptor.new_instance();
         for (field_name, field_aggregator_mutex) in self.field_assignments.iter() {
             let to_builder_err =
@@ -56,7 +63,7 @@ impl MessageBuilder for MessageBuilderImpl {
                 .field_by_name(field_name)
                 .expect("All fields should have been validated to exist");
             let mut field_aggregator = field_aggregator_mutex.lock().unwrap();
-            let node_value = field_aggregator.compute().map_err(to_builder_err)?;
+            let node_value = field_aggregator.compute(context).map_err(to_builder_err)?;
             // if node_value is none, skip populating this field
             if node_value.is_none() {
                 // TODO: b/307547570 - properly handle absent values
@@ -163,7 +170,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -186,7 +194,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -218,7 +227,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -248,8 +258,10 @@ mod tests {
                 ),
             ],
         );
+
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // verify the newly-built message does set the fields to the expected values
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -272,7 +284,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -293,7 +306,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -316,7 +330,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build()?;
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context)?;
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
@@ -332,7 +347,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build();
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context);
 
         assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
     }
@@ -346,7 +362,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build();
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context);
 
         assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
     }
@@ -359,7 +376,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build();
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context);
 
         assert!(matches!(
             res.err().unwrap(),
@@ -384,7 +402,8 @@ mod tests {
         );
 
         // action
-        let res = builder.build();
+        let context = NodeEvaluationContext::new();
+        let res = builder.build(&context);
 
         assert!(matches!(res.unwrap_err(), MessageBuilderError::BadAggregation { .. }));
     }

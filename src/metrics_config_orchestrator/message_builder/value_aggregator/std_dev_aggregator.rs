@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
+use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
@@ -59,8 +60,8 @@ fn update_running_standard_deviation(
 }
 
 impl ValueAggregator for StdDevAggregator {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError> {
-        let new_value = self.node.evaluate()?;
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+        let new_value = self.node.evaluate(context)?;
         if new_value.is_none() {
             return Ok(new_value);
         }
@@ -110,8 +111,9 @@ mod tests {
             StdDevAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
         let mut result_std_devs = Vec::new();
 
+        let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            let res = std_dev_aggregator.compute().unwrap();
+            let res = std_dev_aggregator.compute(&context).unwrap();
             result_std_devs.push(res);
 
             // update the next exrp eval result, so we can test correctness of compute()
@@ -120,7 +122,7 @@ mod tests {
         }
 
         // To make sure the last node also gets calculated.
-        result_std_devs.push(std_dev_aggregator.compute().unwrap());
+        result_std_devs.push(std_dev_aggregator.compute(&context).unwrap());
 
         result_std_devs
     }
@@ -166,7 +168,8 @@ mod tests {
         let mut aggregator =
             StdDevAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
-        let res = aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        let res = aggregator.compute(&context).unwrap();
         assert_eq!(res, NodeValue::None);
     }
 
@@ -176,6 +179,7 @@ mod tests {
         let mut bad_std_dev =
             StdDevAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        bad_std_dev.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        bad_std_dev.compute(&context).unwrap();
     }
 }
