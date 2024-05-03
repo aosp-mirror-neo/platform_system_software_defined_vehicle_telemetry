@@ -2,18 +2,19 @@
 
 #include "callback_container.h"
 
-#include <google/sdv/telemetry/BnTelemetryStatusListener.h>
-#include <google/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <aidl/google/sdv/telemetry/BnTelemetryStatusListener.h>
+#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <utils/Log.h>
 
 namespace google::sdv::telemetry {
 
-class StatusListenerImpl : public google::sdv::telemetry::BnTelemetryStatusListener {
+class StatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryStatusListener {
 public:
+    explicit StatusListenerImpl(std::shared_ptr<CallbackContainer> cb_container);
     explicit StatusListenerImpl(CallbackContainer& cb_container);
     void set_status_listener(void* listener, CbFunction cbFunc);
-    android::binder::Status sendStatus(int api_call_id, int status_code,
-                                       const std::string& message) override;
+    ndk::ScopedAStatus sendStatus(int api_call_id, int status_code,
+                                  const std::string& message) override;
 
 private:
     CallbackContainer& cb_container_;

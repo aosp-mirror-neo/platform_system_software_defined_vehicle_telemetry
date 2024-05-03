@@ -15,6 +15,7 @@ cc_defaults {
     shared_libs: [
         "libprotobuf-cpp-full",
         "libbinder",
+        "libbinder_ndk",
         "liblog",
         "libutils",
         "libbase",
@@ -42,7 +43,7 @@ cc_library {
         "export",
     ],
     shared_libs: [
-        "google.sdv.telemetry-V1-cpp",
+        "google.sdv.telemetry-V1-ndk",
         "libsdvtelemetry_proto_cpp",
     ],
     vendor_available: true,

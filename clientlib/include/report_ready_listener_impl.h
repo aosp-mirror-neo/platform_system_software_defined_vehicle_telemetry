@@ -1,18 +1,19 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-#include <google/sdv/telemetry/BnTelemetryReportReadyListener.h>
+#include <aidl/google/sdv/telemetry/BnTelemetryReportReadyListener.h>
 #include <utils/Log.h>
 
 namespace google::sdv::telemetry {
 
 typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int32_t);
 
-class ReportReadyListenerImpl : public google::sdv::telemetry::BnTelemetryReportReadyListener {
+class ReportReadyListenerImpl :
+      public aidl::google::sdv::telemetry::BnTelemetryReportReadyListener {
 public:
     void set_report_ready_listener(void* cbObject, ReportReadyCallbackFunction cbFunc);
-    android::binder::Status onReady(const std::string& metricsConfigUuid,
-                                    const std::string& metricsReportConfigName,
-                                    int32_t reportNumber) override;
+    ndk::ScopedAStatus onReady(const std::string& metricsConfigUuid,
+                               const std::string& metricsReportConfigName,
+                               int32_t reportNumber) override;
 
 private:
     // Void pointer storing the CB object passed by the OEM client app.
