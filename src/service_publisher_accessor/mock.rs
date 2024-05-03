@@ -1,6 +1,5 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
@@ -25,7 +24,7 @@ struct MockServicePublisherAccessorData {
     /// The number of times unsubscribe function of the mock was called.
     num_unsubscribe_calls: u32,
     /// The map of subscribed callbacks, keyed by service name.
-    callbacks: HashMap<String, Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>,
+    callbacks: HashMap<String, Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>>,
 }
 
 struct MockServicePublisherSubscription {
@@ -50,20 +49,21 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         service_name: &str,
         _configuration: Option<&[u8]>,
-        callback: Arc<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
-    ) -> Result<Option<Box<dyn ServicePublisherSubscription>>, anyhow::Error> {
+        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+    ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock().unwrap();
         data.num_subscribe_calls += 1;
         data.check_next_error()?;
+
+        if data.callbacks.try_insert_value(service_name.to_owned(), callback).is_err() {
+            panic!("Callback is already set for service name {}", service_name);
+        }
 
         let subscription = MockServicePublisherSubscription {
             service_name: service_name.to_owned(),
             data: Arc::downgrade(&self.data),
         };
-        data.callbacks
-            .try_insert_value(service_name.to_owned(), callback)
-            .map_err(|_| anyhow!("Subscription already exists for service {}", service_name))?;
-        Ok(Some(Box::new(subscription)))
+        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(subscription)))
     }
 }
 
@@ -93,8 +93,8 @@ impl MockServicePublisherAccessor {
     }
 
     pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
-        let callback = Arc::clone(self.data.lock().unwrap().callbacks.get(service_name).unwrap());
-        (callback)(message);
+        let data_lock = self.data.lock().unwrap();
+        data_lock.callbacks.get(service_name).unwrap()(message);
     }
 
     pub(crate) fn with_next_descriptor(self, descriptor: MessageDescriptor) -> Self {
@@ -123,7 +123,7 @@ impl ServicePublisherSubscription for MockServicePublisherSubscription {
         data.num_unsubscribe_calls += 1;
         data.check_next_error()?;
 
-        data.callbacks.remove(&self.service_name).unwrap();
+        let _ = data.callbacks.remove(&self.service_name).unwrap();
         Ok(())
     }
 }
