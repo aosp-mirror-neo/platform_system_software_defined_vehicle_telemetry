@@ -121,9 +121,8 @@ impl Publisher for PublisherImpl {
             PublisherType::Aggregation { trigger_subscriber, triggers, .. } => {
                 // Subscribe to parent triggers.
                 for trigger in triggers {
-                    let self_clone = self.clone();
-                    trigger
-                        .clone()
+                    let self_clone = Arc::clone(&self);
+                    Arc::clone(trigger)
                         .subscribe(
                             trigger_subscriber,
                             Box::new(move || {
@@ -137,7 +136,7 @@ impl Publisher for PublisherImpl {
                 assert!(service_subscription.lock().unwrap().is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
 
                 // Subscribe to the service adapter.
-                let self_clone = self.clone();
+                let self_clone = Arc::clone(&self);
                 let subscription = service_adapter
                     .subscribe(
                         service_name,
@@ -306,14 +305,14 @@ impl PublisherImpl {
             }
         };
 
-        let self_clone = self.clone();
+        let self_clone = Arc::clone(self);
         tokio::spawn(async move {
             self_clone.set_new_message(msg.as_ref()).await;
         });
     }
 
     fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
-        let self_clone = self.clone();
+        let self_clone = Arc::clone(self);
         let message_clone = message.clone_box();
         tokio::spawn(async move {
             self_clone.set_new_message(message_clone.as_ref()).await;
@@ -368,7 +367,7 @@ mod tests {
     ) -> Arc<PublisherImpl> {
         let publisher = create_inactive_aggregation_publisher(triggers);
 
-        publisher.clone().activate().await.unwrap();
+        Arc::clone(&publisher).activate().await.unwrap();
         publisher
     }
 
@@ -377,7 +376,7 @@ mod tests {
     ) -> Arc<PublisherImpl> {
         let publisher = create_inactive_service_publisher(service_adapter);
 
-        publisher.clone().activate().await.unwrap();
+        Arc::clone(&publisher).activate().await.unwrap();
         publisher
     }
 
@@ -417,7 +416,7 @@ mod tests {
     #[tokio::test]
     async fn deactivate_service_publisher_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = create_active_service_publisher(Some(service_adapter.clone())).await;
+        let publisher = create_active_service_publisher(Some(Arc::clone(&service_adapter))).await;
 
         publisher.deactivate().await.unwrap();
 
@@ -443,7 +442,7 @@ mod tests {
     #[tokio::test]
     async fn subscribe_service_publisher_new_message_notifies_subscriber() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = create_active_service_publisher(Some(service_adapter.clone())).await;
+        let publisher = create_active_service_publisher(Some(Arc::clone(&service_adapter))).await;
         let (tx, rx) = oneshot::channel();
         let mut maybe_tx = Some(tx);
         let mut msg = Int32Value::new();
@@ -470,7 +469,8 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
-        let publisher = create_active_aggregation_publisher(vec![trigger.clone()]).await;
+        let publisher =
+            create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
         let (tx, rx) = oneshot::channel();
         let mut maybe_tx = Some(tx);
 

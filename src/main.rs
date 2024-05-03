@@ -21,7 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let data_tunnel_wrapper = Arc::new(DataTunnelSubscriber::new());
 
     // Add all service publishers to the manager in order of priority
-    let service_publishers: Vec<Arc<dyn ServicePublisherAccessor>> = vec![data_tunnel_wrapper];
+    let service_publishers = vec![data_tunnel_wrapper as Arc<dyn ServicePublisherAccessor>];
 
     // Create Service Publisher Manager
     let service_publisher_manager_impl = Arc::new(ServicePublisherManager::new(service_publishers));

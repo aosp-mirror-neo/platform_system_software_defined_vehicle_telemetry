@@ -28,8 +28,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
 
     // Add all service publishers to the manager in order of priority
-    let service_publishers: Vec<Arc<dyn ServicePublisherAccessor>> =
-        vec![configurable_publisher_registry.clone()];
+    let service_publishers =
+        vec![Arc::clone(&configurable_publisher_registry) as Arc<dyn ServicePublisherAccessor>];
 
     // Create Service Publisher Manager
     let service_publisher_manager_impl = Arc::new(ServicePublisherManager::new(service_publishers));

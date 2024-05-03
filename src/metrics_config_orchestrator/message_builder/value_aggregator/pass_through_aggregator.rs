@@ -10,7 +10,7 @@ pub struct PassThroughAggregator {
 
 impl PassThroughAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
-        Self { node: node.clone() }
+        Self { node: Arc::clone(node) }
     }
 }
 
@@ -39,7 +39,7 @@ mod tests {
         let true_val = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) });
         let bad_node = Arc::new(Node::Combination {
             operator: OP_ADD.clone(),
-            left: Some(true_val.clone()),
+            left: Some(Arc::clone(&true_val)),
             right: Some(true_val),
         });
         let mut bad_value = PassThroughAggregator::new(&bad_node);

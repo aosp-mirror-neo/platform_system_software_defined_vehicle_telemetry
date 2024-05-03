@@ -88,7 +88,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                 return Ok(Arc::new(PublisherImpl::new_service_publisher(
                     publisher_name,
                     service_publisher.service_name.clone(),
-                    self.service_adapter.clone(),
+                    Arc::clone(&self.service_adapter),
                 )));
             }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => self
@@ -152,7 +152,7 @@ impl PublisherFactoryImpl {
         let triggers = aggregation_publisher_proto
             .trigger_names
             .iter()
-            .map(|trigger_name| context.triggers[trigger_name].clone() as Arc<dyn Trigger>)
+            .map(|trigger_name| Arc::clone(&context.triggers[trigger_name]) as Arc<dyn Trigger>)
             .collect();
         let publisher = PublisherImpl::new_aggregation_publisher(
             publisher_name,
@@ -344,8 +344,9 @@ mod tests {
         let factory = create_default_factory();
         let (publisher, trigger) = create_valid_aggregation_publisher();
 
-        let res =
-            factory.create_using_context_with(&publisher, Some(vec![trigger.clone()])).unwrap();
+        let res = factory
+            .create_using_context_with(&publisher, Some(vec![Arc::clone(&trigger)]))
+            .unwrap();
 
         assert_eq!(res.name, PUBLISHER_NAME);
         let PublisherType::Aggregation { triggers: res_triggers, reset_on_get, .. } =

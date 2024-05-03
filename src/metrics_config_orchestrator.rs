@@ -274,7 +274,7 @@ where
             &self.service_publisher_manager,
         )?;
         let node_factory_context = NodeFactoryContext {
-            message_provider: Some(message_provider.clone()),
+            message_provider: Some(Arc::<MessageProviderImpl<_, _, _>>::clone(&message_provider)),
             descriptor_provider,
         };
 
@@ -370,7 +370,7 @@ where
         // Store MetricsConfig with encapsulated objects.
         {
             let mut configs = self.configs.lock().unwrap();
-            match configs.try_insert_value(config_proto.uuid.clone(), config.clone()) {
+            match configs.try_insert_value(config_proto.uuid.clone(), Arc::clone(&config)) {
                 Ok(val) => val,
                 Err(_) => {
                     return Err(MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid {
@@ -383,12 +383,12 @@ where
         // Set real MetricsConfig in MessageProvider so that Publishers are discoverable by Nodes.
         message_provider
             .metrics_config
-            .set(config.clone())
+            .set(Arc::clone(&config))
             .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
         // Activate publishers one by one in topologically sorted order.
         for publisher_name in &config.ordered_publisher_names {
-            config.publishers[publisher_name].clone().activate().await.map_err(|error| {
+            Arc::clone(&config.publishers[publisher_name]).activate().await.map_err(|error| {
                 MetricsConfigOrchestratorError::UnableToActivatePublisher {
                     publisher_name: publisher_name.to_owned(),
                     error,
@@ -406,9 +406,8 @@ where
         // Subscribe to finish trigger if it's set.
         if let Some(finish_trigger) = &config.finish_trigger {
             let mut maybe_parameters =
-                Some((self.finish_trigger_fired_callback.clone(), config_proto.uuid.clone()));
-            finish_trigger
-                .clone()
+                Some((Arc::clone(&self.finish_trigger_fired_callback), config_proto.uuid.clone()));
+            Arc::clone(finish_trigger)
                 .subscribe(
                     &TriggerSubscriber::MetricsConfigFinish,
                     Box::new(move || {
@@ -572,13 +571,16 @@ impl MetricsConfigOrchestratorImpl {
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
-        let service_adapter = Arc::new(ServiceAdapterImpl::new(service_publisher_manager.clone()));
+        let service_adapter =
+            Arc::new(ServiceAdapterImpl::new(Arc::clone(&service_publisher_manager)));
         Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
-            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(
-                message_builder_factory.clone(),
-            ),
+            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(Arc::<
+                MessageBuilderFactoryImpl,
+            >::clone(
+                &message_builder_factory,
+            )),
             node_factory: NodeFactoryImpl::new(),
             publisher_factory: PublisherFactoryImpl::new(message_builder_factory, service_adapter),
             trigger_factory: TriggerFactoryImpl::new(),
@@ -677,9 +679,8 @@ where
         start_trigger: &Arc<TTrigger>,
         config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
     ) {
-        let mut config_clone = Some(config.clone());
-        start_trigger
-            .clone()
+        let mut config_clone = Some(Arc::clone(config));
+        Arc::clone(start_trigger)
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move || {
@@ -836,9 +837,8 @@ where
 
             // Subscribe to end trigger if it's set.
             if let Some(end_trigger) = &config.end_trigger {
-                let mut config_clone = Some(config.clone());
-                end_trigger
-                    .clone()
+                let mut config_clone = Some(Arc::clone(&config));
+                Arc::clone(end_trigger)
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigEnd,
                         Box::new(move || {
@@ -1102,7 +1102,7 @@ mod tests {
             self.message_providers
                 .lock()
                 .unwrap()
-                .push(context.message_provider.as_ref().unwrap().clone());
+                .push(Arc::clone(context.message_provider.as_ref().unwrap()));
 
             let size = proto_nodes.len();
             let empty_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
@@ -1866,8 +1866,8 @@ mod tests {
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
-        let factory_calls_clone1 = factory_calls.clone();
-        let factory_calls_clone2 = factory_calls.clone();
+        let factory_calls_clone1 = Arc::clone(&factory_calls);
+        let factory_calls_clone2 = Arc::clone(&factory_calls);
         orchestrator.publisher_factory.add_publishers(vec![
             Arc::new(service_publisher_mock),
             Arc::new(aggregation_publisher_mock),
@@ -1908,7 +1908,7 @@ mod tests {
         let config = {
             let configs = orchestrator.configs.lock().unwrap();
             assert_eq!(configs.len(), 1);
-            configs[&config.uuid].clone()
+            Arc::clone(&configs[&config.uuid])
         };
         assert_eq!(config.publishers.len(), 2);
         let config_state = config.state.lock().await;
@@ -2025,11 +2025,11 @@ mod tests {
         // Setup callbacks that log actions and current MetricsConfig state.
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
 
-        let factory_calls_clone = factory_calls.clone();
+        let factory_calls_clone = Arc::clone(&factory_calls);
         let subscribe_callback = move |name: &str| {
             factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()))
         };
-        let factory_calls_clone = factory_calls.clone();
+        let factory_calls_clone = Arc::clone(&factory_calls);
         let unsubscribe_callback = move |name: &str| {
             factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()))
         };
@@ -2058,7 +2058,7 @@ mod tests {
         // Create and setup mock publisher.
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
 
-        let factory_calls_clone = factory_calls.clone();
+        let factory_calls_clone = Arc::clone(&factory_calls);
         publisher_mock.set_activate_callback(move |name| {
             factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()));
             None
@@ -2068,11 +2068,11 @@ mod tests {
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
 
-        let factory_calls_clone = factory_calls.clone();
+        let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_activate_callback(move |name| {
             factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
         });
-        let factory_calls_clone = factory_calls.clone();
+        let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_deactivate_callback(move |name| {
             factory_calls_clone.lock().unwrap().push((DEACTIVATE.to_owned(), name.to_owned()))
         });
@@ -2086,8 +2086,8 @@ mod tests {
             .add_report_generators(vec![report_generator_mock.into()]);
         orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
         orchestrator.trigger_factory.add_triggers(vec![
-            start_trigger_mock.clone(),
-            end_trigger_mock.clone(),
+            Arc::clone(&start_trigger_mock),
+            Arc::clone(&end_trigger_mock),
             finish_trigger_mock.into(),
         ]);
 
@@ -2141,7 +2141,7 @@ mod tests {
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
         assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        let config = { orchestrator.configs.lock().unwrap()[UUID].clone() };
+        let config = { Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]) };
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::NotStarted),
@@ -2157,7 +2157,7 @@ mod tests {
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
 
         let num_calls = Arc::new(AtomicU32::new(0));
-        let num_calls_clone = num_calls.clone();
+        let num_calls_clone = Arc::clone(&num_calls);
         report_generator_mock.set_activate_callback(move |_| {
             num_calls_clone.fetch_add(1, Ordering::SeqCst);
         });
@@ -2196,14 +2196,14 @@ mod tests {
 
         let mut aggregation_publisher1_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
-        let activate_calls_clone = activate_calls.clone();
+        let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher1_mock.set_activate_callback(move |name| {
             activate_calls_clone.lock().unwrap().push(name.to_owned());
             None
         });
 
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
-        let activate_calls_clone = activate_calls.clone();
+        let activate_calls_clone = Arc::clone(&activate_calls);
         service_publisher_mock.set_activate_callback(move |name| {
             activate_calls_clone.lock().unwrap().push(name.to_owned());
             None
@@ -2211,7 +2211,7 @@ mod tests {
 
         let mut aggregation_publisher2_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME_2.to_owned());
-        let activate_calls_clone = activate_calls.clone();
+        let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher2_mock.set_activate_callback(move |name| {
             activate_calls_clone.lock().unwrap().push(name.to_owned());
             None
@@ -2295,7 +2295,7 @@ mod tests {
         let maybe_tx = Mutex::new(Some(tx));
         orchestrator.finish_trigger_fired_callback =
             Arc::new(move |uuid| maybe_tx.lock().unwrap().take().unwrap().send(uuid).unwrap());
-        orchestrator.trigger_factory.add_triggers(vec![finish_trigger_mock.clone()]);
+        orchestrator.trigger_factory.add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
 
         // Setup Metrics Config.
         let mut finish_trigger_proto = TriggerProto::new();
@@ -2337,7 +2337,7 @@ mod tests {
             START_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigStart,
         );
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         start_trigger_mock.set_unsubscribe_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned())
         });
@@ -2346,7 +2346,7 @@ mod tests {
             END_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigEnd,
         );
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         end_trigger_mock.set_unsubscribe_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned())
         });
@@ -2355,14 +2355,14 @@ mod tests {
             FINISH_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigFinish,
         );
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned())
         });
 
         // Setup mock publishers.
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned());
             None
@@ -2370,7 +2370,7 @@ mod tests {
 
         let mut aggregation_publisher_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned());
             None
@@ -2386,9 +2386,9 @@ mod tests {
             Arc::new(aggregation_publisher_mock),
         ]);
         orchestrator.trigger_factory.add_triggers(vec![
-            start_trigger_mock.clone(),
-            end_trigger_mock.clone(),
-            finish_trigger_mock.clone(),
+            Arc::clone(&start_trigger_mock),
+            Arc::clone(&end_trigger_mock),
+            Arc::clone(&finish_trigger_mock),
         ]);
 
         // Setup Metrics Config.
@@ -2425,7 +2425,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Store metrics config Rust object.
-        let metrics_config = orchestrator.configs.lock().unwrap()[UUID].clone();
+        let metrics_config = Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]);
 
         // Finish config.
         orchestrator.finish_config(UUID).await.unwrap();
@@ -2470,7 +2470,7 @@ mod tests {
             END_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigEnd,
         );
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         end_trigger_mock.set_unsubscribe_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned())
         });
@@ -2479,14 +2479,14 @@ mod tests {
             FINISH_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigFinish,
         );
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned())
         });
 
         // Setup mock publishers.
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned());
             None
@@ -2494,7 +2494,7 @@ mod tests {
 
         let mut aggregation_publisher_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned());
             None
@@ -2503,7 +2503,7 @@ mod tests {
         // Setup mock report generator.
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
-        let name_container_clone = name_container.clone();
+        let name_container_clone = Arc::clone(&name_container);
         report_generator_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().unwrap().push(name.to_owned())
         });
@@ -2521,9 +2521,9 @@ mod tests {
             Arc::new(aggregation_publisher_mock),
         ]);
         orchestrator.trigger_factory.add_triggers(vec![
-            start_trigger_mock.clone(),
-            end_trigger_mock.clone(),
-            finish_trigger_mock.clone(),
+            Arc::clone(&start_trigger_mock),
+            Arc::clone(&end_trigger_mock),
+            Arc::clone(&finish_trigger_mock),
         ]);
         orchestrator
             .metrics_report_generator_factory
@@ -2566,7 +2566,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Store metrics config Rust object.
-        let metrics_config = orchestrator.configs.lock().unwrap()[UUID].clone();
+        let metrics_config = Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]);
 
         // Fire start trigger. This should start data collection.
         start_trigger_mock.fire().await;
@@ -2846,8 +2846,8 @@ mod tests {
     fn validate_config_with_dependencies_success() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
-        let factory_calls_clone1 = factory_calls.clone();
-        let factory_calls_clone2 = factory_calls.clone();
+        let factory_calls_clone1 = Arc::clone(&factory_calls);
+        let factory_calls_clone2 = Arc::clone(&factory_calls);
         orchestrator.publisher_factory.set_validate_callback(move |publisher_proto| {
             factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
             None
