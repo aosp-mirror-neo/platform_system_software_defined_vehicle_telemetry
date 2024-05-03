@@ -17,6 +17,8 @@ struct MockServicePublisherAccessorData {
     next_descriptor: Option<MessageDescriptor>,
     /// When set, the error will be returned on the next call to the adapter.
     next_error: Option<anyhow::Error>,
+    /// When set to true, the next call to create_subscription will return a not found result.
+    next_not_available: bool,
     /// The number of times get message descriptor function of the mock was called.
     num_get_message_descriptor_calls: u32,
     /// The number of times subscribe function of the mock was called.
@@ -55,6 +57,11 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         data.num_subscribe_calls += 1;
         data.check_next_error()?;
 
+        if data.next_not_available {
+            data.next_not_available = false;
+            return Ok(CreateSubscriptionOutcome::NotAvailable(callback));
+        }
+
         if data.callbacks.try_insert_value(service_name.to_owned(), callback).is_err() {
             panic!("Callback is already set for service name {}", service_name);
         }
@@ -72,6 +79,7 @@ impl MockServicePublisherAccessor {
         let data = Arc::new(Mutex::new(MockServicePublisherAccessorData {
             next_descriptor: None,
             next_error: None,
+            next_not_available: false,
             num_subscribe_calls: 0,
             num_unsubscribe_calls: 0,
             num_get_message_descriptor_calls: 0,
@@ -104,6 +112,11 @@ impl MockServicePublisherAccessor {
 
     pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
         self.data.lock().unwrap().next_error.replace(error);
+        self
+    }
+
+    pub(crate) fn with_next_not_available(self) -> Self {
+        self.data.lock().unwrap().next_not_available = true;
         self
     }
 }

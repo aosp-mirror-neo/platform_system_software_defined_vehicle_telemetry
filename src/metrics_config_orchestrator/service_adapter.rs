@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use async_trait::async_trait;
-use protobuf::MessageDyn;
+use protobuf::{well_known_types::any::Any, Message, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -16,11 +16,13 @@ use crate::service_publisher_accessor::{
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
 pub(crate) trait ServiceAdapter {
-    /// Subscribe to new messages from the service with the specified name.
+    /// Subscribe to new messages from the service with the specified name
+    /// using specified configuration.
     /// The callback mustn't block because it's executed on the adapter thread.
     async fn subscribe(
         &self,
         service_name: &str,
+        configuration: &Option<Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError>;
 
@@ -32,9 +34,24 @@ pub(crate) trait ServiceAdapter {
     ) -> Result<(), ServiceAdapterUnsubscribeError>;
 }
 
+/// Stores details about a service subscription.
 pub(crate) struct ServiceSubscription {
-    service_name: String,
-    subscription_id: u32,
+    subscription_type: ServiceSubscriptionType,
+}
+
+enum ServiceSubscriptionType {
+    /// Subscription with configuration that can't be shared.
+    Configured {
+        /// Underlying accessor subscription.
+        accessor_subscription: Box<dyn ServicePublisherSubscription>,
+    },
+    /// Subscription without configuration that can be shared.
+    Shared {
+        /// The name of the service of the shared subscription.
+        service_name: String,
+        /// Unique service subscription identifier.
+        subscription_id: u32,
+    },
 }
 
 #[derive(Error, Debug)]
@@ -88,78 +105,135 @@ pub(crate) struct ServiceAdapterImpl {
     >,
 }
 
+impl ServiceSubscriptionType {
+    fn new_configured(
+        accessor_subscription: Box<dyn ServicePublisherSubscription>,
+    ) -> ServiceSubscriptionType {
+        ServiceSubscriptionType::Configured { accessor_subscription }
+    }
+
+    fn new_shared(service_name: String, subscription_id: u32) -> ServiceSubscriptionType {
+        ServiceSubscriptionType::Shared { service_name, subscription_id }
+    }
+}
+
 #[async_trait]
 impl ServiceAdapter for ServiceAdapterImpl {
     async fn subscribe(
         &self,
         service_name: &str,
-        new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+        configuration: &Option<Any>,
+        mut new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
-        let subscription_id = self.next_subscription_id.fetch_add(1, Ordering::SeqCst);
+        let maybe_subscription_type = if let Some(configuration) = configuration {
+            // Subscription has configuration, so it can't be shared.
+            let configuration_bytes = configuration.write_length_delimited_to_bytes().unwrap();
+            let create_subscription_outcome = self
+                .service_publisher_accessor
+                .create_subscription(
+                    service_name,
+                    Some(&configuration_bytes),
+                    Box::new(move |msg| new_message_callback(msg.as_ref())),
+                )
+                .await?;
 
-        match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
-            Entry::Occupied(o) => {
-                // If there's already an active subscription, add callback to its map.
-                let (_, callback_container) = o.get();
-                callback_container.lock().await.insert(subscription_id, new_message_callback);
+            match create_subscription_outcome {
+                CreateSubscriptionOutcome::Subscribed(subscription) => {
+                    Some(ServiceSubscriptionType::new_configured(subscription))
+                }
+                CreateSubscriptionOutcome::NotAvailable(_) => None,
             }
-            Entry::Vacant(v) => {
-                // If there is no active subscription, create a new one and store it.
-                let callbacks = HashMap::from([(subscription_id, new_message_callback)]);
-                let callback_container = Arc::new(AsyncMutex::new(callbacks));
-                let callback_container_clone = Arc::clone(&callback_container);
-                let create_subscription_outcome = self
-                    .service_publisher_accessor
-                    .create_subscription(
-                        service_name,
-                        None,
-                        Box::new(move |msg| Self::on_new_message(msg, &callback_container_clone)),
-                    )
-                    .await?;
+        } else {
+            // Subscription doesn't have configuration, so it can be shared.
+            let subscription_id = self.next_subscription_id.fetch_add(1, Ordering::SeqCst);
 
-                match create_subscription_outcome {
-                    CreateSubscriptionOutcome::Subscribed(subscription) => {
-                        v.insert((subscription, callback_container))
-                    }
-                    CreateSubscriptionOutcome::NotAvailable(_) => {
-                        // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
-                        return Err(anyhow::anyhow!(
-                            "Service with name {} is not available",
-                            service_name
+            match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
+                Entry::Occupied(o) => {
+                    // If there's already an active subscription, add callback to its map.
+                    let (_, callback_container) = o.get();
+                    callback_container.lock().await.insert(subscription_id, new_message_callback);
+
+                    Some(ServiceSubscriptionType::new_shared(
+                        service_name.to_owned(),
+                        subscription_id,
+                    ))
+                }
+                Entry::Vacant(v) => {
+                    // If there is no active subscription, create a new one and store it.
+                    let callbacks = HashMap::from([(subscription_id, new_message_callback)]);
+                    let callback_container = Arc::new(AsyncMutex::new(callbacks));
+                    let callback_container_clone = Arc::clone(&callback_container);
+                    let create_subscription_outcome = self
+                        .service_publisher_accessor
+                        .create_subscription(
+                            service_name,
+                            None,
+                            Box::new(move |msg| {
+                                Self::on_new_shared_subscription_message(
+                                    msg,
+                                    &callback_container_clone,
+                                )
+                            }),
                         )
-                        .into());
+                        .await?;
+
+                    match create_subscription_outcome {
+                        CreateSubscriptionOutcome::Subscribed(subscription) => {
+                            v.insert((subscription, callback_container));
+                            Some(ServiceSubscriptionType::new_shared(
+                                service_name.to_owned(),
+                                subscription_id,
+                            ))
+                        }
+                        CreateSubscriptionOutcome::NotAvailable(_) => None,
                     }
-                };
+                }
             }
         };
 
-        Ok(ServiceSubscription { service_name: service_name.to_owned(), subscription_id })
+        if let Some(subscription_type) = maybe_subscription_type {
+            Ok(ServiceSubscription { subscription_type })
+        } else {
+            // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
+            Err(ServiceAdapterSubscribeError::SubscriptionFailed {
+                error: anyhow::anyhow!("Service with name {} is not available", service_name),
+            })
+        }
     }
 
     async fn unsubscribe(
         &self,
         subscription: ServiceSubscription,
     ) -> Result<(), ServiceAdapterUnsubscribeError> {
-        match self.service_subscriptions.lock().await.entry(subscription.service_name) {
-            Entry::Occupied(o) => {
-                let (_, callback_container) = o.get();
-                let is_last_callback = {
-                    let mut callbacks = callback_container.lock().await;
-                    if callbacks.remove(&subscription.subscription_id).is_none() {
-                        return Err(ServiceAdapterUnsubscribeError::InvalidServiceSubscription);
-                    }
-                    callbacks.is_empty()
-                };
-
-                if is_last_callback {
-                    // Remove entry and unsubscribe from the underlying subscription
-                    // if the last callback was removed.
-                    let (_, (underlying_subscription, _)) = o.remove_entry();
-                    underlying_subscription.unsubscribe().await?;
-                }
+        match subscription.subscription_type {
+            ServiceSubscriptionType::Configured { accessor_subscription } => {
+                accessor_subscription.unsubscribe().await?;
             }
-            Entry::Vacant(_) => {
-                return Err(ServiceAdapterUnsubscribeError::InvalidServiceSubscription)
+            ServiceSubscriptionType::Shared { service_name, subscription_id } => {
+                match self.service_subscriptions.lock().await.entry(service_name) {
+                    Entry::Occupied(o) => {
+                        let (_, callback_container) = o.get();
+                        let is_last_callback = {
+                            let mut callbacks = callback_container.lock().await;
+                            if callbacks.remove(&subscription_id).is_none() {
+                                return Err(
+                                    ServiceAdapterUnsubscribeError::InvalidServiceSubscription,
+                                );
+                            }
+                            callbacks.is_empty()
+                        };
+
+                        if is_last_callback {
+                            // Remove entry and unsubscribe from the underlying subscription
+                            // if the last callback was removed.
+                            let (_, (underlying_subscription, _)) = o.remove_entry();
+                            underlying_subscription.unsubscribe().await?;
+                        }
+                    }
+                    Entry::Vacant(_) => {
+                        return Err(ServiceAdapterUnsubscribeError::InvalidServiceSubscription)
+                    }
+                }
             }
         }
 
@@ -176,8 +250,8 @@ impl ServiceAdapterImpl {
         }
     }
 
-    // Handles notification about new messages.
-    fn on_new_message(
+    // Handles notification about a new shared subscription message.
+    fn on_new_shared_subscription_message(
         message: Box<dyn MessageDyn>,
         subscriptions_container: &Arc<
             AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
@@ -219,6 +293,7 @@ pub(super) mod tests {
     use super::*;
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
+    const ERROR_MESSAGE: &str = "Error 42";
     const SERVICE_NAME: &str = "service";
     const SERVICE_NAME_2: &str = "service2";
 
@@ -236,21 +311,29 @@ pub(super) mod tests {
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
-        ServiceSubscription { service_name: String::default(), subscription_id: u32::MAX }
+        ServiceSubscription {
+            subscription_type: ServiceSubscriptionType::Shared {
+                service_name: String::default(),
+                subscription_id: u32::MAX,
+            },
+        }
     }
 
     #[tokio::test]
-    async fn subscribe_registry_returns_error_fails() {
+    async fn subscribe_configured_accessor_returns_error_fails() {
         let accessor =
-            Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!("Error")));
+            Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let err =
-            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.err().unwrap();
+        let err = service_adapter
+            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .await
+            .err()
+            .unwrap();
 
         assert!(
-            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { .. }),
+            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains(ERROR_MESSAGE)),
             "Unexpected error: {:?}",
             err
         );
@@ -258,7 +341,97 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_different_services_subscribes_to_registry() {
+    async fn subscribe_configured_accessor_returns_not_available_fails() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let err = service_adapter
+            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains("is not available")),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(accessor.get_num_subscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_configured_success() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let (tx, mut rx) = mpsc::channel(1);
+        let mut msg = Box::new(Int32Value::new());
+        msg.value = 1;
+
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                &Some(Any::new()),
+                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Notify about a new message and receive the message.
+        accessor.notify_subscriber(SERVICE_NAME, msg.clone());
+        let msg_received = with_timeout(rx.recv()).await.unwrap();
+
+        // Verify that the received message is the same as the one sent.
+        assert_eq!(&msg_received, &(msg as Box<dyn MessageDyn>));
+
+        // Verify the number of registry subscribe calls.
+        assert_eq!(accessor.get_num_subscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_shared_accessor_returns_error_fails() {
+        let accessor =
+            Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let err = service_adapter
+            .subscribe(SERVICE_NAME, &None, create_empty_fn_box())
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains(ERROR_MESSAGE)),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(accessor.get_num_subscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_shared_accessor_returns_not_available_fails() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let err = service_adapter
+            .subscribe(SERVICE_NAME, &None, create_empty_fn_box())
+            .await
+            .err()
+            .unwrap();
+
+        assert!(
+            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains("is not available")),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(accessor.get_num_subscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn subscribe_shared_different_services_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
@@ -273,12 +446,17 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME,
+                &None,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
             .unwrap();
         service_adapter
-            .subscribe(SERVICE_NAME_2, Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()))
+            .subscribe(
+                SERVICE_NAME_2,
+                &None,
+                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+            )
             .await
             .unwrap();
 
@@ -298,7 +476,7 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn subscribe_same_service_subscribes_to_registry() {
+    async fn subscribe_shared_same_service_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
@@ -311,12 +489,17 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME,
+                &None,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
             .unwrap();
         service_adapter
-            .subscribe(SERVICE_NAME, Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()))
+            .subscribe(
+                SERVICE_NAME,
+                &None,
+                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+            )
             .await
             .unwrap();
 
@@ -340,7 +523,7 @@ pub(super) mod tests {
         let service_adapter = create_default_service_adapter();
 
         // Create subscription for a different service.
-        service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
+        service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
 
         // Try unsubscribing using invalid subscription.
         let err = service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap_err();
@@ -353,13 +536,15 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_success() {
+    async fn unsubscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let subscription =
-            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .await
+            .unwrap();
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
@@ -367,16 +552,30 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_not_called_unless_last_subscriber_unsubscribes() {
+    async fn unsubscribe_shared_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
-            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+        service_adapter.unsubscribe(subscription).await.unwrap();
+
+        // Verify the number of registry unsubscribe calls.
+        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_shared_not_called_unless_last_subscriber_unsubscribes() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let subscription =
+            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
 
         let _subscription2 =
-            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
 
         service_adapter.unsubscribe(subscription).await.unwrap();
 
@@ -385,16 +584,16 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_called_after_last_subscriber_unsubscribes() {
+    async fn unsubscribe_shared_called_after_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
-            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
 
         let subscription2 =
-            service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
 
         service_adapter.unsubscribe(subscription).await.unwrap();
         service_adapter.unsubscribe(subscription2).await.unwrap();
