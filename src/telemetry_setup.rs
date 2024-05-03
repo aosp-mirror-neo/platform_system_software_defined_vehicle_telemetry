@@ -22,22 +22,20 @@ pub fn register_services(
     service_publisher_manager_impl: Arc<ServicePublisherManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
-    let value = watcher.read(|_, value| Ok(value.trim().to_string())).unwrap_or("1".to_string());
+    let value = watcher.read(|_, value| Ok(value.trim().to_owned())).ok();
 
-    let configured_size: usize = value.parse().unwrap_or(1); // Default size 1 MB
+    // Default size 1 MB
+    let configured_size: usize = value.and_then(|value| value.parse().ok()).unwrap_or(1);
 
     let telemetry_runtime = Builder::new_multi_thread().enable_all().build().unwrap();
     info!("Creating telemetry service with {}MBs metric store size", configured_size);
 
-    let telemetry_service = match telemetry_runtime.block_on(SdvTelemetryService::new(
+    let Some(telemetry_service) = telemetry_runtime.block_on(SdvTelemetryService::new(
         ROOT_DIR,
         configured_size * SIZE_MB,
         service_publisher_manager_impl,
-    )) {
-        Some(telemetry_service) => telemetry_service,
-        None => {
-            return Err("Error in initialization telemetry service. Aborting.".into());
-        }
+    )) else {
+        return Err("Error in initialization telemetry service. Aborting.".into());
     };
 
     let telemetry_descriptor =

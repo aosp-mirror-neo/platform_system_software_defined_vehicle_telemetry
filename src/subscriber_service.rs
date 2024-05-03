@@ -52,7 +52,7 @@ mod tests {
 
     use super::*;
 
-    // Arbitrarily chosen buffer cpaacity
+    // Arbitrarily chosen buffer capacity
     const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
     #[test]
