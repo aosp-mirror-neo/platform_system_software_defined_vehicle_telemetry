@@ -105,7 +105,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 // If there is no active subscription, create a new one and store it.
                 let callbacks = HashMap::from([(subscription_id, new_message_callback)]);
                 let callback_container = Arc::new(AsyncMutex::new(callbacks));
-                let callback_container_clone = callback_container.clone();
+                let callback_container_clone = Arc::clone(&callback_container);
                 let maybe_underlying_subscription = self
                     .service_publisher_accessor
                     .create_subscription(
@@ -179,7 +179,7 @@ impl ServiceAdapterImpl {
             AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
         >,
     ) {
-        let subscriptions_container_clone = subscriptions_container.clone();
+        let subscriptions_container_clone = Arc::clone(subscriptions_container);
         tokio::spawn(async move {
             // Retrieve subscriptions.
             let mut subscriptions = subscriptions_container_clone.lock().await;
@@ -239,7 +239,8 @@ pub(super) mod tests {
     async fn subscribe_registry_returns_error_fails() {
         let accessor =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!("Error")));
-        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.err().unwrap();
@@ -255,7 +256,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_different_services_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg1 = Box::new(Int32Value::new());
         msg1.value = 1;
@@ -294,7 +296,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_same_service_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
@@ -348,7 +351,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
@@ -361,7 +365,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_not_called_unless_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();
@@ -378,7 +383,8 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_called_after_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = ServiceAdapterImpl::new(accessor.clone());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
             service_adapter.subscribe(SERVICE_NAME, create_empty_fn_box()).await.unwrap();

@@ -103,7 +103,7 @@ impl MetricsConfigManagerImpl {
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
         let config_manager = Arc::new_cyclic(
             |manager_reference: &Weak<MetricsConfigManagerImpl>| {
-                let manager_reference_clone = manager_reference.clone();
+                let manager_reference_clone = Weak::clone(manager_reference);
                 let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
                     service_publisher_manager,
                     move |config_uuid| {
@@ -173,9 +173,7 @@ impl MetricsConfigManagerImpl {
                     let uuid = &config.uuid;
 
                     // Validates and initializes metrics config
-                    match config_manager
-                        .metrics_config_orchestrator
-                        .clone()
+                    match Arc::clone(&config_manager.metrics_config_orchestrator)
                         .initialize_config(&config)
                         .await
                     {
@@ -316,7 +314,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             let uuid = &config.uuid;
             info!("initializing {} Config", uuid);
             // Initializes metrics config
-            match self.metrics_config_orchestrator.clone().initialize_config(&config).await {
+            match Arc::clone(&self.metrics_config_orchestrator).initialize_config(&config).await {
                 Ok(()) => {
                     info!("Metrics config orchestrator successfully initialized {} config", uuid);
                     let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
@@ -556,9 +554,9 @@ mod tests {
             let num_validate_config_calls = Arc::new(Mutex::new(0));
 
             let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new(
-                num_initialize_config_calls.clone(),
-                num_finish_config_calls.clone(),
-                num_validate_config_calls.clone(),
+                Arc::clone(&num_initialize_config_calls),
+                Arc::clone(&num_finish_config_calls),
+                Arc::clone(&num_validate_config_calls),
             ));
 
             // Used to initialize/create root directories
@@ -578,7 +576,9 @@ mod tests {
                 inactive_data_dir,
                 cur_persistent_config_store_size: AtomicUsize::new(0),
                 max_persistent_config_store_size,
-                metrics_config_orchestrator: metrics_config_orchestrator.clone(),
+                metrics_config_orchestrator: Arc::<MockMetricsConfigOrchestratorImpl>::clone(
+                    &metrics_config_orchestrator,
+                ),
                 metrics_configs_store: Mutex::new(HashMap::new()),
             });
 
@@ -586,9 +586,9 @@ mod tests {
                 root_path,
                 manager,
                 metrics_config_orchestrator,
-                num_initialize_config_calls: num_initialize_config_calls.clone(),
-                num_finish_config_calls: num_finish_config_calls.clone(),
-                num_validate_config_calls: num_validate_config_calls.clone(),
+                num_initialize_config_calls: Arc::clone(&num_initialize_config_calls),
+                num_finish_config_calls: Arc::clone(&num_finish_config_calls),
+                num_validate_config_calls: Arc::clone(&num_validate_config_calls),
             }
         }
 

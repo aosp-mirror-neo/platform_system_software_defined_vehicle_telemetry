@@ -89,7 +89,7 @@ impl ValueAggregator for StdDevAggregator {
 impl StdDevAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
         Self {
-            node: node.clone(),
+            node: Arc::clone(node),
             current_avg: NodeValue::Double(0.0),
             current_std_dev: NodeValue::Double(0.0),
             n: 0,

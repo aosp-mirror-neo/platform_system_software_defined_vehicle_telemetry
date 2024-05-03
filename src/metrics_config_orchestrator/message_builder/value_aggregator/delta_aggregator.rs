@@ -14,7 +14,7 @@ pub struct DeltaAggregator {
 
 impl DeltaAggregator {
     pub fn new(node: &Arc<Node>) -> Self {
-        Self { node: node.clone(), previous_value: NodeValue::None }
+        Self { node: Arc::clone(node), previous_value: NodeValue::None }
     }
 }
 

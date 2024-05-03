@@ -84,7 +84,9 @@ impl TriggerFactory for TriggerFactoryImpl {
         let trigger_name = trigger_proto.name.clone();
         let trigger_type = match &trigger_proto.trigger_type {
             Some(TriggerTypeProto::DataTrigger(data_trigger)) => TriggerType::Data {
-                publisher: context.publishers[&data_trigger.publisher_name].clone(),
+                publisher: Arc::<PublisherImpl>::clone(
+                    &context.publishers[&data_trigger.publisher_name],
+                ),
             },
             Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => {
                 TriggerType::Periodic { interval_ms: periodic_trigger.interval_ms }
@@ -104,13 +106,13 @@ impl TriggerFactory for TriggerFactoryImpl {
                 let triggers = conditional_trigger
                     .trigger_names
                     .iter()
-                    .map(|name| context.triggers[name].clone() as Arc<dyn Trigger>)
+                    .map(|name| Arc::clone(&context.triggers[name]) as Arc<dyn Trigger>)
                     .collect();
                 return Ok(TriggerImpl::new_conditional_trigger(
                     trigger_name,
                     condition_type,
                     triggers,
-                    selector_expression.clone(),
+                    Arc::clone(selector_expression),
                 ));
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
@@ -377,7 +379,13 @@ mod tests {
         let (trigger, publisher) = create_valid_data_trigger();
 
         let res = factory
-            .create_using_context_with(&trigger, None, vec![], Some(vec![publisher.clone()]), None)
+            .create_using_context_with(
+                &trigger,
+                None,
+                vec![],
+                Some(vec![Arc::clone(&publisher)]),
+                None,
+            )
             .unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
@@ -522,7 +530,7 @@ mod tests {
         let res = factory
             .create_using_context_with(
                 &trigger,
-                Some(vec![node_0.clone(), node_1.clone()]),
+                Some(vec![Arc::clone(&node_0), Arc::clone(&node_1)]),
                 vec![Some(NodeValueType::Bool), Some(NodeValueType::Bool)],
                 None,
                 parent_triggers.clone(),
@@ -542,7 +550,7 @@ mod tests {
         assert_eq!(triggers.len(), 1);
         assert!(Arc::ptr_eq(
             &triggers[0],
-            &(parent_triggers.unwrap()[0].clone() as Arc<dyn Trigger>)
+            &(Arc::clone(&parent_triggers.unwrap()[0]) as Arc<dyn Trigger>)
         ));
     }
 

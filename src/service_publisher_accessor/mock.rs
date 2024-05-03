@@ -93,7 +93,7 @@ impl MockServicePublisherAccessor {
     }
 
     pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
-        let callback = self.data.lock().unwrap().callbacks.get(service_name).unwrap().clone();
+        let callback = Arc::clone(self.data.lock().unwrap().callbacks.get(service_name).unwrap());
         (callback)(message);
     }
 

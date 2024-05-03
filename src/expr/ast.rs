@@ -187,11 +187,9 @@ impl NodeFactoryImpl {
                             Ok(Arc::new(Node::FieldLeaf {
                                 publisher_name: field_leaf.publisher_name.clone(),
                                 fields: field_leaf.field_names.clone(),
-                                message_provider: context
-                                    .message_provider
-                                    .as_ref()
-                                    .unwrap()
-                                    .clone(),
+                                message_provider: Arc::clone(
+                                    context.message_provider.as_ref().unwrap(),
+                                ),
                             }))
                         })?
                     }
@@ -751,7 +749,7 @@ mod tests {
         let mut combination_node = CombinationNode::new();
         combination_node.left_index = Some(0);
         combination_node.set_logical_operator(LogicalOperator::NOT);
-        root_node.set_combination_node(combination_node.clone());
+        root_node.set_combination_node(combination_node);
 
         let all_proto_nodes = vec![leaf_true, root_node];
 
@@ -1334,7 +1332,7 @@ mod tests {
         let mut combination_node = CombinationNode::new();
         combination_node.left_index = Some(0);
         combination_node.set_logical_operator(LogicalOperator::NOT);
-        root_node.set_combination_node(combination_node.clone());
+        root_node.set_combination_node(combination_node);
 
         let all_proto_nodes = vec![leaf_true, root_node];
 
@@ -1431,13 +1429,13 @@ mod tests {
         let false_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(false) });
         let or_node = Arc::new(Node::Combination {
             operator: OP_OR.clone(),
-            left: Some(true_node.clone()),
-            right: Some(false_node.clone()),
+            left: Some(Arc::clone(&true_node)),
+            right: Some(Arc::clone(&false_node)),
         });
         let xor_node = Node::Combination {
             operator: OP_XOR.clone(),
-            left: Some(true_node.clone()),
-            right: Some(or_node.clone()),
+            left: Some(Arc::clone(&true_node)),
+            right: Some(Arc::clone(&or_node)),
         };
         let nodes = [true_node, false_node, or_node, xor_node.into()];
 
@@ -1471,22 +1469,22 @@ mod tests {
         let two_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(2) });
         let divide_node = Arc::new(Node::Combination {
             operator: OP_DIVIDE.clone(),
-            left: Some(five_node.clone()),
-            right: Some(two_node.clone()),
+            left: Some(Arc::clone(&five_node)),
+            right: Some(Arc::clone(&two_node)),
         });
         let power_node = Arc::new(Node::Combination {
             operator: OP_POWER.clone(),
-            left: Some(five_node.clone()),
-            right: Some(two_node.clone()),
+            left: Some(Arc::clone(&five_node)),
+            right: Some(Arc::clone(&two_node)),
         });
         let multiply_node = Arc::new(Node::Combination {
             operator: OP_MULTIPLY.clone(),
-            left: Some(divide_node.clone()),
-            right: Some(power_node.clone()),
+            left: Some(Arc::clone(&divide_node)),
+            right: Some(Arc::clone(&power_node)),
         });
         let unary_minus_node = Arc::new(Node::Combination {
             operator: OP_UNARY_MINUS.clone(),
-            left: Some(multiply_node.clone()),
+            left: Some(Arc::clone(&multiply_node)),
             right: None,
         });
         let nodes = [five_node, two_node, divide_node, power_node, multiply_node, unary_minus_node];
@@ -1525,12 +1523,12 @@ mod tests {
             Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
         let contains_node = Arc::new(Node::Combination {
             operator: OP_CONTAINS.clone(),
-            left: Some(repeated_doubles_node.clone()),
-            right: Some(pi_node.clone()),
+            left: Some(Arc::clone(&repeated_doubles_node)),
+            right: Some(Arc::clone(&pi_node)),
         });
         let eq_node = Arc::new(Node::Combination {
             operator: OP_EQ.clone(),
-            left: Some(contains_node.clone()),
+            left: Some(Arc::clone(&contains_node)),
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
         });
         let nodes = [repeated_doubles_node, pi_node, contains_node, eq_node];
@@ -1557,7 +1555,7 @@ mod tests {
             Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
         let round_node = Arc::new(Node::Combination {
             operator: OP_ROUND.clone(),
-            left: Some(pi_node.clone()),
+            left: Some(Arc::clone(&pi_node)),
             right: None,
         });
         let nodes = [pi_node, round_node];
@@ -1588,23 +1586,23 @@ mod tests {
         let point_three_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.3) });
         let ceil_node = Arc::new(Node::Combination {
             operator: OP_CEIL.clone(),
-            left: Some(point_three_node.clone()),
+            left: Some(Arc::clone(&point_three_node)),
             right: None,
         });
         let five_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) });
         let add_node = Arc::new(Node::Combination {
             operator: OP_ADD.clone(),
-            left: Some(five_node.clone()),
-            right: Some(five_node.clone()),
+            left: Some(Arc::clone(&five_node)),
+            right: Some(Arc::clone(&five_node)),
         });
         let lt_or_eq_node = Arc::new(Node::Combination {
             operator: OP_LT_OR_EQ.clone(),
-            left: Some(five_node.clone()),
-            right: Some(add_node.clone()),
+            left: Some(Arc::clone(&five_node)),
+            right: Some(Arc::clone(&add_node)),
         });
         let and_node = Arc::new(Node::Combination {
             operator: OP_AND.clone(),
-            left: Some(lt_or_eq_node.clone()),
+            left: Some(Arc::clone(&lt_or_eq_node)),
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })),
         });
         let nodes = [point_three_node, ceil_node, five_node, add_node, lt_or_eq_node, and_node];
@@ -1643,7 +1641,7 @@ mod tests {
         });
         let divide_node = Arc::new(Node::Combination {
             operator: OP_DIVIDE.clone(),
-            left: Some(float_field_node.clone()),
+            left: Some(Arc::clone(&float_field_node)),
             right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(2) })),
         });
         let int_field_node = Arc::new(Node::FieldLeaf {
@@ -1653,8 +1651,8 @@ mod tests {
         });
         let lt_node = Arc::new(Node::Combination {
             operator: OP_LT.clone(),
-            left: Some(divide_node.clone()),
-            right: Some(int_field_node.clone()),
+            left: Some(Arc::clone(&divide_node)),
+            right: Some(Arc::clone(&int_field_node)),
         });
 
         let nodes = [float_field_node, divide_node, int_field_node, lt_node];

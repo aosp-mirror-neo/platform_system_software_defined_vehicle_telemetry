@@ -74,7 +74,7 @@ impl<TKey: Display + Eq + Hash + Send + Sync> SubscriptionManager<TKey>
                 .upgrade()
                 .expect("Subscribe shouldn't be called after activatable is freed");
             let callback_map = Arc::new(AsyncMutex::new(HashMap::from([(key, callback)])));
-            activatable.clone().activate(callback_map.clone()).await;
+            Arc::clone(&activatable).activate(Arc::clone(&callback_map)).await;
             maybe_callback_map_lock.replace(callback_map);
         };
     }
