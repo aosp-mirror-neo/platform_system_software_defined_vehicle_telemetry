@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 use sdvtelemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
@@ -19,8 +20,8 @@ impl DeltaAggregator {
 }
 
 impl ValueAggregator for DeltaAggregator {
-    fn compute(&mut self) -> Result<NodeValue, AggregationError> {
-        let new_value = self.node.evaluate()?;
+    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+        let new_value = self.node.evaluate(context)?;
 
         if new_value.is_none() {
             return Ok(new_value);
@@ -61,8 +62,9 @@ mod tests {
             DeltaAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
         let mut result = Vec::new();
 
+        let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            let res = aggregator.compute().unwrap();
+            let res = aggregator.compute(&context).unwrap();
             // Index 0 is ignored as delta for that is None which cannot be converted into a number.
             if i > 0 {
                 result.push(res);
@@ -73,7 +75,7 @@ mod tests {
         }
 
         // To make sure the last node also gets calculated.
-        result.push(aggregator.compute().unwrap());
+        result.push(aggregator.compute(&context).unwrap());
 
         result
     }
@@ -103,7 +105,8 @@ mod tests {
         let mut aggregator =
             DeltaAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
-        let res = aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        let res = aggregator.compute(&context).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -114,6 +117,7 @@ mod tests {
         let mut bad_delta_aggregator =
             DeltaAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
-        bad_delta_aggregator.compute().unwrap();
+        let context = NodeEvaluationContext::new();
+        bad_delta_aggregator.compute(&context).unwrap();
     }
 }
