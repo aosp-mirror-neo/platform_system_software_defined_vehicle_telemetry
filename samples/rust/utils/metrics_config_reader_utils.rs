@@ -4,36 +4,34 @@
 use protobuf::{text_format::parse_from_str, Message};
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 
-use log::error;
+use anyhow::{anyhow, Context};
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
 /// Reads the metrics config from either a .bin or legacy formatted .textproto file into a bytes
 /// array.
-pub fn read(path: &PathBuf) -> Option<Vec<u8>> {
+pub fn read(path: &PathBuf) -> anyhow::Result<Vec<u8>> {
     match Path::new(&path).extension().and_then(|o| o.to_str()) {
         Some("bin") => {
             // Read binary into a vector
-            fs::read(path).ok()
+            fs::read(path)
+                .with_context(|| format!("Failed to read binary file: {}", &path.display()))
         }
         Some("textproto") => {
             // Note that go/textformat-spec currently only supports the legacy text proto format.
-            let result = move || -> anyhow::Result<Vec<u8>> {
+            move || -> anyhow::Result<Vec<u8>> {
                 let textproto = fs::read_to_string(path)?;
                 let mc: MetricsConfig = parse_from_str::<MetricsConfig>(&textproto)?;
                 Ok(mc.write_to_bytes()?)
-            }();
-            result.inspect_err(|err| error!("Unable to read textproto file: {}", err)).ok()
+            }()
+            .with_context(|| format!("Failed to read textproto file: {}", &path.display()))
         }
-        Some(unknown_ext) => {
-            error!("Unsupported config file extension {}. Use .textproto or .bin.", unknown_ext);
-            None
-        }
-        None => {
-            error!("Unable to read file extension.");
-            None
-        }
+        Some(unknown_ext) => Err(anyhow!(
+            "Unsupported config file extension {}. Use .textproto or .bin.",
+            unknown_ext
+        )),
+        None => Err(anyhow!("Unable to read file extension.")),
     }
 }
 
