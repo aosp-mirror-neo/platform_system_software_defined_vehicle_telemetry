@@ -46,7 +46,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         &self,
         service_name: &str,
         configuration: Option<&[u8]>,
-        mut callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             callback = match service_publisher_manager_impl

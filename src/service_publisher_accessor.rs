@@ -25,7 +25,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
         &self,
         service_name: &str,
         configuration: Option<&[u8]>,
-        callback: Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome>;
 }
 
@@ -34,7 +34,7 @@ pub enum CreateSubscriptionOutcome {
     /// Subscription was successfully created.
     Subscribed(Box<dyn ServicePublisherSubscription>),
     /// The service with the specified service name is not available.
-    NotAvailable(Box<dyn Fn(Box<dyn MessageDyn>) + Send + Sync>),
+    NotAvailable(Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>),
 }
 
 /// Interface of the Service Publisher subscription.
