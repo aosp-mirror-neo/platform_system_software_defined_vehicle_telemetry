@@ -42,7 +42,7 @@ pub enum NodeError {
     FieldNotFound { field_name: String, message_name: String },
     #[error("Nested field {field_name} is illegal: {e}")]
     WrongNestedFieldType { field_name: String, e: String },
-    #[error("Map and bytes fields are not supported")]
+    #[error("Map fields are not supported")]
     UnsupportedSingularFieldType,
     #[error("Only repeated bools or repeated numbers are supported")]
     UnsupportedRepeatedFieldType,

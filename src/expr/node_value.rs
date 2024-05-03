@@ -68,6 +68,9 @@ pub enum NodeValue {
 
     /// A string node value.
     String(String),
+
+    /// A byte array node value.
+    ByteList(Vec<u8>),
 }
 
 /// Check if two floating point values are approximately equal.
@@ -107,6 +110,7 @@ impl PartialEq for NodeValue {
             (NodeValue::MessageList(v1), NodeValue::MessageList(v2)) => {
                 v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| a == b)
             }
+            (NodeValue::ByteList(v1), NodeValue::ByteList(v2)) => *v1 == *v2,
             _ => false,
         }
     }
@@ -868,6 +872,14 @@ mod tests {
     }
 
     #[test]
+    fn extract_value_bytes_field_ok() -> Result<(), NodeError> {
+        let field_names = ["bytes_field".to_string()];
+        let extracted = NodeValue::extract_value(Box::new(TEST_MESSAGE.clone()), &field_names)?;
+        assert_eq!(extracted, NodeValue::ByteList("Hello world".as_bytes().to_vec()));
+        Ok(())
+    }
+
+    #[test]
     fn extract_value_field_has_default_value_ok() -> Result<(), NodeError> {
         let mut msg = TestMessage::new();
         msg.int_field = 0;
@@ -894,6 +906,10 @@ mod tests {
         assert_eq!(
             NodeValue::extract_value(Box::new(msg.clone()), &["string_field".to_string()])?,
             NodeValue::String(String::default())
+        );
+        assert_eq!(
+            NodeValue::extract_value(Box::new(msg.clone()), &["bytes_field".to_string()])?,
+            NodeValue::ByteList(vec![])
         );
         Ok(())
     }
