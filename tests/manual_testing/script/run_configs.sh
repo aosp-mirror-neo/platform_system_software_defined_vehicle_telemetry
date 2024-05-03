@@ -35,12 +35,11 @@ ln -s $ANDROID_BUILD_TOP/external/protobuf/src/google $TEMP_DIR/google
 ln -s $ANDROID_BUILD_TOP/system                       $TEMP_DIR/system
 
 convert_proto() {
-  log "Converting $1 to $2"
+  log "Converting $1 to $2 as $3"
 
   cd $TEMP_DIR
   gqui from "$1" \
-      proto \
-      system/software_defined_vehicle/telemetry/proto/metrics_configuration.proto:MetricsConfig \
+      proto $3 \
       --outfile="$2"
   cd -
 }
@@ -51,26 +50,32 @@ else
     FILES="$@"
 fi
 
-for FILE in $FILES; do
-    FILE_PATH=$(realpath "$FILE")
-    NAME=${FILE_PATH##*/}
-    BASE=${NAME%.textproto}
-    # Convert config file from 'textproto' to binary 'pb' format
-    convert_proto \
-      "textproto:$FILE_PATH" \
-      "rawproto:$TEMP_DIR/$BASE.pb"
-done
-
 # The vm seems to take a bit of time to be ready after the command finishes
 wait $CVD_START_PID
 sleep 10
+adb root
+
+if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then
+  log "Running in SDV Core"
+  PUBLISHERS=$CORE_PUBLISHERS
+elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
+  log "Running in SDV IVI"
+  PUBLISHERS=$IVI_PUBLISHERS
+
+  log "Starting Telemetry Service"
+  adb shell sdv_ivi_telemetry_service_agent &
+  trap "pkill -f sdv_ivi_telemetry_service_agent" 0 2 3 15
+else
+  log "[ERROR] \$TARGET_PRODUCT is missing or unsupported. Please \`lunch\` one of the supported Android targets (\`sdv_core_cf-*\` or \`sdv_ivi_cf-*\`)."
+  exit 1
+fi
+
 
 log "Pushing configs to vm"
-adb root
 
 num_configs=0
 CONFIG_FILE_NAMES=""
-for FILE in $TEMP_DIR/*.pb; do
+for FILE in $FILES; do
     NAME=${FILE##*/}
     adb push "$FILE" "/data/local/tmp/$NAME"
     CONFIG_FILE_NAMES+="/data/local/tmp/$NAME "
@@ -79,7 +84,7 @@ done
 
 log "Pushed $num_configs configs"
 
-log "Starting publishers"
+log "Starting publishers: $PUBLISHERS"
 for PUBLISHER in ${PUBLISHERS//,/ }; do
     adb shell "$PUBLISHER" &
     trap "pkill -f $PUBLISHER" 0 2 3 15
@@ -93,9 +98,9 @@ TELEMETRY_CLIENT_PID=$!
 mkdir -p "$OUT_DIR"
 if [ "$LOG_TO_FILE" ]; then
     NOW=$(date '+%F_%H-%M-%S')
-    adb logcat | stdbuf -o0 grep -E 'telemetry|telemetry_rust_c_client' >"$OUT_DIR/$NOW.log" &
+    adb logcat | stdbuf -o0 grep -iE 'telemetry|telemetry_rust_c_client' >"$OUT_DIR/$NOW.log" &
 else
-    adb logcat | stdbuf -o0 grep -E 'telemetry|telemetry_rust_c_client' &
+    adb logcat | stdbuf -o0 grep -iE 'telemetry|telemetry_rust_c_client' &
 fi
 LOGCAT_PID=$!
 
@@ -115,7 +120,8 @@ for FILE in $TEMP_DIR/binary_reports/*.pb; do
     # Convert report from binary 'pb' to human-readable 'textproto' format
     convert_proto \
       "rawproto:$TEMP_DIR/binary_reports/$BASE.pb" \
-      "textproto:$OUT_DIR/reports/$BASE.textproto"
+      "textproto:$OUT_DIR/reports/$BASE.textproto" \
+      system/software_defined_vehicle/telemetry/proto/metrics_configuration.proto:MetricsReport
     ((num_reports += 1))
 done
 

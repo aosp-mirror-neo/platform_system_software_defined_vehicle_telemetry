@@ -59,12 +59,16 @@ You can choose to write logs to the command line or to a file by setting
 
 ### Publishers
 
-`PUBLISHERS` is a string with a space-separated list of rust binary names. The
-script will run all publishers listed here. By default this contains all sample
-publishers in [samples/rust](../../../samples/rust).
+`IVI_PUBLISHERS` and `CORE_PUBLISHERS` are strings with a space-separated list
+of rust binary names. The script will run all publishers `IVI_PUBLISHERS` when
+you `lunch`ed an IVI target, and all `CORE_PUBLISHERS` when you `lunch`ed a CORE
+target. By default, these contain all applicable sample publishers in
+[samples/rust](../../../samples/rust).
 
 For publishers to work, their rust binary name must be listed in
 [device/google/sdv/sdv_core_common/sdv_packages_telemetry.mk](../../../../../../device/google/sdv/sdv_core_common/sdv_packages_telemetry.mk).
+
+TODO(b/318739373): This might change after b/318739373 is fixed.
 
 ### guest-enforce-security flag
 

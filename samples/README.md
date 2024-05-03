@@ -34,10 +34,12 @@ For Core:
 For IVI:
 
 ```
-cvd start -vsock_guest_cid=4 -guest-enforce-security=false -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4
+cvd start -vsock_guest_cid=4 -guest-enforce-security=false -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4"
 ```
 
-Note: if testing on ivi, telemetry service needs to be started explicity. To do that launch a new terminal, and start telemetry service using the following steps:
+Note: if testing on ivi, telemetry service needs to be started explicity. To do
+that launch a new terminal, and start telemetry service using the following
+steps:
 
 ```
 adb shell
@@ -85,7 +87,6 @@ sdv_ivi_telemetry_service_agent
 
     In **Terminal #1**, the one with `logcat`, expect new logs (on top of what
     was already printed in step 2):
-
 
     ```
     10-26 23:33:32.166  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
@@ -167,7 +168,6 @@ Steps to reproduce:
 
     In **Terminal #1**, the one with `logcat`, expect new logs (on top of what
     was already printed in step 2):
-
 
     ```
     11-20 22:35:47.993   627   627 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
