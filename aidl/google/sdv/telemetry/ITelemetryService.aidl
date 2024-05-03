@@ -28,7 +28,7 @@ interface ITelemetryService {
      * related to the MetricsConfig.
      *
      * @param apiCallId unique integer id assigned to each API call
-     * @param metricsConfigUuid uuid of the metricConfig that needs to be activated
+     * @param metricsConfigUuid uuid of the metricsConfig that needs to be activated
      */
     void activateMetricsConfig(in int apiCallId, in @utf8InCpp String metricsConfigUuid);
 
@@ -37,7 +37,7 @@ interface ITelemetryService {
      * related to the MetricsConfig.
      *
      * @param apiCallId unique integer id assigned to each API call
-     * @param metricsConfigUuid uuid of the metricConfig that needs to be deactivated
+     * @param metricsConfigUuid uuid of the metricsConfig that needs to be deactivated
      */
     void deactivateMetricsConfig(in int apiCallId, in @utf8InCpp String metricsConfigUuid);
 
@@ -46,7 +46,7 @@ interface ITelemetryService {
      * MetricsConfig.
      *
      * @param apiCallId unique integer id assigned to each API call
-     * @param metricsConfigUuid uuid of the metricConfig that needs to be removed
+     * @param metricsConfigUuid uuid of the metricsConfig that needs to be removed
      */
     void removeMetricsConfig(in int apiCallId, in @utf8InCpp String metricsConfigUuid);
 

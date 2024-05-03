@@ -56,8 +56,10 @@ typedef void (*GetReportCallbackFunction)(void*, int, const char*, const uint8_t
 /**
  * Gets an instance of telemetry_service and type casts it to an opaque
  * pointer. This is a blocking call and it will wait until the telemetry binder service
- * is ready. The returned value will never be null, and will always hold an instance
- * of telemetry service.
+ * is ready. The returned value can be null in case of an error, such as when the telemetry binder
+ * service cannot be found, or when status listeners for it cannot be registered.
+ *
+ * This function is thread safe.
  *
  * @return an opaque pointer holding a reference to the telemetry_service
  */

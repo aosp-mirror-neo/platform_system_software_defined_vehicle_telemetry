@@ -8,6 +8,7 @@
 #include "report_ready_listener_impl.h"
 #include "status_listener_impl.h"
 
+#include <android-base/expected.h>
 #include <android-base/stringprintf.h>
 #include <binder/IServiceManager.h>
 #include <google/sdv/telemetry/BnTelemetryService.h>
@@ -32,13 +33,17 @@ namespace google::sdv::telemetry {
 // Acts as the mediator between the OEM client and the telemetry service.
 class TelemetryService {
 public:
-    TelemetryService();
+    static android::base::expected<std::unique_ptr<TelemetryService>, android::binder::Status>
+    Create();
+
+    TelemetryService(const TelemetryService&) = delete;
+    TelemetryService& operator=(const TelemetryService&) = delete;
 
     TelemetryServiceStatusCodes activate_metrics_config(const std::string& metricsConfigUuid,
                                                         void* listener, CbFunction cbFunc);
     TelemetryServiceStatusCodes deactivate_metrics_config(const std::string& metricsConfigUuid,
                                                           void* listener, CbFunction cbFunc);
-    TelemetryServiceStatusCodes add_metrics_config(const std::vector<uint8_t>& metricConfig,
+    TelemetryServiceStatusCodes add_metrics_config(const std::vector<uint8_t>& metricsConfig,
                                                    void* listener, CbFunction cbFunc);
     TelemetryServiceStatusCodes remove_all_metrics_configs(void* listener, CbFunction cbFunc);
     TelemetryServiceStatusCodes remove_metrics_config(const std::string& metricsConfigUuid,
@@ -55,13 +60,23 @@ public:
     TelemetryServiceStatusCodes clear_status_listener();
 
 private:
-    std::atomic<int> api_id_;
-    android::sp<CallbackContainer> cb_container_;
-    android::sp<StatusListenerImpl> mStatusListenerImpl_;
-    android::sp<ReportReadyListenerImpl> mReportReadyListener_;
+    using ApiId = int;
 
-    // holds a reference to the binder service
-    android::sp<google::sdv::telemetry::ITelemetryService> binder_service_;
+    explicit TelemetryService(
+            android::sp<google::sdv::telemetry::ITelemetryService> binder_service);
+
+    android::binder::Status registerListeners();
+
+    ApiId getNextApiId();
+
+    std::atomic<ApiId> mLastApiId = 1;
+    CallbackContainer mCallbackContainer;
+    android::sp<StatusListenerImpl> mStatusListenerImpl =
+            android::sp<StatusListenerImpl>::make(mCallbackContainer);
+    android::sp<ReportReadyListenerImpl> mReportReadyListener =
+            android::sp<ReportReadyListenerImpl>::make();
+
+    android::sp<google::sdv::telemetry::ITelemetryService> mBinderService;
 };
 }  // namespace google::sdv::telemetry
 

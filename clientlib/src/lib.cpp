@@ -1,16 +1,31 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 #include "lib.h"
+
 #include "telemetry_service.h"
+
+#include <memory>
+#include <mutex>
 
 ServiceHolder* get_telemetry_service() {
     // The current assumption is that the lifecycle of the TelemetryService is equal
     // to the lifecycle of the client application, hence it is defined as function static
-    // here. This makes it more convenient to implement thread-safety when multiple threads
-    // are calling the get_telemetry_service.
-    static google::sdv::telemetry::TelemetryService* service =
-            new google::sdv::telemetry::TelemetryService();
-    return reinterpret_cast<ServiceHolder*>(service);
+    // here.
+    static std::unique_ptr<google::sdv::telemetry::TelemetryService> service;
+    static std::mutex mutex;
+
+    std::lock_guard<std::mutex> guard(mutex);
+    if (!service) {
+        auto maybe_service = google::sdv::telemetry::TelemetryService::Create();
+        if (maybe_service.has_value()) {
+            service = std::move(maybe_service.value());
+        } else {
+            ALOGE("Failed to create TelemetryService: %s",
+                  maybe_service.error().toString8().c_str());
+        }
+    }
+
+    return service ? reinterpret_cast<ServiceHolder*>(service.get()) : nullptr;
 }
 
 int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size, void* listener,
