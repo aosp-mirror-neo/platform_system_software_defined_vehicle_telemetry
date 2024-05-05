@@ -7,9 +7,9 @@
 
 #include <iostream>
 
+using ::aidl::google::sdv::telemetry::ITelemetryService;
+using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
 using ::android::base::StringPrintf;
-using ::google::sdv::telemetry::ITelemetryService;
-using ::google::sdv::telemetry::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 
@@ -31,17 +31,16 @@ std::optional<TelemetryServiceStatusCodes> validate_params(void* listener, T cbF
 }  // namespace
 
 //  static
-android::base::expected<std::unique_ptr<TelemetryService>, android::binder::Status>
+android::base::expected<std::unique_ptr<TelemetryService>, ndk::ScopedAStatus>
 TelemetryService::Create() {
-    const std::string instance =
-            StringPrintf("%s/default", android::String8(ITelemetryService::descriptor).c_str());
-    ALOGI("Waiting for service %s", instance.c_str());
-    auto binder_service = android::waitForService<google::sdv::telemetry::ITelemetryService>(
-            android::String16(instance.c_str()));
+    const auto descriptor = std::string(ITelemetryService::descriptor) + "/default";
+    ALOGI("Waiting for service %s", descriptor.c_str());
+    auto binder_service = ITelemetryService::fromBinder(
+            ndk::SpAIBinder(AServiceManager_waitForService(descriptor.data())));
+
     if (!binder_service) {
-        ALOGE("Failed to bind service %s", instance.c_str());
-        return android::base::unexpected(android::binder::Status::fromExceptionCode(
-                android::binder::Status::EX_NULL_POINTER));
+        ALOGE("Failed to bind service %s", descriptor.c_str());
+        return android::base::unexpected(ndk::ScopedAStatus::fromExceptionCode(EX_NULL_POINTER));
     }
 
     auto service =
@@ -49,38 +48,37 @@ TelemetryService::Create() {
     auto status = service->registerListeners();
     if (!status.isOk()) {
         ALOGE("Failed to register listeners");
-        return android::base::unexpected(status);
+        return android::base::unexpected(
+                ndk::ScopedAStatus::fromExceptionCode(status.getExceptionCode()));
     }
 
     ALOGI("TelemetryService Created");
     return service;
 }
 
-TelemetryService::TelemetryService(
-        android::sp<google::sdv::telemetry::ITelemetryService> binder_service) :
+TelemetryService::TelemetryService(std::shared_ptr<ITelemetryService> binder_service) :
       mBinderService(std::move(binder_service)) {}
 
-android::binder::Status TelemetryService::registerListeners() {
+ndk::ScopedAStatus TelemetryService::registerListeners() {
     {
         ALOGI("Registering status listener");
-        android::binder::Status status =
-                mBinderService->registerStatusListener(mStatusListenerImpl);
+        ndk::ScopedAStatus status = mBinderService->registerStatusListener(mStatusListenerImpl);
         if (!status.isOk()) {
-            ALOGE("Failed to register status listener: %s", status.toString8().c_str());
+            ALOGE("Failed to register status listener: %s", status.getDescription().c_str());
             return status;
         }
     }
     {
         ALOGI("Registering report ready listener");
-        android::binder::Status status =
+        ndk::ScopedAStatus status =
                 mBinderService->registerReportReadyListener(mReportReadyListener);
         if (!status.isOk()) {
-            ALOGE("Failed to register report ready listener: %s", status.toString8().c_str());
+            ALOGE("Failed to register report ready listener: %s", status.getDescription().c_str());
             return status;
         }
     }
 
-    return android::binder::Status::ok();
+    return ndk::ScopedAStatus::ok();
 }
 
 TelemetryServiceStatusCodes TelemetryService::add_metrics_config(
@@ -172,8 +170,8 @@ TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener() {
-    android::binder::Status err = mBinderService->unregisterReportReadyListener();
-    ALOGI("unregisterReportReadyListener from CPP %s", err.toString8().c_str());
+    ndk::ScopedAStatus err = mBinderService->unregisterReportReadyListener();
+    ALOGI("unregisterReportReadyListener from CPP %s", err.getDescription().c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
@@ -191,11 +189,12 @@ TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* met
         return TelemetryServiceStatusCodes::API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET;
     }
 
-    android::sp<ReportListenerImpl> mReportListener(new ReportListenerImpl(listener, cbFunc));
-    android::binder::Status err =
+    std::shared_ptr<ReportListenerImpl> mReportListener =
+            ndk::SharedRefBase::make<ReportListenerImpl>(listener, cbFunc);
+    ndk::ScopedAStatus err =
             mBinderService->getMetricsReport(metrics_config_uuid, report_config_name, report_number,
                                              mReportListener);
-    ALOGI("get_metrics_report from CPP %s", err.toString8().c_str());
+    ALOGI("get_metrics_report from CPP %s", err.getDescription().c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
@@ -213,8 +212,8 @@ TelemetryServiceStatusCodes TelemetryService::set_status_listener(void* listener
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
-    android::binder::Status err = mBinderService->unregisterStatusListener();
-    ALOGI("unregisterStatusListener from CPP %s", err.toString8().c_str());
+    ndk::ScopedAStatus err = mBinderService->unregisterStatusListener();
+    ALOGI("unregisterStatusListener from CPP %s", err.getDescription().c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 

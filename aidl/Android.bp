@@ -22,7 +22,7 @@ aidl_interface {
         rust: {
             enabled: true,
         },
-        cpp: {
+        ndk: {
             enabled: true,
         },
     },
@@ -44,7 +44,7 @@ aidl_interface {
         rust: {
             enabled: true,
         },
-        cpp: {
+        ndk: {
             enabled: true,
         },
     },
