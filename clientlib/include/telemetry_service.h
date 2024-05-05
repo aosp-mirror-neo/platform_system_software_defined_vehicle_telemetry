@@ -8,11 +8,11 @@
 #include "report_ready_listener_impl.h"
 #include "status_listener_impl.h"
 
+#include <aidl/google/sdv/telemetry/BnTelemetryService.h>
+#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <android-base/expected.h>
 #include <android-base/stringprintf.h>
-#include <binder/IServiceManager.h>
-#include <google/sdv/telemetry/BnTelemetryService.h>
-#include <google/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <android/binder_manager.h>
 #include <utils/Log.h>
 
 #include <getopt.h>
@@ -26,15 +26,15 @@
 #include <memory>
 #include <vector>
 
-using ::google::sdv::telemetry::ITelemetryService;
+using aidl::google::sdv::telemetry::ITelemetryService;
+using aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 
 // Acts as the mediator between the OEM client and the telemetry service.
 class TelemetryService {
 public:
-    static android::base::expected<std::unique_ptr<TelemetryService>, android::binder::Status>
-    Create();
+    static android::base::expected<std::unique_ptr<TelemetryService>, ndk::ScopedAStatus> Create();
 
     TelemetryService(const TelemetryService&) = delete;
     TelemetryService& operator=(const TelemetryService&) = delete;
@@ -62,21 +62,20 @@ public:
 private:
     using ApiId = int;
 
-    explicit TelemetryService(
-            android::sp<google::sdv::telemetry::ITelemetryService> binder_service);
+    explicit TelemetryService(std::shared_ptr<ITelemetryService> binder_service);
 
-    android::binder::Status registerListeners();
+    ndk::ScopedAStatus registerListeners();
 
     ApiId getNextApiId();
 
     std::atomic<ApiId> mLastApiId = 1;
     CallbackContainer mCallbackContainer;
-    android::sp<StatusListenerImpl> mStatusListenerImpl =
-            android::sp<StatusListenerImpl>::make(mCallbackContainer);
-    android::sp<ReportReadyListenerImpl> mReportReadyListener =
-            android::sp<ReportReadyListenerImpl>::make();
+    std::shared_ptr<StatusListenerImpl> mStatusListenerImpl =
+            ndk::SharedRefBase::make<StatusListenerImpl>(mCallbackContainer);
+    std::shared_ptr<ReportReadyListenerImpl> mReportReadyListener =
+            ndk::SharedRefBase::make<ReportReadyListenerImpl>();
 
-    android::sp<google::sdv::telemetry::ITelemetryService> mBinderService;
+    std::shared_ptr<ITelemetryService> mBinderService;
 };
 }  // namespace google::sdv::telemetry
 

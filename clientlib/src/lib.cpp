@@ -21,7 +21,7 @@ ServiceHolder* get_telemetry_service() {
             service = std::move(maybe_service.value());
         } else {
             ALOGE("Failed to create TelemetryService: %s",
-                  maybe_service.error().toString8().c_str());
+                  maybe_service.error().getDescription().c_str());
         }
     }
 
