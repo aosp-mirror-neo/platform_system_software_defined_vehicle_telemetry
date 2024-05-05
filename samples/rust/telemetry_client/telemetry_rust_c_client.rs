@@ -30,7 +30,7 @@ async fn process_config(
         let error_message = format!("{:?} is not a file or does not exist", path);
         error!("{error_message}");
         return Err((
-            status_codes_bindgen::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR,
+            rust_to_c::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR,
             error_message,
         ));
     }

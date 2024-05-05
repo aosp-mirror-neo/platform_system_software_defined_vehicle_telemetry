@@ -8,6 +8,7 @@ use crate::rust_to_c::ServiceHolder;
 use log::{error, info};
 use sdv_telemetry_bindgen as rust_to_c;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
+pub use status_codes::*;
 use status_codes_bindgen as status_codes;
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;

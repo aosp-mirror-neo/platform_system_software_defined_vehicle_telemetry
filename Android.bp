@@ -59,6 +59,7 @@ rust_protobuf {
     source_stem: "sdvtelemetry_proto_rust_source",
     vendor_available: true,
     system_ext_specific: true,
+    visibility: ["//visibility:public"],
 }
 
 rust_protobuf {
