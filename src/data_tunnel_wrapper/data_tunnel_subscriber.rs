@@ -20,7 +20,7 @@ use sdv_dt::{
     TopicTypedMetadata,
 };
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, ServicePublisherMetadata, ServicePublisherSubscription,
 };
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -74,11 +74,7 @@ impl Default for DataTunnelSubscriber {
 
 #[async_trait]
 impl ServicePublisherAccessor for DataTunnelSubscriber {
-    /// Checks if topic with the given name exists in the data tunnel.
-    fn get_message_descriptor(
-        &self,
-        topic_name: &str,
-    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
+    fn get_metadata(&self, topic_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
         let message_descriptor = match self
             .data_tunnel_topic_message_descriptors
             .lock()
@@ -133,7 +129,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             }
         };
 
-        Ok(Some(message_descriptor))
+        Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
 
     async fn create_subscription(
@@ -183,8 +179,10 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         let message_count = subscribe_meta_data.message_count_;
 
         let message_descriptor = self
-            .get_message_descriptor(topic_name)?
-            .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?;
+            .get_metadata(topic_name)?
+            .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
+            .message_descriptor;
+
         let topic_name_clone = topic_name.to_owned();
 
         // Tokio task for fetching data from data tunnel and pushing it to telemetry service.

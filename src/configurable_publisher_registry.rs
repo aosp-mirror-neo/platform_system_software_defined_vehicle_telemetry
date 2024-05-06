@@ -9,7 +9,7 @@ use log::info;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherMetadata, ServicePublisherSubscription};
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
@@ -77,13 +77,16 @@ impl Default for ConfigurablePublisherRegistry {
 
 #[async_trait]
 impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
-    fn get_message_descriptor(
-        &self,
-        service_name: &str,
-    ) -> Result<Option<MessageDescriptor>, anyhow::Error> {
-        Ok(visit_entry(&self.publisher_entries, service_name, |entry| {
-            entry.message_descriptor.clone()
-        }))
+    fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+        let maybe_message_descriptor =
+            visit_entry(&self.publisher_entries, service_name, |entry| {
+                entry.message_descriptor.clone()
+            });
+
+        let metadata = maybe_message_descriptor.map(|message_descriptor| {
+            ServicePublisherMetadata { supports_get: false, message_descriptor }
+        });
+        Ok(metadata)
     }
 
     async fn create_subscription(
@@ -289,24 +292,24 @@ mod tests {
     }
 
     #[test]
-    fn get_message_descriptor_incorrect_service_name_returns_none() {
+    fn get_metadata_incorrect_service_name_returns_none() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let res = configurable_publisher_registry.get_message_descriptor(SERVICE_NAME).unwrap();
+        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).unwrap();
 
-        assert!(res.is_none(), "Unexpected result: {:?}", res);
+        assert!(res.is_none());
     }
 
     #[tokio::test]
-    async fn get_message_descriptor_success() {
+    async fn get_metadata_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
         let configurable_publisher_registry =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        let res =
-            configurable_publisher_registry.get_message_descriptor(SERVICE_NAME).unwrap().unwrap();
+        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).unwrap().unwrap();
 
-        assert_eq!(res.proto(), SampleMessage::descriptor().proto());
+        assert!(!res.supports_get);
+        assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
     }
 
     #[tokio::test]

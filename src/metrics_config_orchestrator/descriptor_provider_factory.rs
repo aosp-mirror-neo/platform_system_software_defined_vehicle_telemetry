@@ -52,7 +52,8 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
                 let descriptor = match &publisher.publisher_type {
                     Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
                         service_publisher_manager
-                            .get_message_descriptor(&service_publisher_proto.service_name)?
+                            .get_metadata(&service_publisher_proto.service_name)?
+                            .map(|metadata| metadata.message_descriptor)
                     }
                     Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
                         let message_builder = aggregation_publisher_proto
