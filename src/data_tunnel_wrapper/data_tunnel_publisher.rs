@@ -10,11 +10,15 @@ pub struct DataTunnelPublisher {
     topic_handle: TopicHandle,
 }
 
-/// Data tunnel rust sample to  a register topic.
-/// topic_name is the name of the topic for Data tunnel.
-/// queue_size is the size of the data tunnel queue.
-/// message_size is the size of the message in bytes being transferred and cannot be changed in the topic lifetime.
-/// Returns a DT publisher implementation that can be used to write messages.
+/// Data tunnel rust sample to register a topic. Returns a DT publisher implementation that can be
+///  used to write messages.
+///
+/// # Arguments
+///
+/// * `topic_name` - The name of the topic for data tunnel.
+/// * `queue_size` - The size of the data tunnel queue.
+/// * `message_size` - The size of the message in bytes being transferred and cannot be changed in
+///                    the topic lifetime.
 pub fn register_topic(
     topic_name: &str,
     queue_size: usize,
@@ -46,8 +50,14 @@ pub fn register_topic(
 /// Publisher struct impl that encapsulates the data required for publishing.
 impl DataTunnelPublisher {
     /// Data tunnel rust publish messages sample.
-    /// message_bytes: the messages that should be sent using DT in bytes. The message_bytes size should be equal
-    /// to the message size set in register topic call multiplied by the number_of_messages.
+    ///
+    /// # Arguments
+    ///
+    /// * `message_bytes` - The messages that should be sent using DT in bytes.
+    ///
+    /// # Safety
+    /// The size of `message_bytes` should be equal to the message size set in register topic call
+    /// multiplied by the number_of_messages.
     pub fn publish(&self, message_bytes: &[u8]) -> Result<(), SdvResult> {
         let mut message_count = 0usize;
         let result = sdv_dt::AvailableToWrite(self.topic_handle, &mut message_count);
@@ -56,11 +66,13 @@ impl DataTunnelPublisher {
         }
 
         let result =
-            // Safety:
-            // `message_bytes` contains no more than `self.message_size` bytes since we are sending
-            // a single message of size <= self.message_size, and the `DataTunnelPublisher` has been created
-            // by register_topic which called RegisterTopic with `self.message_size`
-            unsafe { sdv_dt::WriteMessages(self.topic_handle, message_bytes.as_ptr() as *const c_void, 1) };
+            // SAFETY: `message_bytes` contains no more than `self.message_size` bytes since we are
+            // sending a single message of size <= `self.message_size`, and `DataTunnelPublisher`
+            // has been created by `register_topic` which called `RegisterTopic` with
+            // `self.message_size`.
+            unsafe {
+                sdv_dt::WriteMessages(self.topic_handle, message_bytes.as_ptr() as *const c_void, 1)
+            };
         match result {
             SdvResult::Success => Ok(()),
             _ => Err(result),

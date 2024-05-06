@@ -26,29 +26,29 @@ use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 
-// Notification interval betwween two consecutive messages received from Data Tunnel
+// Notification interval betwween two consecutive messages received from Data Tunnel.
 const NOTIFICATION_INTERVAL: u32 = 0;
 
-/// Struct for storing all data tunnel subscriptions that implements ServicePublisherManager
+/// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
 pub struct DataTunnelSubscriber {
-    /// Hashmap to store topic names and their MessageDescriptors
+    /// Hashmap to store topic names and their `MessageDescriptor`s.
     data_tunnel_topic_message_descriptors: Arc<Mutex<HashMap<String, MessageDescriptor>>>,
 }
 
-/// Struct for subscription of DT topic
+/// Struct for subscription of DT topic.
 pub struct DataTunnelSubscription {
     _subscription_handle: SubscriptionHandle,
 }
 
-/// Callback that handles data received from data tunnel.
+/// Callback that handles data received from the data tunnel.
 ///
 /// # Safety
 ///
-/// * `notification_type` points to an enum SubscriptionNotificationType defined in data tunnel
+/// * `notification_type` - Points to an enum SubscriptionNotificationType defined in data tunnel.
 ///
-/// * `user_data` points to a valid `mpsc::Notify` originally sent to the caller during
-///    the SetNotificationHandler api call and was originally allocated using a
-///    global allocator using Box::new()
+/// * `user_data` - Points to a valid `mpsc::Notify` originally sent to the caller during the
+///                 `SetNotificationHandler` api call and was originally allocated using a global
+///                 allocator using Box::new().
 extern "C" fn data_tunnel_callback(
     notification_type: SubscriptionNotificationType,
     user_data: *mut c_void,
@@ -74,7 +74,7 @@ impl Default for DataTunnelSubscriber {
 
 #[async_trait]
 impl ServicePublisherAccessor for DataTunnelSubscriber {
-    /// Checks if topic with given name exists in data tunnel
+    /// Checks if topic with the given name exists in the data tunnel.
     fn get_message_descriptor(
         &self,
         topic_name: &str,
@@ -108,16 +108,17 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                     protobuf::Message::parse_from_bytes(cxx_metadata_vec.as_slice())
                         .map_err(|e| anyhow!("Error in parsing Metadata: {:?}", e))?;
 
-                // Build the provided proto file descriptors
+                // Build the provided proto file descriptors.
                 let file_descriptors = FileDescriptor::new_dynamic_fds(
                     publisher_metadata.descriptor_protos,
                     &WELL_KNOWN_FILE_DESCRIPTORS,
                 )
                 .map_err(|e| anyhow!("Invalid Descriptor Protos: {:?}", e))?;
 
-                // iterate through all file_descriptors, find MessageDescriptor for the given message_type
-                // message_by_full_name() method requires the name to start with dot, it returns a clone
-                // of the MessageDescriptor, so we can return it as-is without cloning again
+                // Iterate through all `file_descriptors` and find `MessageDescriptor` for the given
+                // `message_type_name`. `message_by_full_name()` function requires the name to start
+                // with a dot. The function returns a clone of the `MessageDescriptor`, so we can
+                // return it as-is without cloning again.
                 let message_descriptor = file_descriptors
                     .iter()
                     .find_map(|fd| fd.message_by_full_name(&publisher_metadata.message_type_name))
@@ -164,7 +165,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         // Setting notification handler
         let notify = Arc::new(Notify::new());
 
-        // Safety: "user_data" must point to valid data for "data_tunnel_callback" to use.
+        // SAFETY: `user_data` must point to valid data for `data_tunnel_callback` to use.
         let result = unsafe {
             sdv_dt::SetNotificationHandler(
                 subscription_handle,
@@ -186,16 +187,17 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?;
         let topic_name_clone = topic_name.to_owned();
 
-        // Tokio task for fetching data from data tunnel and pushing it to telemetry service
+        // Tokio task for fetching data from data tunnel and pushing it to telemetry service.
         tokio::spawn(async move {
             let size_of_buffer = message_count * message_size;
             let mut buffer = vec![0u8; size_of_buffer];
             let mut is_first_message = true;
 
-            // This loop runs infintely until telemetry service stops. In case of error in message parsing,
-            // the data is lost, as data was retrieved successfully from data tunnel.
-            // In case of data tunnel errors, data is not lost, and can be fetched in the next iteration of the loop.
-            // Logic to stop the loop will be added once data tunnel provides support for unsubscribe calls
+            // This loop runs infintely until telemetry service stops. In case of error in message
+            // parsing, the data is lost, as data was retrieved successfully from data tunnel. In
+            // case of data tunnel errors, data is not lost, and can be fetched in the next
+            // iteration of the loop. Logic to stop the loop will be added once data tunnel provides
+            // support for unsubscribe calls
             loop {
                 notify.notified().await;
                 match Self::read(
@@ -263,9 +265,9 @@ impl DataTunnelSubscriber {
         let mut read_message_count = 0usize;
         let mut result = sdv_dt::AvailableToRead(subscription_handle, &mut read_message_count);
 
-        // We have to invoke ReadMessages() after Overflow error to reset the Overflow flag
+        // We have to invoke `ReadMessages()` after an Overflow error to reset the Overflow flag.
         if result == sdv_dt::Result::Overflow {
-            // SAFETY: buffer always has enough size to fit a single message.
+            // SAFETY: Buffer always has enough size to fit a single message.
             if unsafe {
                 sdv_dt::ReadMessages(subscription_handle, buffer.as_mut_ptr() as *mut c_void, 1)
             } == sdv_dt::Result::Overflow
@@ -283,10 +285,9 @@ impl DataTunnelSubscriber {
             return Ok(0);
         }
 
-        // Safety:
-        // `buffer` points to a buffer of size at least `message_count` * `message_size`
-        // bytes, where `message_size` and `message_count` can be fetched from metadata argument
-        // in `SubscribeToTopic()` method.
+        // SAFETY: `buffer` points to a buffer of size at least `message_count` * `message_size`
+        // bytes, where `message_size` and `message_count` can be fetched from metadata argument in
+        // `SubscribeToTopic()` method.
         let result = unsafe {
             sdv_dt::ReadMessages(
                 subscription_handle,
@@ -298,8 +299,8 @@ impl DataTunnelSubscriber {
         match result {
             SdvResult::Success => Ok(read_message_count),
             _ => {
-                // The first ReadMessage() invocation could return error if the first
-                // message in the queue was overwritten
+                // The first `ReadMessage()` invocation could return error if the first message in
+                // the queue was overwritten.
                 if is_first_message {
                     Ok(0usize)
                 } else {
@@ -313,7 +314,7 @@ impl DataTunnelSubscriber {
 #[async_trait]
 impl ServicePublisherSubscription for DataTunnelSubscription {
     async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error> {
-        // This logic will be replaced once data tunnel has support for unsubscribe
+        // This logic will be replaced once the data tunnel has support for unsubscribe.
         Ok(())
     }
 }
