@@ -7,7 +7,7 @@ use sdv_telemetry_dt_wrapper::data_tunnel_publisher::register_topic;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::thread;
 
-use log::info;
+use log::{error, info};
 use protobuf::{Message, MessageFull};
 use rand::Rng;
 
@@ -23,17 +23,17 @@ fn main() {
         vec![sample_publisher::file_descriptor().proto().clone()];
     publisher_metadata.message_type_name = format!(".{}", SampleMessage::descriptor().full_name());
 
-    let result = register_topic(
+    let maybe_dt_publisher = register_topic(
         TOPIC_NAME,
         1024,
         TOPIC_MSG_SIZE,
         publisher_metadata.write_to_bytes().unwrap(),
     );
 
-    let publisher = match result {
+    let dt_publisher = match maybe_dt_publisher {
         Ok(publisher) => publisher,
-        Err(result) => {
-            println!("Could not register topic, result={:?}", result);
+        Err(err) => {
+            error!("Could not register topic: {:?}", err);
             return;
         }
     };
@@ -47,14 +47,14 @@ fn main() {
         let mut raw_message: Vec<u8> = Vec::with_capacity(TOPIC_MSG_SIZE);
         // Prepend message length to be read
         if let Err(e) = message.write_length_delimited_to_vec(&mut raw_message) {
-            println!("Could not serialize message, result={:?}", e);
+            error!("Could not serialize message, result={:?}", e);
             return;
         }
 
-        let result = publisher.publish(&raw_message);
-        match result {
-            Ok(()) => println!("Message written to DT {} of size: {}", message, raw_message.len()),
-            _ => println!("Failed to write message {:?}", result),
+        let publish_result = dt_publisher.publish(&raw_message);
+        match publish_result {
+            Ok(()) => info!("Message written to DT {} of size: {}", message, raw_message.len()),
+            _ => error!("Failed to write message: {:?}", publish_result),
         }
 
         thread::sleep(std::time::Duration::from_millis(3000));
