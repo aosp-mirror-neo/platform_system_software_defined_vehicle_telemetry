@@ -10,12 +10,14 @@ option java_multiple_files = true;
 message Node {
   // A node is either a leaf node or a parent node of other nodes.
   oneof node_type {
-    // non-leaf node holding some value computed from its children.
+    // Non-leaf node holding some value computed from its children.
     CombinationNode combination_node = 1;
-    // leaf node of constant value.
+    // Leaf node of constant value.
     ConstantLeafNode constant_leaf_node = 2;
-    // leaf node of field value from a protobuf message.
+    // Leaf node of field value from a protobuf message.
     FieldLeafNode field_leaf_node = 3;
+    // Leaf node that calls a function
+    FunctionLeafNode function_leaf_node = 4;
   }
 }
 
@@ -166,4 +168,29 @@ message CombinationNode {
     ArithmeticOperator arithmetic_operator = 5;
     RoundingOperator rounding_operator = 6;
   }
+}
+
+// Leaf node that calls a function. The function may be impure and
+// non-deterministic, i.e., it may return different values when called multiple
+// times.
+message FunctionLeafNode {
+  oneof function_type {
+    GetCurrentTimestampFunction get_current_timestamp = 1;
+  }
+}
+
+// Returns a timestamp in microseconds based on the selected `time_source`.
+message GetCurrentTimestampFunction {
+  enum TimeSource {
+    TIME_SOURCE_UNSPECIFIED = 0;
+    // Read the timestamp as a UNIX timestamp in microseconds based on the
+    // device's realtime clock. This clock source may not be monotonic and can
+    // jump around when the system's clock is changed.
+    REALTIME_CLOCK = 1;
+    // Retrieves the amount of time since the device booted, including when it
+    // was suspended.
+    MONOTONIC_TIME_SINCE_BOOT = 2;
+  }
+
+  TimeSource time_source = 1;
 }

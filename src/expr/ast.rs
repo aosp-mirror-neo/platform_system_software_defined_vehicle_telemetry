@@ -3,15 +3,21 @@
 //! Module for building and traversing the abstract syntax tree.
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use sdv_telemetry_time_wrapper::Microseconds;
 use sdvtelemetry_proto_rust::expression::{
-    combination_node::Operator as OperatorProto, node::Node_type as NodeTypeProto,
-    Node as NodeProto,
+    combination_node::Operator as OperatorProto,
+    function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
+    get_current_timestamp_function::TimeSource as TimeSourceProto,
+    node::Node_type as NodeTypeProto, FunctionLeafNode as FunctionLeafNodeProto, Node as NodeProto,
 };
 use std::fmt;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
-use crate::expr::node_errors::{DescriptorProviderError, MessageProviderError, NodeError};
+use crate::expr::node_errors::{
+    DescriptorProviderError, FunctionLeafNodeArgumentError,
+    FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeError,
+};
 use crate::expr::node_value::NodeValue;
 use crate::expr::node_value_type::{
     FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
@@ -104,6 +110,20 @@ pub enum Node {
         /// Reference to the right child.
         right: Option<Arc<Node>>,
     },
+
+    FunctionLeaf {
+        function: FunctionType,
+    },
+}
+
+pub enum FunctionType {
+    GetCurrentTimestamp { time_source: TimeSource },
+}
+
+#[derive(Debug)]
+pub enum TimeSource {
+    RealtimeClock,
+    MonotonicTimeSinceBoot,
 }
 
 /// Used for cycle detection in the expression nodes.
@@ -193,6 +213,14 @@ impl NodeFactoryImpl {
                             }))
                         })?
                     }
+                    // base case 3: function leaf node, can return from match block immediately
+                    Some(NodeTypeProto::FunctionLeafNode(function_leaf_node)) => {
+                        node_value_types[index] = Some(function_leaf_node.get_node_value_type()?);
+                        let function = Self::to_function_type(function_leaf_node)?;
+                        Self::maybe_create_node(nodes, index, move || {
+                            Ok(Arc::new(Node::FunctionLeaf { function }))
+                        })?
+                    }
                     // recursive case: visit left, right, self
                     Some(NodeTypeProto::CombinationNode(combination_node)) => {
                         let op = combination_node
@@ -251,6 +279,39 @@ impl NodeFactoryImpl {
                 Ok(rust_node)
             } // match arm `VisitStatus::NotVisited`
         } // `match` block
+    }
+
+    fn to_function_type(
+        function_leaf_node: &FunctionLeafNodeProto,
+    ) -> Result<FunctionType, NodeError> {
+        let function_type =
+            function_leaf_node.function_type.as_ref().ok_or(NodeError::FunctionLeafNodeNotSet)?;
+        match function_type {
+            FunctionLeafNodeTypeProto::GetCurrentTimestamp(get_current_timestamp) => {
+                let time_source = get_current_timestamp.time_source.enum_value().map_err(|_| {
+                    NodeError::FunctionLeafNodeArgumentError {
+                        error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                            FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSupported,
+                        ),
+                    }
+                })?;
+                let time_source = match time_source {
+                    TimeSourceProto::TIME_SOURCE_UNSPECIFIED => {
+                        return Err(NodeError::FunctionLeafNodeArgumentError {
+                            error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                                FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet,
+                            ),
+                        })
+                    }
+                    TimeSourceProto::REALTIME_CLOCK => TimeSource::RealtimeClock,
+                    TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT => {
+                        TimeSource::MonotonicTimeSinceBoot
+                    }
+                };
+                Ok(FunctionType::GetCurrentTimestamp { time_source })
+            }
+            _ => Err(NodeError::FunctionLeafNodeNotSupported),
+        }
     }
 
     /// If the `nodes` vector is non-empty, it will call the `create_node_func` to create
@@ -325,17 +386,26 @@ impl NodeFactory for NodeFactoryImpl {
     }
 }
 
-pub struct NodeEvaluationContext {}
+pub struct NodeEvaluationContext {
+    // By only querying the time once and putting it into the context, we ensure that it remains
+    // constant while nodes are being evaluated, even if multiple nodes as part of the same
+    // evaluation query the time.
+    unix_timestamp: Microseconds,
+    monotonic_time_since_boot: Microseconds,
+}
 
 impl NodeEvaluationContext {
     pub fn new() -> Self {
-        NodeEvaluationContext {}
+        Self {
+            unix_timestamp: sdv_telemetry_time_wrapper::get_unix_timestamp(),
+            monotonic_time_since_boot: sdv_telemetry_time_wrapper::get_monotonic_time_since_boot(),
+        }
     }
 }
 
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
-    pub fn evaluate(&self, _context: &NodeEvaluationContext) -> Result<NodeValue, NodeError> {
+    pub fn evaluate(&self, context: &NodeEvaluationContext) -> Result<NodeValue, NodeError> {
         match &self {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
@@ -360,7 +430,7 @@ impl Node {
                          every non-leaf Node has a left child, but evaluate() encountered \
                          a node without left child",
                     )
-                    .evaluate(_context)?;
+                    .evaluate(context)?;
 
                 // If unary operator, then operate on self.
                 // If binary operator, then [left] <operator> [right]
@@ -381,9 +451,18 @@ impl Node {
                                 );
                             }
                         })
-                        .evaluate(_context)
+                        .evaluate(context)
                 })
             }
+            Node::FunctionLeaf { function } => match function {
+                FunctionType::GetCurrentTimestamp { time_source } => {
+                    let timestamp = match time_source {
+                        TimeSource::RealtimeClock => context.unix_timestamp,
+                        TimeSource::MonotonicTimeSinceBoot => context.monotonic_time_since_boot,
+                    };
+                    Ok(NodeValue::Int64(timestamp.0))
+                }
+            },
         }
     }
 }
@@ -412,6 +491,14 @@ impl fmt::Debug for Node {
                     format_node(right)
                 )
             }
+            Node::FunctionLeaf { function } => write!(
+                f,
+                "Function Leaf Node {{ function: {} }}",
+                match function {
+                    FunctionType::GetCurrentTimestamp { time_source } =>
+                        format!("GetCurrentTimestamp {{ time_source: {:?} }}", time_source),
+                }
+            ),
         }
     }
 }
@@ -419,7 +506,7 @@ impl fmt::Debug for Node {
 #[cfg(test)]
 mod tests {
     use paste::paste;
-    use protobuf::MessageFull;
+    use protobuf::{EnumOrUnknown, MessageFull};
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdvtelemetry_proto_rust::expression::combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -428,6 +515,7 @@ mod tests {
     use sdvtelemetry_proto_rust::expression::{
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
+    use std::time::SystemTime;
 
     use super::*;
     use crate::expr::mock::*;
@@ -1220,6 +1308,89 @@ mod tests {
     }
 
     #[test]
+    fn validate_function_node_timestamp_time_source_not_set_fails() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+
+        let mut node = NodeProto::new();
+        node.mut_function_leaf_node().mut_get_current_timestamp();
+
+        let result = node_factory.validate(&[node], &context);
+
+        assert!(
+            matches!(
+                result,
+                Err(NodeError::FunctionLeafNodeArgumentError {
+                    error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                        FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet,
+                    ),
+                })
+            ),
+            "Unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validate_function_node_timestamp_time_source_not_supported_fails() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+
+        let mut node = NodeProto::new();
+        let timestamp_node = node.mut_function_leaf_node().mut_get_current_timestamp();
+        timestamp_node.time_source = EnumOrUnknown::from_i32(9999);
+
+        let result = node_factory.validate(&[node], &context);
+
+        assert!(
+            matches!(
+                result,
+                Err(NodeError::FunctionLeafNodeArgumentError {
+                    error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                        FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSupported,
+                    ),
+                })
+            ),
+            "Unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validate_function_node_timestamp_time_source_realtime_success() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+
+        let mut node = NodeProto::new();
+        let timestamp_node = node.mut_function_leaf_node().mut_get_current_timestamp();
+        timestamp_node.time_source = TimeSourceProto::REALTIME_CLOCK.into();
+
+        let result = node_factory.validate(&[node], &context);
+
+        assert_eq!(
+            result.as_ref().unwrap(),
+            &vec![Some(NodeValueType::Int)],
+            "Unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
+    fn validate_function_node_timestamp_time_source_monotonic_success() {
+        let node_factory = NodeFactoryImpl {};
+        let context = create_factory_context();
+
+        let mut node = NodeProto::new();
+        let timestamp_node = node.mut_function_leaf_node().mut_get_current_timestamp();
+        timestamp_node.time_source = TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT.into();
+
+        let result = node_factory.validate(&[node], &context);
+
+        assert_eq!(
+            result.as_ref().unwrap(),
+            &vec![Some(NodeValueType::Int)],
+            "Unexpected result: {result:?}"
+        );
+    }
+
+    #[test]
     fn validate_success() {
         let node_factory = NodeFactoryImpl::new();
         let context = create_factory_context();
@@ -1782,5 +1953,56 @@ mod tests {
         let res = node.evaluate(&context).unwrap();
 
         assert_eq!(res, NodeValue::None);
+    }
+
+    #[test]
+    fn evaluate_function_timestamp_time_source_realtime_success() {
+        let timestamp_node = Arc::new(Node::FunctionLeaf {
+            function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
+        });
+
+        let context = NodeEvaluationContext {
+            unix_timestamp: Microseconds(123),
+            monotonic_time_since_boot: Microseconds(456),
+        };
+        let result = timestamp_node.evaluate(&context);
+
+        assert_eq!(result.unwrap(), NodeValue::Int64(123));
+    }
+
+    #[test]
+    fn evaluate_function_timestamp_time_source_realtime_without_mock_success() {
+        let timestamp_node = Arc::new(Node::FunctionLeaf {
+            function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
+        });
+
+        let context = NodeEvaluationContext::new();
+        let expected_timestamp = i64::try_from(
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros(),
+        )
+        .unwrap();
+        let result = timestamp_node.evaluate(&context);
+
+        let Ok(NodeValue::Int64(actual_timestamp)) = result else {
+            panic!("Unexpected result: {:?}", result);
+        };
+        assert!((expected_timestamp - actual_timestamp).abs() < 100_000);
+    }
+
+    #[test]
+    fn evaluate_function_timestamp_time_source_monotonic_success() {
+        let timestamp_node = Arc::new(Node::FunctionLeaf {
+            function: FunctionType::GetCurrentTimestamp {
+                time_source: TimeSource::MonotonicTimeSinceBoot,
+            },
+        });
+
+        let context = NodeEvaluationContext {
+            unix_timestamp: Microseconds(123),
+            monotonic_time_since_boot: Microseconds(456),
+        };
+        let result = timestamp_node.evaluate(&context);
+
+        assert_eq!(result.unwrap(), NodeValue::Int64(456));
     }
 }
