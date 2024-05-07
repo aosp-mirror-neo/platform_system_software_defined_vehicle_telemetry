@@ -5,8 +5,8 @@ use google_sdv_telemetry_configurable_publisher::binder::Strong;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 
 use log::{error, info};
-use protobuf::Message;
-use rand::{rngs::SmallRng, Rng, SeedableRng};
+use protobuf::{Error, Message};
+use rand::Rng;
 use std::sync::{Arc, Mutex};
 use tokio::{sync::Notify, time::Duration};
 
@@ -20,57 +20,53 @@ impl RandomIntegerPublisher {
         Self { subscriber: Mutex::new(None), notify_subscribed }
     }
 
-    pub fn subscribe(
-        &self,
-        subscriber: &Strong<dyn ISubscriber>,
-        _config: Option<&[u8]>,
-    ) -> Result<(), String> {
+    pub fn subscribe(&self, subscriber: &Strong<dyn ISubscriber>, _config: Option<&[u8]>) {
         let mut guard = self.subscriber.lock().unwrap();
         *guard = Some(subscriber.clone());
         self.notify_subscribed.notify_one();
-
-        Ok(())
     }
 
-    // Publishes messages at random intervals until the map is cleared.
-    pub async fn publish_data_randomly(&self, min_interval_ms: u64, max_interval_ms: u64) {
-        let mut small_rng = SmallRng::from_entropy();
+    // Publishes messages at random intervals until there is no longer a subscriber.
+    pub async fn publish_data_randomly(
+        &self,
+        min_interval: Duration,
+        max_interval: Duration,
+    ) -> Result<(), Error> {
+        let interval_range = min_interval..max_interval;
+        let mut rng = rand::thread_rng();
 
         loop {
-            // Verify that the map hasn't been cleared.
-            if self.subscriber.lock().unwrap().is_none() {
-                return;
-            }
+            match &*self.subscriber.lock().unwrap() {
+                Some(subscriber) => {
+                    // Generate random data and send to subscriber.
+                    let random_value: i32 = rng.gen();
+                    let mut message = SampleMessage::new();
+                    message.sample_data = random_value;
+                    info!("Sending message to subscriber: {}", &message);
 
-            // If there is an interval, sleep randomly in within bounds, otherwise sleep fixed duration.
-            tokio::time::sleep(Duration::from_millis(if min_interval_ms != max_interval_ms {
-                small_rng.gen_range(min_interval_ms..max_interval_ms)
-            } else {
-                min_interval_ms
-            }))
-            .await;
-
-            // Generate random data and send to subscribers.
-            let mut rng = rand::thread_rng();
-            let random_value: i32 = rng.gen(); // Generate a random i32
-
-            if let Some(subscriber) = &*self.subscriber.lock().unwrap() {
-                info!("Sending data to subscriber {}", random_value);
-                let mut message = SampleMessage::new();
-                message.sample_data = random_value;
-                let res = subscriber.sendData(&message.write_to_bytes().unwrap());
-
-                if res.is_err() {
-                    error!("Error in sending data {:?}", res);
+                    if let Err(err) = subscriber.sendData(&message.write_to_bytes()?) {
+                        error!("Error while sending message to subscriber: {:?}", err);
+                    }
                 }
-            }
-        }
-    }
+                None => {
+                    // Stop publishing data if we no longer have a subscriber.
+                    break;
+                }
+            };
 
-    pub fn unsubscribe(&self, _config: Option<&[u8]>) -> Result<(), String> {
-        let mut guard = self.subscriber.lock().unwrap();
-        *guard = None;
+            tokio::time::sleep(if interval_range.is_empty() {
+                interval_range.start
+            } else {
+                rng.gen_range(min_interval..max_interval)
+            })
+            .await;
+        }
 
         Ok(())
+    }
+
+    pub fn unsubscribe(&self, _config: Option<&[u8]>) {
+        let mut guard = self.subscriber.lock().unwrap();
+        *guard = None;
     }
 }
