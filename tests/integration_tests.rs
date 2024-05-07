@@ -10,6 +10,7 @@ extern crate protobuf;
 use anyhow::{anyhow, Context};
 use protobuf::text_format::parse_from_str;
 use sdv_telemetry_bindgen as rust_to_c;
+use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 
 use log::{info, LevelFilter};
@@ -18,7 +19,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
-const CONFIG_PATH: &str = "tests/config.bin";
+const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = "telemetry_integr_test";
 const _: () = assert!(
     LOG_TAG.len() <= 23,
@@ -44,23 +45,23 @@ unsafe extern "C" fn on_status(
 }
 
 async fn process_config(
-    path: String,
+    path: &PathBuf,
     config_manager: &Pin<Box<MetricsConfigManager>>,
 ) -> anyhow::Result<String> {
-    let serialized_config = fs::read(&path)
-        .with_context(|| format!("Error in reading serialized config: {}", &path))?;
+    let serialized_config = metrics_config_reader_utils::read(path)
+        .with_context(|| format!("Error while reading config: {}", path.display()))?;
 
     let config_name = config_manager
         .add_metrics_config(&serialized_config)
         .await
         .map_err(|e| anyhow!(e))
-        .with_context(|| format!("Error in adding config: {}", &path))?;
+        .with_context(|| format!("Error while adding config: {}", path.display()))?;
 
     config_manager
         .activate_metrics_config(&config_name)
         .await
         .map_err(|e| anyhow!(e))
-        .with_context(|| format!("Error in activating config: {}", &config_name))?;
+        .with_context(|| format!("Error while activating config: {}", &config_name))?;
 
     Ok(config_name)
 }
@@ -90,10 +91,10 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     let mut report_manager = MetricsReportManager::new(service);
     let config_manager = MetricsConfigManager::new(service);
 
-    let config_path = CONFIG_PATH.to_string();
-    info!("Adding config: {:?}", config_path);
-    let config_name = process_config(config_path, &config_manager).await.unwrap();
-    info!("Config added: {:?}", config_name);
+    let config_path = PathBuf::from(CONFIG_PATH);
+    info!("Adding config: {}", config_path.display());
+    let config_name = process_config(&config_path, &config_manager).await.unwrap();
+    info!("Config added: {}", config_name);
 
     let metrics_report = report_manager.as_mut().get_metrics_report().await.unwrap();
     info!("Report received: {:?}", metrics_report);
