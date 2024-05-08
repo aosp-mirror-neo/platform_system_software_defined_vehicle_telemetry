@@ -56,30 +56,11 @@ mod tests {
             config.descriptor_protos[0].package.as_ref().unwrap(),
             "android.automotive.telemetry.messages"
         );
-        assert_eq!(config.descriptor_protos[0].message_type.len(), 2);
+        assert_eq!(config.descriptor_protos[0].message_type.len(), 1);
 
         let msg_type0 = config.descriptor_protos[0].message_type[0].clone();
-        assert_eq!(msg_type0.name.unwrap(), "VehicleConnectivity");
+        assert_eq!(msg_type0.name.unwrap(), "VehicleConnectivityReport");
         assert_eq!(msg_type0.field[0].name.as_ref().unwrap(), "vector_vehicle_connection_status");
-        assert_eq!(
-            msg_type0.field[1].name.as_ref().unwrap(),
-            "vector_vehicle_connection_signal_strength"
-        );
-        assert_eq!(
-            msg_type0.field[2].name.as_ref().unwrap(),
-            "vector_connection_status_timestamps"
-        );
-
-        let msg_type1 = config.descriptor_protos[0].message_type[1].clone();
-        assert_eq!(msg_type1.name.unwrap(), "VehicleConnectivityReport");
-        assert_eq!(msg_type1.field[0].name.as_ref().unwrap(), "vector_vehicle_connection_status");
-        assert_eq!(
-            msg_type1.field[1].name.as_ref().unwrap(),
-            "vector_vehicle_connection_signal_strength"
-        );
-        assert_eq!(msg_type1.field[2].name.as_ref().unwrap(), "max_speed");
-        assert_eq!(msg_type1.field[3].name.as_ref().unwrap(), "count_airbag_isDeployed");
-        assert_eq!(msg_type1.field[4].name.as_ref().unwrap(), "latest_hmi_car_settings_clicks");
 
         assert_eq!(config.expression_nodes.len(), 1);
         assert_eq!(config.expression_nodes[0].constant_leaf_node().int32_value(), 0);

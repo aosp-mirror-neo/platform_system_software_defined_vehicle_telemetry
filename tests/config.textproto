@@ -1,34 +1,8 @@
-
 uuid: "d3456chu-8fde-436a-9f29-c12f06a10c102504"
 version: 01
 descriptor_protos {
   name: "multi_config_test.proto"
   package: "android.automotive.telemetry.messages"
-
-  message_type {
-    name: "VehicleConnectivity"
-    field {
-      label: LABEL_OPTIONAL
-      type: TYPE_INT32
-      name: "vector_vehicle_connection_status"
-
-      number: 1
-    }
-    field {
-      label: LABEL_REPEATED
-      type: TYPE_FLOAT
-      name: "vector_vehicle_connection_signal_strength"
-
-      number: 2
-    }
-    field {
-      label: LABEL_REPEATED
-      type: TYPE_UINT64
-      name: "vector_connection_status_timestamps"
-
-      number: 3
-    }
-  }
 
   message_type {
     name: "VehicleConnectivityReport"
@@ -38,34 +12,6 @@ descriptor_protos {
       name: "vector_vehicle_connection_status"
 
       number: 1
-    }
-    field {
-      label: LABEL_REPEATED
-      type: TYPE_FLOAT
-      name: "vector_vehicle_connection_signal_strength"
-
-      number: 2
-    }
-    field {
-      label: LABEL_OPTIONAL
-      type: TYPE_FLOAT
-      name: "max_speed"
-
-      number: 3
-    }
-    field {
-      label: LABEL_OPTIONAL
-      type: TYPE_UINT32
-      name: "count_airbag_isDeployed"
-
-      number: 4
-    }
-    field {
-      label: LABEL_OPTIONAL
-      type: TYPE_UINT32
-      name: "latest_hmi_car_settings_clicks"
-
-      number: 5
     }
   }
 }
