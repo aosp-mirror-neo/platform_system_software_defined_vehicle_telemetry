@@ -3,12 +3,12 @@
 package google.sdv.telemetry;
 
 /**
- * Enables clients to receive telemetry report ready notifications.
+ * Enables clients to receive status codes and messages for API calls
  */
 @VintfStability
-oneway interface ITelemetryStatusListener {
+oneway interface ITelemetryApiStatusListener {
     /**
-     * Called by telemetry service to provide notifications on finished reports.
+     * Called by telemetry service to send back status codes and messages for APIs
      */
     void sendStatus(
             in int apiCallId, in int statusCode, in @utf8InCpp String statusMessage);
