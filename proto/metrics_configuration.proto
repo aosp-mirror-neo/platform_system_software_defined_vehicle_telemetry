@@ -242,8 +242,6 @@ message MetricsReport {
   google.protobuf.Any report_data = 7;
 }
 
-message SamplePublisherConfig {}
-
 // Builds a protobuf message of some given type, where the content of the
 // message is specified by the list of field assignments.
 message ProtoMessageBuilder {
