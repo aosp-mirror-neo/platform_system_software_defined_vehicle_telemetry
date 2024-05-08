@@ -49,7 +49,7 @@ enum class TelemetryServiceStatusCodes : int32_t {
     /**
      * Errors specific to set status listener
      */
-    SET_STATUS_LISTENER_FAILED = 410,
+    SET_MISC_STATUS_LISTENER_FAILED = 410,
 
     /**
      * Errors specific to get finished report

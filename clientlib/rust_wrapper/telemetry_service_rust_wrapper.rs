@@ -12,6 +12,7 @@ pub use status_codes::*;
 use status_codes_bindgen as status_codes;
 use std::ffi::{c_void, CStr};
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 use managers::metrics_config_manager;
 use managers::metrics_report_manager;
@@ -19,6 +20,37 @@ use managers::metrics_report_manager;
 /// Struct used to wrap ServiceHolder received from C in a typesafe manner
 #[repr(transparent)]
 pub struct TelemetryServiceHolder(*mut ServiceHolder);
+
+/// Callback that receives status for API calls.
+///
+/// # Safety
+///
+/// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
+///
+/// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
+///    the add_metrics_config api call. Listener will not be valid after the function completes
+pub unsafe extern "C" fn api_callback(
+    listener: *mut std::ffi::c_void,
+    status_code: i32,
+    status_msg: *const std::ffi::c_char,
+) {
+    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
+    // global allocator using Box::new(). For more info check
+    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
+    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(i32, String)>) };
+
+    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+    // safety requirements.
+    let msg = unsafe {
+        // Convert *const std::ffi::c_char to &CStr
+        let c_str = CStr::from_ptr(status_msg);
+
+        // Convert &CStr to String
+        c_str.to_str().unwrap().to_string()
+    };
+
+    sender.send((status_code, msg)).unwrap();
+}
 
 /// Callback function that receives status from telemetry service
 unsafe extern "C" fn on_status(
@@ -56,7 +88,7 @@ impl TelemetryServiceHolder {
         info!("Connecting to service");
 
         // SAFETY: safe to use as all pointers needed to satisfy safety requirements
-        // for on_status are passed.
+        // for status_callback are passed.
         let service = unsafe {
             let service_raw = rust_to_c::get_telemetry_service();
             if !service_raw.is_null() {
@@ -153,7 +185,7 @@ impl TelemetryServiceHolder {
     pub async fn set_report_ready_listener(
         &self,
         report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
-    ) -> Result<(), (i32, String)> {
+    ) -> Result<String, (i32, String)> {
         metrics_report_manager::set_report_ready_listener(self, report_ready_callback).await
     }
 
@@ -203,29 +235,52 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn set_status_listener(
+    pub async fn set_misc_status_listener(
         &self,
         status_callback: impl Fn(i32, String) + Send + Sync + 'static,
-    ) -> Result<(), (i32, String)> {
+    ) -> Result<String, (i32, String)> {
         let listener = Box::new(StatusListener { status_callback: Arc::new(status_callback) });
 
-        // SAFETY: `report_manager_raw` points to MetricsReportManager that is pinned
-        // and thus will not move in memory, and remain a valid reference making the
-        // function safe to call.
-        unsafe {
-            let raw_ptr = Box::into_raw(listener) as *mut c_void;
-            let status_code = rust_to_c::set_status_listener(self.0, raw_ptr, Some(on_status));
+        let (set_listener_sender, set_listener_receiver) = oneshot::channel();
+        let sender_wrapper = Box::new(set_listener_sender);
+
+        // SAFETY: `raw_listener` points to StatusListener and `raw_sender` points to a
+        // valid oneshot::Sender that are initialized using Box::new and thus will not move in memory,
+        // and remain a valid reference in case of successful rust_to_c api calls making the function
+        // safe to call.
+        // In case of failed api calls both the listeners are released to avoid memory leaks
+        let raw_listener = unsafe {
+            let raw_listener = Box::into_raw(listener);
+            let raw_sender = Box::into_raw(sender_wrapper);
+            let status_code = rust_to_c::set_misc_status_listener(
+                self.0,
+                raw_listener as *mut c_void,
+                Some(on_status),
+                raw_sender as *mut c_void,
+                Some(api_callback),
+            );
             if status_code
                 != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
             {
                 // Releasing memory in case of API call failure
-                let _ = Box::from_raw(raw_ptr as *mut StatusListener);
+                let _ = Box::from_raw(raw_listener);
+                let _ = Box::from_raw(raw_sender);
                 error!("Error in setting status listener");
                 return Err((status_code, "Invalid params".to_string()));
             }
-        }
+            raw_listener
+        };
 
-        Ok(())
+        let (status, message) = set_listener_receiver.await.unwrap();
+        if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+            Ok(message)
+        } else {
+            // Releasing memory in case of API call failure
+            // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
+            // raw_listener was created using Box::into_raw above.
+            let _ = unsafe { Box::from_raw(raw_listener) };
+            Err((status, message))
+        }
     }
 
     /// Clears a previously set status listener.
@@ -234,11 +289,11 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn clear_status_listener(&self) -> Result<(), (i32, String)> {
-        // SAFETY: safe to use as all pointers needed to satisfy safety requirements
+    pub async fn clear_misc_status_listener(&self) -> Result<(), (i32, String)> {
+        // SAFETY: safe to use as all pointers needed to satify safety requirements
         // for cb_func are passed.
         unsafe {
-            rust_to_c::clear_status_listener(self.0);
+            rust_to_c::clear_misc_status_listener(self.0);
         }
         Ok(())
     }

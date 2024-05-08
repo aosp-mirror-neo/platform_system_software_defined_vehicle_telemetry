@@ -64,11 +64,13 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
     return static_cast<int>(service->remove_all_metrics_configs(listener, cbFunc));
 }
 
-int set_report_ready_listener(ServiceHolder* holder, void* listener,
-                              ReportReadyListenerFunction cbFunc) {
+int set_report_ready_listener(ServiceHolder* holder, void* report_listener,
+                              ReportReadyCallbackFunction reportReadyCbFunc, void* api_listener,
+                              StatusCallbackFunction cbFunc) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(service->set_report_ready_listener(listener, cbFunc));
+    return static_cast<int>(service->set_report_ready_listener(report_listener, reportReadyCbFunc,
+                                                               api_listener, cbFunc));
 }
 
 int clear_report_ready_listener(ServiceHolder* holder) {
@@ -86,14 +88,17 @@ int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
                                                         report_number, listener, cbFunc));
 }
 
-int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc) {
+int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
+                             StatusCallbackFunction statusCbFunc, void* api_listener,
+                             StatusCallbackFunction apiCbFunc) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(service->set_status_listener(listener, cbFunc));
+    return static_cast<int>(service->set_misc_status_listener(status_listener, statusCbFunc,
+                                                              api_listener, apiCbFunc));
 }
 
-int clear_status_listener(ServiceHolder* holder) {
+int clear_misc_status_listener(ServiceHolder* holder) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(service->clear_status_listener());
+    return static_cast<int>(service->clear_misc_status_listener());
 }

@@ -1,42 +1,12 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use crate::api_callback;
 use crate::TelemetryServiceHolder;
 
 use sdv_telemetry_bindgen as rust_to_c;
 use status_codes_bindgen as status_codes;
-use std::ffi::{c_void, CStr, CString};
+use std::ffi::{c_void, CString};
 use tokio::sync::oneshot;
-
-/// Callback that handles config added event.
-///
-/// # Safety
-///
-/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
-///
-/// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
-///    the add_metrics_config api call. Listener will not be valid after the function completes
-unsafe extern "C" fn api_callback(
-    listener: *mut std::ffi::c_void,
-    status_code: i32,
-    status_msg: *const std::ffi::c_char,
-) {
-    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
-    // global allocator using Box::new(). For more info check
-    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(i32, String)>) };
-
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
-    let msg = unsafe {
-        // Convert *const std::ffi::c_char to &CStr
-        let c_str = CStr::from_ptr(status_msg);
-
-        // Convert &CStr to String
-        c_str.to_str().unwrap().to_string()
-    };
-
-    sender.send((status_code, msg)).unwrap();
-}
 
 pub async fn add_metrics_config(
     service: &TelemetryServiceHolder,

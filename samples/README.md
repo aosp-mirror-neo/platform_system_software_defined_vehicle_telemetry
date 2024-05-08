@@ -99,7 +99,7 @@ sdv_ivi_telemetry_service_agent
     10-26 23:33:36.174  1424  1427 I telemetry_rust_c_client: telemetry_rust_c_client::metrics_report_manager: Report received: c6005cea-8fde-436a-9f29-c12f06a10c102504
     10-26 23:33:36.174  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Report received: MetricsReport { report_number: 1, report_timestamp: MessageField(Some(Timestamp { seconds: 1698363216, nanos: 173714484, special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), report_reason: REGULAR, metrics_config_uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", metrics_config_version: 1, report_data: MessageField(Some(Any { type_url: "type.googleapis.com/android.automotive.telemetry.messages.VehicleConnectivityReport", value: [8, 0], special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } }
     10-26 23:33:36.174  1217  1221 I SdvTelemetryService: sdv_telemetry: removeMetricsConfig: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    10-26 23:33:36.175  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Successfully removed config
+    10-26 23:33:36.175  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: successfully removed config
     ```
 
 Check logs with `adb logcat`
