@@ -1,6 +1,7 @@
 #!/bin/bash
 set -eu -o pipefail
 source tests/manual_testing/script/.env
+OUT_DIR=$(realpath $OUT_DIR)
 CF_REPORTS_PATH="/data/local/tmp/binary_reports"
 
 log() {
