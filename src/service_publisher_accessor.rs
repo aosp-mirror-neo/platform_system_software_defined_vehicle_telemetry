@@ -16,6 +16,9 @@ pub trait ServicePublisherAccessor: Send + Sync {
     /// Returns error if the service publisher is registered, but metadata retrieval failed.
     fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>>;
 
+    /// Returns latest published message without subscribing to the publisher.
+    fn get_latest_message(&self, service_name: &str) -> anyhow::Result<GetLatestMessageOutcome>;
+
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
     async fn create_subscription(
@@ -34,6 +37,16 @@ pub struct ServicePublisherMetadata {
     pub message_descriptor: MessageDescriptor,
 }
 
+/// Successful result of GetLatestMessage function.
+pub enum GetLatestMessageOutcome {
+    /// Accessor was able to retrieve the latest message.
+    Available(Option<Box<dyn MessageDyn>>),
+    /// The service with the specified service name is not available.
+    NotAvailable,
+    /// Get latest message operation is not supported by the accessor.
+    NotSupported,
+}
+
 /// Successful result of subscription creation.
 pub enum CreateSubscriptionOutcome {
     /// Subscription was successfully created.
@@ -47,6 +60,18 @@ pub enum CreateSubscriptionOutcome {
 pub trait ServicePublisherSubscription: Send + Sync {
     /// Ends the underlying subscription.
     async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error>;
+}
+
+impl GetLatestMessageOutcome {
+    /// Returns the contained Available value, consuming the self value.
+    /// Panics if the value is not Available.
+    pub fn unwrap(self) -> Option<Box<dyn MessageDyn>> {
+        match self {
+            GetLatestMessageOutcome::Available(msg) => msg,
+            GetLatestMessageOutcome::NotAvailable => panic!("Unexpected result: Not Available"),
+            GetLatestMessageOutcome::NotSupported => panic!("Unexpected result: Not Supported"),
+        }
+    }
 }
 
 impl CreateSubscriptionOutcome {

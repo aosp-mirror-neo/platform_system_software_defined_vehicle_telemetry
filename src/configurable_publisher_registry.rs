@@ -9,7 +9,7 @@ use log::info;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherMetadata, ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, GetLatestMessageOutcome, ServicePublisherMetadata, ServicePublisherSubscription};
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
@@ -87,6 +87,10 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             ServicePublisherMetadata { supports_get: false, message_descriptor }
         });
         Ok(metadata)
+    }
+
+    fn get_latest_message(&self, _service_name: &str) -> anyhow::Result<GetLatestMessageOutcome> {
+        Ok(GetLatestMessageOutcome::NotSupported)
     }
 
     async fn create_subscription(
@@ -310,6 +314,17 @@ mod tests {
 
         assert!(!res.supports_get);
         assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
+    }
+
+    #[tokio::test]
+    async fn get_latest_message_returns_not_supported() {
+        let configurable_publisher = MockConfigurablePublisher::new();
+        let configurable_publisher_registry =
+            create_configurable_publisher_registry(configurable_publisher).await;
+
+        let res = configurable_publisher_registry.get_latest_message(SERVICE_NAME).unwrap();
+
+        assert!(matches!(res, GetLatestMessageOutcome::NotSupported));
     }
 
     #[tokio::test]
