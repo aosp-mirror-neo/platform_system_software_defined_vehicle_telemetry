@@ -37,7 +37,9 @@ async fn process_config(
 
     // Metrics config is either read directly from a binary file into serialized config or from a
     // textproto file and then converted into serialized config.
-    let serialized_config = metrics_config_reader_utils::read(&path).unwrap();
+    let serialized_config = metrics_config_reader_utils::read(&path).map_err(|e| {
+        (rust_to_c::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR, e.to_string())
+    })?;
 
     let config_name;
     let add_config_res = service.add_metrics_config(&serialized_config).await;
