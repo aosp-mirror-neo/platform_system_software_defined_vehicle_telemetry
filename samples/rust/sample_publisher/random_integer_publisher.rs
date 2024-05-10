@@ -1,7 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
-use google_sdv_telemetry_configurable_publisher::binder::Strong;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}};
+use google_sdv_telemetry_configurable_publisher::binder::{BinderFeatures, Strong, Result as BinderResult};
+
+use crate::random_integer_publisher_subscription::RandomIntegerPublisherSubscription;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 
 use log::{error, info};
@@ -11,19 +13,29 @@ use std::sync::{Arc, Mutex};
 use tokio::{sync::Notify, time::Duration};
 
 pub struct RandomIntegerPublisher {
-    subscriber: Mutex<Option<Strong<dyn ISubscriber>>>,
+    subscriber: Arc<Mutex<Option<Strong<dyn ISubscriber>>>>,
     notify_subscribed: Arc<Notify>,
 }
 
 impl RandomIntegerPublisher {
     pub fn new(notify_subscribed: Arc<Notify>) -> Self {
-        Self { subscriber: Mutex::new(None), notify_subscribed }
+        Self { subscriber: Mutex::new(None).into(), notify_subscribed }
     }
 
-    pub fn subscribe(&self, subscriber: &Strong<dyn ISubscriber>, _config: Option<&[u8]>) {
+    pub fn create_subscription(
+        &self,
+        subscriber: &Strong<dyn ISubscriber>,
+        _config: Option<&[u8]>,
+    ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
         let mut guard = self.subscriber.lock().unwrap();
         *guard = Some(subscriber.clone());
         self.notify_subscribed.notify_one();
+
+        let subs = RandomIntegerPublisherSubscription::new(Arc::downgrade(&self.subscriber));
+        let binder_subscription =
+            BnConfigurablePublisherSubscription::new_binder(subs, BinderFeatures::default());
+
+        Ok(binder_subscription)
     }
 
     // Publishes messages at random intervals until there is no longer a subscriber.
@@ -63,10 +75,5 @@ impl RandomIntegerPublisher {
         }
 
         Ok(())
-    }
-
-    pub fn unsubscribe(&self, _config: Option<&[u8]>) {
-        let mut guard = self.subscriber.lock().unwrap();
-        *guard = None;
     }
 }
