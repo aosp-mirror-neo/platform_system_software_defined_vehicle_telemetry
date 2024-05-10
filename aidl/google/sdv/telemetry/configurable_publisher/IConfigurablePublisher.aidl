@@ -2,6 +2,7 @@
 
 package google.sdv.telemetry.configurable_publisher;
 
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription;
 import google.sdv.telemetry.configurable_publisher.ISubscriber;
 
 /**
@@ -18,18 +19,9 @@ interface IConfigurablePublisher {
      * @param subscriber used by publisher to send data
      * @param configuration optional configuration associated with the subscriber. Configuration is
      *         opaque to the telemetry service and is sent as part of the Metrics Configuration
+     * @return IConfigurablePublisherSubscription configurable publishers subscription.
      *
      */
-    void subscribe(in ISubscriber subscriber, in @nullable byte[] configuration);
-
-    /**
-     * Unsubscribes from a registered publisher. It should return an error if the publisher is
-     * already unsubscribed or the API call fails.
-     * TODO: b/309128308: Design error mechanism for configurable publisher service
-     * TODO: b/317902294: Design how to store/manage subscriptions to configurable publishers
-     *
-     * @param configuration optional configuration associated with the subscriber. Configuration is
-     *         opaque to the telemetry service and is sent as part of the Metrics Configuration
-     */
-    void unsubscribe(in @nullable byte[] configuration);
+    IConfigurablePublisherSubscription create_subscription(
+            in ISubscriber subscriber, in @nullable byte[] configuration);
 }
