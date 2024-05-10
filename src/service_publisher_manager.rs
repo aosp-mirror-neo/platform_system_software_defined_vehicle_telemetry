@@ -8,7 +8,8 @@ use protobuf::MessageDyn;
 use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMetadata,
+    CreateSubscriptionOutcome, GetLatestMessageOutcome, ServicePublisherAccessor,
+    ServicePublisherMetadata,
 };
 
 /// Struct for managing all implementations of ServicePublisherAccessor trait.
@@ -27,8 +28,8 @@ impl ServicePublisherManager {
 #[async_trait]
 impl ServicePublisherAccessor for ServicePublisherManager {
     fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
-        for service_publisher_manager_impl in &self.service_publisher_registry {
-            let metadata = service_publisher_manager_impl.get_metadata(service_name)?;
+        for accessor in &self.service_publisher_registry {
+            let metadata = accessor.get_metadata(service_name)?;
 
             if metadata.is_some() {
                 return Ok(metadata);
@@ -36,6 +37,18 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         }
 
         Ok(None)
+    }
+
+    fn get_latest_message(&self, service_name: &str) -> anyhow::Result<GetLatestMessageOutcome> {
+        for accessor in &self.service_publisher_registry {
+            let outcome = accessor.get_latest_message(service_name)?;
+
+            if let GetLatestMessageOutcome::Available(_) = outcome {
+                return Ok(outcome);
+            }
+        }
+
+        Ok(GetLatestMessageOutcome::NotAvailable)
     }
 
     async fn create_subscription(
@@ -114,6 +127,52 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_latest_message_success() {
+        let service_publisher = Arc::new(
+            MockServicePublisherAccessor::new().with_next_latest_message(Box::new(Empty::new())),
+        );
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let res = service_publisher_manager_impl
+            .get_latest_message(SERVICE_NAME)
+            .unwrap()
+            .unwrap()
+            .expect("Message should be set");
+
+        assert_eq!(service_publisher.get_num_get_latest_message_calls(), 1);
+        assert_eq!(&res, &(Box::new(Empty::new()) as Box<dyn MessageDyn>));
+    }
+
+    #[tokio::test]
+    async fn get_latest_message_propagates_error() {
+        let service_publisher = Arc::new(
+            MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
+        );
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let err = service_publisher_manager_impl.get_latest_message(SERVICE_NAME2).err().unwrap();
+
+        assert_eq!(err.to_string(), ERROR_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn get_latest_message_no_match_returns_not_available() {
+        let service_publisher =
+            Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let res = service_publisher_manager_impl.get_latest_message(SERVICE_NAME2).unwrap();
+
+        assert!(matches!(res, GetLatestMessageOutcome::NotAvailable));
+    }
+
+    #[tokio::test]
     async fn create_subscription_success() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
         let service_publishers =
@@ -144,6 +203,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
+    }
+
+    #[tokio::test]
+    async fn create_subscription_no_match_returns_not_available() {
+        let service_publisher =
+            Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let res = service_publisher_manager_impl
+            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
+            .await
+            .unwrap();
+
+        assert!(matches!(res, CreateSubscriptionOutcome::NotAvailable(_)));
     }
 
     #[tokio::test]
