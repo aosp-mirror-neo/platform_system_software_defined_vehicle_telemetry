@@ -21,6 +21,9 @@ source "$ANDROID_BUILD_TOP/build/envsetup.sh"
 TEST_TARGETS='libsdv_telemetry_* sdv_telemetry_*'
 
 log "Building code..."
+
+# Running `m` is needed to build essential tools like `cvd`.
+m
 # Build all tests, but do not run them yet. We do this before restarting the VM
 # so that we error earlier and do not need to wait for the VM to restart.
 atest --build $TEST_TARGETS
