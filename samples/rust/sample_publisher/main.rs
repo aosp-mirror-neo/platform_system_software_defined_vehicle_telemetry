@@ -68,16 +68,16 @@ async fn main() -> Result<(), binder::Status> {
 
     service.registerPublisher(&publisher_info, &binder_publisher)?;
 
-    info!("Waiting for subscription");
-    notify_subscribed.notified().await;
+    loop {
+        info!("Waiting for subscription");
+        notify_subscribed.notified().await;
 
-    info!("Publishing data");
-    publisher
-        .publish_data_randomly(Duration::from_secs(1), Duration::from_secs(1))
-        .await
-        .expect("Failed to publish data");
+        info!("Publishing data");
+        publisher
+            .publish_data_randomly(Duration::from_secs(1), Duration::from_secs(1))
+            .await
+            .expect("Failed to publish data");
 
-    info!("Stopped publishing data");
-
-    Ok(())
+        info!("Stopped publishing data");
+    }
 }
