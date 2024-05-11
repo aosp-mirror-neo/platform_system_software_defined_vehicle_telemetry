@@ -30,7 +30,7 @@ impl ServiceAdapter for MockServiceAdapter {
         _service_name: &str,
         configuration: &Option<Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
+    ) -> anyhow::Result<ServiceSubscription> {
         self.new_message_callback.lock().await.replace(new_message_callback);
         if let Some(configuration) = configuration {
             self.latest_configuration.lock().unwrap().replace(configuration.clone());
@@ -47,10 +47,7 @@ impl ServiceAdapter for MockServiceAdapter {
         })
     }
 
-    async fn unsubscribe(
-        &self,
-        _subscription: ServiceSubscription,
-    ) -> Result<(), ServiceAdapterUnsubscribeError> {
+    async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::Release);
         if self.block_unsubscribe {
             self.notify_unsubscribing.notify_one();

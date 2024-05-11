@@ -6,7 +6,6 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::service_publisher_accessor::{
@@ -24,14 +23,11 @@ pub(crate) trait ServiceAdapter {
         service_name: &str,
         configuration: &Option<Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError>;
+    ) -> anyhow::Result<ServiceSubscription>;
 
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
-    async fn unsubscribe(
-        &self,
-        subscription: ServiceSubscription,
-    ) -> Result<(), ServiceAdapterUnsubscribeError>;
+    async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
 }
 
 /// Stores details about a service subscription.
@@ -51,28 +47,6 @@ enum ServiceSubscriptionType {
         service_name: String,
         /// Unique service subscription identifier.
         subscription_id: u32,
-    },
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum ServiceAdapterSubscribeError {
-    #[error("Unable to perform subscription: {error}")]
-    SubscriptionFailed {
-        #[from]
-        error: anyhow::Error,
-    },
-}
-
-#[derive(Error, Debug)]
-#[non_exhaustive]
-pub(crate) enum ServiceAdapterUnsubscribeError {
-    #[error("Service subscription is invalid")]
-    InvalidServiceSubscription,
-    #[error("Unable to unsubscribe: {error}")]
-    UnsubscribeFailed {
-        #[from]
-        error: anyhow::Error,
     },
 }
 
@@ -124,7 +98,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         service_name: &str,
         configuration: &Option<Any>,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
+    ) -> anyhow::Result<ServiceSubscription> {
         let maybe_subscription_type = if let Some(configuration) = configuration {
             // Subscription has configuration, so it can't be shared.
             let configuration_bytes = configuration.write_length_delimited_to_bytes().unwrap();
@@ -195,16 +169,11 @@ impl ServiceAdapter for ServiceAdapterImpl {
             Ok(ServiceSubscription { subscription_type })
         } else {
             // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
-            Err(ServiceAdapterSubscribeError::SubscriptionFailed {
-                error: anyhow::anyhow!("Service with name {} is not available", service_name),
-            })
+            Err(anyhow::anyhow!("Service with name {} is not available", service_name))
         }
     }
 
-    async fn unsubscribe(
-        &self,
-        subscription: ServiceSubscription,
-    ) -> Result<(), ServiceAdapterUnsubscribeError> {
+    async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()> {
         match subscription.subscription_type {
             ServiceSubscriptionType::Configured { accessor_subscription } => {
                 accessor_subscription.unsubscribe().await?;
@@ -215,11 +184,9 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         let (_, callback_container) = o.get();
                         let is_last_callback = {
                             let mut callbacks = callback_container.lock().await;
-                            if callbacks.remove(&subscription_id).is_none() {
-                                return Err(
-                                    ServiceAdapterUnsubscribeError::InvalidServiceSubscription,
-                                );
-                            }
+                            let _ = callbacks
+                                .remove(&subscription_id)
+                                .expect("Subscription with the specified ID should exist");
                             callbacks.is_empty()
                         };
 
@@ -230,8 +197,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             underlying_subscription.unsubscribe().await?;
                         }
                     }
-                    Entry::Vacant(_) => {
-                        return Err(ServiceAdapterUnsubscribeError::InvalidServiceSubscription)
+                    Entry::Vacant(v) => {
+                        panic!("No entry found for service name {}", v.key());
                     }
                 }
             }
@@ -332,11 +299,7 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains(ERROR_MESSAGE)),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -352,11 +315,7 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains("is not available")),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(err.to_string().contains("is not available"), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -402,11 +361,7 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains(ERROR_MESSAGE)),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -422,11 +377,7 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        assert!(
-            matches!(&err, ServiceAdapterSubscribeError::SubscriptionFailed { error } if error.to_string().contains("is not available")),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(err.to_string().contains("is not available"), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -519,20 +470,15 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn unsubscribe_not_subscribed_fails() {
+    #[should_panic]
+    async fn unsubscribe_not_subscribed_panics() {
         let service_adapter = create_default_service_adapter();
 
         // Create subscription for a different service.
         service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
 
         // Try unsubscribing using invalid subscription.
-        let err = service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap_err();
-
-        assert!(
-            matches!(&err, ServiceAdapterUnsubscribeError::InvalidServiceSubscription),
-            "Unexpected error: {}",
-            err
-        );
+        service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap();
     }
 
     #[tokio::test]

@@ -14,10 +14,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::ast::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
-use crate::metrics_config_orchestrator::service_adapter::{
-    ServiceAdapter, ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError,
-    ServiceSubscription,
-};
+use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceSubscription};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 
 type CallbackFn = Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>;
@@ -41,9 +38,9 @@ pub(crate) trait Publisher: Send + Sync {
 #[non_exhaustive]
 pub enum PublisherActivateError {
     #[error("Service adapter failed to process subscription request: {error}")]
-    ServiceAdapterError {
+    ServiceAdapterSubscribeError {
         #[from]
-        error: ServiceAdapterSubscribeError,
+        error: anyhow::Error,
     },
 }
 
@@ -51,9 +48,9 @@ pub enum PublisherActivateError {
 #[non_exhaustive]
 pub(crate) enum PublisherDeactivateError {
     #[error("Service adapter failed to process unsubscription request: {error}")]
-    ServiceAdapterError {
+    ServiceAdapterUnsubscribeError {
         #[from]
-        error: ServiceAdapterUnsubscribeError,
+        error: anyhow::Error,
     },
 }
 

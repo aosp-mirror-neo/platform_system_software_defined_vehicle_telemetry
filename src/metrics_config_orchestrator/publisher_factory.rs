@@ -185,9 +185,7 @@ mod tests {
     use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::publisher::PublisherType;
-    use crate::metrics_config_orchestrator::service_adapter::{
-        ServiceAdapterSubscribeError, ServiceAdapterUnsubscribeError, ServiceSubscription,
-    };
+    use crate::metrics_config_orchestrator::service_adapter::ServiceSubscription;
     use crate::metrics_config_orchestrator::trigger::TriggerType;
 
     const INTERVAL_MS: u64 = 42;
@@ -204,14 +202,11 @@ mod tests {
             _service_name: &str,
             _configuration: &Option<Any>,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-        ) -> Result<ServiceSubscription, ServiceAdapterSubscribeError> {
+        ) -> anyhow::Result<ServiceSubscription> {
             unreachable!()
         }
 
-        async fn unsubscribe(
-            &self,
-            _subscription: ServiceSubscription,
-        ) -> Result<(), ServiceAdapterUnsubscribeError> {
+        async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
             unreachable!()
         }
     }
