@@ -932,7 +932,6 @@ mod tests {
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
     };
-    use crate::metrics_config_orchestrator::service_adapter::ServiceAdapterSubscribeError;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
@@ -1975,9 +1974,7 @@ mod tests {
         // Setup mock factory.
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
         publisher_mock.set_activate_callback(move |_| {
-            Some(PublisherActivateError::ServiceAdapterError {
-                error: ServiceAdapterSubscribeError::SubscriptionFailed { error: anyhow!("Error") },
-            })
+            Some(PublisherActivateError::ServiceAdapterSubscribeError { error: anyhow!("Error") })
         });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
@@ -1994,7 +1991,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::ServiceAdapterError { .. })),
+            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::ServiceAdapterSubscribeError { .. })),
             "Unexpected error: {:?}",
             err
         );
