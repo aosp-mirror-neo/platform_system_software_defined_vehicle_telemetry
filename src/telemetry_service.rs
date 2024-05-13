@@ -307,7 +307,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         self.send_status(
             api_call_id,
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
-            "Successfully Removed All Configs",
+            "successfully Removed All Configs",
         )
     }
 

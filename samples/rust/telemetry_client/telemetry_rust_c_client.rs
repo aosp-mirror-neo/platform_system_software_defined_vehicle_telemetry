@@ -145,7 +145,7 @@ async fn main() -> Result<(), binder::Status> {
                 service.remove_metrics_config(&metrics_report.metrics_config_uuid).await;
             match remove_config_res {
                 Ok(_) => {
-                    info!("Successfully removed config");
+                    info!("successfully removed config");
                     active_configs.remove(&metrics_report.metrics_config_uuid);
                 }
                 Err(e) => {
@@ -155,7 +155,7 @@ async fn main() -> Result<(), binder::Status> {
         }
     }
 
-    service.clear_status_listener().await.unwrap();
+    service.clear_misc_status_listener().await.unwrap();
     service.clear_report_ready_listener().await.unwrap();
 
     Ok(())

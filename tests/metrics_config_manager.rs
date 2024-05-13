@@ -140,7 +140,10 @@ unsafe impl Send for MetricsConfigManager {}
 unsafe impl Sync for MetricsConfigManager {}
 
 impl MetricsConfigManager {
-    pub fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
+    /// # Safety
+    ///
+    /// * `service` must be non-null and point to a valid ServiceHolder
+    pub unsafe fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
         Box::pin(MetricsConfigManager { service, _pin: PhantomPinned })
     }
 

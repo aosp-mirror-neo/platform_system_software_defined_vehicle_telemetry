@@ -18,6 +18,7 @@ use std::ffi::{CStr, OsStr};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use tokio::sync::oneshot;
 
 const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = "telemetry_integr_test";
@@ -26,11 +27,24 @@ const _: () = assert!(
     "LOG_TAG should be less than or equal to 23 characters, as it will otherwise be truncated by adb."
 );
 
-unsafe extern "C" fn on_status(
-    _listener: *mut std::ffi::c_void,
+/// Callback that receives status for API calls.
+///
+/// # Safety
+///
+/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
+///
+/// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
+///    the add_metrics_config api call. Listener will not be valid after the function completes
+pub unsafe extern "C" fn api_callback(
+    listener: *mut std::ffi::c_void,
     status_code: i32,
     status_msg: *const std::ffi::c_char,
 ) {
+    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
+    // global allocator using Box::new(). For more info check
+    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
+    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(i32, String)>) };
+
     // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
     // safety requirements.
     let msg = unsafe {
@@ -40,8 +54,8 @@ unsafe extern "C" fn on_status(
         // Convert &CStr to String
         c_str.to_str().unwrap().to_string()
     };
-
-    info!("Status code: {} status message: {}", status_code, msg);
+    info!("status code: {} msg: {}", status_code, msg);
+    sender.send((status_code, msg)).unwrap();
 }
 
 async fn process_config(
@@ -74,22 +88,16 @@ async fn telemetry_service_simple_config_end_to_end_test() {
         logger::Config::default().with_tag_on_device(LOG_TAG).with_max_level(LevelFilter::Trace),
     );
 
-    let service;
-
     info!("Connecting to service");
     // Unsafe block needed to be able to call C API functions
     // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: safe to use as all pointers needed to satisfy the safety requirements
-    // for on_status are passed.
-    unsafe {
-        service = rust_to_c::get_telemetry_service();
-        assert!(!service.is_null());
-        rust_to_c::set_status_listener(service, std::ptr::null_mut(), Some(on_status));
-    }
-    info!("Connected to service");
+    // SAFETY: safe to use as the return value is asserted against before moving forward.
+    let service = unsafe { rust_to_c::get_telemetry_service() };
+    assert!(!service.is_null());
 
-    let mut report_manager = MetricsReportManager::new(service);
-    let config_manager = MetricsConfigManager::new(service);
+    // SAFETY: safe to use as the service passed is non null and points to a valid ServiceHolder.
+    let (mut report_manager, config_manager) =
+        unsafe { (MetricsReportManager::new(service).await, MetricsConfigManager::new(service)) };
 
     let config_path = PathBuf::from(CONFIG_PATH);
     info!("Adding config: {}", config_path.display());
@@ -100,14 +108,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Report received: {:?}", metrics_report);
 
     config_manager.remove_metrics_config(&metrics_report.metrics_config_uuid).await.unwrap();
-    info!("Successfully removed config");
-
-    // Unsafe block needed to be able to call C API functions
-    // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: safe to use as service is a valid pointer to ServiceHolder.
-    unsafe {
-        rust_to_c::clear_status_listener(service);
-    }
+    info!("successfully removed config");
 }
 
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {

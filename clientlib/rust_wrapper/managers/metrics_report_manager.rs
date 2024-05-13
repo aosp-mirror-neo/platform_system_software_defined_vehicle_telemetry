@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use crate::api_callback;
 use crate::TelemetryServiceHolder;
 
 use log::{error, info};
@@ -116,29 +117,52 @@ struct MetricsReportReadyListener {
 pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
     report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
-) -> Result<(), (i32, String)> {
+) -> Result<String, (i32, String)> {
     let listener = Box::new(MetricsReportReadyListener {
         report_ready_callback: Arc::new(report_ready_callback),
     });
 
-    // SAFETY: `report_manager_raw` points to MetricsReportManager that is pinned
-    // and thus will not move in memory, and remain a valid reference making the
-    // function safe to call.
-    unsafe {
-        let raw_ptr = Box::into_raw(listener) as *mut c_void;
-        let status_code =
-            rust_to_c::set_report_ready_listener(service.0, raw_ptr, Some(on_report_ready));
+    let (set_listener_sender, set_listener_receiver) = oneshot::channel();
+    let sender_wrapper = Box::new(set_listener_sender);
+
+    // SAFETY: `raw_listener` points to MetricsReportReadyListener and `raw_sender` points to a
+    // valid oneshot::Sender that are initialized using Box::new and thus will not move in memory,
+    // and remain a valid reference in case of successful rust_to_c api calls making the function
+    // safe to call.
+    // In case of failed api calls both the listeners are released to avoid memory leaks
+    let raw_listener = unsafe {
+        let raw_listener = Box::into_raw(listener);
+        let raw_sender = Box::into_raw(sender_wrapper);
+
+        let status_code = rust_to_c::set_report_ready_listener(
+            service.0,
+            raw_listener as *mut c_void,
+            Some(on_report_ready),
+            raw_sender as *mut c_void,
+            Some(api_callback),
+        );
         if status_code
             != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
         {
             // Releasing memory in case of API call failure
-            let _ = Box::from_raw(raw_ptr as *mut MetricsReportReadyListener);
+            let _ = Box::from_raw(raw_listener);
+            let _ = Box::from_raw(raw_sender);
             error!("Error in setting report ready listener");
             return Err((status_code, "Invalid params".to_string()));
         }
-    }
+        raw_listener
+    };
 
-    Ok(())
+    let (status, message) = set_listener_receiver.await.unwrap();
+    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+        Ok(message)
+    } else {
+        // Releasing memory in case of API call failure
+        // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
+        // raw_listener was created using Box::into_raw above.
+        let _ = unsafe { Box::from_raw(raw_listener) };
+        Err((status, message))
+    }
 }
 
 pub async fn clear_report_ready_listener(

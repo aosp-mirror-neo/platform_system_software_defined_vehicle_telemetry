@@ -3,10 +3,11 @@
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_TELEMETRY_SERVICE_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_TELEMETRY_SERVICE_H
 
+#include "api_status_listener_impl.h"
 #include "callback_container.h"
+#include "misc_status_listener_impl.h"
 #include "report_listener_impl.h"
 #include "report_ready_listener_impl.h"
-#include "status_listener_impl.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryService.h>
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
@@ -40,24 +41,32 @@ public:
     TelemetryService& operator=(const TelemetryService&) = delete;
 
     TelemetryServiceStatusCodes activate_metrics_config(const std::string& metricsConfigUuid,
-                                                        void* listener, CbFunction cbFunc);
+                                                        void* listener,
+                                                        StatusCallbackFunction cbFunc);
     TelemetryServiceStatusCodes deactivate_metrics_config(const std::string& metricsConfigUuid,
-                                                          void* listener, CbFunction cbFunc);
-    TelemetryServiceStatusCodes add_metrics_config(const std::vector<uint8_t>& metricsConfig,
-                                                   void* listener, CbFunction cbFunc);
-    TelemetryServiceStatusCodes remove_all_metrics_configs(void* listener, CbFunction cbFunc);
+                                                          void* listener,
+                                                          StatusCallbackFunction cbFunc);
+    TelemetryServiceStatusCodes add_metrics_config(const std::vector<uint8_t>& metricConfig,
+                                                   void* listener, StatusCallbackFunction cbFunc);
+    TelemetryServiceStatusCodes remove_all_metrics_configs(void* listener,
+                                                           StatusCallbackFunction cbFunc);
     TelemetryServiceStatusCodes remove_metrics_config(const std::string& metricsConfigUuid,
-                                                      void* listener, CbFunction cbFunc);
+                                                      void* listener,
+                                                      StatusCallbackFunction cbFunc);
 
-    TelemetryServiceStatusCodes set_report_ready_listener(void* listener,
-                                                          ReportReadyCallbackFunction cbFunc);
+    TelemetryServiceStatusCodes set_report_ready_listener(
+            void* report_listener, ReportReadyCallbackFunction reportReadyCbFunc,
+            void* api_listener, StatusCallbackFunction cbFunc);
     TelemetryServiceStatusCodes clear_report_ready_listener();
     TelemetryServiceStatusCodes get_metrics_report(const char* metrics_config_uuid,
                                                    const char* report_config_name,
                                                    int32_t report_number, void* listener,
                                                    GetReportCallbackFunction cbFunc);
-    TelemetryServiceStatusCodes set_status_listener(void* listener, CbFunction cbFunc);
-    TelemetryServiceStatusCodes clear_status_listener();
+    TelemetryServiceStatusCodes set_misc_status_listener(void* status_listener,
+                                                         StatusCallbackFunction statusCbFunc,
+                                                         void* api_listener,
+                                                         StatusCallbackFunction apiCbFunc);
+    TelemetryServiceStatusCodes clear_misc_status_listener();
 
 private:
     using ApiId = int;
@@ -69,11 +78,9 @@ private:
     ApiId getNextApiId();
 
     std::atomic<ApiId> mLastApiId = 1;
-    CallbackContainer mCallbackContainer;
-    std::shared_ptr<StatusListenerImpl> mStatusListenerImpl =
-            ndk::SharedRefBase::make<StatusListenerImpl>(mCallbackContainer);
-    std::shared_ptr<ReportReadyListenerImpl> mReportReadyListener =
-            ndk::SharedRefBase::make<ReportReadyListenerImpl>();
+    StatusCallbackContainer mStatusCallbackContainer;
+    std::shared_ptr<ApiStatusListenerImpl> mApiStatusListenerImpl =
+            ndk::SharedRefBase::make<ApiStatusListenerImpl>(mStatusCallbackContainer);
 
     std::shared_ptr<ITelemetryService> mBinderService;
 };
