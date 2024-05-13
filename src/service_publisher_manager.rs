@@ -8,7 +8,7 @@ use protobuf::MessageDyn;
 use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetLatestMessageOutcome, ServicePublisherAccessor,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessor,
     ServicePublisherMetadata,
 };
 
@@ -39,16 +39,19 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         Ok(None)
     }
 
-    fn get_latest_message(&self, service_name: &str) -> anyhow::Result<GetLatestMessageOutcome> {
+    fn get_message_provider(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
         for accessor in &self.service_publisher_registry {
-            let outcome = accessor.get_latest_message(service_name)?;
+            let outcome = accessor.get_message_provider(service_name)?;
 
-            if let GetLatestMessageOutcome::Available(_) = outcome {
+            if let GetMessageProviderOutcome::Available(_) = outcome {
                 return Ok(outcome);
             }
         }
 
-        Ok(GetLatestMessageOutcome::NotAvailable)
+        Ok(GetMessageProviderOutcome::NotAvailable)
     }
 
     async fn create_subscription(
@@ -127,26 +130,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_latest_message_success() {
-        let service_publisher = Arc::new(
-            MockServicePublisherAccessor::new().with_next_latest_message(Box::new(Empty::new())),
-        );
+    async fn get_message_provider_success() {
+        let service_publisher = Arc::new(MockServicePublisherAccessor::new());
         let service_publishers =
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl
-            .get_latest_message(SERVICE_NAME)
-            .unwrap()
-            .unwrap()
-            .expect("Message should be set");
+        service_publisher_manager_impl.get_message_provider(SERVICE_NAME).unwrap().unwrap();
 
-        assert_eq!(service_publisher.get_num_get_latest_message_calls(), 1);
-        assert_eq!(&res, &(Box::new(Empty::new()) as Box<dyn MessageDyn>));
+        assert_eq!(service_publisher.get_num_get_message_provider_calls(), 1);
     }
 
     #[tokio::test]
-    async fn get_latest_message_propagates_error() {
+    async fn get_message_provider_propagates_error() {
         let service_publisher = Arc::new(
             MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
         );
@@ -154,22 +150,22 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let err = service_publisher_manager_impl.get_latest_message(SERVICE_NAME2).err().unwrap();
+        let err = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).err().unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 
     #[tokio::test]
-    async fn get_latest_message_no_match_returns_not_available() {
+    async fn get_message_provider_no_match_returns_not_available() {
         let service_publisher =
             Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
         let service_publishers =
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl.get_latest_message(SERVICE_NAME2).unwrap();
+        let res = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).unwrap();
 
-        assert!(matches!(res, GetLatestMessageOutcome::NotAvailable));
+        assert!(matches!(res, GetMessageProviderOutcome::NotAvailable));
     }
 
     #[tokio::test]

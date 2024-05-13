@@ -9,7 +9,7 @@ use log::info;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, GetLatestMessageOutcome, ServicePublisherMetadata, ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMetadata, ServicePublisherSubscription};
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
@@ -87,8 +87,11 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         Ok(metadata)
     }
 
-    fn get_latest_message(&self, _service_name: &str) -> anyhow::Result<GetLatestMessageOutcome> {
-        Ok(GetLatestMessageOutcome::NotSupported)
+    fn get_message_provider(
+        &self,
+        _service_name: &str,
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
+        Ok(GetMessageProviderOutcome::NotSupported)
     }
 
     async fn create_subscription(
@@ -320,9 +323,9 @@ mod tests {
         let configurable_publisher_registry =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        let res = configurable_publisher_registry.get_latest_message(SERVICE_NAME).unwrap();
+        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap();
 
-        assert!(matches!(res, GetLatestMessageOutcome::NotSupported));
+        assert!(matches!(res, GetMessageProviderOutcome::NotSupported));
     }
 
     #[tokio::test]

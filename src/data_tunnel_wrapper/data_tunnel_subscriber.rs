@@ -20,7 +20,7 @@ use sdv_dt::{
     TopicTypedMetadata,
 };
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetLatestMessageOutcome, ServicePublisherMetadata,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMetadata,
     ServicePublisherSubscription,
 };
 use sdv_telemetry::ServicePublisherAccessor;
@@ -133,8 +133,11 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
 
-    fn get_latest_message(&self, _service_name: &str) -> anyhow::Result<GetLatestMessageOutcome> {
-        Ok(GetLatestMessageOutcome::NotSupported)
+    fn get_message_provider(
+        &self,
+        _service_name: &str,
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
+        Ok(GetMessageProviderOutcome::NotSupported)
     }
 
     async fn create_subscription(
