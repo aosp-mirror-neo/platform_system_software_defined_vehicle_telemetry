@@ -45,12 +45,6 @@ convert_proto() {
   cd -
 }
 
-if [[ $# -eq 0 ]]; then
-    FILES="tests/manual_testing/configs/*.textproto"
-else
-    FILES="$@"
-fi
-
 # The vm seems to take a bit of time to be ready after the command finishes
 wait $CVD_START_PID
 sleep 10
@@ -59,9 +53,21 @@ adb root
 if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then
   log "Running in SDV Core"
   PUBLISHERS=$CORE_PUBLISHERS
+
+  if [[ $# -eq 0 ]]; then
+      FILES=$CORE_DEFAULT_CONFIGS
+  else
+      FILES="$@"
+  fi
 elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
   log "Running in SDV IVI"
   PUBLISHERS=$IVI_PUBLISHERS
+
+  if [[ $# -eq 0 ]]; then
+      FILES=$IVI_DEFAULT_CONFIGS
+  else
+      FILES="$@"
+  fi
 
   log "Starting Telemetry Service"
   adb shell sdv_ivi_telemetry_service_agent &
