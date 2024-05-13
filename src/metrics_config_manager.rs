@@ -3,6 +3,9 @@
 // External dependencies.
 use async_trait::async_trait;
 use log::{error, info};
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+
 use sdv_telemetry_utils::file_io_utils;
 use sdvtelemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use std::collections::HashMap;
@@ -100,7 +103,14 @@ impl MetricsConfigManagerImpl {
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
+        misc_error_callback: impl Fn(i32, String) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
+        let handle_file_io_error =
+            |misc_error_callback: &dyn Fn(i32, String), err_code: i32, err_msg: &str| {
+                error!("{}", err_msg);
+                misc_error_callback(err_code, err_msg.to_string());
+            };
+
         let config_manager = Arc::new_cyclic(
             |manager_reference: &Weak<MetricsConfigManagerImpl>| {
                 let manager_reference_clone = Weak::clone(manager_reference);
@@ -156,8 +166,14 @@ impl MetricsConfigManagerImpl {
                 if path.is_file() {
                     let bytes = match file_io_utils::read_from_file(&path).await {
                         Ok(data) => data,
+
                         Err(e) => {
-                            error!("An error occurred while trying to read file: {}", e);
+                            let err = format!("Error {} in reading file {:?} from disk", e, entry);
+                            handle_file_io_error(
+                                &misc_error_callback,
+                                StatusCodes::FILE_IO_ERROR.0,
+                                &err,
+                            );
                             continue;
                         }
                     };
@@ -165,8 +181,16 @@ impl MetricsConfigManagerImpl {
                     // bytes now contains the contents of the file
                     let config: MetricsConfig = match protobuf::Message::parse_from_bytes(&bytes) {
                         Ok(cfg) => cfg,
-                        Err(_) => {
-                            error!("Error in reading {} config from memory", path.display());
+                        Err(e) => {
+                            let err = format!(
+                                "Error {} in parsing metric config {:?} read from disk",
+                                e, entry
+                            );
+                            handle_file_io_error(
+                                &misc_error_callback,
+                                StatusCodes::METRICS_CONFIG_PARSE_ERROR.0,
+                                &err,
+                            );
                             continue;
                         }
                     };
@@ -184,7 +208,16 @@ impl MetricsConfigManagerImpl {
                             total_size += bytes.len();
                         }
                         Err(e) => {
-                            error!("Error {} in loading {} Config", e, uuid);
+                            let err = format!(
+                                "Error {} in initializing metric config {:?} read from disk",
+                                e, entry
+                            );
+                            handle_file_io_error(
+                                &misc_error_callback,
+                                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED.0,
+                                &err,
+                            );
+
                             file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
                                 error!("An error occurred in removing corrupt config: {}", e)
                             });
@@ -199,8 +232,8 @@ impl MetricsConfigManagerImpl {
                     info!("active config telemetry directory created");
                 }
                 Err(e) => {
-                    error!("An error occurred in creating directory: {}", e);
-                    return Err(MetricsConfigManagerError::FileIOError { error: e });
+                    let err = format!("Error {} in creating active config directory", e);
+                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR.0, &err);
                 }
             };
         }
@@ -220,6 +253,13 @@ impl MetricsConfigManagerImpl {
                     total_size += metadata.len() as usize;
                     num_inactive_configs += 1;
                 } else {
+                    let err = format!("Metric config corrupted {:?}", entry);
+                    handle_file_io_error(
+                        &misc_error_callback,
+                        StatusCodes::METRICS_CONFIG_CORRUPTED.0,
+                        &err,
+                    );
+
                     // remove corrupt inactive config
                     file_io_utils::remove_file(&entry.path()).await.unwrap_or_else(|e| {
                         error!("An error occurred in removing corrupt config: {}", e)
@@ -233,8 +273,8 @@ impl MetricsConfigManagerImpl {
                     info!("inactive config telemetry directory created");
                 }
                 Err(e) => {
-                    error!("An error occurred in creating directory: {}", e);
-                    return Err(MetricsConfigManagerError::FileIOError { error: e });
+                    let err = format!("Error {} in creating active config directory", e);
+                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR.0, &err);
                 }
             };
         }
@@ -242,10 +282,9 @@ impl MetricsConfigManagerImpl {
         config_manager.cur_persistent_config_store_size.store(total_size, Ordering::SeqCst);
 
         info!(
-            "Telemetry service initialized with {:} active configs and {:} inactive configs occupying {} memory",
-            num_active_configs,
-            num_inactive_configs,
-            total_size
+            "Telemetry service initialized with {:} active configs and {:} inactive configs
+            occupying {} memory",
+            num_active_configs, num_inactive_configs, total_size
         );
 
         Ok(config_manager)
@@ -454,7 +493,9 @@ mod tests {
 
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
     use protobuf::Message;
+    use rand::prelude::SliceRandom;
     use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
+    use tokio::sync::oneshot;
 
     use super::*;
 
@@ -566,6 +607,7 @@ mod tests {
                 max_persistent_config_store_size,
                 Arc::new(MockServicePublisherAccessor::new()),
                 |_| {},
+                |_, _| {},
             )
             .await
             .unwrap();
@@ -619,8 +661,65 @@ mod tests {
         config.uuid = uuid.to_string();
         config.version = 2;
 
-        info!("Serializing metric config");
         config.write_to_bytes().unwrap()
+    }
+
+    fn create_corrupt_config(uuid: &str) -> Vec<u8> {
+        let mut config = MetricsConfig::new();
+        config.uuid = uuid.to_string();
+        config.version = 2;
+
+        let mut data = config.write_to_bytes().unwrap();
+        let mut rng = rand::thread_rng();
+        data.shuffle(&mut rng);
+        data
+    }
+
+    #[tokio::test]
+    async fn read_corrupt_config_misc_callback_received() {
+        const ROOT_PATH: &str = "misc_error_callback";
+        let (active_data_dir, inactive_data_dir) = (
+            format!("{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR),
+            format!("{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR),
+        );
+
+        let active_dir_path = Path::new(&active_data_dir);
+        match file_io_utils::create_dir(&active_dir_path.to_path_buf()).await {
+            Ok(_) => {
+                info!("active config telemetry directory created");
+            }
+            Err(e) => {
+                panic!("Error {} in creating active config directory", e);
+            }
+        };
+
+        let file_path = PathBuf::from(active_data_dir.clone() + "/" + UUID);
+        let corrupt_config = create_corrupt_config(UUID);
+
+        file_io_utils::write_to_file(&file_path, &corrupt_config).await.unwrap_or_else(|e| {
+            panic!("An error occurred in writing corrupt config: {:?} {}", file_path, e)
+        });
+
+        let (add_config_sender, add_config_receiver) = oneshot::channel();
+        let sender_wrapper = Arc::new(Mutex::new(Some(add_config_sender)));
+        let sender_clone = Arc::clone(&sender_wrapper);
+
+        MetricsConfigManagerImpl::new(
+            active_data_dir.clone(),
+            inactive_data_dir.clone(),
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+            Arc::new(MockServicePublisherAccessor::new()),
+            |_| {},
+            move |status_code, status_msg| {
+                let mut maybe_sender = sender_clone.lock().unwrap();
+                maybe_sender.take().unwrap().send((status_code, status_msg)).unwrap();
+            },
+        )
+        .await
+        .unwrap();
+
+        let (status, _) = add_config_receiver.await.unwrap();
+        assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR.0);
     }
 
     #[tokio::test]

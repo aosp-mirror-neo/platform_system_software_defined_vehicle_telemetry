@@ -2,9 +2,10 @@
 
 package google.sdv.telemetry;
 
+import google.sdv.telemetry.ITelemetryApiStatusListener;
+import google.sdv.telemetry.ITelemetryMiscStatusListener;
 import google.sdv.telemetry.ITelemetryReportListener;
 import google.sdv.telemetry.ITelemetryReportReadyListener;
-import google.sdv.telemetry.ITelemetryStatusListener;
 
 /**
  * Telemetry system for software defined vehicle has three main components: Telemetry service, Data
@@ -74,21 +75,29 @@ interface ITelemetryService {
 
     /**
      * Registers a listener for receiving notifications when a metrics report is ready. If a
-     * listener is already registered an error is sent back to the global status listener.
+     * listener is already registered an error is returned.
      *
      * @param listener implementation of ITelemetryReportReadyListener, responsible for informing
      * the client about reports which are ready for consumption
      */
-    void registerReportReadyListener(in ITelemetryReportReadyListener listener);
+    void registerReportReadyListener(in int apiCallId, in ITelemetryReportReadyListener listener);
 
     /**
      * Registers a callback for receiving status codes for API calls. If a listener is already
-     * registered an error is sent back to the global status listener.
+     * registered an error is returned.
      *
-     * @param listener implementation of ITelemetryStatusListener, responsible for sending
+     * @param listener implementation of ITelemetryApiStatusListener, responsible for sending
      * status codes back to the client
      */
-    void registerStatusListener(in ITelemetryStatusListener listener);
+    void registerApiStatusListener(in ITelemetryApiStatusListener listener);
+
+    /**
+     * Registers a callback for receiving misc status codes for telemetry service.
+     *
+     * @param listener implementation of ITelemetryMiscStatusListener, responsible for sending
+     * status codes back to the client
+     */
+    void registerMiscStatusListener(in int apiCallId, in ITelemetryMiscStatusListener listener);
 
     /**
      * Clears listener to stop receiving notifications when a report or telemetry error is ready. If
@@ -100,5 +109,11 @@ interface ITelemetryService {
      * Clears listener to stop receiving status codes. If a listener is already unregistered, the
      * call has no effect.
      */
-    void unregisterStatusListener();
+    void unregisterApiStatusListener();
+
+    /**
+     * Clears misc status listener to stop receiving status codes. If a listener is already
+     * unregistered, the call has no effect.
+     */
+    void unregisterMiscStatusListener();
 }

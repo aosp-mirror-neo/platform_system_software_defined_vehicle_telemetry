@@ -62,16 +62,18 @@ TelemetryService::TelemetryService(std::shared_ptr<ITelemetryService> binder_ser
 ndk::ScopedAStatus TelemetryService::registerListeners() {
     {
         ALOGI("Registering status listener");
-        ndk::ScopedAStatus status = mBinderService->registerStatusListener(mStatusListenerImpl);
+        ndk::ScopedAStatus status = mBinderService->registerApiStatusListener(mStatusListenerImpl);
         if (!status.isOk()) {
             ALOGE("Failed to register status listener: %s", status.getDescription().c_str());
             return status;
         }
     }
+
     {
         ALOGI("Registering report ready listener");
+        // The callback id is added in the follow up CL part of the chain
         ndk::ScopedAStatus status =
-                mBinderService->registerReportReadyListener(mReportReadyListener);
+                mBinderService->registerReportReadyListener(-1, mReportReadyListener);
         if (!status.isOk()) {
             ALOGE("Failed to register report ready listener: %s", status.getDescription().c_str());
             return status;
@@ -212,7 +214,7 @@ TelemetryServiceStatusCodes TelemetryService::set_status_listener(void* listener
 }
 
 TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
-    ndk::ScopedAStatus err = mBinderService->unregisterStatusListener();
+    ndk::ScopedAStatus err = mBinderService->unregisterApiStatusListener();
     ALOGI("unregisterStatusListener from CPP %s", err.getDescription().c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
