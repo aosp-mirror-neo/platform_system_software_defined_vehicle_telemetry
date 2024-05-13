@@ -6,10 +6,10 @@
 
 namespace google::sdv::telemetry {
 
-void ReportReadyListenerImpl::set_report_ready_listener(void* cbObject,
-                                                        ReportReadyCallbackFunction cbFunc) {
-    clientCb_ = cbObject;
-    cbFuncPtr_ = cbFunc;
+ReportReadyListenerImpl::ReportReadyListenerImpl(void* clientCb,
+                                                 ReportReadyCallbackFunction cbFunc) :
+      clientCb_(clientCb), cbFunc_(cbFunc) {
+    ALOGI("Created");
 }
 
 ndk::ScopedAStatus ReportReadyListenerImpl::onReady(const std::string& metricsConfigUuid,
@@ -18,7 +18,7 @@ ndk::ScopedAStatus ReportReadyListenerImpl::onReady(const std::string& metricsCo
     const char* configUuid = metricsConfigUuid.c_str();
     const char* reportConfigName = metricsReportConfigName.c_str();
     ALOGD("onReady %s %s report number: %d", configUuid, reportConfigName, reportNumber);
-    cbFuncPtr_(clientCb_, configUuid, reportConfigName, reportNumber);
+    cbFunc_(clientCb_, configUuid, reportConfigName, reportNumber);
     return ndk::ScopedAStatus::ok();
 }
 }  // namespace google::sdv::telemetry

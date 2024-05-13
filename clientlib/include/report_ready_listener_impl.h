@@ -10,7 +10,7 @@ typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int
 class ReportReadyListenerImpl :
       public aidl::google::sdv::telemetry::BnTelemetryReportReadyListener {
 public:
-    void set_report_ready_listener(void* cbObject, ReportReadyCallbackFunction cbFunc);
+    explicit ReportReadyListenerImpl(void* clientCb, ReportReadyCallbackFunction cbFunc);
     ndk::ScopedAStatus onReady(const std::string& metricsConfigUuid,
                                const std::string& metricsReportConfigName,
                                int32_t reportNumber) override;
@@ -23,7 +23,7 @@ private:
     // Client will have its own implementation of CB interface which will be stored
     // as void* pointer in telemetry_service.h. The void* cb will be cast back to the
     // CB interfce by the client in the CB function.
-    ReportReadyCallbackFunction cbFuncPtr_;
+    ReportReadyCallbackFunction cbFunc_;
 };
 
 }  // namespace google::sdv::telemetry

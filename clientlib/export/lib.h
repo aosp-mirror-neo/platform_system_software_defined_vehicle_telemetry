@@ -36,7 +36,7 @@ typedef void (*StatusCallbackFunction)(void*, int32_t, const char*);
  * @param report_number report number of the ready metrics report.
  *
  */
-typedef void (*ReportReadyListenerFunction)(void*, const char*, const char*, int32_t);
+typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int32_t);
 
 /**
  * The get report callback function relays the status of the get_metrics_report API call
@@ -158,16 +158,23 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
  * client, along with the uuid of the metrics config for which the report is ready.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
- * @param listener Reference to report ready listener object.
- * @param cbFunc Function pointer for the cbFunc that gets called when a report is ready. The
- * cbFunc takes a void pointer that points to the report listener sent to the telemetry
- * service by the client app, a const char* uuid, a const char* name and a int32_t that specify
- * metrics config, metrics report name and report number of the report that is ready, respectively.
+ * @param report_listener Reference to report ready listener object.
+ * @param reportReadyCbFunc Function pointer for the callback function that gets called when a
+ * report is ready. The function takes a void pointer that points to the report listener sent to the
+ * telemetry service by the client app, a const char* uuid, a const char* name and a int32_t that
+ * specify metrics config, metrics report name and report number of the report that is ready,
+ * respectively.
+ *
+ * @param api_listener pointer to listener passed back to client when api callback function is
+ * triggered
+ * @param apiCbFunc pointer to callback function. callback function is called to share the status of
+ * the API call
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int set_report_ready_listener(ServiceHolder* holder, void* listener,
-                              ReportReadyListenerFunction cbFunc);
+int set_report_ready_listener(ServiceHolder* holder, void* report_listener,
+                              ReportReadyCallbackFunction reportReadyCbFunc, void* api_listener,
+                              StatusCallbackFunction apiCbFunc);
 
 /**
  * Clears a previously set report ready listener. Client can receive errors related to the
@@ -204,16 +211,24 @@ int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
 
 /**
  * Sets a status listener that receives status codes and messages for misc errors related
- * to the telemetry service. API calls which do not take a listener and callback function
- * like get_metrics_report, also send their status back to the client using the status listener.
+ * to the telemetry service.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
- * @param cbFunc Function pointer for the cbFunc that gets called when after an API call. The
- * cbFunc takes an int status_code and a const char* status_message as params.
+ * @param status_listener pointer to listener passed back to client when the misc status callback
+ * function is triggered
+ * @param statusCbFunc Function pointer for the cbFunc that is set the misc status listener in
+ * telemetry service and is called to send back misc status codes back to the client
+ *
+ * @param api_listener pointer to listener passed back to the rust wrapper when api status callback
+ * function is triggered
+ * @param apiCbFunc pointer to api status callback function. Callback function is called by
+ * telemetry serviceto share the status of the current API call
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFunction cbFunc);
+int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
+                             StatusCallbackFunction statusCbFunc, void* api_listener,
+                             StatusCallbackFunction apiCbFunc);
 
 /**
  * Clears a previously set status listener.
@@ -227,7 +242,7 @@ int set_status_listener(ServiceHolder* holder, void* listener, StatusCallbackFun
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int clear_status_listener(ServiceHolder* holder);
+int clear_misc_status_listener(ServiceHolder* holder);
 
 #ifdef __cplusplus
 }

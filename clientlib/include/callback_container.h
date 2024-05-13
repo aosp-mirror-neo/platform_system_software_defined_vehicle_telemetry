@@ -1,7 +1,9 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC. All Rights Reserved.
 
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
+
+#include "callback_function.h"
 
 #include <utils/Log.h>
 
@@ -13,17 +15,14 @@
 
 namespace google::sdv::telemetry {
 
-// Define a function prototype for the callback function pointer
-typedef void (*CbFunction)(void*, int32_t, const char*);
-
 // Define the struct
 struct CallbackData {
     void* cb_object;
-    CbFunction cb_function;
+    StatusCallbackFunction cb_function;
 };
 
 // Acts as the mediator between the OEM client and the telemetry service.
-class CallbackContainer {
+class StatusCallbackContainer {
 public:
     bool insert_callback(int api_call_id, CallbackData);
     std::optional<CallbackData> extract_callback(int api_call_id);

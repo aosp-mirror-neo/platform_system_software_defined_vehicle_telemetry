@@ -4,13 +4,15 @@ use crate::protobuf::Message;
 use log::{error, info};
 use sdv_telemetry_bindgen as rust_to_c;
 use status_codes_bindgen as status_codes;
-use std::ffi::CStr;
+use std::ffi::{c_void, CStr};
 use std::marker::PhantomPinned;
 use std::pin::Pin;
 use std::slice;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
+
+use crate::api_callback;
 
 /// Callback that handles report ready event.
 ///
@@ -112,7 +114,12 @@ pub struct MetricsReportManager {
 }
 
 impl MetricsReportManager {
-    pub fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
+    /// # Safety
+    ///
+    /// * `service` must be non-null and point to a valid ServiceHolder
+    pub async unsafe fn new(service: *mut rust_to_c::ServiceHolder) -> Pin<Box<Self>> {
+        info!("Creating MetricsReportManager");
+
         let (get_report_sender, get_report_receiver) = mpsc::channel(10);
 
         let mut report_manager = Box::pin(MetricsReportManager {
@@ -125,22 +132,47 @@ impl MetricsReportManager {
         // Convert Pin<Box<MetricsReportManager>> to Pin<&mut MetricsReportManager>
         let report_manager_ref: Pin<&mut MetricsReportManager> = Pin::as_mut(&mut report_manager);
 
+        let (set_listener_sender, set_listener_receiver) = oneshot::channel();
+        let sender_wrapper = Box::new(set_listener_sender);
+
+        info!("Setting report ready listener");
+
         // Unsafe block needed to be able to call C API functions
         // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
         // SAFETY: `report_manager_raw` points to MetricsReportManager that is pinned
         // and thus will not move in memory, and remain a valid reference making the
         // function safe to call.
+        // The data is never moved out of the mutable reference and calling get_unchecked_mut()
+        // is safe to call.
         unsafe {
-            let report_manager_raw: *mut MetricsReportManager =
+            let report_manager_raw =
                 report_manager_ref.get_unchecked_mut() as *mut MetricsReportManager;
-            rust_to_c::set_report_ready_listener(
+
+            let raw_sender = Box::into_raw(sender_wrapper) as *mut c_void;
+            let status_code = rust_to_c::set_report_ready_listener(
                 service,
                 report_manager_raw as *mut std::ffi::c_void,
                 Some(on_report_ready),
+                raw_sender,
+                Some(api_callback),
             );
+            if status_code
+                != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
+            {
+                // Releasing memory in case of API call failure
+                // SAFETY: This function is safe to call because this is called only in case of an
+                // API call failure and the memory will be freed only once.
+                let _ = Box::from_raw(raw_sender as *mut oneshot::Sender<(i32, String)>);
+                panic!("Error in setting report ready listener");
+            }
         }
 
-        report_manager
+        let (status, _): (i32, String) = set_listener_receiver.await.unwrap();
+        if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+            report_manager
+        } else {
+            panic!("Error in setting report ready listener")
+        }
     }
 
     pub async fn get_metrics_report(

@@ -62,20 +62,10 @@ TelemetryService::TelemetryService(std::shared_ptr<ITelemetryService> binder_ser
 ndk::ScopedAStatus TelemetryService::registerListeners() {
     {
         ALOGI("Registering status listener");
-        ndk::ScopedAStatus status = mBinderService->registerApiStatusListener(mStatusListenerImpl);
+        ndk::ScopedAStatus status =
+                mBinderService->registerApiStatusListener(mApiStatusListenerImpl);
         if (!status.isOk()) {
             ALOGE("Failed to register status listener: %s", status.getDescription().c_str());
-            return status;
-        }
-    }
-
-    {
-        ALOGI("Registering report ready listener");
-        // The callback id is added in the follow up CL part of the chain
-        ndk::ScopedAStatus status =
-                mBinderService->registerReportReadyListener(-1, mReportReadyListener);
-        if (!status.isOk()) {
-            ALOGE("Failed to register report ready listener: %s", status.getDescription().c_str());
             return status;
         }
     }
@@ -84,7 +74,7 @@ ndk::ScopedAStatus TelemetryService::registerListeners() {
 }
 
 TelemetryServiceStatusCodes TelemetryService::add_metrics_config(
-        const std::vector<uint8_t>& metricsConfig, void* listener, CbFunction cbFunc) {
+        const std::vector<uint8_t>& metricsConfig, void* listener, StatusCallbackFunction cbFunc) {
     ALOGI("addMetricsConfig in CPP");
 
     std::optional<TelemetryServiceStatusCodes> maybe_error = validate_params(listener, cbFunc);
@@ -93,13 +83,13 @@ TelemetryServiceStatusCodes TelemetryService::add_metrics_config(
     }
 
     ApiId cur_api_id = getNextApiId();
-    mCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     mBinderService->addMetricsConfig(cur_api_id, metricsConfig);
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::activate_metrics_config(
-        const std::string& metricsConfigUuid, void* listener, CbFunction cbFunc) {
+        const std::string& metricsConfigUuid, void* listener, StatusCallbackFunction cbFunc) {
     ALOGI("activate metrics config inside CPP");
 
     std::optional<TelemetryServiceStatusCodes> maybe_error = validate_params(listener, cbFunc);
@@ -108,13 +98,13 @@ TelemetryServiceStatusCodes TelemetryService::activate_metrics_config(
     }
 
     ApiId cur_api_id = getNextApiId();
-    mCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     mBinderService->activateMetricsConfig(cur_api_id, metricsConfigUuid);
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::deactivate_metrics_config(
-        const std::string& metricsConfigUuid, void* listener, CbFunction cbFunc) {
+        const std::string& metricsConfigUuid, void* listener, StatusCallbackFunction cbFunc) {
     ALOGI("deactivate metrics config inside CPP");
     ApiId cur_api_id = getNextApiId();
 
@@ -123,13 +113,13 @@ TelemetryServiceStatusCodes TelemetryService::deactivate_metrics_config(
         return *maybe_error;
     }
 
-    mCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     mBinderService->deactivateMetricsConfig(cur_api_id, metricsConfigUuid);
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::remove_metrics_config(
-        const std::string& metricsConfigUuid, void* listener, CbFunction cbFunc) {
+        const std::string& metricsConfigUuid, void* listener, StatusCallbackFunction cbFunc) {
     ALOGI("remove metrics config inside CPP");
     ApiId cur_api_id = getNextApiId();
 
@@ -138,13 +128,13 @@ TelemetryServiceStatusCodes TelemetryService::remove_metrics_config(
         return *maybe_error;
     }
 
-    mCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
     mBinderService->removeMetricsConfig(cur_api_id, metricsConfigUuid);
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(void* listener,
-                                                                         CbFunction cbFunc) {
+TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(
+        void* listener, StatusCallbackFunction cbFunc) {
     ALOGI("remove all metrics configs inside CPP");
     ApiId cur_api_id = getNextApiId();
 
@@ -152,20 +142,28 @@ TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(void* l
     if (maybe_error) {
         return *maybe_error;
     }
-    mCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{listener, cbFunc});
 
     mBinderService->removeAllMetricsConfigs(cur_api_id);
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
 TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
-        void* listener, ReportReadyCallbackFunction cbFunc) {
-    std::optional<TelemetryServiceStatusCodes> maybe_error = validate_params(listener, cbFunc);
+        void* report_listener, ReportReadyCallbackFunction reportReadyCbFunc, void* api_listener,
+        StatusCallbackFunction cbFunc) {
+    std::optional<TelemetryServiceStatusCodes> maybe_error =
+            validate_params(report_listener, reportReadyCbFunc);
     if (maybe_error) {
         return *maybe_error;
     }
 
-    mReportReadyListener->set_report_ready_listener(listener, cbFunc);
+    ApiId cur_api_id = getNextApiId();
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{api_listener, cbFunc});
+
+    std::shared_ptr<ReportReadyListenerImpl> reportReadyListener =
+            ndk::SharedRefBase::make<ReportReadyListenerImpl>(report_listener, reportReadyCbFunc);
+    mBinderService->registerReportReadyListener(cur_api_id, reportReadyListener);
+
     ALOGI("registerReportReadyListener from CPP");
 
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
@@ -200,22 +198,34 @@ TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* met
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::set_status_listener(void* listener,
-                                                                  CbFunction cbFunc) {
-    std::optional<TelemetryServiceStatusCodes> maybe_error = validate_params(listener, cbFunc);
+TelemetryServiceStatusCodes TelemetryService::set_misc_status_listener(
+        void* status_listener, StatusCallbackFunction statusCbFunc, void* api_listener,
+        StatusCallbackFunction apiCbFunc) {
+    std::optional<TelemetryServiceStatusCodes> maybe_error =
+            validate_params(api_listener, apiCbFunc);
+    if (maybe_error) {
+        return *maybe_error;
+    }
+    maybe_error = validate_params(status_listener, statusCbFunc);
     if (maybe_error) {
         return *maybe_error;
     }
 
-    mStatusListenerImpl->set_status_listener(listener, cbFunc);
-    ALOGI("set status callback from CPP");
+    ApiId cur_api_id = getNextApiId();
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{api_listener, apiCbFunc});
+
+    std::shared_ptr<MiscStatusListenerImpl> miscStatusListenerImpl =
+            ndk::SharedRefBase::make<MiscStatusListenerImpl>(status_listener, statusCbFunc);
+
+    ALOGI("set misc status listener from CPP");
+    mBinderService->registerMiscStatusListener(cur_api_id, miscStatusListenerImpl);
 
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::clear_status_listener() {
-    ndk::ScopedAStatus err = mBinderService->unregisterApiStatusListener();
-    ALOGI("unregisterStatusListener from CPP %s", err.getDescription().c_str());
+TelemetryServiceStatusCodes TelemetryService::clear_misc_status_listener() {
+    ndk::ScopedAStatus err = mBinderService->unregisterMiscStatusListener();
+    ALOGI("unregisterMiscStatusListener from CPP %s", err.getDescription().c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
