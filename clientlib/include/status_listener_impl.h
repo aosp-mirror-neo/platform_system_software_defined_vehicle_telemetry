@@ -2,13 +2,13 @@
 
 #include "callback_container.h"
 
-#include <aidl/google/sdv/telemetry/BnTelemetryStatusListener.h>
+#include <aidl/google/sdv/telemetry/BnTelemetryApiStatusListener.h>
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <utils/Log.h>
 
 namespace google::sdv::telemetry {
 
-class StatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryStatusListener {
+class StatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryApiStatusListener {
 public:
     explicit StatusListenerImpl(std::shared_ptr<CallbackContainer> cb_container);
     explicit StatusListenerImpl(CallbackContainer& cb_container);

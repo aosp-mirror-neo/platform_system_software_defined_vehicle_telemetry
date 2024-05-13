@@ -72,9 +72,9 @@ enum TelemetryServiceStatusCodes {
     SET_REPORT_LISTENER_FAILED = 409,
 
     /**
-     * Errors specific to set status listener
+     * Errors specific to set misc status listener
      */
-    SET_STATUS_LISTENER_FAILED = 410,
+    SET_MISC_STATUS_LISTENER_FAILED = 410,
 
     /**
      * Errors specific to get finished report

@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC. All Rights Reserved.
 ///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
@@ -19,6 +19,6 @@
 
 package google.sdv.telemetry;
 @VintfStability
-interface ITelemetryStatusListener {
-  oneway void sendStatus(in int apiCallId, in int statusCode, in @utf8InCpp String statusMessage);
+interface ITelemetryMiscStatusListener {
+  oneway void sendStatus(in int statusCode, in @utf8InCpp String statusMessage);
 }
