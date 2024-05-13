@@ -8,60 +8,52 @@ extern crate protobuf;
 
 use crate::clap::Parser;
 use crate::protobuf::Message;
+use anyhow::{anyhow, Context};
 use futures::future::join_all;
-use log::{error, info, LevelFilter};
-use std::collections::HashSet;
-use std::fs;
-use std::time::SystemTime;
-use tokio::sync::mpsc;
-
+use log::{error, info, trace, LevelFilter};
 use rust_to_c::TelemetryServiceHolder;
 use sdv_telemetry_rust_wrapper as rust_to_c;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use std::collections::HashSet;
+use std::fs;
+use std::path::PathBuf;
+use std::time::SystemTime;
+use tokio::sync::mpsc;
 
-// Arbitrarily chosen buffer capacity
-const MPSC_CHANNEL_CAPACITY: usize = 32;
+// TODO(b/340201944): The wrapper library itself should be returning a proper
+// error type implementing `std::error::Error`. We should not need to define a
+// manual conversion function here. This would also remove the need for all of
+// the `.map_err(as_error_type)` calls below.
+fn as_error_type(error: (i32, String)) -> anyhow::Error {
+    anyhow!("Error code: {}, Error message: {}", error.0, error.1)
+}
 
 async fn process_config(
-    path: std::path::PathBuf,
+    path: &PathBuf,
     service: &TelemetryServiceHolder,
-) -> Result<String, (i32, String)> {
+) -> anyhow::Result<String> {
     if !path.is_file() {
-        let error_message = format!("{:?} is not a file or does not exist", path);
-        error!("{error_message}");
-        return Err((
-            rust_to_c::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR,
-            error_message,
-        ));
+        return Err(anyhow!("Path is not a file or does not exist"));
     }
 
     // Metrics config is either read directly from a binary file into serialized config or from a
     // textproto file and then converted into serialized config.
-    let serialized_config = metrics_config_reader_utils::read(&path).map_err(|e| {
-        (rust_to_c::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR, e.to_string())
-    })?;
+    let serialized_config = metrics_config_reader_utils::read(path)
+        .with_context(|| "Failed to read config".to_owned())?;
 
-    let config_name;
-    let add_config_res = service.add_metrics_config(&serialized_config).await;
+    let config_uuid = service
+        .add_metrics_config(&serialized_config)
+        .await
+        .map_err(as_error_type)
+        .with_context(|| "Failed to add config".to_owned())?;
 
-    let activate_config_res = match add_config_res {
-        Ok(message) => {
-            config_name = message.clone();
-            service.activate_metrics_config(&message).await
-        }
-        Err(e) => {
-            error!("Error in adding config: {:?}", e);
-            return Err(e);
-        }
-    };
+    service
+        .activate_metrics_config(&config_uuid)
+        .await
+        .map_err(as_error_type)
+        .with_context(|| "Failed to activate config".to_owned())?;
 
-    match activate_config_res {
-        Ok(_) => Ok(config_name),
-        Err(e) => {
-            error!("Error in activating config: {:?}", e);
-            Err(e)
-        }
-    }
+    Ok(config_uuid)
 }
 
 #[derive(Parser, Debug)]
@@ -69,71 +61,99 @@ async fn process_config(
 struct Args {
     /// Folder to write reports to
     #[arg(long = "write-reports-to", default_value = None, value_hint = clap::ValueHint::DirPath)]
-    out_folder: Option<std::path::PathBuf>,
+    out_folder: Option<PathBuf>,
 
     /// Config files to execute
     #[arg(required = true, num_args = 1.., trailing_var_arg = true, value_hint = clap::ValueHint::FilePath)]
-    configs: Vec<std::path::PathBuf>,
+    configs: Vec<PathBuf>,
 }
 
 /// Communicate with the telemetry service.
 #[tokio::main]
-async fn main() -> Result<(), binder::Status> {
-    let args = Args::parse();
-
-    binder::ProcessState::start_thread_pool();
-    let _init_success = logger::init(
-        logger::Config::default()
-            .with_tag_on_device("telemetry_rust_c_client")
-            .with_max_level(LevelFilter::Trace),
+async fn main() -> anyhow::Result<()> {
+    assert!(
+        logger::init(
+            logger::Config::default()
+                .with_tag_on_device("telemetry_rust_c_client")
+                .with_max_level(LevelFilter::Trace)
+        ),
+        "Logger was already initialized."
     );
 
-    info!("Connecting to service");
-    let service = TelemetryServiceHolder::get().unwrap();
+    // `wrapped_main` is used solely to make sure that any errors are logged via
+    // `error!` so that they show up in logs.
+    wrapped_main().await.inspect_err(|err| {
+        error!("{err:?}");
+    })
+}
 
-    let (sender, mut receiver) = mpsc::channel(MPSC_CHANNEL_CAPACITY);
+async fn wrapped_main() -> anyhow::Result<()> {
+    let args = Args::parse();
+    binder::ProcessState::start_thread_pool();
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().map_err(as_error_type)?;
+
+    // Note: Creating an unbounded channel will consume unbounded memory if this
+    // sample client does not read reports fast enough. Consider using a bounded
+    // channel in real-world applications.
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
 
     service
         .set_report_ready_listener(move |metrics_config_uuid, report_config_name, report_number| {
-            sender.try_send((metrics_config_uuid, report_config_name, report_number)).unwrap();
+            report_ready_tx
+                .send((metrics_config_uuid, report_config_name, report_number))
+                .expect("The receiver has been dropped or has closed the channel.");
         })
         .await
-        .unwrap();
+        .map_err(as_error_type)?;
 
-    let add_config_futures: Vec<_> =
-        args.configs.iter().cloned().map(|path| process_config(path, &service)).collect();
-
-    let add_config_results = join_all(add_config_futures).await;
-    let mut active_configs = HashSet::new();
+    let add_config_futures = args
+        .configs
+        .iter()
+        .map(|path| async {
+            process_config(path, &service)
+                .await
+                .with_context(|| format!("Failed to process config: {}", path.display()))
+                .inspect(|config_uuid| {
+                    info!(
+                        "Config with UUID {config_uuid} added successfully from {}",
+                        path.display()
+                    )
+                })
+                .inspect_err(|e| error!("{e:?}"))
+        })
+        .collect::<Vec<_>>();
 
     // Collect all activated configs
-    for res in add_config_results.into_iter().flatten() {
-        info!("Config added successfully: {:?}", res);
-        active_configs.insert(res);
-    }
+    let add_config_results = join_all(add_config_futures).await;
+    let mut active_configs = add_config_results.into_iter().flatten().collect::<HashSet<_>>();
+    trace!("Active configs: {active_configs:?}");
 
     while !active_configs.is_empty() {
-        // SAFETY: The data inside the mutable reference will never move out of the
-        // mutable reference and the function is safe to call.
-        let (config_uuid, config_name, report_number) = receiver.recv().await.unwrap();
-        let metrics_report =
-            service.get_metrics_report(config_uuid, config_name, report_number).await.unwrap();
-
-        let report_name = &metrics_report.report_config_name;
-        let time_marker =
-            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+        let Some((config_uuid, config_name, report_number)) = report_ready_rx.recv().await else {
+            error!("Report ready callback dropped while still expecting additional reports.");
+            break;
+        };
+        let metrics_report = service
+            .get_metrics_report(config_uuid, config_name, report_number)
+            .await
+            .map_err(as_error_type)?;
 
         if let Some(report_directory) = args.out_folder.as_ref() {
             if !report_directory.is_dir() {
-                error!("Report cannot be written to a file because {:?} is not a directory or does not exist", report_directory);
+                error!("Report cannot be written to a file because {} is not a directory or does not exist", report_directory.display());
             } else {
+                let time_marker =
+                    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_nanos();
+                let report_name = &metrics_report.report_config_name;
                 let report_file_path =
                     report_directory.join(format!("{time_marker}_{report_name}.pb"));
                 match fs::File::create(report_file_path) {
                     Err(error) => error!("Error creating report file: {}", error),
                     Ok(mut file) => {
                         if let Err(e) = metrics_report.write_to_writer(&mut file) {
-                            error!("Error in writing report file: {}", e);
+                            error!("Error while writing report file: {}", e);
                         };
                     }
                 };
@@ -141,22 +161,28 @@ async fn main() -> Result<(), binder::Status> {
         }
 
         if active_configs.contains(&metrics_report.metrics_config_uuid) {
-            let remove_config_res =
-                service.remove_metrics_config(&metrics_report.metrics_config_uuid).await;
-            match remove_config_res {
+            match service.remove_metrics_config(&metrics_report.metrics_config_uuid).await {
                 Ok(_) => {
-                    info!("successfully removed config");
+                    info!(
+                        "Successfully removed config with UUID {}",
+                        metrics_report.metrics_config_uuid
+                    );
                     active_configs.remove(&metrics_report.metrics_config_uuid);
                 }
                 Err(e) => {
-                    error!("Error in removing config: {:?}", e);
+                    error!(
+                        "Error while removing config with UUID {}: {e:?}",
+                        metrics_report.metrics_config_uuid
+                    );
                 }
             }
+        } else {
+            error!("Received a metrics report for a config with UUID {} that should no longer be active.", metrics_report.metrics_config_uuid)
         }
     }
 
-    service.clear_misc_status_listener().await.unwrap();
-    service.clear_report_ready_listener().await.unwrap();
+    service.clear_misc_status_listener().await.map_err(as_error_type)?;
+    service.clear_report_ready_listener().await.map_err(as_error_type)?;
 
     Ok(())
 }
