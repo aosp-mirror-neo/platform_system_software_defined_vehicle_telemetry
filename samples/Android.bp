@@ -132,6 +132,40 @@ rust_protobuf {
     system_ext_specific: true,
 }
 
+rust_binary {
+    name: "telemetry_sample_data_tunnel_publisher_tire_pressure",
+    srcs: ["rust/data_tunnel_publisher_tire_pressure/tire_pressure_publisher.rs"],
+    rustlibs: [
+        "libtire_pressure_publisher_proto",
+        "libsdvtelemetry_metadata_proto_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_dt_rust",
+        "libcxx",
+        "liblibc",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libanyhow",
+    ],
+    vendor: true,
+}
+
+rust_protobuf {
+    name: "libtire_pressure_publisher_proto",
+    crate_name: "tire_pressure_publisher_proto",
+    protos: [
+        "rust/data_tunnel_publisher_tire_pressure/tire_pressure_publisher.proto",
+    ],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "configurable_publisher_source",
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
 rust_library {
     name: "libsdv_telemetry_sample_utils",
     crate_name: "sdv_telemetry_sample_utils",
