@@ -20,7 +20,7 @@ use sdv_dt::{
     TopicTypedMetadata,
 };
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMetadata,
+    CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
     ServicePublisherSubscription,
 };
 use sdv_telemetry::ServicePublisherAccessor;
@@ -136,8 +136,8 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
     fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
-        Ok(GetMessageProviderOutcome::NotSupported)
+    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
+        Ok(None)
     }
 
     async fn create_subscription(
@@ -155,7 +155,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             return Err(anyhow!("Data Tunnel Result: {:?}", result));
         };
         if !topic_exists {
-            return Ok(CreateSubscriptionOutcome::NotAvailable(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
         }
 
         let mut subscribe_meta_data = TopicTypedMetadata { message_count_: 0, message_size_: 0 };

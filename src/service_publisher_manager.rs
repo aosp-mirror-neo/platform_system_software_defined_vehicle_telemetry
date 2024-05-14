@@ -8,7 +8,7 @@ use protobuf::MessageDyn;
 use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessor,
+    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
     ServicePublisherMetadata,
 };
 
@@ -42,16 +42,16 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
         for accessor in &self.service_publisher_registry {
-            let outcome = accessor.get_message_provider(service_name)?;
+            let provider = accessor.get_message_provider(service_name)?;
 
-            if let GetMessageProviderOutcome::Available(_) = outcome {
-                return Ok(outcome);
+            if provider.is_some() {
+                return Ok(provider);
             }
         }
 
-        Ok(GetMessageProviderOutcome::NotAvailable)
+        Ok(None)
     }
 
     async fn create_subscription(
@@ -66,11 +66,11 @@ impl ServicePublisherAccessor for ServicePublisherManager {
                 .await?
             {
                 outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
-                CreateSubscriptionOutcome::NotAvailable(callback) => callback,
+                CreateSubscriptionOutcome::NotRegistered(callback) => callback,
             };
         }
 
-        Ok(CreateSubscriptionOutcome::NotAvailable(callback))
+        Ok(CreateSubscriptionOutcome::NotRegistered(callback))
     }
 }
 
@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_message_provider_no_match_returns_not_available() {
+    async fn get_message_provider_no_match_returns_none() {
         let service_publisher =
             Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
         let service_publishers =
@@ -165,7 +165,7 @@ mod tests {
 
         let res = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).unwrap();
 
-        assert!(matches!(res, GetMessageProviderOutcome::NotAvailable));
+        assert!(res.is_none());
     }
 
     #[tokio::test]
@@ -214,7 +214,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(res, CreateSubscriptionOutcome::NotAvailable(_)));
+        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
     }
 
     #[tokio::test]

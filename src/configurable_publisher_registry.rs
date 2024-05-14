@@ -9,7 +9,7 @@ use log::info;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::MessageDyn;
-use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMetadata, ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription};
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
@@ -90,8 +90,8 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
-        Ok(GetMessageProviderOutcome::NotSupported)
+    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
+        Ok(None)
     }
 
     async fn create_subscription(
@@ -105,7 +105,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         });
 
         let Some((message_descriptor, publisher)) = result else {
-            return Ok(CreateSubscriptionOutcome::NotAvailable(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
         };
 
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
@@ -318,14 +318,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_latest_message_returns_not_supported() {
+    async fn get_message_provider_returns_none() {
         let configurable_publisher = MockConfigurablePublisher::new();
         let configurable_publisher_registry =
             create_configurable_publisher_registry(configurable_publisher).await;
 
         let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap();
 
-        assert!(matches!(res, GetMessageProviderOutcome::NotSupported));
+        assert!(res.is_none());
     }
 
     #[tokio::test]
@@ -356,7 +356,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(matches!(res, CreateSubscriptionOutcome::NotAvailable(_)));
+        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
     }
 
     #[tokio::test]

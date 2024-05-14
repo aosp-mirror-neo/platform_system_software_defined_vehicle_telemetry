@@ -17,8 +17,12 @@ pub trait ServicePublisherAccessor: Send + Sync {
     fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>>;
 
     /// Returns provider of messages from the publisher specified by the service name.
-    fn get_message_provider(&self, service_name: &str)
-        -> anyhow::Result<GetMessageProviderOutcome>;
+    /// Returns None if the service publisher is not registered
+    /// or is not able to provide the latest message without subscription.
+    fn get_message_provider(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>>;
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
@@ -47,22 +51,12 @@ pub struct ServicePublisherMetadata {
     pub message_descriptor: MessageDescriptor,
 }
 
-/// Successful result of GetMessageProvider function.
-pub enum GetMessageProviderOutcome {
-    /// Service publisher is available and a message provider was successfully created.
-    Available(Box<dyn ServicePublisherMessageProvider>),
-    /// The service with the specified service name is not available.
-    NotAvailable,
-    /// Get latest message operation is not supported by the accessor.
-    NotSupported,
-}
-
 /// Successful result of subscription creation.
 pub enum CreateSubscriptionOutcome {
     /// Service publisher is available and a subscription was successfully created.
     Subscribed(Box<dyn ServicePublisherSubscription>),
-    /// The service with the specified service name is not available.
-    NotAvailable(Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>),
+    /// The service with the specified service name is not registered.
+    NotRegistered(Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>),
 }
 
 /// Interface of the Service Publisher subscription.
@@ -72,25 +66,13 @@ pub trait ServicePublisherSubscription: Send + Sync {
     async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error>;
 }
 
-impl GetMessageProviderOutcome {
-    /// Returns the contained Available value, consuming the self value.
-    /// Panics if the value is not Available.
-    pub fn unwrap(self) -> Box<dyn ServicePublisherMessageProvider> {
-        match self {
-            Self::Available(provider) => provider,
-            Self::NotAvailable => panic!("Unexpected result: Not Available"),
-            Self::NotSupported => panic!("Unexpected result: Not Supported"),
-        }
-    }
-}
-
 impl CreateSubscriptionOutcome {
     /// Returns the contained Subscribed value, consuming the self value.
     /// Panics if the value is not Subscribed.
     pub fn unwrap(self) -> Box<dyn ServicePublisherSubscription> {
         match self {
             Self::Subscribed(subscription) => subscription,
-            Self::NotAvailable(_) => panic!("Unexpected result: Not Available"),
+            Self::NotRegistered(_) => panic!("Unexpected result: Not Registered"),
         }
     }
 }

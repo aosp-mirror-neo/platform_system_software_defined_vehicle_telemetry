@@ -61,19 +61,17 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
         let mut data = self.data.lock().unwrap();
         data.num_get_message_provider_calls += 1;
         data.check_next_error()?;
 
         if data.next_not_available {
             data.next_not_available = false;
-            return Ok(GetMessageProviderOutcome::NotAvailable);
+            return Ok(None);
         }
 
-        Ok(GetMessageProviderOutcome::Available(Box::new(MockServicePublisherMessageProvider {
-            data: Arc::downgrade(&self.data),
-        })))
+        Ok(Some(Box::new(MockServicePublisherMessageProvider { data: Arc::downgrade(&self.data) })))
     }
 
     async fn create_subscription(
@@ -88,7 +86,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
 
         if data.next_not_available {
             data.next_not_available = false;
-            return Ok(CreateSubscriptionOutcome::NotAvailable(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
         }
 
         if data.callbacks.try_insert_value(service_name.to_owned(), callback).is_err() {
