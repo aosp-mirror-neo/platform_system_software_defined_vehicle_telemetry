@@ -579,6 +579,23 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
+    async fn unsubscribe_configured_accessor_returns_error_fails() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .await
+            .unwrap();
+        accessor.set_next_error(anyhow!(ERROR_MESSAGE));
+        let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
+
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[tokio::test]
     async fn unsubscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
@@ -591,6 +608,21 @@ pub(super) mod tests {
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
+        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn unsubscribe_shared_accessor_returns_error_fails() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let subscription =
+            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+        accessor.set_next_error(anyhow!(ERROR_MESSAGE));
+        let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
+
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
