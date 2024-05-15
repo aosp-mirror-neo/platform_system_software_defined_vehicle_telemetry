@@ -51,7 +51,22 @@ typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int
  * @param size_t size of the metrics report byte array.
  *
  */
-typedef void (*GetReportCallbackFunction)(void*, int, const char*, const uint8_t*, size_t);
+typedef void (*GetSerializedDataCallbackFunction)(void*, int, const char*, const uint8_t*, size_t);
+
+/**
+ * The get config list callback function relays the status of the
+ * get_(active/inactive)_metrics_config API call. If the API call was successful it also sends the
+ * list of config uuids as a char**
+ *
+ * @param void* Pointer to the callback object associated with the callback function.
+ * @param int32_t status code indicating the outcome of the API call
+ * @param const char* status message adding more context to the outcome of the API call.
+ * @param const char** pointer to the array of strings containing config uuids
+ * Null if the API call failed
+ * @param size_t size of the string array
+ *
+ */
+typedef void (*ConfigListCallbackFunction)(void*, int, const char*, const char**, size_t);
 
 /**
  * Gets an instance of telemetry_service and type casts it to an opaque
@@ -117,6 +132,35 @@ int activate_metrics_config(ServiceHolder* holder, const char* uuid, void* liste
  */
 int deactivate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
                               StatusCallbackFunction cbFunc);
+
+/**
+ * Retrieves a list of metrics configs currently in the active state from telemetry service
+ *
+ * @param holder An opaque pointer holding a reference to the telemetry_service
+ * @param listener Reference to config list listener object.
+ * @param cbFunc pointer to callback function. Callback function is used to send the list of active
+ * configs as a byte array along with the size of the list, and the config list listener object
+ * passed.
+ *
+ * @return an integer status code that validates the parameters provided to the API
+ */
+int get_active_metrics_config_uuids(ServiceHolder* holder, void* listener,
+                                    ConfigListCallbackFunction cbFunc);
+
+/**
+ * Retrieves a list of metrics configs currently in the inactive state from telemetry service
+ *
+ * @param holder An opaque pointer holding a reference to the telemetry_service
+ *
+ * @param listener Reference to config list listener object.
+ * @param cbFunc pointer to callback function. Callback function is used to send the list of active
+ * configs as a byte array along with the size of the list, and the config list listener object
+ * passed.
+ *
+ * @return an integer status code that validates the parameters provided to the API
+ */
+int get_inactive_metrics_config_uuids(ServiceHolder* holder, void* listener,
+                                      ConfigListCallbackFunction cbFunc);
 
 /**
  * Removes a previously added metrics config. The config being removed will be
@@ -215,7 +259,7 @@ int clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportL
  */
 int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
                        const char* report_config_name, int32_t report_number, void* listener,
-                       GetReportCallbackFunction cbFunc);
+                       GetSerializedDataCallbackFunction cbFunc);
 
 /**
  * Sets a status listener that receives status codes and messages for misc errors related

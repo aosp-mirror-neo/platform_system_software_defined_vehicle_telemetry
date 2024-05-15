@@ -25,6 +25,8 @@ interface ITelemetryService {
   void deactivateMetricsConfig(in int apiCallId, in @utf8InCpp String metricsConfigUuid);
   void removeMetricsConfig(in int apiCallId, in @utf8InCpp String metricsConfigUuid);
   void removeAllMetricsConfigs(in int apiCallId);
+  void getActiveMetricsConfigUuids(in google.sdv.telemetry.ITelemetryConfigListListener listener);
+  void getInactiveMetricsConfigUuids(in google.sdv.telemetry.ITelemetryConfigListListener listener);
   void getMetricsReport(in @utf8InCpp String metricsConfigUuid, in @utf8InCpp String metricsReportConfigName, in int reportNumber, in google.sdv.telemetry.ITelemetryReportListener listener);
   void registerReportReadyListener(in int apiCallId, in google.sdv.telemetry.ITelemetryReportReadyListener listener);
   void registerApiStatusListener(in google.sdv.telemetry.ITelemetryApiStatusListener listener);

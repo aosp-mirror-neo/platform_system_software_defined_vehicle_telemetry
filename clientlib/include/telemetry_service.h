@@ -5,6 +5,7 @@
 
 #include "api_status_listener_impl.h"
 #include "callback_container.h"
+#include "config_list_listener_impl.h"
 #include "misc_status_listener_impl.h"
 #include "report_listener_impl.h"
 #include "report_ready_listener_impl.h"
@@ -54,6 +55,12 @@ public:
                                                       void* listener,
                                                       StatusCallbackFunction cbFunc);
 
+    TelemetryServiceStatusCodes get_active_metrics_config_uuids(void* listener,
+                                                                ConfigListCallbackFunction cbFunc);
+
+    TelemetryServiceStatusCodes get_inactive_metrics_config_uuids(
+            void* listener, ConfigListCallbackFunction cbFunc);
+
     TelemetryServiceStatusCodes set_report_ready_listener(
             void* reportListener, ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
             StatusCallbackFunction cbFunc, void** outPreviousReportListener);
@@ -61,7 +68,7 @@ public:
     TelemetryServiceStatusCodes get_metrics_report(const char* metrics_config_uuid,
                                                    const char* report_config_name,
                                                    int32_t report_number, void* listener,
-                                                   GetReportCallbackFunction cbFunc);
+                                                   GetSerializedDataCallbackFunction cbFunc);
     TelemetryServiceStatusCodes set_misc_status_listener(void* status_listener,
                                                          StatusCallbackFunction statusCbFunc,
                                                          void* api_listener,

@@ -148,6 +148,44 @@ TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
+TelemetryServiceStatusCodes TelemetryService::get_active_metrics_config_uuids(
+        void* listener, ConfigListCallbackFunction cbFunc) {
+    if (listener == nullptr) {
+        return TelemetryServiceStatusCodes::API_CALL_FAILED_LISTENER_NOT_SET;
+    }
+
+    // Had to explicitly check since the function signature is different from the function signature
+    // accepted in the validate_params(..) helper function
+    if (cbFunc == nullptr) {
+        return TelemetryServiceStatusCodes::API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET;
+    }
+
+    std::shared_ptr<ConfigListListenerImpl> config_list_listener =
+            ndk::SharedRefBase::make<ConfigListListenerImpl>(listener, cbFunc);
+    ndk::ScopedAStatus err = mBinderService->getActiveMetricsConfigUuids(config_list_listener);
+    ALOGI("get_active_metrics_config_uuids from CPP %s", err.getDescription().c_str());
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
+}
+
+TelemetryServiceStatusCodes TelemetryService::get_inactive_metrics_config_uuids(
+        void* listener, ConfigListCallbackFunction cbFunc) {
+    if (listener == nullptr) {
+        return TelemetryServiceStatusCodes::API_CALL_FAILED_LISTENER_NOT_SET;
+    }
+
+    // Had to explicitly check since the function signature is different from the function signature
+    // accepted in the validate_params(..) helper function
+    if (cbFunc == nullptr) {
+        return TelemetryServiceStatusCodes::API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET;
+    }
+
+    std::shared_ptr<ConfigListListenerImpl> config_list_listener =
+            ndk::SharedRefBase::make<ConfigListListenerImpl>(listener, cbFunc);
+    ndk::ScopedAStatus err = mBinderService->getInactiveMetricsConfigUuids(config_list_listener);
+    ALOGI("get_inactive_metrics_config_uuids from CPP %s", err.getDescription().c_str());
+    return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
+}
+
 TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
         void* reportListener, ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
         StatusCallbackFunction cbFunc, void** outPreviousReportListener) {
@@ -185,11 +223,9 @@ TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener(
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* metrics_config_uuid,
-                                                                 const char* report_config_name,
-                                                                 int32_t report_number,
-                                                                 void* listener,
-                                                                 GetReportCallbackFunction cbFunc) {
+TelemetryServiceStatusCodes TelemetryService::get_metrics_report(
+        const char* metrics_config_uuid, const char* report_config_name, int32_t report_number,
+        void* listener, GetSerializedDataCallbackFunction cbFunc) {
     if (listener == nullptr) {
         return TelemetryServiceStatusCodes::API_CALL_FAILED_LISTENER_NOT_SET;
     }
