@@ -4,7 +4,7 @@
 
 mod data_generator;
 
-use anyhow::{anyhow, Context};
+use anyhow::anyhow;
 use data_generator::SpeedDataGenerator;
 use log::{error, info, trace, LevelFilter};
 use protobuf::{Message, MessageFull};
@@ -59,13 +59,8 @@ fn wrapped_main() -> anyhow::Result<()> {
     let mut data_generator = SpeedDataGenerator::new();
     loop {
         let message = data_generator.generate();
-        let mut raw_message = Vec::<u8>::with_capacity(DT_MESSAGE_SIZE);
-        message
-            .write_length_delimited_to_vec(&mut raw_message)
-            .with_context(|| "Failed to serialize message")?;
-
-        match dt_publisher.publish(&raw_message) {
-            Ok(()) => trace!("Message of size: {} written to DT: {}", raw_message.len(), message),
+        match dt_publisher.publish_length_delimited_proto(&message) {
+            Ok(()) => trace!("Message written to DT: {}", message),
             Err(err) => error!("Failed to write message to DT: {:?}", err),
         }
 

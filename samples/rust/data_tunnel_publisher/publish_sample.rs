@@ -53,15 +53,8 @@ fn main() {
         let mut message = SampleMessage::new();
         message.sample_data = rng.gen();
 
-        let mut raw_message = Vec::<u8>::with_capacity(TOPIC_MSG_SIZE);
-        // Prepend message length to be read
-        if let Err(err) = message.write_length_delimited_to_vec(&mut raw_message) {
-            error!("Failed to serialize message: {:?}", err);
-            return;
-        }
-
-        match dt_publisher.publish(&raw_message) {
-            Ok(()) => info!("Message of size: {} written to DT: {}", raw_message.len(), message),
+        match dt_publisher.publish_length_delimited_proto(&message) {
+            Ok(()) => info!("Message written to DT: {}", message),
             Err(err) => error!("Failed to write message to DT: {:?}", err),
         }
 
