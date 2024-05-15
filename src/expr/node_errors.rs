@@ -4,6 +4,8 @@
 
 use thiserror::Error;
 
+use sdvtelemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
+
 #[derive(Error, Debug)]
 #[non_exhaustive]
 #[allow(missing_docs)]
@@ -23,12 +25,10 @@ pub enum NodeError {
     InternalError { msg: String },
 
     // errors related to ConstantLeafNode
-    #[error("Constant node has unrecognized value: {v}")]
-    ConstantUnknownValue { v: String },
     #[error("Constant node value is not set")]
     ConstantValueNotSet,
-    #[error("Constant node has an unsupported value")]
-    ConstantValueNotSupported,
+    #[error("Constant node has an unsupported value: {node_value:?}")]
+    ConstantValueNotSupported { node_value: NodeValueProto },
 
     // errors related to FieldLeafNode
     #[error("Field leaf node encountered error: {e}")]
