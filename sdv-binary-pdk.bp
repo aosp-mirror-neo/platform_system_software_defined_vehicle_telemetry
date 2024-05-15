@@ -1,4 +1,4 @@
-// build target to archive sample code to be shared with Renault's partners
+// build target to archive sample code to be shared with OEM's partners
 // with access only to the binary PDK.
 genrule {
     name: "telemetry_samples-dist",
