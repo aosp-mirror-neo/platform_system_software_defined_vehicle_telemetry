@@ -84,16 +84,20 @@ pub trait NodeValueTypeExtension {
 
 impl NodeValueTypeExtension for ConstantLeafNode {
     fn get_node_value_type(&self) -> Result<NodeValueType, NodeError> {
-        if self.node_value.is_none() {
-            return Err(NodeError::ConstantValueNotSet);
-        }
-        Ok(match self.node_value.as_ref().unwrap() {
-            NodeValueProto::BoolValue(_) => NodeValueType::Bool,
-            NodeValueProto::Int32Value(_) | NodeValueProto::Int64Value(_) => NodeValueType::Int,
-            NodeValueProto::FloatValue(_) | NodeValueProto::DoubleValue(_) => NodeValueType::Float,
-            _ => {
-                return Err(NodeError::ConstantUnknownValue { v: format!("{:?}", self.node_value) })
-            }
+        Ok(match &self.node_value {
+            Some(node_value) => match node_value {
+                NodeValueProto::BoolValue(_) => NodeValueType::Bool,
+                NodeValueProto::Int32Value(_) | NodeValueProto::Int64Value(_) => NodeValueType::Int,
+                NodeValueProto::FloatValue(_) | NodeValueProto::DoubleValue(_) => {
+                    NodeValueType::Float
+                }
+                _ => {
+                    return Err(NodeError::ConstantValueNotSupported {
+                        node_value: node_value.clone(),
+                    })
+                }
+            },
+            None => return Err(NodeError::ConstantValueNotSet),
         })
     }
 }

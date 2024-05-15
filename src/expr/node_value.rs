@@ -127,7 +127,9 @@ impl NodeValue {
             Some(NodeValueProto::Int64Value(val)) => NodeValue::Int64(*val),
             Some(NodeValueProto::FloatValue(val)) => NodeValue::Float(*val),
             Some(NodeValueProto::DoubleValue(val)) => NodeValue::Double(*val),
-            Some(_) => return Err(NodeError::ConstantValueNotSupported),
+            Some(node_value) => {
+                return Err(NodeError::ConstantValueNotSupported { node_value: node_value.clone() })
+            }
             None => return Err(NodeError::ConstantValueNotSet),
         })
     }
