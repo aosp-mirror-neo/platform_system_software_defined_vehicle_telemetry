@@ -9,12 +9,19 @@ use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessor,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
 pub(crate) trait ServiceAdapter {
+    /// Returns provider of messages from the publisher specified by the service name.
+    fn get_message_provider(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>>;
+
     /// Subscribe to new messages from the service with the specified name
     /// using specified configuration.
     /// The callback mustn't block because it's executed on the adapter thread.
@@ -28,6 +35,13 @@ pub(crate) trait ServiceAdapter {
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
     async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
+}
+
+pub(crate) trait ServiceMessageProvider: Send + Sync {
+    fn get_latest_message(
+        &self,
+        configuration: &Option<Any>,
+    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
 }
 
 /// Stores details about a service subscription.
@@ -79,6 +93,14 @@ pub(crate) struct ServiceAdapterImpl {
     >,
 }
 
+struct ServiceMessageProviderImpl {
+    service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
+}
+
+fn serialize_configuration(configuration: &Any) -> Vec<u8> {
+    configuration.write_length_delimited_to_bytes().unwrap()
+}
+
 impl ServiceSubscriptionType {
     fn new_configured(
         accessor_subscription: Box<dyn ServicePublisherSubscription>,
@@ -93,6 +115,21 @@ impl ServiceSubscriptionType {
 
 #[async_trait]
 impl ServiceAdapter for ServiceAdapterImpl {
+    fn get_message_provider(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
+        let res = if let GetMessageProviderOutcome::Available(service_publisher_message_provider) =
+            self.service_publisher_accessor.get_message_provider(service_name)?
+        {
+            Some(Box::new(ServiceMessageProviderImpl { service_publisher_message_provider })
+                as Box<dyn ServiceMessageProvider>)
+        } else {
+            None
+        };
+        Ok(res)
+    }
+
     async fn subscribe(
         &self,
         service_name: &str,
@@ -101,7 +138,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
     ) -> anyhow::Result<ServiceSubscription> {
         let maybe_subscription_type = if let Some(configuration) = configuration {
             // Subscription has configuration, so it can't be shared.
-            let configuration_bytes = configuration.write_length_delimited_to_bytes().unwrap();
+            let configuration_bytes = serialize_configuration(configuration);
             let create_subscription_outcome = self
                 .service_publisher_accessor
                 .create_subscription(
@@ -244,6 +281,16 @@ impl ServiceAdapterImpl {
     }
 }
 
+impl ServiceMessageProvider for ServiceMessageProviderImpl {
+    fn get_latest_message(
+        &self,
+        configuration: &Option<Any>,
+    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+        let configuration_bytes = configuration.as_ref().map(serialize_configuration);
+        self.service_publisher_message_provider.get_latest_message(configuration_bytes.as_deref())
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod mock;
 
@@ -284,6 +331,58 @@ pub(super) mod tests {
                 subscription_id: u32::MAX,
             },
         }
+    }
+
+    #[test]
+    fn get_message_provider_accessor_returns_error_fails() {
+        let accessor =
+            Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let err = service_adapter.get_message_provider(SERVICE_NAME).err().unwrap();
+
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
+    }
+
+    #[test]
+    fn get_message_provider_accessor_latest_message_returns_error_fails() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let provider = service_adapter
+            .get_message_provider(SERVICE_NAME)
+            .unwrap()
+            .expect("Provider should be available");
+        accessor.set_next_error(anyhow!(ERROR_MESSAGE));
+        let err = provider.get_latest_message(&None).err().unwrap();
+
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
+    }
+
+    #[test]
+    fn get_message_provider_get_latest_message_success() {
+        let mut message = Box::new(Int32Value::new());
+        message.value = 42;
+        let accessor =
+            Arc::new(MockServicePublisherAccessor::new().with_latest_message(message.clone()));
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let message_provider = service_adapter
+            .get_message_provider(SERVICE_NAME)
+            .unwrap()
+            .expect("Provider should be available");
+
+        let latest_message = message_provider
+            .get_latest_message(&None)
+            .unwrap()
+            .expect("Message should be available");
+        assert_eq!(&latest_message, &(message as Box<dyn MessageDyn>));
+        assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
     #[tokio::test]

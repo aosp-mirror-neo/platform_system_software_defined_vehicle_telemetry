@@ -185,7 +185,9 @@ mod tests {
     use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::publisher::PublisherType;
-    use crate::metrics_config_orchestrator::service_adapter::ServiceSubscription;
+    use crate::metrics_config_orchestrator::service_adapter::{
+        ServiceMessageProvider, ServiceSubscription,
+    };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
 
     const INTERVAL_MS: u64 = 42;
@@ -197,6 +199,13 @@ mod tests {
 
     #[async_trait]
     impl ServiceAdapter for MockServiceAdapter {
+        fn get_message_provider(
+            &self,
+            _service_name: &str,
+        ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
+            unreachable!()
+        }
+
         async fn subscribe(
             &self,
             _service_name: &str,

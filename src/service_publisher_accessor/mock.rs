@@ -13,10 +13,14 @@ pub(crate) struct MockServicePublisherAccessor {
 }
 
 struct MockServicePublisherAccessorData {
+    /// The map of subscribed callbacks, keyed by service name.
+    callbacks: HashMap<String, Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
     /// When set, the descriptor will be returned on the next call to get_metadata.
     next_descriptor: Option<MessageDescriptor>,
     /// When set, the error will be returned on the next call to the adapter.
     next_error: Option<anyhow::Error>,
+    /// When set, the message will be returned on the next call to get_latest_message.
+    next_latest_message: Option<Box<dyn MessageDyn>>,
     /// When set to true, the next call to create_subscription will return a not found result.
     next_not_available: bool,
     /// The number of times get latest message function of the mock was called.
@@ -27,11 +31,11 @@ struct MockServicePublisherAccessorData {
     num_subscribe_calls: u32,
     /// The number of times unsubscribe function of the mock was called.
     num_unsubscribe_calls: u32,
-    /// The map of subscribed callbacks, keyed by service name.
-    callbacks: HashMap<String, Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
 }
 
-struct MockServicePublisherMessageProvider {}
+struct MockServicePublisherMessageProvider {
+    data: Weak<Mutex<MockServicePublisherAccessorData>>,
+}
 
 struct MockServicePublisherSubscription {
     data: Weak<Mutex<MockServicePublisherAccessorData>>,
@@ -67,7 +71,9 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
             return Ok(GetMessageProviderOutcome::NotAvailable);
         }
 
-        Ok(GetMessageProviderOutcome::Available(Box::new(MockServicePublisherMessageProvider {})))
+        Ok(GetMessageProviderOutcome::Available(Box::new(MockServicePublisherMessageProvider {
+            data: Arc::downgrade(&self.data),
+        })))
     }
 
     async fn create_subscription(
@@ -102,6 +108,7 @@ impl MockServicePublisherAccessor {
         let data = Arc::new(Mutex::new(MockServicePublisherAccessorData {
             next_descriptor: None,
             next_error: None,
+            next_latest_message: None,
             next_not_available: false,
             num_get_message_provider_calls: 0,
             num_get_metadata_calls: 0,
@@ -133,6 +140,15 @@ impl MockServicePublisherAccessor {
         data_lock.callbacks.get_mut(service_name).unwrap()(message);
     }
 
+    pub(crate) fn set_next_error(&self, error: anyhow::Error) {
+        self.data.lock().unwrap().next_error.replace(error);
+    }
+
+    pub(crate) fn with_latest_message(self, message: Box<dyn MessageDyn>) -> Self {
+        self.data.lock().unwrap().next_latest_message.replace(message);
+        self
+    }
+
     pub(crate) fn with_next_descriptor(self, descriptor: MessageDescriptor) -> Self {
         self.data.lock().unwrap().next_descriptor.replace(descriptor);
         self
@@ -157,8 +173,15 @@ impl MockServicePublisherAccessorData {
 }
 
 impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
-    fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
-        None
+    fn get_latest_message(
+        &self,
+        _configuration: Option<&[u8]>,
+    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+        let data_reference = self.data.upgrade().unwrap();
+        let mut data = data_reference.lock().unwrap();
+        data.check_next_error()?;
+
+        Ok(data.next_latest_message.take())
     }
 }
 
