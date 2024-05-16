@@ -9,8 +9,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
+    ServicePublisherSubscription,
 };
 
 /// Provides an interface to subscribe to messages published by services.
@@ -119,14 +119,12 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
-        let res = if let GetMessageProviderOutcome::Available(service_publisher_message_provider) =
-            self.service_publisher_accessor.get_message_provider(service_name)?
-        {
-            Some(Box::new(ServiceMessageProviderImpl { service_publisher_message_provider })
-                as Box<dyn ServiceMessageProvider>)
-        } else {
-            None
-        };
+        let res = self.service_publisher_accessor.get_message_provider(service_name)?.map(
+            |service_publisher_message_provider| {
+                Box::new(ServiceMessageProviderImpl { service_publisher_message_provider })
+                    as Box<dyn ServiceMessageProvider>
+            },
+        );
         Ok(res)
     }
 
@@ -152,7 +150,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 CreateSubscriptionOutcome::Subscribed(subscription) => {
                     Some(ServiceSubscriptionType::new_configured(subscription))
                 }
-                CreateSubscriptionOutcome::NotAvailable(_) => None,
+                CreateSubscriptionOutcome::NotRegistered(_) => None,
             }
         } else {
             // Subscription doesn't have configuration, so it can be shared.
@@ -196,7 +194,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                 subscription_id,
                             ))
                         }
-                        CreateSubscriptionOutcome::NotAvailable(_) => None,
+                        CreateSubscriptionOutcome::NotRegistered(_) => None,
                     }
                 }
             }
