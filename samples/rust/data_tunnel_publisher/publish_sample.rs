@@ -3,7 +3,7 @@
 //! Test the rust wrapper for telemetry and DT.
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::register_topic;
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::thread;
 
@@ -32,7 +32,7 @@ fn main() {
         vec![sample_publisher::file_descriptor().proto().clone()];
     publisher_metadata.message_type_name = format!(".{}", SampleMessage::descriptor().full_name());
 
-    let maybe_dt_publisher = register_topic(
+    let maybe_dt_publisher = DataTunnelPublisher::register_topic(
         TOPIC_NAME,
         1024,
         TOPIC_MSG_SIZE,

@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context};
 use data_generator::SpeedDataGenerator;
 use log::{error, info, trace, LevelFilter};
 use protobuf::{Message, MessageFull};
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::{register_topic, DataTunnelPublisher};
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use speed_publisher_proto::speed_publisher;
 use speed_publisher_proto::speed_publisher::SpeedData;
@@ -39,7 +39,7 @@ fn create_dt_publisher() -> anyhow::Result<DataTunnelPublisher> {
     publisher_metadata.descriptor_protos = vec![speed_publisher::file_descriptor().proto().clone()];
     publisher_metadata.message_type_name = format!(".{}", SpeedData::descriptor().full_name());
 
-    register_topic(
+    DataTunnelPublisher::register_topic(
         DT_TOPIC_NAME,
         DT_QUEUE_SIZE,
         DT_MESSAGE_SIZE,
