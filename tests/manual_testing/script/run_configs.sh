@@ -53,6 +53,7 @@ adb root
 if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then
   log "Running in SDV Core"
   PUBLISHERS=$CORE_PUBLISHERS
+  CLIENT=telemetry_rust_c_client
 
   if [[ $# -eq 0 ]]; then
       FILES=$CORE_DEFAULT_CONFIGS
@@ -62,6 +63,7 @@ if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then
 elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
   log "Running in SDV IVI"
   PUBLISHERS=$IVI_PUBLISHERS
+  CLIENT=telemetry_ivi_rust_c_client
 
   if [[ $# -eq 0 ]]; then
       FILES=$IVI_DEFAULT_CONFIGS
@@ -99,15 +101,15 @@ done
 
 adb shell mkdir "$CF_REPORTS_PATH"
 log "Starting telemetry client"
-adb shell telemetry_rust_c_client --write-reports-to="$CF_REPORTS_PATH" "$CONFIG_FILE_NAMES" &
+adb shell "$CLIENT" --write-reports-to="$CF_REPORTS_PATH" "$CONFIG_FILE_NAMES" &
 TELEMETRY_CLIENT_PID=$!
 
 mkdir -p "$OUT_DIR"
 if [ "$LOG_TO_FILE" ]; then
     NOW=$(date '+%F_%H-%M-%S')
-    adb logcat | stdbuf -o0 grep -iE 'telemetry|telemetry_rust_c_client' >"$OUT_DIR/$NOW.log" &
+    adb logcat | stdbuf -o0 grep -i telemetry >"$OUT_DIR/$NOW.log" &
 else
-    adb logcat | stdbuf -o0 grep -iE 'telemetry|telemetry_rust_c_client' &
+    adb logcat | stdbuf -o0 grep -i telemetry &
 fi
 LOGCAT_PID=$!
 
