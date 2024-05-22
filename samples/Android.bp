@@ -98,6 +98,40 @@ rust_binary {
     vendor: true,
 }
 
+rust_binary {
+    name: "telemetry_sample_data_tunnel_publisher_speed",
+    srcs: ["rust/data_tunnel_publisher_speed/speed_publisher.rs"],
+    rustlibs: [
+        "libspeed_publisher_proto",
+        "libsdvtelemetry_metadata_proto_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_dt_rust",
+        "libcxx",
+        "liblibc",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libanyhow",
+    ],
+    vendor: true,
+}
+
+rust_protobuf {
+    name: "libspeed_publisher_proto",
+    crate_name: "speed_publisher_proto",
+    protos: [
+        "rust/data_tunnel_publisher_speed/speed_publisher.proto",
+    ],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "configurable_publisher_source",
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
 rust_library {
     name: "libsdv_telemetry_sample_utils",
     crate_name: "sdv_telemetry_sample_utils",
