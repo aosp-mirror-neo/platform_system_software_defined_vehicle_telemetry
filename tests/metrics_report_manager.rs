@@ -155,6 +155,7 @@ impl MetricsReportManager {
                 Some(on_report_ready),
                 raw_sender,
                 Some(api_callback),
+                std::ptr::null_mut(),
             );
             if status_code
                 != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
@@ -201,7 +202,7 @@ impl Drop for MetricsReportManager {
         // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
         // SAFETY: safe to use as service is a valid pointer to ServiceHolder.
         unsafe {
-            rust_to_c::clear_report_ready_listener(self.service);
+            rust_to_c::clear_report_ready_listener(self.service, std::ptr::null_mut());
         }
     }
 }

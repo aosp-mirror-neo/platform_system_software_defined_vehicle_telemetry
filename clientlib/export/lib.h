@@ -158,23 +158,27 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
  * client, along with the uuid of the metrics config for which the report is ready.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
- * @param report_listener Reference to report ready listener object.
+ * @param reportListener Reference to report ready listener object.
  * @param reportReadyCbFunc Function pointer for the callback function that gets called when a
  * report is ready. The function takes a void pointer that points to the report listener sent to the
  * telemetry service by the client app, a const char* uuid, a const char* name and a int32_t that
  * specify metrics config, metrics report name and report number of the report that is ready,
  * respectively.
  *
- * @param api_listener pointer to listener passed back to client when api callback function is
+ * @param apiListener pointer to listener passed back to client when api callback function is
  * triggered
  * @param apiCbFunc pointer to callback function. callback function is called to share the status of
  * the API call
+
+ * @param outPreviousReportListener Reference to a pointer that will be set to point to the
+ * `reportListener` set in a previous call to `set_report_ready_listener`, if any. Will be ignored
+ * if it is `nullptr`.
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int set_report_ready_listener(ServiceHolder* holder, void* report_listener,
-                              ReportReadyCallbackFunction reportReadyCbFunc, void* api_listener,
-                              StatusCallbackFunction apiCbFunc);
+int set_report_ready_listener(ServiceHolder* holder, void* reportListener,
+                              ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
+                              StatusCallbackFunction apiCbFunc, void** outPreviousReportListener);
 
 /**
  * Clears a previously set report ready listener. Client can receive errors related to the
@@ -185,9 +189,13 @@ int set_report_ready_listener(ServiceHolder* holder, void* report_listener,
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
  *
+ * @param outPreviousReportListener Reference to a pointer that will be set to point to the
+ * `reportListener` set in a previous call to `set_report_ready_listener`, if any. Will be ignored
+ * if it is `nullptr`.
+ *
  * @return an integer status code that validates the parameters provided to the API
  */
-int clear_report_ready_listener(ServiceHolder* holder);
+int clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportListener);
 
 /**
  * Tells the telemetry service to send a metrics report with the given uuid and report number.

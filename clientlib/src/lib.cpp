@@ -64,19 +64,20 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
     return static_cast<int>(service->remove_all_metrics_configs(listener, cbFunc));
 }
 
-int set_report_ready_listener(ServiceHolder* holder, void* report_listener,
-                              ReportReadyCallbackFunction reportReadyCbFunc, void* api_listener,
-                              StatusCallbackFunction cbFunc) {
+int set_report_ready_listener(ServiceHolder* holder, void* reportListener,
+                              ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
+                              StatusCallbackFunction cbFunc, void** outPreviousReportListener) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(service->set_report_ready_listener(report_listener, reportReadyCbFunc,
-                                                               api_listener, cbFunc));
+    return static_cast<int>(service->set_report_ready_listener(reportListener, reportReadyCbFunc,
+                                                               apiListener, cbFunc,
+                                                               outPreviousReportListener));
 }
 
-int clear_report_ready_listener(ServiceHolder* holder) {
+int clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportListener) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(service->clear_report_ready_listener());
+    return static_cast<int>(service->clear_report_ready_listener(outPreviousReportListener));
 }
 
 int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,

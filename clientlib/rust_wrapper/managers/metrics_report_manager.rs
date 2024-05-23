@@ -140,6 +140,7 @@ pub async fn set_report_ready_listener(
             Some(on_report_ready),
             raw_sender as *mut c_void,
             Some(api_callback),
+            std::ptr::null_mut(),
         );
         if status_code
             != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
@@ -172,7 +173,7 @@ pub async fn clear_report_ready_listener(
     // and thus will not move in memory, and remain a valid reference making the
     // function safe to call.
     unsafe {
-        rust_to_c::clear_report_ready_listener(service.0);
+        rust_to_c::clear_report_ready_listener(service.0, std::ptr::null_mut());
     }
     Ok(())
 }
