@@ -149,29 +149,39 @@ TelemetryServiceStatusCodes TelemetryService::remove_all_metrics_configs(
 }
 
 TelemetryServiceStatusCodes TelemetryService::set_report_ready_listener(
-        void* report_listener, ReportReadyCallbackFunction reportReadyCbFunc, void* api_listener,
-        StatusCallbackFunction cbFunc) {
+        void* reportListener, ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
+        StatusCallbackFunction cbFunc, void** outPreviousReportListener) {
     std::optional<TelemetryServiceStatusCodes> maybe_error =
-            validate_params(report_listener, reportReadyCbFunc);
+            validate_params(reportListener, reportReadyCbFunc);
     if (maybe_error) {
         return *maybe_error;
     }
 
     ApiId cur_api_id = getNextApiId();
-    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{api_listener, cbFunc});
+    mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{apiListener, cbFunc});
 
-    std::shared_ptr<ReportReadyListenerImpl> reportReadyListener =
-            ndk::SharedRefBase::make<ReportReadyListenerImpl>(report_listener, reportReadyCbFunc);
-    mBinderService->registerReportReadyListener(cur_api_id, reportReadyListener);
+    if (outPreviousReportListener != nullptr && mReportReadyListener) {
+        *outPreviousReportListener = mReportReadyListener->getClientCb();
+    }
+    mReportReadyListener =
+            ndk::SharedRefBase::make<ReportReadyListenerImpl>(reportListener, reportReadyCbFunc);
+    mBinderService->registerReportReadyListener(cur_api_id, mReportReadyListener);
 
     ALOGI("registerReportReadyListener from CPP");
 
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener() {
+TelemetryServiceStatusCodes TelemetryService::clear_report_ready_listener(
+        void** outPreviousReportListener) {
+    if (outPreviousReportListener != nullptr && mReportReadyListener) {
+        *outPreviousReportListener = mReportReadyListener->getClientCb();
+    }
+    mReportReadyListener = nullptr;
     ndk::ScopedAStatus err = mBinderService->unregisterReportReadyListener();
+
     ALOGI("unregisterReportReadyListener from CPP %s", err.getDescription().c_str());
+
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 

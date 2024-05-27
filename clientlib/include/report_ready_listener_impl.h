@@ -15,6 +15,8 @@ public:
                                const std::string& metricsReportConfigName,
                                int32_t reportNumber) override;
 
+    void* getClientCb() { return clientCb_; }
+
 private:
     // Void pointer storing the CB object passed by the OEM client app.
     void* clientCb_;
