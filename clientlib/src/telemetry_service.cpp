@@ -210,7 +210,7 @@ TelemetryServiceStatusCodes TelemetryService::get_metrics_report(const char* met
 
 TelemetryServiceStatusCodes TelemetryService::set_misc_status_listener(
         void* status_listener, StatusCallbackFunction statusCbFunc, void* api_listener,
-        StatusCallbackFunction apiCbFunc) {
+        StatusCallbackFunction apiCbFunc, void** outPreviousStatusListener) {
     std::optional<TelemetryServiceStatusCodes> maybe_error =
             validate_params(api_listener, apiCbFunc);
     if (maybe_error) {
@@ -221,19 +221,28 @@ TelemetryServiceStatusCodes TelemetryService::set_misc_status_listener(
         return *maybe_error;
     }
 
+    if (outPreviousStatusListener != nullptr && mMiscStatusListener) {
+        *outPreviousStatusListener = mMiscStatusListener->getClientCb();
+    }
+
     ApiId cur_api_id = getNextApiId();
     mStatusCallbackContainer.insert_callback(cur_api_id, CallbackData{api_listener, apiCbFunc});
 
-    std::shared_ptr<MiscStatusListenerImpl> miscStatusListenerImpl =
+    mMiscStatusListener =
             ndk::SharedRefBase::make<MiscStatusListenerImpl>(status_listener, statusCbFunc);
 
     ALOGI("set misc status listener from CPP");
-    mBinderService->registerMiscStatusListener(cur_api_id, miscStatusListenerImpl);
+    mBinderService->registerMiscStatusListener(cur_api_id, mMiscStatusListener);
 
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
 }
 
-TelemetryServiceStatusCodes TelemetryService::clear_misc_status_listener() {
+TelemetryServiceStatusCodes TelemetryService::clear_misc_status_listener(
+        void** outPreviousStatusListener) {
+    if (outPreviousStatusListener != nullptr && mMiscStatusListener) {
+        *outPreviousStatusListener = mMiscStatusListener->getClientCb();
+    }
+    mMiscStatusListener = nullptr;
     ndk::ScopedAStatus err = mBinderService->unregisterMiscStatusListener();
     ALOGI("unregisterMiscStatusListener from CPP %s", err.getDescription().c_str());
     return TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS;
