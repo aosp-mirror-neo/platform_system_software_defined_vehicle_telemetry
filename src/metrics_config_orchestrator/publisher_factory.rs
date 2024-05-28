@@ -181,6 +181,7 @@ mod tests {
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdvtelemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
@@ -190,7 +191,7 @@ mod tests {
     };
     use crate::metrics_config_orchestrator::trigger::TriggerType;
 
-    const INTERVAL_MS: u64 = 42;
+    const INTERVAL: Duration = Duration::from_millis(42);
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
     const TRIGGER_NAME: &str = "trigger";
@@ -256,10 +257,8 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval_ms: INTERVAL_MS },
-        );
+        let trigger =
+            TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval: INTERVAL });
 
         (publisher, trigger)
     }

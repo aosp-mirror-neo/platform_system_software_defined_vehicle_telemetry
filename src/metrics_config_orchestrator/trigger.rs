@@ -72,7 +72,7 @@ pub(crate) enum TriggerType {
         publisher: Arc<dyn Publisher>,
     },
     Periodic {
-        interval_ms: u64,
+        interval: Duration,
     },
     Conditional {
         condition_type: ConditionType,
@@ -144,11 +144,11 @@ impl Activatable<TriggerSubscriber> for TriggerImpl {
                     )
                     .await;
             }
-            TriggerType::Periodic { interval_ms } => {
+            TriggerType::Periodic { interval } => {
                 let trigger_name_clone = self.name.clone();
-                let interval_ms = *interval_ms;
+                let interval = *interval;
                 tokio::spawn(async move {
-                    Self::call_periodically(&trigger_name_clone, interval_ms, callback_map).await;
+                    Self::call_periodically(&trigger_name_clone, interval, callback_map).await;
                 });
             }
             TriggerType::Conditional { condition_type, subscriber, triggers, .. } => {
@@ -251,10 +251,10 @@ impl TriggerImpl {
     /// Periodically invokes callbacks until the weak reference is no longer valid.
     async fn call_periodically(
         trigger_name: &str,
-        interval_ms: u64,
+        interval: Duration,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
     ) {
-        let mut timer = tokio::time::interval(Duration::from_millis(interval_ms));
+        let mut timer = tokio::time::interval(interval);
 
         // Trigger first tick that returns immediately.
         timer.tick().await;
@@ -417,7 +417,7 @@ mod tests {
         publisher::mock::MockPublisher, trigger::mock::MockTrigger,
     };
 
-    const INTERVAL_MS: u64 = 10;
+    const INTERVAL: Duration = Duration::from_millis(10);
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const TRIGGER_NAME: &str = "trigger";
@@ -512,7 +512,7 @@ mod tests {
     }
 
     fn create_valid_periodic_trigger() -> (Arc<TriggerImpl>, MockSubscriptionManager) {
-        create_trigger(TriggerType::Periodic { interval_ms: INTERVAL_MS })
+        create_trigger(TriggerType::Periodic { interval: INTERVAL })
     }
 
     fn create_valid_conditional_trigger(

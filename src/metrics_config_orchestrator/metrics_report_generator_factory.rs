@@ -199,6 +199,7 @@ impl MetricsReportGeneratorFactoryImpl {
 mod tests {
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
+    use std::time::Duration;
 
     use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
@@ -366,8 +367,10 @@ mod tests {
         message_builder_factory.fail_create();
         let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
         let config = create_valid_config();
-        let trigger =
-            TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval_ms: 0 });
+        let trigger = TriggerImpl::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval: Duration::ZERO },
+        );
 
         let err = factory
             .create_using_context(&config, None, None, Some(vec![Arc::clone(&trigger)]))
@@ -389,8 +392,10 @@ mod tests {
         UUID.clone_into(&mut metrics_config.uuid);
         metrics_config.version = VERSION;
         let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
-        let trigger =
-            TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval_ms: 0 });
+        let trigger = TriggerImpl::new(
+            TRIGGER_NAME.to_owned(),
+            TriggerType::Periodic { interval: Duration::ZERO },
+        );
 
         let res = factory
             .create_using_context(

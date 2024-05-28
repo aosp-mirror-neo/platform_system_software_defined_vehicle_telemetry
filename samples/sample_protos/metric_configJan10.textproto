@@ -28,13 +28,17 @@ expression_nodes {
 triggers {
   name: "start_trigger"
   periodic_trigger {
-    interval_ms: 3000
+    interval {
+      seconds: 3
+    }
   }
 }
 triggers {
   name: "period_3s"
   periodic_trigger {
-    interval_ms: 3000
+    interval {
+      seconds: 3
+    }
   }
 }
 

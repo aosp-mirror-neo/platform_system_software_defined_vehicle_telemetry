@@ -221,6 +221,9 @@ rust_library {
 rust_test {
     name: "sdv_telemetry_sample_utils_unit_tests",
     defaults: ["libsdv_telemetry_sample_utils_defaults"],
+    rustlibs: [
+        "libsdv_telemetry_utils",
+    ],
     test_suites: [
         "general-tests",
         "automotive-sdv-tests",

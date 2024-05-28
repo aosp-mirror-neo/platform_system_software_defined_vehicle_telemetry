@@ -6,6 +6,7 @@ package google.sdv.telemetry;
 
 import "google/protobuf/any.proto";
 import "google/protobuf/descriptor.proto";
+import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
 import "system/software_defined_vehicle/telemetry/proto/expression.proto";
 
@@ -82,8 +83,8 @@ message DataTrigger {
 // Triggers periodically.
 message PeriodicTrigger {
   // Required.
-  // An interval between polls, in milliseconds.
-  uint64 interval_ms = 1;
+  // The interval between polls.
+  google.protobuf.Duration interval = 1;
 }
 
 // Listens to other triggers, when they fire evaluates selector expression
