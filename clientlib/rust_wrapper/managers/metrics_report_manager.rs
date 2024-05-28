@@ -1,6 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use crate::api_callback;
+use crate::TelemetryError;
+use crate::TelemetryResult;
 use crate::TelemetryServiceHolder;
 
 use log::{error, info};
@@ -117,7 +119,7 @@ struct MetricsReportReadyListener {
 pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
     report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
-) -> Result<String, (i32, String)> {
+) -> TelemetryResult<String> {
     let listener = Box::new(MetricsReportReadyListener {
         report_ready_callback: Arc::new(report_ready_callback),
     });
@@ -149,7 +151,10 @@ pub async fn set_report_ready_listener(
             let _ = Box::from_raw(raw_listener);
             let _ = Box::from_raw(raw_sender);
             error!("Error in setting report ready listener");
-            return Err((status_code, "Invalid params".to_string()));
+            return Err(TelemetryError {
+                status: status_code,
+                message: "Invalid params".to_owned(),
+            });
         }
         raw_listener
     };
@@ -162,13 +167,11 @@ pub async fn set_report_ready_listener(
         // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
         // raw_listener was created using Box::into_raw above.
         let _ = unsafe { Box::from_raw(raw_listener) };
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }
 
-pub async fn clear_report_ready_listener(
-    service: &TelemetryServiceHolder,
-) -> Result<(), (i32, String)> {
+pub async fn clear_report_ready_listener(service: &TelemetryServiceHolder) -> TelemetryResult<()> {
     // SAFETY: `report_manager_raw` points to MetricsReportManager that is pinned
     // and thus will not move in memory, and remain a valid reference making the
     // function safe to call.
@@ -183,7 +186,7 @@ pub async fn get_metrics_report(
     metrics_config_uuid: String,
     report_config_name: String,
     report_number: i32,
-) -> Result<MetricsReport, (i32, String)> {
+) -> TelemetryResult<MetricsReport> {
     let (get_report_sender, get_report_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(get_report_sender);
 
@@ -223,6 +226,6 @@ pub async fn get_metrics_report(
     if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(report.unwrap())
     } else {
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }

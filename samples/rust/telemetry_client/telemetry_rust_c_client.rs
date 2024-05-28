@@ -20,14 +20,6 @@ use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 
-// TODO(b/340201944): The wrapper library itself should be returning a proper
-// error type implementing `std::error::Error`. We should not need to define a
-// manual conversion function here. This would also remove the need for all of
-// the `.map_err(as_error_type)` calls below.
-fn as_error_type(error: (i32, String)) -> anyhow::Error {
-    anyhow!("Error code: {}, Error message: {}", error.0, error.1)
-}
-
 async fn process_config(
     path: &PathBuf,
     service: &TelemetryServiceHolder,
@@ -44,13 +36,11 @@ async fn process_config(
     let config_uuid = service
         .add_metrics_config(&serialized_config)
         .await
-        .map_err(as_error_type)
         .with_context(|| "Failed to add config".to_owned())?;
 
     service
         .activate_metrics_config(&config_uuid)
         .await
-        .map_err(as_error_type)
         .with_context(|| "Failed to activate config".to_owned())?;
 
     Ok(config_uuid)
@@ -92,7 +82,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
     binder::ProcessState::start_thread_pool();
 
     info!("Connecting to service");
-    let service = TelemetryServiceHolder::get().map_err(as_error_type)?;
+    let service = TelemetryServiceHolder::get()?;
 
     // Note: Creating an unbounded channel will consume unbounded memory if this
     // sample client does not read reports fast enough. Consider using a bounded
@@ -105,8 +95,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
                 .send((metrics_config_uuid, report_config_name, report_number))
                 .expect("The receiver has been dropped or has closed the channel.");
         })
-        .await
-        .map_err(as_error_type)?;
+        .await?;
 
     let add_config_futures = args
         .configs
@@ -135,10 +124,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
             error!("Report ready callback dropped while still expecting additional reports.");
             break;
         };
-        let metrics_report = service
-            .get_metrics_report(config_uuid, config_name, report_number)
-            .await
-            .map_err(as_error_type)?;
+        let metrics_report =
+            service.get_metrics_report(config_uuid, config_name, report_number).await?;
 
         if let Some(report_directory) = args.out_folder.as_ref() {
             if !report_directory.is_dir() {
@@ -181,8 +168,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
         }
     }
 
-    service.clear_misc_status_listener().await.map_err(as_error_type)?;
-    service.clear_report_ready_listener().await.map_err(as_error_type)?;
+    service.clear_misc_status_listener().await?;
+    service.clear_report_ready_listener().await?;
 
     Ok(())
 }

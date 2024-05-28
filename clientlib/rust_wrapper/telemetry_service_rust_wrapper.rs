@@ -17,6 +17,17 @@ use tokio::sync::oneshot;
 use managers::metrics_config_manager;
 use managers::metrics_report_manager;
 
+/// Represents an error with an error code and error message.
+#[derive(thiserror::Error, Debug)]
+#[error("{status}: {message}")]
+pub struct TelemetryError {
+    status: i32,
+    message: String,
+}
+
+/// Represents the result of a telemetry service call.
+pub type TelemetryResult<T> = Result<T, TelemetryError>;
+
 /// Struct used to wrap ServiceHolder received from C in a typesafe manner
 #[repr(transparent)]
 pub struct TelemetryServiceHolder(*mut ServiceHolder);
@@ -84,7 +95,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an opaque pointer holding a reference to the telemetry_service
 
-    pub fn get() -> Result<TelemetryServiceHolder, (i32, String)> {
+    pub fn get() -> TelemetryResult<TelemetryServiceHolder> {
         info!("Connecting to service");
 
         // SAFETY: safe to use as all pointers needed to satisfy safety requirements
@@ -95,10 +106,11 @@ impl TelemetryServiceHolder {
                 // Convert to an immutable reference
                 service_raw
             } else {
-                return Err((
-                    status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR,
-                    "Unable to get telemetry service".to_string(),
-                ));
+                return Err(TelemetryError {
+                    status:
+                        status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR,
+                    message: "Unable to get telemetry service".to_owned(),
+                });
             }
         };
         Ok(TelemetryServiceHolder(service))
@@ -113,10 +125,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
 
-    pub async fn add_metrics_config(
-        &self,
-        serialized_config: &[u8],
-    ) -> Result<String, (i32, String)> {
+    pub async fn add_metrics_config(&self, serialized_config: &[u8]) -> TelemetryResult<String> {
         metrics_config_manager::add_metrics_config(self, serialized_config).await
     }
 
@@ -127,10 +136,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
 
-    pub async fn activate_metrics_config(
-        &self,
-        config_uuid: &str,
-    ) -> Result<String, (i32, String)> {
+    pub async fn activate_metrics_config(&self, config_uuid: &str) -> TelemetryResult<String> {
         metrics_config_manager::activate_metrics_config(self, config_uuid).await
     }
 
@@ -141,10 +147,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
 
-    pub async fn deactivate_metrics_config(
-        &self,
-        config_uuid: &str,
-    ) -> Result<String, (i32, String)> {
+    pub async fn deactivate_metrics_config(&self, config_uuid: &str) -> TelemetryResult<String> {
         metrics_config_manager::deactivate_metrics_config(self, config_uuid).await
     }
 
@@ -156,7 +159,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
 
-    pub async fn remove_metrics_config(&self, config_uuid: &str) -> Result<String, (i32, String)> {
+    pub async fn remove_metrics_config(&self, config_uuid: &str) -> TelemetryResult<String> {
         metrics_config_manager::remove_metrics_config(self, config_uuid).await
     }
 
@@ -167,7 +170,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of failure
 
-    pub async fn remove_all_metrics_configs(&self) -> Result<(), (i32, String)> {
+    pub async fn remove_all_metrics_configs(&self) -> TelemetryResult<()> {
         metrics_config_manager::remove_all_metrics_configs(self).await
     }
 
@@ -185,7 +188,7 @@ impl TelemetryServiceHolder {
     pub async fn set_report_ready_listener(
         &self,
         report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
-    ) -> Result<String, (i32, String)> {
+    ) -> TelemetryResult<String> {
         metrics_report_manager::set_report_ready_listener(self, report_ready_callback).await
     }
 
@@ -197,7 +200,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn clear_report_ready_listener(&self) -> Result<(), (i32, String)> {
+    pub async fn clear_report_ready_listener(&self) -> TelemetryResult<()> {
         metrics_report_manager::clear_report_ready_listener(self).await
     }
 
@@ -215,7 +218,7 @@ impl TelemetryServiceHolder {
         metrics_config_uuid: String,
         report_config_name: String,
         report_number: i32,
-    ) -> Result<MetricsReport, (i32, String)> {
+    ) -> TelemetryResult<MetricsReport> {
         metrics_report_manager::get_metrics_report(
             self,
             metrics_config_uuid,
@@ -238,7 +241,7 @@ impl TelemetryServiceHolder {
     pub async fn set_misc_status_listener(
         &self,
         status_callback: impl Fn(i32, String) + Send + Sync + 'static,
-    ) -> Result<String, (i32, String)> {
+    ) -> TelemetryResult<String> {
         let listener = Box::new(StatusListener { status_callback: Arc::new(status_callback) });
 
         let (set_listener_sender, set_listener_receiver) = oneshot::channel();
@@ -266,7 +269,10 @@ impl TelemetryServiceHolder {
                 let _ = Box::from_raw(raw_listener);
                 let _ = Box::from_raw(raw_sender);
                 error!("Error in setting status listener");
-                return Err((status_code, "Invalid params".to_string()));
+                return Err(TelemetryError {
+                    status: status_code,
+                    message: "Invalid params".to_owned(),
+                });
             }
             raw_listener
         };
@@ -279,7 +285,7 @@ impl TelemetryServiceHolder {
             // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
             // raw_listener was created using Box::into_raw above.
             let _ = unsafe { Box::from_raw(raw_listener) };
-            Err((status, message))
+            Err(TelemetryError { status, message })
         }
     }
 
@@ -289,7 +295,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn clear_misc_status_listener(&self) -> Result<(), (i32, String)> {
+    pub async fn clear_misc_status_listener(&self) -> TelemetryResult<()> {
         // SAFETY: safe to use as all pointers needed to satify safety requirements
         // for cb_func are passed.
         unsafe {

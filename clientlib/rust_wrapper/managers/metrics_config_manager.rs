@@ -1,6 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use crate::api_callback;
+use crate::TelemetryError;
+use crate::TelemetryResult;
 use crate::TelemetryServiceHolder;
 
 use sdv_telemetry_bindgen as rust_to_c;
@@ -11,7 +13,7 @@ use tokio::sync::oneshot;
 pub async fn add_metrics_config(
     service: &TelemetryServiceHolder,
     serialized_config: &[u8],
-) -> Result<String, (i32, String)> {
+) -> TelemetryResult<String> {
     let (add_config_sender, add_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(add_config_sender);
 
@@ -38,14 +40,14 @@ pub async fn add_metrics_config(
     if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(message)
     } else {
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }
 
 pub async fn activate_metrics_config(
     service: &TelemetryServiceHolder,
     config_uuid: &str,
-) -> Result<String, (i32, String)> {
+) -> TelemetryResult<String> {
     let (activate_config_sender, activate_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(activate_config_sender);
 
@@ -73,14 +75,14 @@ pub async fn activate_metrics_config(
     if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(message)
     } else {
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }
 
 pub async fn deactivate_metrics_config(
     service: &TelemetryServiceHolder,
     config_uuid: &str,
-) -> Result<String, (i32, String)> {
+) -> TelemetryResult<String> {
     let (deactivate_config_sender, deactivate_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(deactivate_config_sender);
 
@@ -108,14 +110,14 @@ pub async fn deactivate_metrics_config(
     if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(message)
     } else {
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }
 
 pub async fn remove_metrics_config(
     service: &TelemetryServiceHolder,
     config_uuid: &str,
-) -> Result<String, (i32, String)> {
+) -> TelemetryResult<String> {
     let (remove_config_sender, remove_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(remove_config_sender);
 
@@ -143,13 +145,11 @@ pub async fn remove_metrics_config(
     if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(message)
     } else {
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }
 
-pub async fn remove_all_metrics_configs(
-    service: &TelemetryServiceHolder,
-) -> Result<(), (i32, String)> {
+pub async fn remove_all_metrics_configs(service: &TelemetryServiceHolder) -> TelemetryResult<()> {
     let (remove_config_sender, remove_config_receiver) = oneshot::channel();
     let sender_wrapper = Box::new(remove_config_sender);
 
@@ -171,6 +171,6 @@ pub async fn remove_all_metrics_configs(
     if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(())
     } else {
-        Err((status, message))
+        Err(TelemetryError { status, message })
     }
 }
