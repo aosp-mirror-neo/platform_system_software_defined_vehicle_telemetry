@@ -346,6 +346,8 @@ rust_test {
         "**/*.textproto",
     ],
     auto_gen_config: true,
+    // Requires root so the test can perform Binder calls.
+    require_root: true,
 }
 
 rust_bindgen {
