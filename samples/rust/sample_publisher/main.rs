@@ -51,8 +51,8 @@ async fn main() -> Result<(), binder::Status> {
 
     info!("Creating publisher");
     let notify_subscribed = Arc::new(Notify::new());
-    let publisher = Arc::new(RandomIntegerPublisher::new(notify_subscribed.clone()));
-    let publisher_wrapper = RandomIntegerPublisherService { publisher: publisher.clone() };
+    let publisher = Arc::new(RandomIntegerPublisher::new(Arc::clone(&notify_subscribed)));
+    let publisher_wrapper = RandomIntegerPublisherService { publisher: Arc::clone(&publisher) };
     let binder_publisher =
         BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
 

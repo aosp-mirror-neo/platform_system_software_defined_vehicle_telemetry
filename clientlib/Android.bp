@@ -50,6 +50,7 @@ cc_library {
 
 rust_library {
     name: "libsdv_telemetry_rust_wrapper",
+    defaults: ["sdv_telemetry@rust_defaults"],
     crate_name: "sdv_telemetry_rust_wrapper",
     srcs: ["rust_wrapper/telemetry_service_rust_wrapper.rs"],
     rustlibs: [
