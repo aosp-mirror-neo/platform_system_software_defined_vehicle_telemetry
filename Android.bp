@@ -212,15 +212,19 @@ rust_binary {
     system_ext_specific: true,
     vintf_fragments: [
         "google.sdv.telemetry-service.xml",
+        // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
+        "google.sdv.telemetry.configurable_publisher-service.xml",
     ],
     defaults: ["telemetry@rust_defaults"],
     srcs: [
         "src/main.rs",
     ],
     rustlibs: [
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
         "google.sdv.telemetry-V1-rust",
         "librustutils",
         "libsdv_telemetry",
+        "libsdv_telemetry_configurable_publisher",
         "libsdv_telemetry_dt_wrapper",
         "libsdvtelemetry_proto_rust",
     ],
