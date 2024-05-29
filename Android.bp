@@ -215,6 +215,9 @@ rust_test {
     name: "libsdv_telemetry_dt_wrapper_integration_tests",
     defaults: ["telemetry_dt_wrapper_tests@rust_defaults"],
     cfgs: ["integration_tests"],
+    rustlibs: [
+        "librand",
+    ],
     // Requires root so the test can perform Binder calls to the data tunnel
     // agent.
     require_root: true,
@@ -401,7 +404,7 @@ rust_test {
         "libprotobuf",
         "libsdv_telemetry_bindgen",
         "libsdv_telemetry_sample_utils",
-        "libstatus_codes_bindgen",
+        "libsdv_telemetry_status_codes_bindgen",
         "libtokio",
     ],
     test_suites: [
@@ -429,8 +432,8 @@ rust_bindgen {
 }
 
 rust_bindgen {
-    name: "libstatus_codes_bindgen",
-    crate_name: "status_codes_bindgen",
+    name: "libsdv_telemetry_status_codes_bindgen",
+    crate_name: "sdv_telemetry_status_codes_bindgen",
     wrapper_src: "clientlib/export/status_codes.h",
     cpp_std: "gnu++17",
     source_stem: "bindings",
