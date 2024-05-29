@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2024 Google LLC
+
 set -e -o pipefail
 
 log() {

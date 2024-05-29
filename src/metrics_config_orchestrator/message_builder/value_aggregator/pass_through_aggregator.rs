@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 use std::sync::Arc;
 
 use crate::expr::ast::NodeEvaluationContext;
