@@ -130,32 +130,80 @@ rust_library {
     system_ext_specific: true,
 }
 
-rust_library {
-    name: "libsdv_telemetry_dt_wrapper",
-    crate_name: "sdv_telemetry_dt_wrapper",
+rust_defaults {
+    name: "telemetry_dt_wrapper@rust_defaults",
+    defaults: [
+        "telemetry@rust_defaults",
+    ],
     srcs: ["src/data_tunnel_wrapper/lib.rs"],
     rustlibs: [
         "libanyhow",
         "liblog_rust",
         "liblogger",
-        "libonce_cell",
         "libprotobuf",
-        "libsample_publisher_proto",
         "libsdv_dt_rust",
         "libsdv_telemetry",
         "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
+        "libthiserror",
         "libtokio",
         "libcxx",
-        "liblazy_static",
         "liblibc",
     ],
     proc_macros: [
         "libasync_trait",
-        "libclap_derive",
     ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_dt_wrapper",
+    crate_name: "sdv_telemetry_dt_wrapper",
+    defaults: ["telemetry_dt_wrapper@rust_defaults"],
     vendor_available: true,
     system_ext_specific: true,
+}
+
+rust_defaults {
+    name: "telemetry_dt_wrapper_tests@rust_defaults",
+    defaults: [
+        "telemetry_dt_wrapper@rust_defaults",
+    ],
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    target: {
+        host: {
+            data_libs: [
+                "libcutils",
+                "libbase",
+                "libc++",
+                "libutils",
+                "liblog",
+                "libbinder_ndk",
+                "libbinder",
+            ],
+        },
+    },
+    auto_gen_config: true,
+}
+
+rust_test {
+    name: "libsdv_telemetry_dt_wrapper_unit_tests",
+    defaults: ["telemetry_dt_wrapper_tests@rust_defaults"],
+    cfgs: ["unit_tests"],
+    test_options: {
+        unit_test: true,
+    },
+}
+
+rust_test {
+    name: "libsdv_telemetry_dt_wrapper_integration_tests",
+    defaults: ["telemetry_dt_wrapper_tests@rust_defaults"],
+    cfgs: ["integration_tests"],
+    // Requires root so the test can perform Binder calls to the data tunnel
+    // agent.
+    require_root: true,
 }
 
 rust_binary {
