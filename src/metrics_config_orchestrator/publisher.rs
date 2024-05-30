@@ -24,6 +24,7 @@ const PUBLISHER_STATE_ACTIVE: &str = "Active";
 
 #[async_trait]
 pub(crate) trait Publisher: Send + Sync {
+    #[allow(dead_code)]
     fn get_name(&self) -> &str;
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
 

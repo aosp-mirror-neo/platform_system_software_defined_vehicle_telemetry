@@ -462,14 +462,14 @@ mod tests {
         let mut left_node = NodeProto::new();
         let left_field_node = left_node.mut_field_leaf_node();
 
-        left_field_node.publisher_name =
-            if is_left_known { KNOWN_PUBLISHER_NAME } else { UNKNOWN_PUBLISHER_NAME }.to_owned();
+        if is_left_known { KNOWN_PUBLISHER_NAME } else { UNKNOWN_PUBLISHER_NAME }
+            .clone_into(&mut left_field_node.publisher_name);
         left_field_node.field_names = vec![left_field_name.to_owned()];
 
         let mut right_node = NodeProto::new();
         let right_field_node = right_node.mut_field_leaf_node();
-        right_field_node.publisher_name =
-            if is_right_known { KNOWN_PUBLISHER_NAME } else { UNKNOWN_PUBLISHER_NAME }.to_owned();
+        if is_right_known { KNOWN_PUBLISHER_NAME } else { UNKNOWN_PUBLISHER_NAME }
+            .clone_into(&mut right_field_node.publisher_name);
         right_field_node.field_names = vec![right_field_name.to_owned()];
 
         let mut node = NodeProto::new();
@@ -489,13 +489,13 @@ mod tests {
         let mut node_2 = NodeProto::new();
 
         let mut message_list_field_leaf = FieldLeafNode::new();
-        message_list_field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_owned();
+        KNOWN_PUBLISHER_NAME.clone_into(&mut message_list_field_leaf.publisher_name);
         message_list_field_leaf.field_names =
             message_list_field_names.iter().map(|s| s.to_string()).collect();
         node_0.set_field_leaf_node(message_list_field_leaf);
 
         let mut message_field_leaf = FieldLeafNode::new();
-        message_field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_owned();
+        KNOWN_PUBLISHER_NAME.clone_into(&mut message_field_leaf.publisher_name);
         message_field_leaf.field_names = vec![MESSAGE_FIELD_NAME.to_owned()];
         node_1.set_field_leaf_node(message_field_leaf);
 
@@ -992,7 +992,7 @@ mod tests {
 
         let mut node = NodeProto::new();
         let field_leaf = node.mut_field_leaf_node();
-        field_leaf.publisher_name = UNKNOWN_PUBLISHER_NAME.to_owned();
+        UNKNOWN_PUBLISHER_NAME.clone_into(&mut field_leaf.publisher_name);
         field_leaf.field_names = vec![INT_FIELD_NAME.to_owned()];
 
         // action
@@ -1016,7 +1016,7 @@ mod tests {
 
         let mut node = NodeProto::new();
         let mut field_leaf = FieldLeafNode::new();
-        field_leaf.publisher_name = KNOWN_PUBLISHER_NAME.to_owned();
+        KNOWN_PUBLISHER_NAME.clone_into(&mut field_leaf.publisher_name);
         field_leaf.field_names = vec![INT_FIELD_NAME.to_owned()];
         node.set_field_leaf_node(field_leaf);
         let all_proto_nodes = vec![node];
@@ -1124,7 +1124,7 @@ mod tests {
 
         let mut left_node = NodeProto::new();
         let left_field_node = left_node.mut_field_leaf_node();
-        left_field_node.publisher_name = UNKNOWN_PUBLISHER_NAME.to_owned();
+        UNKNOWN_PUBLISHER_NAME.clone_into(&mut left_field_node.publisher_name);
         left_field_node.field_names = vec![BOOL_FIELD_NAME.to_owned()];
 
         let mut node = NodeProto::new();
@@ -1204,7 +1204,7 @@ mod tests {
 
         let mut left_node = NodeProto::new();
         let left_field_node = left_node.mut_field_leaf_node();
-        left_field_node.publisher_name = UNKNOWN_PUBLISHER_NAME.to_owned();
+        UNKNOWN_PUBLISHER_NAME.clone_into(&mut left_field_node.publisher_name);
         left_field_node.field_names = vec![INT_FIELD_NAME.to_owned()];
 
         let mut node = NodeProto::new();
