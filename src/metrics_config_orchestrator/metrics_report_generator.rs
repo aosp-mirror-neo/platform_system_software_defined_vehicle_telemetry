@@ -18,6 +18,7 @@ use crate::metrics_config_orchestrator::Trigger;
 
 #[async_trait]
 pub(crate) trait MetricsReportGenerator: Send + Sync {
+    #[allow(dead_code)]
     fn get_name(&self) -> &str;
 
     async fn activate(self: &Arc<Self>);
@@ -115,9 +116,9 @@ impl MetricsReportGeneratorImpl {
                 report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);
                 report.report_timestamp = Some(Timestamp::now()).into();
                 report.report_reason = ReportReason::REGULAR.into();
-                report.metrics_config_uuid = self.config_uuid.clone();
+                report.metrics_config_uuid.clone_from(&self.config_uuid);
                 report.metrics_config_version = self.config_version;
-                report.report_config_name = self.name.clone();
+                report.report_config_name.clone_from(&self.name);
                 report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
 
                 debug!(
@@ -161,7 +162,7 @@ mod test {
 
     fn create_report_config_proto() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
-        config.name = REPORT_CONFIG_NAME.to_owned();
+        REPORT_CONFIG_NAME.clone_into(&mut config.name);
         config.report_incomplete = true;
         config
     }

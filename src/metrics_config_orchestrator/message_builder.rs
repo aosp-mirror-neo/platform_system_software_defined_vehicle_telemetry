@@ -209,9 +209,9 @@ mod tests {
         let doubles = vec![0.0, 1.0];
         let enums = vec![1, 1, 0]; // SOME, SOME, NONE
         let mut expected_message = TestMessage::new();
-        expected_message.repeated_bools = booleans.clone();
-        expected_message.repeated_i64s = integers.clone();
-        expected_message.repeated_doubles = doubles.clone();
+        expected_message.repeated_bools.clone_from(&booleans);
+        expected_message.repeated_i64s.clone_from(&integers);
+        expected_message.repeated_doubles.clone_from(&doubles);
         expected_message.repeated_enums =
             vec![TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
 

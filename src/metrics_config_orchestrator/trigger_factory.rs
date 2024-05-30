@@ -221,7 +221,7 @@ mod tests {
 
     fn new_trigger(name: &str) -> TriggerProto {
         let mut trigger = TriggerProto::new();
-        trigger.name = name.to_owned();
+        name.clone_into(&mut trigger.name);
         trigger
     }
 
@@ -232,7 +232,7 @@ mod tests {
     fn create_valid_data_trigger() -> (TriggerProto, Arc<PublisherImpl>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let data_trigger = trigger.mut_data_trigger();
-        data_trigger.publisher_name = PUBLISHER_NAME.to_owned();
+        PUBLISHER_NAME.clone_into(&mut data_trigger.publisher_name);
 
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),

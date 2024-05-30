@@ -287,14 +287,14 @@ mod tests {
 
     fn create_config_without_message_builder() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
-        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        METRICS_REPORT_CONFIG_NAME.clone_into(&mut config.name);
         config.trigger_names.push(TRIGGER_NAME.to_owned());
         config
     }
 
     fn create_config_with_invalid_trigger_name() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
-        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        METRICS_REPORT_CONFIG_NAME.clone_into(&mut config.name);
         config.trigger_names.push(TRIGGER_NAME.to_owned());
         config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
         config
@@ -302,7 +302,7 @@ mod tests {
 
     fn create_config_with_empty_trigger_names(report_incomplete: bool) -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
-        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        METRICS_REPORT_CONFIG_NAME.clone_into(&mut config.name);
         config.trigger_names = vec![];
         config.report_incomplete = report_incomplete;
         config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
@@ -311,7 +311,7 @@ mod tests {
 
     fn create_valid_config() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
-        config.name = METRICS_REPORT_CONFIG_NAME.to_owned();
+        METRICS_REPORT_CONFIG_NAME.clone_into(&mut config.name);
         config.report_incomplete = true;
         config.trigger_names.push(TRIGGER_NAME.to_owned());
         config.message_builder = protobuf::MessageField::some(ProtoMessageBuilder::new());
@@ -386,7 +386,7 @@ mod tests {
         let factory = create_factory();
         let report_config = create_valid_config();
         let mut metrics_config = MetricsConfigProto::new();
-        metrics_config.uuid = UUID.to_owned();
+        UUID.clone_into(&mut metrics_config.uuid);
         metrics_config.version = VERSION;
         let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
         let trigger =

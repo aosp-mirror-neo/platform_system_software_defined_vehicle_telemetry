@@ -579,7 +579,7 @@ mod tests {
             let mut report_number = self.report_number.lock().unwrap();
             *report_number = metrics_report_number;
             let mut uuid = self.uuid.lock().unwrap();
-            *uuid = metrics_config_uuid.to_owned();
+            metrics_config_uuid.clone_into(&mut uuid);
             Ok(())
         }
     }

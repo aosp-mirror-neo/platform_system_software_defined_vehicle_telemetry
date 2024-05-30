@@ -153,7 +153,7 @@ mod tests {
 
         let mut publisher = PublisherProto::new();
         let service_publisher = publisher.mut_service_publisher();
-        service_publisher.service_name = SERVICE_NAME.to_owned();
+        SERVICE_NAME.clone_into(&mut service_publisher.service_name);
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let err = descriptor_provider_factory
@@ -212,7 +212,7 @@ mod tests {
     #[test]
     fn get_descriptor_service_publisher_success() {
         let mut publisher = PublisherProto::new();
-        publisher.name = PUBLISHER_1.to_owned();
+        PUBLISHER_1.clone_into(&mut publisher.name);
         publisher.mut_service_publisher();
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;

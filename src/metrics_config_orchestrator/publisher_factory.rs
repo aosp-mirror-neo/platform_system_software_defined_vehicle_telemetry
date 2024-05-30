@@ -237,7 +237,7 @@ mod tests {
 
     fn create_publisher(name: &str) -> PublisherProto {
         let mut publisher = PublisherProto::new();
-        publisher.name = name.to_owned();
+        name.clone_into(&mut publisher.name);
         publisher
     }
 
@@ -246,7 +246,7 @@ mod tests {
         let service_publisher = publisher.mut_service_publisher();
         service_publisher.configuration =
             MessageField::some(Any::pack(Empty::default_instance()).unwrap());
-        service_publisher.service_name = SERVICE_NAME.to_owned();
+        SERVICE_NAME.clone_into(&mut service_publisher.service_name);
         publisher
     }
 
