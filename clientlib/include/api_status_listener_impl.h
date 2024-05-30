@@ -6,12 +6,14 @@
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <utils/Log.h>
 
+using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+
 namespace google::sdv::telemetry {
 
 class ApiStatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryApiStatusListener {
 public:
     explicit ApiStatusListenerImpl(StatusCallbackContainer& cb_container);
-    ndk::ScopedAStatus sendStatus(int api_call_id, int status_code,
+    ndk::ScopedAStatus sendStatus(int api_call_id, TelemetryServiceStatusCodes status_code,
                                   const std::string& message) override;
 
 private:

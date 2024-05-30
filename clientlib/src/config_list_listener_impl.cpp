@@ -15,7 +15,7 @@ ConfigListListenerImpl::ConfigListListenerImpl(void* cb, ConfigListCallbackFunct
 }
 
 ndk::ScopedAStatus ConfigListListenerImpl::sendConfigList(
-        int32_t status_code, const std::string& status_message,
+        TelemetryServiceStatusCodes status_code, const std::string& status_message,
         const std::vector<std::string>& config_list) {
     std::vector<const char*> c_strings;
 
@@ -23,8 +23,9 @@ ndk::ScopedAStatus ConfigListListenerImpl::sendConfigList(
         c_strings.push_back(uuid.c_str());
     }
 
-    cbFuncPtr_(clientConfigListListener_, status_code, status_message.c_str(), c_strings.data(),
-               c_strings.size());
+    cbFuncPtr_(clientConfigListListener_,
+               static_cast<std::underlying_type_t<TelemetryServiceStatusCodes>>(status_code),
+               status_message.c_str(), c_strings.data(), c_strings.size());
 
     return ndk::ScopedAStatus::ok();
 }

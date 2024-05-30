@@ -42,7 +42,7 @@ use metrics_report_listener::MetricsReportListener;
 const ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
 const INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
 
-fn get_error_code_and_message(err: ConfigManagerError) -> (i32, String) {
+fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) {
     let err_code = match err {
         ConfigManagerError::ConfigOrchestratorError { ref error } => match error {
             ConfigOrchestratorError::DuplicatePublisherDefinition { .. } => {
@@ -99,7 +99,7 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (i32, String) {
         }
     };
 
-    (err_code.0, err.to_string())
+    (err_code, err.to_string())
 }
 
 /// This struct is defined to implement ITelemetryService AIDL interface.
@@ -113,7 +113,7 @@ pub struct SdvTelemetryService {
     /// Misc Status Listener to send back status to client
     misc_status_listener: Mutex<Option<Strong<dyn ITelemetryMiscStatusListener>>>,
     /// Store for miscellaneous errors
-    misc_error_store: Arc<Mutex<Vec<(i32, String)>>>,
+    misc_error_store: Arc<Mutex<Vec<(StatusCodes, String)>>>,
 }
 
 impl Interface for SdvTelemetryService {}
@@ -177,7 +177,7 @@ impl SdvTelemetryService {
     pub fn send_status(
         &self,
         api_call_id: i32,
-        status_code: i32,
+        status_code: StatusCodes,
         status_message: &str,
     ) -> BinderResult<()> {
         if let Ok(listener) = self.api_status_listener.lock() {
@@ -186,7 +186,7 @@ impl SdvTelemetryService {
                     listener_ref.deref().sendStatus(api_call_id, status_code, status_message)
                 {
                     warn!(
-                        "Error when sending status code {} for API call {} to the client: {:?}",
+                        "Error when sending status code {:?} for API call {} to the client: {:?}",
                         status_code, api_call_id, e
                     );
                 }
@@ -197,11 +197,18 @@ impl SdvTelemetryService {
 
     /// Uses the global listener object set by the client to send back status codes
     /// and error messages for API calls
-    pub fn send_misc_status(&self, status_code: i32, status_message: &str) -> BinderResult<()> {
+    pub fn send_misc_status(
+        &self,
+        status_code: StatusCodes,
+        status_message: &str,
+    ) -> BinderResult<()> {
         if let Ok(listener) = self.misc_status_listener.lock() {
             if let Some(listener_ref) = listener.as_ref() {
                 if let Err(e) = listener_ref.deref().sendStatus(status_code, status_message) {
-                    warn!("Error when sending status code {} to the client: {:?}", status_code, e);
+                    warn!(
+                        "Error when sending status code {:?} to the client: {:?}",
+                        status_code, e
+                    );
                 }
             }
         }
@@ -226,7 +233,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         return self.send_status(
             api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             &metrics_config_uuid,
         );
     }
@@ -248,7 +255,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         self.send_status(
             api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             metrics_config_uuid,
         )
     }
@@ -270,7 +277,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         self.send_status(
             api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             metrics_config_uuid,
         )
     }
@@ -291,7 +298,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         self.send_status(
             api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             metrics_config_uuid,
         )
     }
@@ -307,7 +314,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         self.send_status(
             api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             "successfully Removed All Configs",
         )
     }
@@ -321,7 +328,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
         let config_list = self.metrics_config_manager.get_active_metrics_config_uuids().await;
         if let Err(e) = config_list_listener.deref().sendConfigList(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             "",
             &config_list,
         ) {
@@ -339,7 +346,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         info!("getActiveMetricsConfigUuids");
         let config_list = self.metrics_config_manager.get_inactive_metrics_config_uuids().await;
         if let Err(e) = config_list_listener.deref().sendConfigList(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             "",
             &config_list,
         ) {
@@ -360,13 +367,13 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             self.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
                 |_| {
                     (
-                        StatusCodes::SET_REPORT_READY_LISTENER_FAILED.0,
+                        StatusCodes::SET_REPORT_READY_LISTENER_FAILED,
                         "Report Ready Listener already exists",
                     )
                 },
                 |_| {
                     (
-                        StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                        StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                         "Report Ready Listener successfully added",
                     )
                 },
@@ -397,12 +404,12 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             if guard.is_none() {
                 *guard = Some(listener.clone());
                 (
-                    StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                    StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                     "Status listener successfully added",
                 )
             } else {
                 (
-                    StatusCodes::SET_MISC_STATUS_LISTENER_FAILED.0,
+                    StatusCodes::SET_MISC_STATUS_LISTENER_FAILED,
                     "Misc Status listener already exists",
                 )
             }
@@ -434,14 +441,14 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         ) {
             let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
             if let Err(e) = report_listener.deref().onReport(
-                StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                 metrics_config_uuid,
                 serialized_report,
             ) {
                 warn!("Unable to send report to the client: {:?}", e);
             }
         } else if let Err(e) = report_listener.deref().onReport(
-            StatusCodes::GET_FINISHED_REPORT_FAILED.0,
+            StatusCodes::GET_FINISHED_REPORT_FAILED,
             metrics_config_uuid,
             &[],
         ) {
@@ -501,7 +508,7 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryConfigListListener {
-        status_code: Arc<Mutex<i32>>,
+        status_code: Arc<Mutex<StatusCodes>>,
         num_send_config_calls: Arc<Mutex<i32>>,
         metrics_config_list: Arc<Mutex<Option<Vec<String>>>>,
     }
@@ -511,13 +518,13 @@ mod tests {
     impl MockTelemetryConfigListListener {
         fn new() -> Self {
             Self {
-                status_code: Arc::new(Mutex::new(0)),
+                status_code: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
                 num_send_config_calls: Arc::new(Mutex::new(0)),
                 metrics_config_list: Arc::new(Mutex::new(None)),
             }
         }
 
-        fn get_status_code(&self) -> i32 {
+        fn get_status_code(&self) -> StatusCodes {
             *self.status_code.lock().unwrap()
         }
 
@@ -533,7 +540,7 @@ mod tests {
     impl ITelemetryConfigListListener for MockTelemetryConfigListListener {
         fn sendConfigList(
             &self,
-            status_code: i32,
+            status_code: StatusCodes,
             _status_message: &str,
             config_list: &[String],
         ) -> BinderResult<()> {
@@ -551,7 +558,7 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryReportListener {
-        status_code: Arc<Mutex<i32>>,
+        status_code: Arc<Mutex<StatusCodes>>,
         status_message: Arc<Mutex<String>>,
         num_on_result_calls: Arc<Mutex<i32>>,
         uuid: Arc<Mutex<String>>,
@@ -564,7 +571,7 @@ mod tests {
     impl MockTelemetryReportListener {
         fn new() -> Self {
             Self {
-                status_code: Arc::new(Mutex::new(0)),
+                status_code: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
                 status_message: Arc::new(Mutex::new(String::new())),
                 num_on_result_calls: Arc::new(Mutex::new(0)),
                 uuid: Arc::new(Mutex::new(String::new())),
@@ -573,7 +580,7 @@ mod tests {
             }
         }
 
-        fn get_status_code(&self) -> i32 {
+        fn get_status_code(&self) -> StatusCodes {
             *self.status_code.lock().unwrap()
         }
 
@@ -597,7 +604,7 @@ mod tests {
     impl ITelemetryReportListener for MockTelemetryReportListener {
         fn onReport(
             &self,
-            status_code: i32,
+            status_code: StatusCodes,
             status_message: &str,
             serialized_report: &[u8],
         ) -> BinderResult<()> {
@@ -680,7 +687,7 @@ mod tests {
     #[derive(Clone)]
     struct MockTelemetryApiStatusListener {
         num_send_status_calls: Arc<Mutex<i32>>,
-        status: Arc<Mutex<i32>>,
+        status: Arc<Mutex<StatusCodes>>,
     }
 
     impl Interface for MockTelemetryApiStatusListener {}
@@ -689,7 +696,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 num_send_status_calls: Arc::new(Mutex::new(0)),
-                status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0)),
+                status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
             }
         }
 
@@ -697,7 +704,7 @@ mod tests {
             *self.num_send_status_calls.lock().unwrap()
         }
 
-        pub fn get_status_code(&self) -> i32 {
+        pub fn get_status_code(&self) -> StatusCodes {
             *self.status.lock().unwrap()
         }
     }
@@ -706,7 +713,7 @@ mod tests {
         fn sendStatus(
             &self,
             _api_call_id: i32,
-            status_code: i32,
+            status_code: StatusCodes,
             _status_msg: &str,
         ) -> BinderResult<()> {
             let mut num_calls = self.num_send_status_calls.lock().unwrap();
@@ -724,7 +731,7 @@ mod tests {
     #[derive(Clone)]
     struct MockTelemetryMiscStatusListener {
         num_send_status_calls: Arc<Mutex<i32>>,
-        status: Arc<Mutex<i32>>,
+        status: Arc<Mutex<StatusCodes>>,
     }
 
     impl Interface for MockTelemetryMiscStatusListener {}
@@ -733,13 +740,13 @@ mod tests {
         fn new() -> Self {
             Self {
                 num_send_status_calls: Arc::new(Mutex::new(0)),
-                status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0)),
+                status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
             }
         }
     }
 
     impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
-        fn sendStatus(&self, status_code: i32, _status_msg: &str) -> BinderResult<()> {
+        fn sendStatus(&self, status_code: StatusCodes, _status_msg: &str) -> BinderResult<()> {
             let mut num_calls = self.num_send_status_calls.lock().unwrap();
             *num_calls += 1;
 
@@ -822,10 +829,10 @@ mod tests {
             self.service.registerApiStatusListener(&binder_status_listener).await.unwrap();
             self.api_status_listener = Some(api_status_listener);
 
-            assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0, self.get_status_code());
+            assert_eq!(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, self.get_status_code());
         }
 
-        pub fn get_status_code(&self) -> i32 {
+        pub fn get_status_code(&self) -> StatusCodes {
             self.api_status_listener.as_ref().unwrap().get_status_code()
         }
 
@@ -887,7 +894,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
@@ -911,7 +918,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
@@ -921,7 +928,7 @@ mod tests {
             .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
             .await
             .unwrap();
-        assert_eq!(StatusCodes::ADD_METRICS_CONFIG_FAILED.0, test_environment.get_status_code());
+        assert_eq!(StatusCodes::ADD_METRICS_CONFIG_FAILED, test_environment.get_status_code());
         assert_eq!(2, test_environment.get_num_add_metrics_config_calls());
     }
 
@@ -942,7 +949,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
         test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
@@ -958,7 +965,7 @@ mod tests {
 
         test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
-            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
+            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
@@ -985,7 +992,7 @@ mod tests {
 
         test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_deactivate_metrics_config_calls());
@@ -1001,7 +1008,7 @@ mod tests {
 
         test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
-            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
+            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_deactivate_metrics_config_calls());
@@ -1029,7 +1036,7 @@ mod tests {
         test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_remove_config_calls());
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
     }
@@ -1044,7 +1051,7 @@ mod tests {
 
         test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
-            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
+            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_remove_config_calls());
@@ -1077,7 +1084,7 @@ mod tests {
         // Remove all configs
         test_environment.service.removeAllMetricsConfigs(-1).await.unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_remove_all_config_calls());
@@ -1108,7 +1115,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             config_list_listener.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_get_active_config_calls());
@@ -1143,7 +1150,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             config_list_listener.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_get_inactive_config_calls());
@@ -1175,14 +1182,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
 
         test_environment.service.unregisterReportReadyListener().await.unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
     }
@@ -1210,7 +1217,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
     }
@@ -1237,7 +1244,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
 
@@ -1266,7 +1273,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
 
@@ -1276,7 +1283,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            StatusCodes::SET_REPORT_READY_LISTENER_FAILED.0,
+            StatusCodes::SET_REPORT_READY_LISTENER_FAILED,
             test_environment.get_status_code()
         );
     }
@@ -1298,7 +1305,7 @@ mod tests {
         let serialized_config = create_serialized_config(UUID1);
         test_environment.service.registerApiStatusListener(&binder_listener).await.unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR,
             api_status_listener.get_status_code()
         );
 
@@ -1340,7 +1347,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             api_status_listener.get_status_code()
         );
     }
@@ -1380,7 +1387,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::SET_MISC_STATUS_LISTENER_FAILED.0,
+            StatusCodes::SET_MISC_STATUS_LISTENER_FAILED,
             api_status_listener.get_status_code()
         );
     }
@@ -1422,7 +1429,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             test_environment.get_status_code()
         );
 
@@ -1449,7 +1456,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             report_listener.get_status_code()
         );
         assert_eq!(UUID1, report_listener.get_status_message());

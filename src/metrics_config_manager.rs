@@ -109,13 +109,14 @@ impl MetricsConfigManagerImpl {
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        misc_error_callback: impl Fn(i32, String) + Send + Sync + 'static,
+        misc_error_callback: impl Fn(StatusCodes, String) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
-        let handle_file_io_error =
-            |misc_error_callback: &dyn Fn(i32, String), err_code: i32, err_msg: &str| {
-                error!("{}", err_msg);
-                misc_error_callback(err_code, err_msg.to_string());
-            };
+        let handle_file_io_error = |misc_error_callback: &dyn Fn(StatusCodes, String),
+                                    err_code: StatusCodes,
+                                    err_msg: &str| {
+            error!("{}", err_msg);
+            misc_error_callback(err_code, err_msg.to_string());
+        };
 
         let config_manager = Arc::new_cyclic(
             |manager_reference: &Weak<MetricsConfigManagerImpl>| {
@@ -177,7 +178,7 @@ impl MetricsConfigManagerImpl {
                             let err = format!("Error {} in reading file {:?} from disk", e, entry);
                             handle_file_io_error(
                                 &misc_error_callback,
-                                StatusCodes::FILE_IO_ERROR.0,
+                                StatusCodes::FILE_IO_ERROR,
                                 &err,
                             );
                             continue;
@@ -194,7 +195,7 @@ impl MetricsConfigManagerImpl {
                             );
                             handle_file_io_error(
                                 &misc_error_callback,
-                                StatusCodes::METRICS_CONFIG_PARSE_ERROR.0,
+                                StatusCodes::METRICS_CONFIG_PARSE_ERROR,
                                 &err,
                             );
                             continue;
@@ -220,7 +221,7 @@ impl MetricsConfigManagerImpl {
                             );
                             handle_file_io_error(
                                 &misc_error_callback,
-                                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED.0,
+                                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED,
                                 &err,
                             );
 
@@ -239,7 +240,7 @@ impl MetricsConfigManagerImpl {
                 }
                 Err(e) => {
                     let err = format!("Error {} in creating active config directory", e);
-                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR.0, &err);
+                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR, &err);
                 }
             };
         }
@@ -262,7 +263,7 @@ impl MetricsConfigManagerImpl {
                     let err = format!("Metric config corrupted {:?}", entry);
                     handle_file_io_error(
                         &misc_error_callback,
-                        StatusCodes::METRICS_CONFIG_CORRUPTED.0,
+                        StatusCodes::METRICS_CONFIG_CORRUPTED,
                         &err,
                     );
 
@@ -280,7 +281,7 @@ impl MetricsConfigManagerImpl {
                 }
                 Err(e) => {
                     let err = format!("Error {} in creating active config directory", e);
-                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR.0, &err);
+                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR, &err);
                 }
             };
         }
@@ -770,7 +771,7 @@ mod tests {
         .unwrap();
 
         let (status, _) = add_config_receiver.await.unwrap();
-        assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR.0);
+        assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
     }
 
     #[tokio::test]

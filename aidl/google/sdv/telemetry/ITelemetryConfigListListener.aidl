@@ -2,6 +2,8 @@
 
 package google.sdv.telemetry;
 
+import google.sdv.telemetry.TelemetryServiceStatusCodes;
+
 /**
  * Enables clients to receive list of active or inactive configs currently part of the service.
  */
@@ -15,6 +17,6 @@ oneway interface ITelemetryConfigListListener {
      * @param metricsReport List of metrics config uuids maintained by telemetry service in either
      *                      active or inactive state
      */
-    void sendConfigList(in int statusCode, in @utf8InCpp String statusMessage,
-            in List<String> configList);
+    void sendConfigList(in TelemetryServiceStatusCodes statusCode,
+            in @utf8InCpp String statusMessage, in List<String> configList);
 }

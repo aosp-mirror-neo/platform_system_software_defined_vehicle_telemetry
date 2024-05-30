@@ -2,6 +2,8 @@
 
 package google.sdv.telemetry;
 
+import google.sdv.telemetry.TelemetryServiceStatusCodes;
+
 /**
  * Enables clients to receive status codes and messages for API calls
  */
@@ -10,6 +12,6 @@ oneway interface ITelemetryApiStatusListener {
     /**
      * Called by telemetry service to send back status codes and messages for APIs
      */
-    void sendStatus(
-            in int apiCallId, in int statusCode, in @utf8InCpp String statusMessage);
+    void sendStatus(in int apiCallId, in TelemetryServiceStatusCodes statusCode,
+            in @utf8InCpp String statusMessage);
 }
