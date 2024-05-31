@@ -32,23 +32,10 @@ cc_library {
 }
 
 rust_defaults {
-    name: "telemetry@rust_defaults",
+    name: "sdv_telemetry@rust_defaults",
     defaults: [
         "sdv@rust_defaults",
         "sdv_tracing@rust_defaults",
-    ],
-    rustlibs: [
-        "libanyhow",
-        "liblazy_static",
-        "liblog_rust",
-        "liblogger",
-        "libbinder_rs",
-        "libbinder_tokio_rs",
-        "libprotobuf",
-        "librand",
-        "libtokio",
-        "libthiserror",
-        "libsdv_log_rust",
     ],
     flags: [
         // By enforcing this lint, we make it a lot more obvious when a conversion
@@ -89,66 +76,92 @@ rust_protobuf {
     system_ext_specific: true,
 }
 
-rust_library {
-    name: "libsdv_telemetry",
-    crate_name: "sdv_telemetry",
-    defaults: ["telemetry@rust_defaults"],
+rust_defaults {
+    name: "libsdv_telemetry_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
     srcs: [
         "src/telemetry_service.rs",
     ],
     rustlibs: [
         "google.sdv.telemetry-V1-rust",
+        "libanyhow",
+        "libbinder_rs",
+        "liblog_rust",
+        "libprotobuf",
+        "libthiserror",
+        "libtokio",
         "libsdvtelemetry_proto_rust",
         "libsdv_telemetry_utils",
     ],
     proc_macros: [
         "libasync_trait",
-        "libclap_derive",
     ],
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_library {
-    name: "libsdv_telemetry_configurable_publisher",
-    crate_name: "sdv_telemetry_configurable_publisher",
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "src/configurable_publisher_registry_service.rs",
-    ],
-    rustlibs: [
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
-        "libsdv_telemetry",
-        "libsdv_telemetry_utils",
-    ],
-    proc_macros: [
-        "libasync_trait",
-        "libclap_derive",
-    ],
-    vendor_available: true,
-    system_ext_specific: true,
-}
-
-rust_library {
-    name: "libsdv_telemetry_utils",
-    crate_name: "sdv_telemetry_utils",
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "src/utils/lib.rs",
-    ],
-    proc_macros: [
-        "libasync_trait",
-        "libclap_derive",
-    ],
+    name: "libsdv_telemetry",
+    defaults: ["libsdv_telemetry_defaults"],
+    crate_name: "sdv_telemetry",
     vendor_available: true,
     system_ext_specific: true,
 }
 
 rust_defaults {
-    name: "telemetry_dt_wrapper@rust_defaults",
-    defaults: [
-        "telemetry@rust_defaults",
+    name: "libsdv_telemetry_configurable_publisher_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "src/configurable_publisher_registry_service.rs",
     ],
+    rustlibs: [
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "libanyhow",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "liblog_rust",
+        "libsdv_telemetry",
+        "libsdv_telemetry_utils",
+        "libprotobuf",
+        "libthiserror",
+        "libtokio",
+    ],
+    proc_macros: [
+        "libasync_trait",
+        "libclap_derive",
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_configurable_publisher",
+    defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
+    crate_name: "sdv_telemetry_configurable_publisher",
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_utils_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "src/utils/lib.rs",
+    ],
+    rustlibs: [
+        "liblazy_static",
+        "libprotobuf",
+        "libtokio",
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_utils",
+    defaults: ["libsdv_telemetry_utils_defaults"],
+    crate_name: "sdv_telemetry_utils",
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_defaults {
+    name: "telemetry_dt_wrapper_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["src/data_tunnel_wrapper/lib.rs"],
     rustlibs: [
         "libanyhow",
@@ -172,16 +185,14 @@ rust_defaults {
 rust_library {
     name: "libsdv_telemetry_dt_wrapper",
     crate_name: "sdv_telemetry_dt_wrapper",
-    defaults: ["telemetry_dt_wrapper@rust_defaults"],
+    defaults: ["telemetry_dt_wrapper_defaults"],
     vendor_available: true,
     system_ext_specific: true,
 }
 
 rust_defaults {
-    name: "telemetry_dt_wrapper_tests@rust_defaults",
-    defaults: [
-        "telemetry_dt_wrapper@rust_defaults",
-    ],
+    name: "telemetry_dt_wrapper_tests_defaults",
+    defaults: ["telemetry_dt_wrapper_defaults"],
     test_suites: [
         "general-tests",
         "automotive-sdv-tests",
@@ -204,7 +215,7 @@ rust_defaults {
 
 rust_test {
     name: "libsdv_telemetry_dt_wrapper_unit_tests",
-    defaults: ["telemetry_dt_wrapper_tests@rust_defaults"],
+    defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["unit_tests"],
     test_options: {
         unit_test: true,
@@ -213,7 +224,7 @@ rust_test {
 
 rust_test {
     name: "libsdv_telemetry_dt_wrapper_integration_tests",
-    defaults: ["telemetry_dt_wrapper_tests@rust_defaults"],
+    defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
     rustlibs: [
         "librand",
@@ -223,55 +234,64 @@ rust_test {
     require_root: true,
 }
 
-rust_binary {
-    name: "sdv_telemetry_service_agent",
+rust_defaults {
+    name: "sdv_telemetry_service_agent_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
     vendor_available: true,
     system_ext_specific: true,
     vintf_fragments: [
         "google.sdv.telemetry-service.xml",
-        // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
-        "google.sdv.telemetry.configurable_publisher-service.xml",
-    ],
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "src/main.rs",
     ],
     rustlibs: [
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
         "google.sdv.telemetry-V1-rust",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "liblog_rust",
         "librustutils",
+        "libsdv_log_rust",
         "libsdv_telemetry",
-        "libsdv_telemetry_configurable_publisher",
-        "libsdv_telemetry_dt_wrapper",
         "libsdvtelemetry_proto_rust",
+        "libtokio",
     ],
     proc_macros: [
         "libasync_trait",
-        "libclap_derive",
     ],
 }
 
 rust_binary {
+    name: "sdv_telemetry_service_agent",
+    defaults: ["sdv_telemetry_service_agent_defaults"],
+    srcs: [
+        "src/main.rs",
+    ],
+    vintf_fragments: [
+        // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
+        "google.sdv.telemetry.configurable_publisher-service.xml",
+        // End of configurable publisher fragments
+    ],
+    rustlibs: [
+        "libsdv_telemetry_dt_wrapper",
+        // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "libsdv_telemetry_configurable_publisher",
+        // End of configurable publisher deps
+    ],
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_binary {
     name: "sdv_ivi_telemetry_service_agent",
-    defaults: ["telemetry@rust_defaults"],
+    defaults: ["sdv_telemetry_service_agent_defaults"],
     srcs: [
         "src/main_ivi.rs",
     ],
     vintf_fragments: [
-        "google.sdv.telemetry-service.xml",
         "google.sdv.telemetry.configurable_publisher-service.xml",
     ],
     rustlibs: [
         "google.sdv.telemetry.configurable_publisher-V1-rust",
-        "google.sdv.telemetry-V1-rust",
-        "librustutils",
-        "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
-        "libsdvtelemetry_proto_rust",
-    ],
-    proc_macros: [
-        "libasync_trait",
-        "libclap_derive",
     ],
     system_ext_specific: true,
     vendor_available: true,
@@ -279,20 +299,16 @@ rust_binary {
 
 rust_test {
     name: "libsdv_telemetry_unit_tests",
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "src/telemetry_service.rs",
-    ],
+    defaults: ["libsdv_telemetry_defaults"],
     rustlibs: [
-        "google.sdv.telemetry-V1-rust",
-        "libfutures",
+        "liblazy_static",
+        "librand",
         "libsdv_telemetry_test_proto",
         "libsdvtelemetry_proto_rust",
         "libsdv_telemetry_utils",
     ],
     proc_macros: [
         "libasync_trait",
-        "libclap_derive",
         "libpaste",
     ],
     test_suites: [
@@ -320,19 +336,9 @@ rust_test {
 
 rust_test {
     name: "libsdv_telemetry_configurable_publisher_unit_tests",
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "src/configurable_publisher_registry_service.rs",
-    ],
+    defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     rustlibs: [
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libsample_publisher_proto",
-        "libsdv_telemetry",
-        "libsdv_telemetry_utils",
-    ],
-    proc_macros: [
-        "libasync_trait",
-        "libclap_derive",
     ],
     test_suites: [
         "general-tests",
@@ -359,15 +365,7 @@ rust_test {
 
 rust_test {
     name: "libsdv_telemetry_utils_unit_tests",
-    defaults: ["telemetry@rust_defaults"],
-    srcs: [
-        "src/utils/lib.rs",
-    ],
-    rustlibs: [
-        "libsdv_telemetry_utils",
-    ],
-    proc_macros: [
-    ],
+    defaults: ["libsdv_telemetry_utils_defaults"],
     test_suites: [
         "general-tests",
         "automotive-sdv-tests",
@@ -391,11 +389,12 @@ rust_test {
 
 rust_test {
     name: "sdv_telemetry_integration_tests",
-    defaults: ["telemetry@rust_defaults"],
+    defaults: ["sdv_telemetry@rust_defaults"],
     srcs: [
         "tests/integration_tests.rs",
     ],
     rustlibs: [
+        "libanyhow",
         "libfutures",
         "liblog_rust",
         "libbinder_rs",
@@ -433,7 +432,7 @@ rust_bindgen {
 
 rust_test {
     name: "libsdv_telemetry_bindgen_tests",
-    defaults: ["telemetry@rust_defaults"],
+    defaults: ["sdv_telemetry@rust_defaults"],
     srcs: [
         ":libsdv_telemetry_bindgen",
     ],
@@ -462,7 +461,7 @@ rust_bindgen {
 
 rust_test {
     name: "libsdv_telemetry_status_codes_bindgen_tests",
-    defaults: ["telemetry@rust_defaults"],
+    defaults: ["sdv_telemetry@rust_defaults"],
     srcs: [
         ":libsdv_telemetry_status_codes_bindgen",
     ],
