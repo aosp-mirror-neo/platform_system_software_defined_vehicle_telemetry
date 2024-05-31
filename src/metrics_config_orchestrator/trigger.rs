@@ -67,7 +67,7 @@ pub(crate) struct TriggerImpl {
     subscription_manager: Box<dyn SubscriptionManager<TriggerSubscriber>>,
 }
 
-pub(crate) enum TriggerType {
+pub(super) enum TriggerType {
     Data {
         publisher: Arc<dyn Publisher>,
     },

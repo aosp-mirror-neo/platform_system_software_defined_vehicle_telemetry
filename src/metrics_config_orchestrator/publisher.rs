@@ -63,7 +63,7 @@ pub(crate) struct PublisherImpl {
     state: AsyncMutex<PublisherState>,
 }
 
-pub(crate) enum PublisherState {
+pub(super) enum PublisherState {
     Inactive,
     Active {
         // Map of unique data trigger names to the subscribed callbacks.
@@ -72,7 +72,7 @@ pub(crate) enum PublisherState {
 }
 
 #[allow(dead_code)]
-pub(crate) enum PublisherType {
+pub(super) enum PublisherType {
     Service {
         configuration: Option<Any>,
         service_name: String,
