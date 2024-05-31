@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 /// Modules that allow conversion between NodeValue and protobuf reflections.
 ///
 /// Useful for:

@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 use lazy_static::lazy_static;
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_test_proto::test_message;
