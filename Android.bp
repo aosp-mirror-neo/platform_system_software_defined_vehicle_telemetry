@@ -431,6 +431,25 @@ rust_bindgen {
     system_ext_specific: true,
 }
 
+rust_test {
+    name: "libsdv_telemetry_bindgen_tests",
+    defaults: ["telemetry@rust_defaults"],
+    srcs: [
+        ":libsdv_telemetry_bindgen",
+    ],
+    crate_name: "sdv_telemetry_bindgen_tests",
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    auto_gen_config: true,
+
+    // Disable all lints because the generated code is not guaranteed to be
+    // lint-free.
+    clippy_lints: "none",
+    lints: "none",
+}
+
 rust_bindgen {
     name: "libsdv_telemetry_status_codes_bindgen",
     crate_name: "sdv_telemetry_status_codes_bindgen",
@@ -439,6 +458,25 @@ rust_bindgen {
     source_stem: "bindings",
     vendor_available: true,
     system_ext_specific: true,
+}
+
+rust_test {
+    name: "libsdv_telemetry_status_codes_bindgen_tests",
+    defaults: ["telemetry@rust_defaults"],
+    srcs: [
+        ":libsdv_telemetry_status_codes_bindgen",
+    ],
+    crate_name: "sdv_telemetry_status_codes_bindgen_tests",
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    auto_gen_config: true,
+
+    // Disable all lints because the generated code is not guaranteed to be
+    // lint-free.
+    clippy_lints: "none",
+    lints: "none",
 }
 
 build = [
