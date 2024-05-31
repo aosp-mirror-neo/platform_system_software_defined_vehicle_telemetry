@@ -229,6 +229,7 @@ mod tests {
 
     use super::*;
     use crate::expr::node_value::NodeValue;
+    use crate::metrics_config_orchestrator::publisher::ConnectionType;
     use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
@@ -261,6 +262,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            ConnectionType::Subscription,
             Arc::new(MockServiceAdapter::new()),
         ));
 

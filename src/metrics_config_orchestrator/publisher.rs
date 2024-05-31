@@ -75,6 +75,7 @@ pub(super) enum PublisherState {
 pub(super) enum PublisherType {
     Service {
         configuration: Option<Any>,
+        connection_type: ConnectionType,
         service_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         service_subscription: Mutex<Option<ServiceSubscription>>,
@@ -85,6 +86,11 @@ pub(super) enum PublisherType {
         trigger_subscriber: TriggerSubscriber,
         triggers: Vec<Arc<dyn Trigger>>,
     },
+}
+
+pub(super) enum ConnectionType {
+    Subscription,
+    Getter,
 }
 
 impl Display for PublisherState {
@@ -137,6 +143,7 @@ impl Publisher for PublisherImpl {
                 service_name,
                 service_adapter,
                 service_subscription,
+                ..
             } => {
                 assert!(service_subscription.lock().unwrap().is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
 
@@ -263,12 +270,14 @@ impl PublisherImpl {
         name: String,
         service_name: String,
         configuration: Option<Any>,
+        connection_type: ConnectionType,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     ) -> Self {
         Self::new(
             name,
             PublisherType::Service {
                 configuration,
+                connection_type,
                 service_name,
                 service_adapter,
                 service_subscription: None.into(),
@@ -358,6 +367,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            ConnectionType::Subscription,
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
         ))
     }
@@ -407,6 +417,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             Some(Any::pack(Empty::default_instance()).unwrap()),
+            ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
         ));
 
