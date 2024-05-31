@@ -64,6 +64,7 @@ rust_library {
         "libprotobuf",
         "libsdv_telemetry_bindgen",
         "libstatus_codes_bindgen",
+        "libthiserror",
         "libtokio",
     ],
     proc_macros: [
