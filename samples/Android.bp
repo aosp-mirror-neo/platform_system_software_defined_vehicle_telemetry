@@ -168,6 +168,40 @@ rust_protobuf {
     system_ext_specific: true,
 }
 
+rust_binary {
+    name: "telemetry_sample_data_tunnel_publisher_error_report",
+    srcs: ["rust/data_tunnel_publisher_error_report/error_report_publisher.rs"],
+    rustlibs: [
+        "liberror_report_publisher_proto",
+        "libsdvtelemetry_metadata_proto_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_dt_rust",
+        "libcxx",
+        "liblibc",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libanyhow",
+    ],
+    vendor: true,
+}
+
+rust_protobuf {
+    name: "liberror_report_publisher_proto",
+    crate_name: "error_report_publisher_proto",
+    protos: [
+        "rust/data_tunnel_publisher_error_report/error_report_publisher.proto",
+    ],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "configurable_publisher_source",
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
 rust_library {
     name: "libsdv_telemetry_sample_utils",
     crate_name: "sdv_telemetry_sample_utils",
