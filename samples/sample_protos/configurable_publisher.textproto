@@ -36,13 +36,17 @@ expression_nodes {
 triggers {
   name: "start_trigger"
   periodic_trigger {
-    interval_ms: 2000
+    interval {
+      seconds: 2
+    }
   }
 }
 triggers {
   name: "period_2s"
   periodic_trigger {
-    interval_ms: 2000
+    interval {
+      seconds: 2
+    }
   }
 }
 

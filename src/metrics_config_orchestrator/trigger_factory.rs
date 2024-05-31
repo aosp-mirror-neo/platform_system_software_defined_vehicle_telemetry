@@ -1,5 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+use protobuf::well_known_types::duration::Duration as DurationProto;
+use sdv_telemetry_utils::duration_utils::try_into_duration;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionType, trigger::Trigger_type as TriggerTypeProto,
     ConditionalTrigger as ConditionalTriggerProto, Trigger as TriggerProto,
@@ -68,6 +70,8 @@ pub enum TriggerFactoryError {
         "Condition {condition_type:?} cannot be applied to an expression of type {value_type:?}"
     )]
     InvalidNodeValueType { condition_type: ConditionType, value_type: NodeValueType },
+    #[error("Periodic trigger interval ({interval}) is invalid: {error}")]
+    PeriodicTriggerInvalidDuration { interval: DurationProto, error: std::num::TryFromIntError },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
 }
@@ -88,9 +92,14 @@ impl TriggerFactory for TriggerFactoryImpl {
                     &context.publishers[&data_trigger.publisher_name],
                 ),
             },
-            Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => {
-                TriggerType::Periodic { interval_ms: periodic_trigger.interval_ms }
-            }
+            Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => TriggerType::Periodic {
+                interval: try_into_duration(&periodic_trigger.interval).map_err(|error| {
+                    TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                        interval: (*periodic_trigger.interval).clone(),
+                        error,
+                    }
+                })?,
+            },
             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
 
@@ -199,16 +208,18 @@ impl TriggerFactoryImpl {
 
 #[cfg(test)]
 mod tests {
-    use protobuf::EnumOrUnknown;
+    use protobuf::{EnumOrUnknown, MessageField};
     use sdv_telemetry_utils::collection_extension::VecExtension;
+    use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use sdvtelemetry_proto_rust::metrics_configuration::conditional_trigger::ConditionType;
     use std::collections::HashMap;
+    use std::time::Duration;
 
     use super::*;
     use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
 
-    const INTERVAL: u64 = u64::MAX;
+    const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
     const NODE_INDEX: u32 = 42;
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
@@ -247,7 +258,7 @@ mod tests {
     fn create_valid_periodic_trigger() -> TriggerProto {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let periodic_trigger = trigger.mut_periodic_trigger();
-        periodic_trigger.interval_ms = INTERVAL;
+        periodic_trigger.interval = MessageField::some(try_into_proto_duration(&INTERVAL).unwrap());
         trigger
     }
 
@@ -272,7 +283,7 @@ mod tests {
 
         let parent_trigger = TriggerImpl::new(
             PARENT_TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval_ms: INTERVAL },
+            TriggerType::Periodic { interval: INTERVAL },
         );
 
         (trigger, Some(vec![parent_trigger]))
@@ -404,10 +415,32 @@ mod tests {
         let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.name, TRIGGER_NAME);
-        let TriggerType::Periodic { interval_ms } = res.trigger_type else {
+        let TriggerType::Periodic { interval } = res.trigger_type else {
             panic!("Unexpected trigger type");
         };
-        assert_eq!(interval_ms, INTERVAL);
+        assert_eq!(interval, INTERVAL);
+    }
+
+    #[test]
+    fn create_periodic_trigger_negative_interval_failure() {
+        let factory = create_factory();
+
+        let mut trigger = new_trigger(TRIGGER_NAME);
+        let periodic_trigger = trigger.mut_periodic_trigger();
+        periodic_trigger.interval =
+            MessageField::some(DurationProto { seconds: -1, nanos: 0, ..Default::default() });
+
+        let err = factory.create_using_default_context(&trigger).err().unwrap();
+        assert!(
+            matches!(
+                err,
+                TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                    interval: DurationProto { seconds: -1, nanos: 0, .. },
+                    ..
+                }
+            ),
+            "Unexpected error: {err:?}"
+        );
     }
 
     #[test]

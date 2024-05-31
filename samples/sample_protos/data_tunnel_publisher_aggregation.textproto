@@ -117,25 +117,34 @@ expression_nodes {
 triggers {
   name: "start_trigger"
   periodic_trigger {
-    interval_ms: 2000
+    interval {
+      seconds: 2
+    }
   }
 }
 triggers {
   name: "period_2s"
   periodic_trigger {
-    interval_ms: 2000
+    interval {
+      seconds: 2
+    }
   }
 }
 triggers {
   name: "end_trigger"
   periodic_trigger {
-    interval_ms: 30200
+    interval {
+      seconds: 30
+      nanos: 200000000
+    }
   }
 }
 triggers {
   name: "agg_trigger"
   periodic_trigger {
-    interval_ms: 1000
+    interval {
+      seconds: 1
+    }
   }
 }
 
