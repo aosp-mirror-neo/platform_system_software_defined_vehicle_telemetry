@@ -3,9 +3,8 @@
 use protobuf::reflect::FileDescriptor;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
-    Trigger as TriggerProto,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -50,7 +49,7 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigg
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
-    pub trigger_protos: &'a Vec<TriggerProto>,
+    pub trigger_protos: &'a HashMap<String, ()>,
     pub file_descriptors: &'a [FileDescriptor],
     pub node_types: &'a [Option<NodeValueType>],
 }
@@ -159,10 +158,8 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         )?;
 
         // Verify that trigger names for this report config exist.
-        let names_set =
-            context.trigger_protos.iter().map(|proto| &proto.name).collect::<HashSet<_>>();
         metrics_report_config.trigger_names.iter().try_for_each(|name| {
-            if names_set.contains(&name) {
+            if context.trigger_protos.contains_key(name) {
                 Ok(())
             } else {
                 Err(MetricsReportGeneratorFactoryError::InvalidTriggerName {
@@ -259,11 +256,7 @@ mod tests {
             trigger_names: Option<Vec<String>>,
         ) -> Result<(), MetricsReportGeneratorFactoryError> {
             let triggers = trigger_names
-                .map(|vec| {
-                    vec.into_iter()
-                        .map(|name| TriggerProto { name, ..Default::default() })
-                        .collect()
-                })
+                .map(|vec| vec.into_iter().map(|name| (name, ())).collect())
                 .unwrap_or_default();
             let context = MetricsReportGeneratorFactoryValidateContext {
                 trigger_protos: &triggers,
