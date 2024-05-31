@@ -2,7 +2,7 @@
 
 use log::error;
 use sdv_telemetry_bindgen as rust_to_c;
-use status_codes_bindgen as status_codes;
+use sdv_telemetry_status_codes_bindgen as status_codes;
 use std::ffi::{c_void, CStr, CString};
 use std::marker::PhantomPinned;
 use std::pin::Pin;

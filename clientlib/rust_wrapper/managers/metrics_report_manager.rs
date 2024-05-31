@@ -8,7 +8,7 @@ use crate::TelemetryServiceHolder;
 use log::{error, info};
 use protobuf::Message;
 use sdv_telemetry_bindgen as rust_to_c;
-use status_codes_bindgen as status_codes;
+use sdv_telemetry_status_codes_bindgen as status_codes;
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::slice;
 use std::sync::Arc;

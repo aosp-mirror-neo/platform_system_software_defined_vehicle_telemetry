@@ -60,7 +60,7 @@ rust_library {
         "libsdvtelemetry_proto_rust",
         "libprotobuf",
         "libsdv_telemetry_bindgen",
-        "libstatus_codes_bindgen",
+        "libsdv_telemetry_status_codes_bindgen",
         "libthiserror",
         "libtokio",
     ],
