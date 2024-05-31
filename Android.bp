@@ -4,8 +4,22 @@ package {
     default_applicable_licenses: ["sdv_license"],
 }
 
+cc_defaults {
+    name: "sdv_telemetry@cc_defaults",
+    defaults: [
+        "sdv@cc_defaults",
+        "sdv_tracing@cc_defaults",
+    ],
+    cflags: [
+        "-Wno-unused-private-field",
+    ],
+}
+
 cc_library {
     name: "libsdvtelemetry_proto_cpp",
+    defaults: [
+        "sdv_telemetry@cc_defaults",
+    ],
     srcs: [":sdvtelemetryservice-proto-srcs"],
     proto: {
         export_proto_headers: true,

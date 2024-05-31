@@ -5,12 +5,9 @@ package {
 }
 
 cc_defaults {
-    name: "telemetry_defaults",
-    cflags: [
-        "-Werror",
-        "-Wall",
-        "-Wno-unused-parameter",
-        "-Wno-unused-private-field",
+    name: "libtelemetry_c_defaults",
+    defaults: [
+        "sdv_telemetry@cc_defaults",
     ],
     shared_libs: [
         "libprotobuf-cpp-full",
@@ -25,6 +22,9 @@ cc_defaults {
 
 cc_library {
     name: "libtelemetry_c",
+    defaults: [
+        "libtelemetry_c_defaults",
+    ],
     srcs: [
         "src/callback_container.cpp",
         "src/api_status_listener_impl.cpp",
@@ -33,9 +33,6 @@ cc_library {
         "src/report_ready_listener_impl.cpp",
         "src/telemetry_service.cpp",
         "src/lib.cpp",
-    ],
-    defaults: [
-        "telemetry_defaults",
     ],
     local_include_dirs: [
         "include",
