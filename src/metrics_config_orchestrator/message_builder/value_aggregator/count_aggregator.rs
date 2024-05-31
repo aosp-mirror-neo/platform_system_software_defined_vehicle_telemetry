@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};

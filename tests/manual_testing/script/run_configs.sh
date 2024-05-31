@@ -1,4 +1,6 @@
 #!/bin/bash
+# Copyright 2024 Google LLC
+
 set -eu -o pipefail
 source tests/manual_testing/script/.env
 OUT_DIR=$(realpath $OUT_DIR)

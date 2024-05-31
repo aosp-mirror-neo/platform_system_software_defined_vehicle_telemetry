@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 pub(crate) mod ast;
 pub(crate) mod node_errors;
 pub(crate) mod node_value;

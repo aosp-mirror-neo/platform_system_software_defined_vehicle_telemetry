@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 use lazy_static::lazy_static;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};

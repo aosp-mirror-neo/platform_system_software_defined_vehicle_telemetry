@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 pub(super) mod avg_aggregator;
 pub(super) mod count_aggregator;
 pub(super) mod delta_aggregator;

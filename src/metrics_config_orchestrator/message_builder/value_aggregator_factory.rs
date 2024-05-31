@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 use protobuf::{reflect::FieldDescriptor, well_known_types::any::Any, MessageFull};
 use sdv_telemetry_utils::option_extension::OptionExtension;
 use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
