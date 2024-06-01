@@ -201,7 +201,7 @@ impl TelemetryServiceHolder {
     /// @return an error code and error message in case of incorrect parameters
 
     pub async fn clear_report_ready_listener(&self) -> TelemetryResult<()> {
-        metrics_report_manager::clear_report_ready_listener(self).await
+        metrics_report_manager::clear_report_ready_listener(self)
     }
 
     /// Tells the telemetry service to send a metrics report with the given uuid and report number.
@@ -302,5 +302,13 @@ impl TelemetryServiceHolder {
             rust_to_c::clear_misc_status_listener(self.0);
         }
         Ok(())
+    }
+}
+
+impl Drop for TelemetryServiceHolder {
+    fn drop(&mut self) {
+        if let Err(err) = metrics_report_manager::clear_report_ready_listener(self) {
+            error!("Error while clearing report ready listener: {:?}", err);
+        }
     }
 }
