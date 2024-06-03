@@ -3,7 +3,7 @@
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
 
-#include "callback_function.h"
+#include "callback_functions.h"
 
 #include <utils/Log.h>
 

@@ -3,6 +3,7 @@
 package google.sdv.telemetry;
 
 import google.sdv.telemetry.ITelemetryApiStatusListener;
+import google.sdv.telemetry.ITelemetryConfigListListener;
 import google.sdv.telemetry.ITelemetryMiscStatusListener;
 import google.sdv.telemetry.ITelemetryReportListener;
 import google.sdv.telemetry.ITelemetryReportReadyListener;
@@ -57,6 +58,24 @@ interface ITelemetryService {
      * @param apiCallId unique integer id assigned to each API call
      */
     void removeAllMetricsConfigs(in int apiCallId);
+
+    /**
+     * Returns a list of all metrics config currently in the active state. The list is returned as
+     * a serialized protobuf message by calling the callback function of the listener sent as a
+     * function argument.
+     *
+     * @param listener callback used by telemetry service to send back list of active configs
+     */
+    void getActiveMetricsConfigUuids(in ITelemetryConfigListListener listener);
+
+    /**
+     * Returns a list of all metrics config currently in the inactive state. The list is returned as
+     * a serialized protobuf message by calling the callback function of the listener sent as a
+     * function argument.
+     *
+     * @param listener callback used by telemetry service to send back list of inactive configs
+     */
+    void getInactiveMetricsConfigUuids(in ITelemetryConfigListListener listener);
 
     /**
      * Sends finished telemetry report with the specified metricsConfigUuid,

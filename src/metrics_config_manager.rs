@@ -8,7 +8,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCo
 
 use sdv_telemetry_utils::file_io_utils;
 use sdvtelemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::marker::{Send, Sync};
 use std::mem;
@@ -54,6 +54,12 @@ pub trait MetricsConfigManager {
 
     /// Removes all metrics config from memory
     async fn remove_all_metrics_configs(&self) -> Result<(), MetricsConfigManagerError>;
+
+    /// Get all metrics configs in active state
+    async fn get_active_metrics_config_uuids(&self) -> Vec<String>;
+
+    /// Get all metrics configs in inactive state
+    async fn get_inactive_metrics_config_uuids(&self) -> Vec<String>;
 }
 
 #[derive(Error, Debug)]
@@ -485,6 +491,27 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         self.cur_persistent_config_store_size.store(0, Ordering::SeqCst);
         Ok(())
     }
+
+    async fn get_active_metrics_config_uuids(&self) -> Vec<String> {
+        info!("get_active_metrics_config_uuids");
+
+        self.metrics_config_orchestrator.get_active_metrics_config_uuids()
+    }
+
+    async fn get_inactive_metrics_config_uuids(&self) -> Vec<String> {
+        info!("get_active_metrics_config_uuids");
+
+        let active_configs = self.metrics_config_orchestrator.get_active_metrics_config_uuids();
+        let metrics_config_store_lock = self.metrics_configs_store.lock().unwrap();
+        let all_configs_set = metrics_config_store_lock.keys().collect::<HashSet<_>>();
+
+        let inactive_configs = all_configs_set
+            .difference(&active_configs.iter().collect())
+            .map(|uuid| uuid.to_string())
+            .collect::<Vec<_>>();
+
+        inactive_configs
+    }
 }
 #[cfg(test)]
 pub(crate) mod mock;
@@ -508,6 +535,8 @@ mod tests {
         num_initialize_config_calls: Arc<Mutex<i32>>,
         num_finish_config_calls: Arc<Mutex<i32>>,
         num_validate_config_calls: Arc<Mutex<i32>>,
+        num_get_active_config_calls: Arc<Mutex<i32>>,
+        configs: Mutex<Vec<String>>,
         /// When set, the error will be returned on the next api call
         pub next_error: Mutex<Option<ConfigOrchestratorError>>,
     }
@@ -517,13 +546,20 @@ mod tests {
             num_initialize_config_calls: Arc<Mutex<i32>>,
             num_finish_config_calls: Arc<Mutex<i32>>,
             num_validate_config_calls: Arc<Mutex<i32>>,
+            num_get_active_config_calls: Arc<Mutex<i32>>,
         ) -> Self {
             Self {
                 num_initialize_config_calls,
                 num_finish_config_calls,
                 num_validate_config_calls,
+                num_get_active_config_calls,
+                configs: Vec::new().into(),
                 next_error: None.into(),
             }
+        }
+
+        pub(crate) fn populate_active_configs(&self, config_uuids: Vec<String>) {
+            *self.configs.lock().unwrap() = config_uuids;
         }
     }
 
@@ -564,6 +600,13 @@ mod tests {
 
             Ok(())
         }
+
+        fn get_active_metrics_config_uuids(&self) -> Vec<String> {
+            *self.num_get_active_config_calls.lock().unwrap() += 1;
+
+            let active_configs = self.configs.lock().unwrap().clone().into_iter().collect();
+            active_configs
+        }
     }
 
     struct TestEnvironment {
@@ -573,6 +616,7 @@ mod tests {
         num_initialize_config_calls: Arc<Mutex<i32>>,
         num_finish_config_calls: Arc<Mutex<i32>>,
         num_validate_config_calls: Arc<Mutex<i32>>,
+        num_get_active_config_calls: Arc<Mutex<i32>>,
     }
 
     impl TestEnvironment {
@@ -593,11 +637,13 @@ mod tests {
             let num_initialize_config_calls = Arc::new(Mutex::new(0));
             let num_finish_config_calls = Arc::new(Mutex::new(0));
             let num_validate_config_calls = Arc::new(Mutex::new(0));
+            let num_get_active_config_calls = Arc::new(Mutex::new(0));
 
             let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new(
                 Arc::clone(&num_initialize_config_calls),
                 Arc::clone(&num_finish_config_calls),
                 Arc::clone(&num_validate_config_calls),
+                Arc::clone(&num_get_active_config_calls),
             ));
 
             // Used to initialize/create root directories
@@ -621,7 +667,7 @@ mod tests {
                 metrics_config_orchestrator: Arc::<MockMetricsConfigOrchestratorImpl>::clone(
                     &metrics_config_orchestrator,
                 ),
-                metrics_configs_store: Mutex::new(HashMap::new()),
+                metrics_configs_store: HashMap::new().into(),
             });
 
             TestEnvironment {
@@ -631,6 +677,7 @@ mod tests {
                 num_initialize_config_calls: Arc::clone(&num_initialize_config_calls),
                 num_finish_config_calls: Arc::clone(&num_finish_config_calls),
                 num_validate_config_calls: Arc::clone(&num_validate_config_calls),
+                num_get_active_config_calls: Arc::clone(&num_get_active_config_calls),
             }
         }
 
@@ -644,6 +691,10 @@ mod tests {
 
         pub fn get_num_validate_config_calls(&self) -> i32 {
             *self.num_validate_config_calls.lock().unwrap()
+        }
+
+        pub fn get_num_get_active_config_calls(&self) -> i32 {
+            *self.num_get_active_config_calls.lock().unwrap()
         }
     }
 
@@ -996,5 +1047,68 @@ mod tests {
         assert_eq!(active_dir_path.read_dir().unwrap().count(), 0); // check if directory is empty
         assert_eq!(inactive_dir_path.read_dir().unwrap().count(), 0); // check if directory is empty
         assert_eq!(2, test_environment.get_num_finish_config_calls());
+    }
+
+    #[tokio::test]
+    async fn get_active_metrics_configs_success() {
+        const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "get_active_metrics_configs_success";
+        let file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID));
+
+        let test_environment =
+            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+
+        info!("Serializing metric config");
+        let serialized_config = create_serialized_config(UUID);
+        let serialized_config2 = create_serialized_config(UUID2);
+
+        test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
+        test_environment.manager.activate_metrics_config(UUID).await.unwrap();
+        test_environment.manager.add_metrics_config(&serialized_config2).await.unwrap();
+
+        test_environment
+            .metrics_config_orchestrator
+            .populate_active_configs(vec![UUID.to_string()]);
+        let active_configs = test_environment.manager.get_active_metrics_config_uuids().await;
+        assert!(file_path.is_file());
+        assert_eq!(1, test_environment.get_num_get_active_config_calls());
+        assert_eq!(active_configs, vec![UUID.to_string()], "active configs: {:?}", active_configs);
+    }
+
+    #[tokio::test]
+    async fn get_inactive_metrics_configs_success() {
+        const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "get_inactive_metrics_configs_success";
+        let file_path =
+            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
+
+        let test_environment =
+            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+
+        info!("Serializing metric config");
+        let serialized_config = create_serialized_config(UUID);
+        let serialized_config2 = create_serialized_config(UUID2);
+
+        test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
+        test_environment.manager.add_metrics_config(&serialized_config2).await.unwrap();
+        test_environment
+            .metrics_config_orchestrator
+            .populate_active_configs(vec![UUID2.to_string()]);
+
+        let inactive_configs = test_environment.manager.get_inactive_metrics_config_uuids().await;
+
+        assert!(file_path.is_file());
+        assert_eq!(1, test_environment.get_num_get_active_config_calls());
+        assert_eq!(
+            inactive_configs,
+            vec![UUID.to_string()],
+            "inactive configs: {:?}",
+            inactive_configs
+        );
     }
 }

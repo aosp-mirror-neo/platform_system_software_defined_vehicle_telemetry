@@ -92,6 +92,11 @@ enum TelemetryServiceStatusCodes {
     API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 413,
 
     /**
+     * Errors specific to get active and inactive configs
+     */
+    GET_CONFIG_LIST_FAILED = 414,
+
+    /**
      * Arbitrary Error used as a placeholder for errors not yet defined
      */
     TELEMETRY_SERVICE_UNKNOWN_ERROR = 499,

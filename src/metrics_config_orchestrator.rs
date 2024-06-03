@@ -66,6 +66,9 @@ const TRIGGER: &str = "trigger";
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 #[async_trait]
 pub trait MetricsConfigOrchestrator {
+    /// get list of currently active metrics configs.
+    fn get_active_metrics_config_uuids(&self) -> Vec<String>;
+
     /// Initialize lifecycle of the specified Metrics Configuration.
     async fn initialize_config(
         &self,
@@ -255,6 +258,10 @@ where
     TTrigger: Trigger + 'static,
     TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Send + Sync + 'static,
 {
+    fn get_active_metrics_config_uuids(&self) -> Vec<String> {
+        self.configs.lock().unwrap().keys().cloned().collect()
+    }
+
     async fn initialize_config(
         &self,
         config_proto: &MetricsConfigProto,

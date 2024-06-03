@@ -129,7 +129,6 @@ impl TelemetryServiceHolder {
     /// config added is inactive by default and needs to be activated explicitly. Client can receive
     /// errors related to the config if a status listener is added to the telemetry service.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param serialized_config Pointer to the serialized metrics config
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
@@ -140,7 +139,6 @@ impl TelemetryServiceHolder {
 
     /// Activates a previously added metrics config or a deactivated metrics config.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param config_uuid UUID of the metrics config that needs to be activated.
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
@@ -151,7 +149,6 @@ impl TelemetryServiceHolder {
 
     /// Deactivates an active metrics config.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param config_uuid UUID of the metrics config that needs to be deactivated.
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
@@ -163,7 +160,6 @@ impl TelemetryServiceHolder {
     /// Removes a previously added metrics config. The config being removed will be
     /// deactivated if it's in active state before being removed.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param config_uuid UUID of the metrics config that needs to be removed.
     ///
     /// @return metrics config uuid in case of success, and a error code and error message in case of failure
@@ -175,7 +171,6 @@ impl TelemetryServiceHolder {
     /// Removes all previously added metrics config. The configs be deactivated
     /// if it's in active state before being removed.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     ///
     /// @return an error code and error message in case of failure
 
@@ -183,11 +178,26 @@ impl TelemetryServiceHolder {
         metrics_config_manager::remove_all_metrics_configs(self).await
     }
 
+    /// Returns a list of all metrics configs currently in the active state in telemetry service
+    ///
+    ///
+    /// @return s vector of strings containing the requested list
+    pub async fn get_active_metrics_config_uuids(&self) -> Result<Vec<String>, (i32, String)> {
+        metrics_config_manager::get_active_metrics_config_uuids(self).await
+    }
+
+    /// Returns a list of all metrics configs currently in the inactive state in telemetry service
+    ///
+    ///
+    /// @return a vector of strings containing the requested list
+    pub async fn get_inactive_metrics_config_uuids(&self) -> Result<Vec<String>, (i32, String)> {
+        metrics_config_manager::get_inactive_metrics_config_uuids(self).await
+    }
+
     /// Sets a report ready listener that gets called whenever there is a metrics report
     /// ready. Telemetry service will call the CbFunc and pass the listener object back to the
     /// client, along with the uuid of the metrics config for which the report is ready.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param report_ready_callback function closure gets called when a report is ready. The
     /// report_ready_callback takes String, String and i32 that specify
     /// metrics config uuid, metrics report name and report number of the report that is ready, respectively.
@@ -205,7 +215,6 @@ impl TelemetryServiceHolder {
     /// params passed to the API call of the config if a status listener is added to the
     /// telemetry service.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     ///
     /// @return an error code and error message in case of incorrect parameters
 
@@ -215,7 +224,6 @@ impl TelemetryServiceHolder {
 
     /// Tells the telemetry service to send a metrics report with the given uuid and report number.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param metrics_config_uuid uuid of the metrics configuration of the requested report
     /// @param report_config_name name of the metrics report config of the requested report
     /// @param report_number report number of the requested metrics report
@@ -241,7 +249,6 @@ impl TelemetryServiceHolder {
     /// to the telemetry service. API calls which do not take a listener and callback function
     /// also send their status back to the client using the status listener.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     /// @param status_callback function closure that gets called everytime a status catering to telemetry service needs to be shared with the client. The
     /// status_callback takes an i32 status_code and a String status_message as params.
     ///
@@ -308,7 +315,6 @@ impl TelemetryServiceHolder {
 
     /// Clears a previously set status listener.
     ///
-    /// @param service An opaque pointer holding a reference to the telemetry_service
     ///
     /// @return an error code and error message in case of incorrect parameters
 

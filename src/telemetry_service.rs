@@ -13,6 +13,7 @@ pub mod service_publisher_manager;
 use async_trait::async_trait;
 use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     ITelemetryApiStatusListener::ITelemetryApiStatusListener,
+    ITelemetryConfigListListener::ITelemetryConfigListListener,
     ITelemetryMiscStatusListener::ITelemetryMiscStatusListener,
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
@@ -311,6 +312,43 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         )
     }
 
+    #[instrument(skip(self, config_list_listener))]
+    async fn getActiveMetricsConfigUuids(
+        &self,
+        config_list_listener: &Strong<dyn ITelemetryConfigListListener>,
+    ) -> BinderResult<()> {
+        info!("getActiveMetricsConfigUuids");
+
+        let config_list = self.metrics_config_manager.get_active_metrics_config_uuids().await;
+        if let Err(e) = config_list_listener.deref().sendConfigList(
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            "",
+            &config_list,
+        ) {
+            warn!("Unable to send config list to the client: {:?}", e);
+        }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self, config_list_listener))]
+    async fn getInactiveMetricsConfigUuids(
+        &self,
+        config_list_listener: &Strong<dyn ITelemetryConfigListListener>,
+    ) -> BinderResult<()> {
+        info!("getActiveMetricsConfigUuids");
+        let config_list = self.metrics_config_manager.get_inactive_metrics_config_uuids().await;
+        if let Err(e) = config_list_listener.deref().sendConfigList(
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            "",
+            &config_list,
+        ) {
+            warn!("Unable to send config list to the client: {:?}", e);
+        }
+
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     async fn registerReportReadyListener(
         &self,
@@ -441,6 +479,7 @@ mod tests {
     use binder::BinderFeatures;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::{
         ITelemetryApiStatusListener::BnTelemetryApiStatusListener,
+        ITelemetryConfigListListener::BnTelemetryConfigListListener,
         ITelemetryMiscStatusListener::BnTelemetryMiscStatusListener,
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
@@ -456,6 +495,58 @@ mod tests {
     const DUMMY_API_CALL_ID: i32 = -1;
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
     const REPORT_NUMBER: i32 = 42;
+    const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+
+    /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
+    #[derive(Clone)]
+    struct MockTelemetryConfigListListener {
+        status_code: Arc<Mutex<i32>>,
+        num_send_config_calls: Arc<Mutex<i32>>,
+        metrics_config_list: Arc<Mutex<Option<Vec<String>>>>,
+    }
+
+    impl Interface for MockTelemetryConfigListListener {}
+
+    impl MockTelemetryConfigListListener {
+        fn new() -> Self {
+            Self {
+                status_code: Arc::new(Mutex::new(0)),
+                num_send_config_calls: Arc::new(Mutex::new(0)),
+                metrics_config_list: Arc::new(Mutex::new(None)),
+            }
+        }
+
+        fn get_status_code(&self) -> i32 {
+            *self.status_code.lock().unwrap()
+        }
+
+        fn get_num_send_config_calls(&self) -> i32 {
+            *self.num_send_config_calls.lock().unwrap()
+        }
+
+        fn get_metrics_config_list(&self) -> Vec<String> {
+            self.metrics_config_list.lock().unwrap().clone().unwrap()
+        }
+    }
+
+    impl ITelemetryConfigListListener for MockTelemetryConfigListListener {
+        fn sendConfigList(
+            &self,
+            status_code: i32,
+            _status_message: &str,
+            config_list: &[String],
+        ) -> BinderResult<()> {
+            let mut mut_status_code = self.status_code.lock().unwrap();
+            *mut_status_code = status_code;
+            let mut num_send_config_calls = self.num_send_config_calls.lock().unwrap();
+            *num_send_config_calls += 1;
+            let mut mut_config_list = self.metrics_config_list.lock().unwrap();
+            *mut_config_list = Some(config_list.to_vec());
+
+            Ok(())
+        }
+    }
 
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     #[derive(Clone)]
@@ -662,11 +753,14 @@ mod tests {
     struct TestEnvironment {
         service: SdvTelemetryService,
         api_status_listener: Option<MockTelemetryApiStatusListener>,
+        metrics_config_manager: Arc<MockMetricsConfigManager>,
         num_add_metrics_config_calls: Arc<Mutex<i32>>,
         num_activate_metrics_config_calls: Arc<Mutex<i32>>,
         num_deactivate_metrics_config_calls: Arc<Mutex<i32>>,
         num_remove_config_calls: Arc<Mutex<i32>>,
         num_remove_all_config_calls: Arc<Mutex<i32>>,
+        num_get_active_config_calls: Arc<Mutex<i32>>,
+        num_get_inactive_config_calls: Arc<Mutex<i32>>,
     }
 
     impl TestEnvironment {
@@ -677,6 +771,8 @@ mod tests {
             let num_deactivate_metrics_config_calls = Arc::new(Mutex::new(0));
             let num_remove_config_calls = Arc::new(Mutex::new(0));
             let num_remove_all_config_calls = Arc::new(Mutex::new(0));
+            let num_get_active_config_calls = Arc::new(Mutex::new(0));
+            let num_get_inactive_config_calls = Arc::new(Mutex::new(0));
 
             let mut service = SdvTelemetryService::new(
                 dir_path.as_str(),
@@ -685,17 +781,24 @@ mod tests {
             )
             .await
             .unwrap();
-            service.metrics_config_manager = Arc::new(MockMetricsConfigManager::new(
+            let metrics_config_manager = Arc::new(MockMetricsConfigManager::new(
                 Arc::clone(&num_add_metrics_config_calls),
                 Arc::clone(&num_activate_metrics_config_calls),
                 Arc::clone(&num_deactivate_metrics_config_calls),
                 Arc::clone(&num_remove_config_calls),
                 Arc::clone(&num_remove_all_config_calls),
+                Arc::clone(&num_get_active_config_calls),
+                Arc::clone(&num_get_inactive_config_calls),
             ));
+
+            service.metrics_config_manager = Arc::<
+                metrics_config_manager::mock::MockMetricsConfigManager,
+            >::clone(&metrics_config_manager);
 
             TestEnvironment {
                 service,
                 api_status_listener: None,
+                metrics_config_manager,
                 num_add_metrics_config_calls: Arc::clone(&num_add_metrics_config_calls),
                 num_activate_metrics_config_calls: Arc::clone(&num_activate_metrics_config_calls),
                 num_deactivate_metrics_config_calls: Arc::clone(
@@ -703,6 +806,8 @@ mod tests {
                 ),
                 num_remove_config_calls: Arc::clone(&num_remove_config_calls),
                 num_remove_all_config_calls: Arc::clone(&num_remove_all_config_calls),
+                num_get_active_config_calls: Arc::clone(&num_get_active_config_calls),
+                num_get_inactive_config_calls: Arc::clone(&num_get_inactive_config_calls),
             }
         }
 
@@ -743,6 +848,14 @@ mod tests {
         pub fn get_num_remove_all_config_calls(&self) -> i32 {
             *self.num_remove_all_config_calls.lock().unwrap()
         }
+
+        pub fn get_num_get_active_config_calls(&self) -> i32 {
+            *self.num_get_active_config_calls.lock().unwrap()
+        }
+
+        pub fn get_num_get_inactive_config_calls(&self) -> i32 {
+            *self.num_get_inactive_config_calls.lock().unwrap()
+        }
     }
 
     fn create_serialized_config(uuid: &str) -> Vec<u8> {
@@ -756,7 +869,7 @@ mod tests {
 
     #[tokio::test]
     async fn add_metrics_config_call_received() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+        const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
@@ -766,7 +879,7 @@ mod tests {
         test_environment.set_mock_api_status_listener().await;
 
         info!("Serializing metric config");
-        let serialized_config = create_serialized_config(UUID);
+        let serialized_config = create_serialized_config(UUID1);
 
         test_environment
             .service
@@ -782,8 +895,6 @@ mod tests {
 
     #[tokio::test]
     async fn add_metrics_config_call_duplicate_fail() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
@@ -792,7 +903,7 @@ mod tests {
         test_environment.set_mock_api_status_listener().await;
 
         info!("Serializing metric config");
-        let serialized_config = create_serialized_config(UUID);
+        let serialized_config = create_serialized_config(UUID1);
 
         test_environment
             .service
@@ -816,22 +927,20 @@ mod tests {
 
     #[tokio::test]
     async fn activate_metrics_config_call_received() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_api_status_listener().await;
 
-        let serialized_config = create_serialized_config(UUID);
+        let serialized_config = create_serialized_config(UUID1);
         test_environment
             .service
             .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
             .await
             .unwrap();
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
@@ -841,15 +950,13 @@ mod tests {
 
     #[tokio::test]
     async fn activate_metrics_config_fail_config_doesnt_exist() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_api_status_listener().await;
 
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
             test_environment.get_status_code()
@@ -859,15 +966,13 @@ mod tests {
 
     #[tokio::test]
     async fn deactivate_metrics_config_call_received() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_api_status_listener().await;
 
-        let serialized_config = create_serialized_config(UUID);
+        let serialized_config = create_serialized_config(UUID1);
         test_environment
             .service
             .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
@@ -875,10 +980,10 @@ mod tests {
             .unwrap();
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
 
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
 
-        test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             test_environment.get_status_code()
@@ -888,15 +993,13 @@ mod tests {
 
     #[tokio::test]
     async fn deactivate_metrics_config_fail_config_doesnt_exist() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_api_status_listener().await;
 
-        test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
             test_environment.get_status_code()
@@ -906,15 +1009,13 @@ mod tests {
 
     #[tokio::test]
     async fn remove_metrics_config_success() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_api_status_listener().await;
 
-        let serialized_config = create_serialized_config(UUID);
+        let serialized_config = create_serialized_config(UUID1);
         test_environment
             .service
             .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
@@ -922,10 +1023,10 @@ mod tests {
             .unwrap();
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
 
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
 
-        test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_remove_config_calls());
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -935,15 +1036,13 @@ mod tests {
 
     #[tokio::test]
     async fn remove_metrics_config_fail_config_doesnt_exist() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         test_environment.set_mock_api_status_listener().await;
 
-        test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID).await.unwrap();
+        test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID.0,
             test_environment.get_status_code()
@@ -953,9 +1052,6 @@ mod tests {
 
     #[tokio::test]
     async fn remove_all_metrics_configs() {
-        const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-        const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_all_metrics_configs";
@@ -985,6 +1081,76 @@ mod tests {
             test_environment.get_status_code()
         );
         assert_eq!(1, test_environment.get_num_remove_all_config_calls());
+    }
+
+    #[tokio::test]
+    async fn get_active_metrics_config_uuids() {
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "get_active_metrics_config_uuids";
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        test_environment.set_mock_api_status_listener().await;
+
+        let config_list_listener = MockTelemetryConfigListListener::new();
+
+        let binder_config_list_listener = BnTelemetryConfigListListener::new_binder(
+            config_list_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let config_uuids = [UUID1.to_string(), UUID2.to_string()];
+        test_environment.metrics_config_manager.populate_active_configs(config_uuids.to_vec());
+
+        test_environment
+            .service
+            .getActiveMetricsConfigUuids(&binder_config_list_listener)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            config_list_listener.get_status_code()
+        );
+        assert_eq!(1, test_environment.get_num_get_active_config_calls());
+        assert_eq!(1, config_list_listener.get_num_send_config_calls());
+        assert!(config_uuids
+            .iter()
+            .all(|item| config_list_listener.get_metrics_config_list().contains(item)));
+    }
+
+    #[tokio::test]
+    async fn get_inactive_metrics_config_uuids() {
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "get_inactive_metrics_config_uuids";
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        test_environment.set_mock_api_status_listener().await;
+
+        let config_list_listener = MockTelemetryConfigListListener::new();
+
+        let binder_config_list_listener = BnTelemetryConfigListListener::new_binder(
+            config_list_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        let config_uuids = [UUID1.to_string(), UUID2.to_string()];
+        test_environment.metrics_config_manager.populate_inactive_configs(config_uuids.to_vec());
+
+        test_environment
+            .service
+            .getInactiveMetricsConfigUuids(&binder_config_list_listener)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+            config_list_listener.get_status_code()
+        );
+        assert_eq!(1, test_environment.get_num_get_inactive_config_calls());
+        assert_eq!(1, config_list_listener.get_num_send_config_calls());
+        assert!(config_uuids
+            .iter()
+            .all(|item| config_list_listener.get_metrics_config_list().contains(item)));
     }
 
     #[tokio::test]
@@ -1051,8 +1217,6 @@ mod tests {
 
     #[tokio::test]
     async fn set_report_ready_listener_and_check_on_ready_calls() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "check_on_ready_calls";
@@ -1078,10 +1242,10 @@ mod tests {
         );
 
         // Call onReady on report ready listener
-        report_ready_listener.onReady(UUID, &String::default(), REPORT_NUMBER).unwrap();
+        report_ready_listener.onReady(UUID1, &String::default(), REPORT_NUMBER).unwrap();
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
-        assert_eq!(UUID, &report_ready_listener.get_uuid());
+        assert_eq!(UUID1, &report_ready_listener.get_uuid());
     }
 
     #[tokio::test]
@@ -1119,7 +1283,6 @@ mod tests {
 
     #[tokio::test]
     async fn set_api_status_listener_and_check_status_code() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "set_status_listener";
@@ -1132,7 +1295,7 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        let serialized_config = create_serialized_config(UUID);
+        let serialized_config = create_serialized_config(UUID1);
         test_environment.service.registerApiStatusListener(&binder_listener).await.unwrap();
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
@@ -1237,8 +1400,6 @@ mod tests {
 
     #[tokio::test]
     async fn get_metrics_report() {
-        const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_metrics_report";
@@ -1276,14 +1437,14 @@ mod tests {
 
         // Send report to metric report listener
         let mut report = MetricsReport::new();
-        report.metrics_config_uuid = UUID.to_string();
+        report.metrics_config_uuid = UUID1.to_string();
         report.report_number = REPORT_NUMBER;
 
         // Call on_report_ready callback on metrics report listener
         test_environment.service.metrics_report_listener.on_report_ready(report);
         test_environment
             .service
-            .getMetricsReport(UUID, &String::default(), REPORT_NUMBER, &binder_report_listener)
+            .getMetricsReport(UUID1, &String::default(), REPORT_NUMBER, &binder_report_listener)
             .await
             .unwrap();
 
@@ -1291,10 +1452,10 @@ mod tests {
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
             report_listener.get_status_code()
         );
-        assert_eq!(UUID, report_listener.get_status_message());
+        assert_eq!(UUID1, report_listener.get_status_message());
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(1, report_listener.get_num_on_result_calls());
-        assert_eq!(UUID, report_listener.get_uuid());
+        assert_eq!(UUID1, report_listener.get_uuid());
         assert_eq!(REPORT_NUMBER, report_listener.get_report_number());
     }
 }

@@ -1,11 +1,11 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
+#include "callback_functions.h"
+
 #include <aidl/google/sdv/telemetry/BnTelemetryReportListener.h>
 #include <utils/Log.h>
 
 namespace google::sdv::telemetry {
-
-typedef void (*GetReportCallbackFunction)(void*, int, const char*, const uint8_t*, size_t);
 
 class ReportListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryReportListener {
 public:
@@ -19,7 +19,7 @@ private:
 
     // Function pointer to the CB function provided by the OEM client application.
     // CB function will be used to send the metrics report back to the client
-    GetReportCallbackFunction cbFuncPtr_;
+    GetSerializedDataCallbackFunction cbFuncPtr_;
 };
 
 }  // namespace google::sdv::telemetry
