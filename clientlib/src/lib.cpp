@@ -91,15 +91,16 @@ int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
 
 int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
                              StatusCallbackFunction statusCbFunc, void* api_listener,
-                             StatusCallbackFunction apiCbFunc) {
+                             StatusCallbackFunction apiCbFunc, void** outPreviousStatusListener) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
     return static_cast<int>(service->set_misc_status_listener(status_listener, statusCbFunc,
-                                                              api_listener, apiCbFunc));
+                                                              api_listener, apiCbFunc,
+                                                              outPreviousStatusListener));
 }
 
-int clear_misc_status_listener(ServiceHolder* holder) {
+int clear_misc_status_listener(ServiceHolder* holder, void** outPreviousStatusListener) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
-    return static_cast<int>(service->clear_misc_status_listener());
+    return static_cast<int>(service->clear_misc_status_listener(outPreviousStatusListener));
 }

@@ -12,10 +12,11 @@ class MiscStatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryM
 public:
     explicit MiscStatusListenerImpl(void* cb_object, StatusCallbackFunction cbFunc);
     ndk::ScopedAStatus sendStatus(int status_code, const std::string& message) override;
+    void* getClientCb() { return clientCb_; }
 
 private:
-    void* mCbObject;
-    StatusCallbackFunction mCBFunc;
+    void* clientCb_;
+    StatusCallbackFunction cbFunc_;
 };
 
 }  // namespace google::sdv::telemetry

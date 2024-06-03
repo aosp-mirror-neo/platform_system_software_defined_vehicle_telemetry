@@ -65,8 +65,9 @@ public:
     TelemetryServiceStatusCodes set_misc_status_listener(void* status_listener,
                                                          StatusCallbackFunction statusCbFunc,
                                                          void* api_listener,
-                                                         StatusCallbackFunction apiCbFunc);
-    TelemetryServiceStatusCodes clear_misc_status_listener();
+                                                         StatusCallbackFunction apiCbFunc,
+                                                         void** outPreviousStatusListener);
+    TelemetryServiceStatusCodes clear_misc_status_listener(void** outPreviousStatusListener);
 
 private:
     using ApiId = int;
@@ -82,6 +83,7 @@ private:
     std::shared_ptr<ApiStatusListenerImpl> mApiStatusListenerImpl =
             ndk::SharedRefBase::make<ApiStatusListenerImpl>(mStatusCallbackContainer);
     std::shared_ptr<ReportReadyListenerImpl> mReportReadyListener;
+    std::shared_ptr<MiscStatusListenerImpl> mMiscStatusListener;
 
     std::shared_ptr<ITelemetryService> mBinderService;
 };
