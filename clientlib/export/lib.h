@@ -232,11 +232,15 @@ int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
  * @param apiCbFunc pointer to api status callback function. Callback function is called by
  * telemetry serviceto share the status of the current API call
  *
+ * @param outPreviousStatusListener Reference to a pointer that will be set to point to the
+ * `status_listener` set in a previous call to `set_misc_status_listener`, if any. Will be ignored
+ * if it is `nullptr`.
+ *
  * @return an integer status code that validates the parameters provided to the API
  */
 int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
                              StatusCallbackFunction statusCbFunc, void* api_listener,
-                             StatusCallbackFunction apiCbFunc);
+                             StatusCallbackFunction apiCbFunc, void** outPreviousStatusListener);
 
 /**
  * Clears a previously set status listener.
@@ -247,10 +251,13 @@ int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
  * TODO: b/298457300: Handle cases when API calls are made after service is stopped
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
+ * @param outPreviousStatusListener Reference to a pointer that will be set to point to the
+ * `status_listener` set in a previous call to `set_misc_status_listener`, if any. Will be ignored
+ * if it is `nullptr`.
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int clear_misc_status_listener(ServiceHolder* holder);
+int clear_misc_status_listener(ServiceHolder* holder, void** outPreviousStatusListener);
 
 #ifdef __cplusplus
 }
