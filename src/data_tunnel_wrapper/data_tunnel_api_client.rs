@@ -212,13 +212,11 @@ pub(super) fn read_messages(
 /// * `user_data` - User data originally sent to the caller during the `SetNotificationHandler` API
 ///                 call.
 ///
-/// TODO(b/343435803): This function should be marked as unsafe.
-///
 /// # Safety
 ///
 /// `user_data` must point to the `Notify` object originally sent to the caller during the
 /// `SetNotificationHandler` API call.
-extern "C" fn on_notification_callback(
+unsafe extern "C" fn on_notification_callback(
     notification_type: SubscriptionNotificationType,
     user_data: *mut c_void,
 ) {
