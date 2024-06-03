@@ -46,7 +46,7 @@ impl DataTunnelPublisher {
     ///
     /// * `message_bytes` - The bytes that should be written to the data tunnel. Their length must
     ///                     be equal to the topic's configured message size.
-    fn publish_bytes(&self, message_bytes: &[u8]) -> anyhow::Result<()> {
+    pub fn publish_bytes(&self, message_bytes: &[u8]) -> anyhow::Result<()> {
         let message_count = data_tunnel_api_client::available_to_write(&self.topic_descriptor)
             .with_context(|| "Failed to query how many messages are available to write.")?;
         if message_count == 0 {
