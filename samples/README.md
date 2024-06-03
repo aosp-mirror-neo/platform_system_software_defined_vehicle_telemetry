@@ -29,27 +29,27 @@ Start Guest:
 
 For Core:
 
-`$ cvd start -guest-enforce-security false`
+`cvd start`
 
 For IVI:
 
-```
-cvd start -vsock_guest_cid=4 -guest-enforce-security=false -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4"
+```bash
+cvd start -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4"
 ```
 
 Note: if testing on ivi, telemetry service needs to be started explicity. To do
 that launch a new terminal, and start telemetry service using the following
 steps:
 
-```
-adb shell
-
-sdv_ivi_telemetry_service_agent
+```bash
+adb root
+adb shell sdv_ivi_telemetry_service_agent
 ```
 
 1.  LAUNCH NEW TERMINAL (**Terminal #1**), switch to root, start logcat:
 
     ```bash
+    # restart adbd with root permissions, if you haven't already
     adb root
 
     adb push config1.bin data/local/tmp/config1.bin
@@ -77,6 +77,8 @@ sdv_ivi_telemetry_service_agent
     For rust client application:
 
     ```bash
+    # restart adbd with root permissions, if you haven't already
+    adb root
     adb shell telemetry_rust_c_client <path_to_config1> ... <path_to_configN>
     ```
 
@@ -108,7 +110,7 @@ Check logs with `adb logcat`
 
 Start Guest:
 
-`$ cvd start -guest-enforce-security false`
+`cvd start`
 
 Steps to reproduce:
 
@@ -140,6 +142,8 @@ Steps to reproduce:
 2.  LAUNCH NEW TERMINAL (**Terminal #2**)
 
     ```bash
+    # restart adbd with root permissions, if you haven't already
+    adb root
     adb shell telemetry_sample_publisher
     ```
 
@@ -158,6 +162,8 @@ Steps to reproduce:
     in step 3.
 
     ```bash
+    # restart adbd with root permissions, if you haven't already
+    adb root
     adb shell telemetry_rust_c_client <path_to_config1> ... <path_to_configN>
     ```
 
@@ -189,7 +195,7 @@ The configurable publisher executable needs to be terminated manually using
 
 Start Guest:
 
-`$ cvd start -guest-enforce-security false`
+`cvd start`
 
 Steps to reproduce:
 
@@ -219,6 +225,8 @@ Steps to reproduce:
 2.  LAUNCH NEW TERMINAL (**Terminal #2**)
 
     ```bash
+    # restart adbd with root permissions, if you haven't already
+    adb root
     adb shell dt_telemetry_sample_publisher
     ```
 
@@ -247,6 +255,8 @@ Steps to reproduce:
     Make sure the config uses the data tunnel topic registered in step 2.
 
     ```bash
+    # restart adbd with root permissions, if you haven't already
+    adb root
     adb shell telemetry_rust_c_client <path_to_data_tunnel_config>
     ```
 
