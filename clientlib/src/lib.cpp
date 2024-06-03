@@ -50,6 +50,20 @@ int deactivate_metrics_config(ServiceHolder* holder, const char* config_uuid, vo
     return static_cast<int>(service->deactivate_metrics_config(config_uuid, listener, cbFunc));
 }
 
+int get_active_metrics_config_uuids(ServiceHolder* holder, void* listener,
+                                    ConfigListCallbackFunction cbFunc) {
+    google::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
+    return static_cast<int>(service->get_active_metrics_config_uuids(listener, cbFunc));
+}
+
+int get_inactive_metrics_config_uuids(ServiceHolder* holder, void* listener,
+                                      ConfigListCallbackFunction cbFunc) {
+    google::sdv::telemetry::TelemetryService* service =
+            reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
+    return static_cast<int>(service->get_inactive_metrics_config_uuids(listener, cbFunc));
+}
+
 int remove_metrics_config(ServiceHolder* holder, const char* config_uuid, void* listener,
                           StatusCallbackFunction cbFunc) {
     google::sdv::telemetry::TelemetryService* service =
@@ -82,7 +96,7 @@ int clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportL
 
 int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
                        const char* report_config_name, int32_t report_number, void* listener,
-                       GetReportCallbackFunction cbFunc) {
+                       GetSerializedDataCallbackFunction cbFunc) {
     google::sdv::telemetry::TelemetryService* service =
             reinterpret_cast<google::sdv::telemetry::TelemetryService*>(holder);
     return static_cast<int>(service->get_metrics_report(metrics_config_uuid, report_config_name,
