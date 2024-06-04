@@ -529,10 +529,10 @@ where
                         factory_error: e,
                     }
                 })?;
-                Ok(())
+                Ok(publisher_proto)
             },
-            |trigger_proto, _publishers, _triggers| {
-                let context = TriggerFactoryValidateContext { node_types: &node_types };
+            |trigger_proto, publishers, _triggers| {
+                let context = TriggerFactoryValidateContext { node_types: &node_types, publishers };
                 self.trigger_factory.validate(trigger_proto, &context).map_err(|e| {
                     MetricsConfigOrchestratorError::InvalidTriggerDefinition {
                         trigger_name: trigger_proto.name.clone(),
@@ -701,14 +701,14 @@ where
 
     /// Topologically sort publishers and triggers declared in the protobuf message
     /// and try to fold the sorted list using provided functions.
-    fn try_fold_topoligically_sorted_publishers_triggers<TTrig, TPub>(
-        config_proto: &MetricsConfigProto,
+    fn try_fold_topoligically_sorted_publishers_triggers<'a, TTrig, TPub>(
+        config_proto: &'a MetricsConfigProto,
         mut publisher_func: impl FnMut(
-            &PublisherProto,
+            &'a PublisherProto,
             &HashMap<String, TTrig>,
         ) -> Result<TPub, MetricsConfigOrchestratorError>,
         mut trigger_func: impl FnMut(
-            &TriggerProto,
+            &'a TriggerProto,
             &HashMap<String, TPub>,
             &HashMap<String, TTrig>,
         ) -> Result<TTrig, MetricsConfigOrchestratorError>,
