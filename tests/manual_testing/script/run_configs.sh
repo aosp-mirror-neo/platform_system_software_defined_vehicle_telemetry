@@ -19,11 +19,7 @@ fi
 cvd clear
 
 log "Starting VM"
-if [[ $RUN_CVD_WITH_SECURITY_FLAG ]]; then
-    cvd start -guest-enforce-security false &
-else
-    cvd start &
-fi
+cvd start &
 CVD_START_PID=$!
 # Stop vm when the script is done or cancelled
 trap "cvd stop" 0 2 3 15 # Runs 'cvd stop' when one of these signals is received: 0=exit shell, 2=interrupt, 3=quit, 15=terminate
