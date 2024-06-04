@@ -237,9 +237,7 @@ mod tests {
     }
 
     fn create_publisher(name: &str) -> PublisherProto {
-        let mut publisher = PublisherProto::new();
-        name.clone_into(&mut publisher.name);
-        publisher
+        PublisherProto { name: name.to_owned(), ..Default::default() }
     }
 
     fn create_valid_service_publisher() -> PublisherProto {
@@ -313,7 +311,7 @@ mod tests {
     fn create_no_name_fails() {
         let factory = create_default_factory();
 
-        let err = factory.create_using_default_context(&PublisherProto::new()).err().unwrap();
+        let err = factory.create_using_default_context(&PublisherProto::default()).err().unwrap();
 
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
@@ -381,7 +379,7 @@ mod tests {
     fn validate_no_name_fails() {
         let factory = create_default_factory();
 
-        let err = factory.validate_using_default_context(&PublisherProto::new()).unwrap_err();
+        let err = factory.validate_using_default_context(&PublisherProto::default()).unwrap_err();
 
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }

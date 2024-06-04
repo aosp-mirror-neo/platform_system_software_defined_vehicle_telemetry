@@ -261,11 +261,7 @@ mod tests {
             let triggers = trigger_names
                 .map(|vec| {
                     vec.into_iter()
-                        .map(|name| {
-                            let mut trigger = TriggerProto::new();
-                            trigger.name = name;
-                            trigger
-                        })
+                        .map(|name| TriggerProto { name, ..Default::default() })
                         .collect()
                 })
                 .unwrap_or_default();
@@ -388,9 +384,8 @@ mod tests {
     fn create_success() {
         let factory = create_factory();
         let report_config = create_valid_config();
-        let mut metrics_config = MetricsConfigProto::new();
-        UUID.clone_into(&mut metrics_config.uuid);
-        metrics_config.version = VERSION;
+        let metrics_config =
+            MetricsConfigProto { uuid: UUID.to_owned(), version: VERSION, ..Default::default() };
         let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
         let trigger = TriggerImpl::new(
             TRIGGER_NAME.to_owned(),
