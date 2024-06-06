@@ -69,8 +69,3 @@ For publishers to work, their rust binary name must be listed in
 [device/google/sdv/sdv_core_common/sdv_packages_telemetry.mk](../../../../../../device/google/sdv/sdv_core_common/sdv_packages_telemetry.mk).
 
 TODO(b/318739373): This might change after b/318739373 is fixed.
-
-### guest-enforce-security flag
-
-Set `RUN_CVD_WITH_SECURITY_FLAG` to `true` to run `cvd start` with
-`-guest-enforce-security false`
