@@ -229,6 +229,7 @@ rust_test {
     cfgs: ["integration_tests"],
     rustlibs: [
         "librand",
+        "libsdv_telemetry_test_proto",
     ],
     // Requires root so the test can perform Binder calls to the data tunnel
     // agent.
