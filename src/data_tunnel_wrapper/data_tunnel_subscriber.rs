@@ -161,7 +161,6 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             // TODO(b/329515273): Add logic to stop the loop once data tunnel provides support for
             // unsubscribing.
             loop {
-                notify.notified().await;
                 let number_of_messages =
                     match Self::read(&subscription_descriptor_clone, &topic_name, &mut buffer) {
                         Ok(number_of_messages) => number_of_messages,
@@ -178,6 +177,11 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                         Err(err) => error!("Failed to convert bytes to protobuf: {err:?}"),
                     };
                 }
+
+                // Wait for the next message(s) to arrive. We wait here and not at the top of the
+                // loop, so that we read any potentially already available messages right when
+                // subscribing to the data tunnel.
+                notify.notified().await;
             }
         });
 
@@ -262,5 +266,182 @@ impl ServicePublisherSubscription for DataTunnelSubscription {
     async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
         // This logic will be replaced once the data tunnel has support for unsubscribe.
         Ok(())
+    }
+}
+
+#[cfg(all(test, unit_tests))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_message_provider_success() -> anyhow::Result<()> {
+        let subscriber = DataTunnelSubscriber::new();
+        assert!(subscriber.get_message_provider("service-name")?.is_none());
+
+        Ok(())
+    }
+}
+
+#[cfg(all(test, integration_tests))]
+mod tests {
+    use protobuf::reflect::ReflectValueRef;
+    use protobuf::MessageFull;
+    use sdv_dt::TopicTypedMetadata;
+    use sdv_telemetry_test_proto::test_message;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::data_tunnel_api_client::TopicDescriptor;
+
+    // TODO(b/343140446): We should clean up data tunnel topics.
+    fn unique_topic_name() -> String {
+        format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
+    }
+
+    fn register_topic(
+        topic_name: &str,
+        publisher_metadata: TelemetryPublisherMetadata,
+    ) -> TopicDescriptor {
+        let mut metadata = vec![];
+        publisher_metadata.write_to_vec(&mut metadata).unwrap();
+        cxx::let_cxx_string!(cxx_topic_name = &topic_name);
+        data_tunnel_api_client::register_topic_with_metadata(
+            &cxx_topic_name,
+            TopicTypedMetadata { message_count_: 2, message_size_: 3 },
+            metadata,
+        )
+        .unwrap()
+    }
+
+    fn write_message(topic_descriptor: &TopicDescriptor, message: TestMessage) {
+        let mut bytes = vec![];
+        message.write_length_delimited_to_vec(&mut bytes).unwrap();
+        data_tunnel_api_client::write_message(topic_descriptor, &bytes).unwrap();
+    }
+
+    fn get_int_field_value(message: Box<dyn MessageDyn>) -> i32 {
+        let int_field_descriptor = message.descriptor_dyn().field_by_name("int_field").unwrap();
+        match int_field_descriptor.get_singular(&*message) {
+            Some(ReflectValueRef::I32(value)) => value,
+            result => panic!("Unexpected value: {result:?}"),
+        }
+    }
+
+    #[test]
+    fn get_metadata_topic_not_registered_returns_none() {
+        let topic_name = unique_topic_name();
+
+        let subscriber = DataTunnelSubscriber::new();
+        // The topic should not exist yet, therefore metadata should be `None`.
+        assert!(subscriber.get_metadata(&topic_name).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_metadata_success() {
+        let topic_name = unique_topic_name();
+
+        register_topic(
+            &topic_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+                ..Default::default()
+            },
+        );
+
+        let subscriber = DataTunnelSubscriber::new();
+        let publisher_metadata = subscriber.get_metadata(&topic_name).unwrap().unwrap();
+        assert!(!publisher_metadata.supports_get);
+        assert_eq!(publisher_metadata.message_descriptor.name(), "TestMessage");
+        assert_eq!(
+            publisher_metadata.message_descriptor.proto(),
+            TestMessage::descriptor().proto()
+        );
+    }
+
+    #[tokio::test]
+    async fn create_subscription_when_topic_does_not_exist_failure() {
+        let topic_name = unique_topic_name();
+
+        let subscriber = DataTunnelSubscriber::new();
+        let outcome = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                Box::new(|_| {
+                    unreachable!();
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered(_)));
+    }
+
+    #[tokio::test]
+    async fn create_subscription_success() {
+        let topic_name = unique_topic_name();
+
+        register_topic(
+            &topic_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+                ..Default::default()
+            },
+        );
+
+        let subscriber = DataTunnelSubscriber::new();
+        let outcome = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                Box::new(|_| {
+                    unreachable!();
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+    }
+
+    #[tokio::test]
+    async fn create_subscription_read_messages_success() {
+        let topic_name = unique_topic_name();
+
+        let topic_descriptor = register_topic(
+            &topic_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+                ..Default::default()
+            },
+        );
+
+        // Write a message before the subscription is created, to verify that we can still receive
+        // it afterwards.
+        write_message(&topic_descriptor, TestMessage { int_field: 1, ..Default::default() });
+
+        let subscriber = DataTunnelSubscriber::new();
+        let (tx, mut rx) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
+        let outcome = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                Box::new(move |message| tx.send(message).unwrap()),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+
+        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 1);
+
+        write_message(&topic_descriptor, TestMessage { int_field: 2, ..Default::default() });
+        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 2);
+
+        write_message(&topic_descriptor, TestMessage { int_field: 3, ..Default::default() });
+        write_message(&topic_descriptor, TestMessage { int_field: 4, ..Default::default() });
+        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 3);
+        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 4);
     }
 }

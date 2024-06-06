@@ -88,3 +88,119 @@ impl DataTunnelPublisher {
         self.publish_bytes(&raw_message)
     }
 }
+
+#[cfg(all(test, integration_tests))]
+mod tests {
+    use protobuf::Message;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
+
+    use super::*;
+
+    // TODO(b/343140446): We should clean up data tunnel topics.
+    fn unique_topic_name() -> String {
+        format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
+    }
+
+    #[test]
+    fn register_topic_success() {
+        let topic_name = unique_topic_name();
+        let publisher =
+            DataTunnelPublisher::register_topic(&topic_name, 10, 100, vec![1, 2, 3]).unwrap();
+
+        cxx::let_cxx_string!(topic_name = topic_name);
+
+        assert_eq!(publisher.topic_descriptor.dt_metadata.message_count_, 10);
+        assert_eq!(publisher.topic_descriptor.dt_metadata.message_size_, 100);
+        assert!(data_tunnel_api_client::topic_exists(&topic_name).unwrap());
+        assert_eq!(
+            data_tunnel_api_client::get_topic_metadata(&topic_name).unwrap().as_slice(),
+            &[1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn publish_bytes_success() {
+        let topic_name = unique_topic_name();
+        let publisher = DataTunnelPublisher::register_topic(&topic_name, 10, 3, vec![]).unwrap();
+
+        cxx::let_cxx_string!(topic_name = topic_name);
+        let subscription_descriptor = data_tunnel_api_client::subscribe(&topic_name).unwrap();
+
+        publisher.publish_bytes(&[1, 1, 1]).unwrap();
+        publisher.publish_bytes(&[2, 2, 2]).unwrap();
+
+        assert_eq!(data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap(), 2);
+        let mut buffer = vec![0u8; 6];
+        data_tunnel_api_client::read_messages(&subscription_descriptor, &mut buffer, 2).unwrap();
+        assert_eq!(buffer, vec![1, 1, 1, 2, 2, 2]);
+    }
+
+    #[test]
+    fn publish_bytes_overflow() {
+        let topic_name = unique_topic_name();
+        let publisher = DataTunnelPublisher::register_topic(&topic_name, 2, 3, vec![]).unwrap();
+
+        cxx::let_cxx_string!(topic_name = topic_name);
+        let subscription_descriptor = data_tunnel_api_client::subscribe(&topic_name).unwrap();
+
+        publisher.publish_bytes(&[1, 1, 1]).unwrap();
+        publisher.publish_bytes(&[2, 2, 2]).unwrap();
+        // This line produces an overflow. However, the publisher is not notified of overflows and
+        // can just continue publishing.
+        publisher.publish_bytes(&[3, 3, 3]).unwrap();
+        publisher.publish_bytes(&[4, 4, 4]).unwrap();
+
+        // The subscriber should be notified of the overflow.
+        assert_eq!(
+            data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap_err(),
+            sdv_dt::Result::Overflow
+        );
+        let result = data_tunnel_api_client::read_messages(&subscription_descriptor, &mut [], 0);
+        assert!(
+            matches!(result, Err(data_tunnel_api_client::ReadMessagesError::DataTunnelError(ref err))
+                if *err == sdv_dt::Result::Overflow),
+            "Expected overflow error, got {result:?}"
+        );
+        assert_eq!(data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap(), 0);
+    }
+
+    #[test]
+    fn publish_length_delimited_proto_success() {
+        let topic_name = unique_topic_name();
+        let publisher = DataTunnelPublisher::register_topic(&topic_name, 2, 30, vec![]).unwrap();
+
+        cxx::let_cxx_string!(topic_name = topic_name);
+        let subscription_descriptor = data_tunnel_api_client::subscribe(&topic_name).unwrap();
+
+        let proto = TestMessage { string_field: "test".to_owned(), ..Default::default() };
+        publisher.publish_length_delimited_proto(&proto).unwrap();
+
+        assert_eq!(data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap(), 1);
+        let mut buffer = vec![0u8; 30];
+        data_tunnel_api_client::read_messages(&subscription_descriptor, &mut buffer, 1).unwrap();
+
+        let mut expected = proto.write_length_delimited_to_bytes().unwrap();
+        // `buffer` should start with the length delimited byte representation of the protobuf, and
+        // then be padded with zeros.
+        assert_eq!(buffer[..expected.len()], expected);
+        expected.resize(30, 0);
+        assert_eq!(buffer, expected);
+    }
+
+    #[test]
+    fn publish_length_delimited_proto_too_long_failure() {
+        let topic_name = unique_topic_name();
+        let publisher = DataTunnelPublisher::register_topic(&topic_name, 2, 30, vec![]).unwrap();
+
+        cxx::let_cxx_string!(topic_name = topic_name);
+        let subscription_descriptor = data_tunnel_api_client::subscribe(&topic_name).unwrap();
+
+        let proto = TestMessage {
+            string_field: "this is a very long string that should make the proto bigger than the maximum message size".to_owned(),
+            ..Default::default()
+        };
+        assert!(publisher.publish_length_delimited_proto(&proto).is_err());
+
+        assert_eq!(data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap(), 0);
+    }
+}
