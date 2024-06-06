@@ -137,17 +137,29 @@ impl TriggerFactory for TriggerFactoryImpl {
     ) -> Result<(), TriggerFactoryError> {
         Self::verify_name_set(trigger_proto)?;
         match &trigger_proto.trigger_type {
-            Some(TriggerTypeProto::DataTrigger(_)) | Some(TriggerTypeProto::PeriodicTrigger(_)) => {
-            }
-            Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
-                TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
-                let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
-                let value_type = context.node_types.get(selector_node_index as usize).ok_or(
-                    TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
-                )?;
-                Self::get_condition_type(conditional_trigger, value_type)?;
-            }
-            _ => return Err(TriggerFactoryError::UnknownTriggerType),
+            Some(trigger_type) => match trigger_type {
+                TriggerTypeProto::DataTrigger(_) => {}
+                TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
+                    try_into_duration(&periodic_trigger.interval).map_err(|err| {
+                        TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                            interval: (*periodic_trigger.interval).clone(),
+                            error: err,
+                        }
+                    })?;
+                }
+                TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
+                    TriggerFactoryImpl::verify_has_parent_triggers(
+                        &conditional_trigger.trigger_names,
+                    )?;
+                    let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
+                    let value_type = context.node_types.get(selector_node_index as usize).ok_or(
+                        TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
+                    )?;
+                    Self::get_condition_type(conditional_trigger, value_type)?;
+                }
+                _ => return Err(TriggerFactoryError::UnknownTriggerType),
+            },
+            None => return Err(TriggerFactoryError::UnknownTriggerType),
         };
         Ok(())
     }
@@ -630,6 +642,21 @@ mod tests {
         let trigger = create_valid_periodic_trigger();
 
         factory.validate_using_default_context(&trigger).unwrap();
+    }
+
+    #[test]
+    fn validate_periodic_trigger_negative_interval_fails() {
+        let factory = create_factory();
+        let mut trigger = create_valid_periodic_trigger();
+        trigger.mut_periodic_trigger().interval =
+            MessageField::some(DurationProto { seconds: -1, nanos: 0, ..Default::default() });
+
+        let result = factory.validate_using_default_context(&trigger);
+
+        assert!(
+            matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. })),
+            "Unexpected result: {result:?}"
+        );
     }
 
     #[test]
