@@ -31,6 +31,21 @@ pub type TelemetryResult<T> = Result<T, TelemetryError>;
 #[repr(transparent)]
 pub struct TelemetryServiceHolder(*mut ServiceHolder);
 
+/// Safety:
+///
+/// This implementation allows the `TelemetryServiceHolder` to be safely sent (transferred) between threads.
+/// The underlying C `ServiceHolder` is designed for thread-safe ownership transfer, meaning that
+/// transferring it between threads will not lead to any undefined behavior or data races.
+unsafe impl Send for TelemetryServiceHolder {}
+
+/// Safety:
+///
+/// This implementation allows the `TelemetryServiceHolder` to be safely shared (referenced) across threads.
+/// The underlying C `ServiceHolder` is designed for thread-safe shared access. This implies that
+/// concurrent read operations on the `ServiceHolder` from multiple threads are well-defined and will not result in
+/// data races or undefined behavior.
+unsafe impl Sync for TelemetryServiceHolder {}
+
 /// Callback that receives status for API calls.
 ///
 /// # Safety
