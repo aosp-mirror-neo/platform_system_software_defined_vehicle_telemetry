@@ -11,11 +11,12 @@ ReportListenerImpl::ReportListenerImpl(void* cb, GetSerializedDataCallbackFuncti
     ALOGI("Created");
 }
 
-ndk::ScopedAStatus ReportListenerImpl::onReport(int32_t status_code,
+ndk::ScopedAStatus ReportListenerImpl::onReport(TelemetryServiceStatusCodes status_code,
                                                 const std::string& status_message,
                                                 const std::vector<uint8_t>& report) {
-    cbFuncPtr_(clientReportListener_, status_code, status_message.c_str(), report.data(),
-               report.size());
+    cbFuncPtr_(clientReportListener_,
+               static_cast<std::underlying_type_t<TelemetryServiceStatusCodes>>(status_code),
+               status_message.c_str(), report.data(), report.size());
     return ndk::ScopedAStatus::ok();
 }
 }  // namespace google::sdv::telemetry

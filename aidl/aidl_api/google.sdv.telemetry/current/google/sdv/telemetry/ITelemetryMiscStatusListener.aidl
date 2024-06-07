@@ -20,5 +20,5 @@
 package google.sdv.telemetry;
 @VintfStability
 interface ITelemetryMiscStatusListener {
-  oneway void sendStatus(in int statusCode, in @utf8InCpp String statusMessage);
+  oneway void sendStatus(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode, in @utf8InCpp String statusMessage);
 }
