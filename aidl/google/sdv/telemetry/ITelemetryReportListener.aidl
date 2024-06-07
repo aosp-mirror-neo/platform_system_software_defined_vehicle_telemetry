@@ -2,6 +2,8 @@
 
 package google.sdv.telemetry;
 
+import google.sdv.telemetry.TelemetryServiceStatusCodes;
+
 /**
  * Interface implemented by Data logger to receive telemetry reports.
  */
@@ -16,6 +18,6 @@ oneway interface ITelemetryReportListener {
      * @param metricsReport serialized MetricsReport
      *
      */
-    void onReport(
-            in int statusCode, in @utf8InCpp String statusMessage, in byte[] metricsReport);
+    void onReport(in TelemetryServiceStatusCodes statusCode,
+            in @utf8InCpp String statusMessage, in byte[] metricsReport);
 }

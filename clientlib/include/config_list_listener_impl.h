@@ -7,12 +7,15 @@
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <utils/Log.h>
 
+using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+
 namespace google::sdv::telemetry {
 
 class ConfigListListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryConfigListListener {
 public:
     ConfigListListenerImpl(void* cb, ConfigListCallbackFunction cbFunc);
-    ndk::ScopedAStatus sendConfigList(int32_t status_code, const std::string& status_message,
+    ndk::ScopedAStatus sendConfigList(TelemetryServiceStatusCodes status_code,
+                                      const std::string& status_message,
                                       const std::vector<std::string>& config_list) override;
 
 private:

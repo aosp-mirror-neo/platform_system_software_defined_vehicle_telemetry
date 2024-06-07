@@ -20,5 +20,5 @@
 package google.sdv.telemetry;
 @VintfStability
 interface ITelemetryReportListener {
-  oneway void onReport(in int statusCode, in @utf8InCpp String statusMessage, in byte[] metricsReport);
+  oneway void onReport(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode, in @utf8InCpp String statusMessage, in byte[] metricsReport);
 }
