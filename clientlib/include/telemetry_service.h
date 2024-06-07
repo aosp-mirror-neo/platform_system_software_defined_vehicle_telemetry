@@ -40,6 +40,7 @@ public:
 
     TelemetryService(const TelemetryService&) = delete;
     TelemetryService& operator=(const TelemetryService&) = delete;
+    ~TelemetryService();
 
     TelemetryServiceStatusCodes activate_metrics_config(const std::string& metricsConfigUuid,
                                                         void* listener,

@@ -386,10 +386,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         listener: &Strong<dyn ITelemetryApiStatusListener>,
     ) -> BinderResult<()> {
-        let mut guard = self.api_status_listener.lock().unwrap();
-        if guard.is_none() {
-            *guard = Some(listener.clone());
-        }
+        *self.api_status_listener.lock().unwrap() = Some(listener.clone());
         Ok(())
     }
 
