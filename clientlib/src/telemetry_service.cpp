@@ -59,6 +59,15 @@ TelemetryService::Create() {
 TelemetryService::TelemetryService(std::shared_ptr<ITelemetryService> binder_service) :
       mBinderService(std::move(binder_service)) {}
 
+TelemetryService::~TelemetryService() {
+    ALOGI("Unregistering status listener");
+    ndk::ScopedAStatus status = mBinderService->unregisterApiStatusListener();
+    if (!status.isOk()) {
+        ALOGE("Failed to unregister status listener: %s", status.getDescription().c_str());
+    }
+    ALOGI("Destroyed");
+}
+
 ndk::ScopedAStatus TelemetryService::registerListeners() {
     {
         ALOGI("Registering status listener");
