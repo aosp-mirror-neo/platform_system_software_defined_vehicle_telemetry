@@ -138,6 +138,21 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             format!("Failed to set notification handler for data tunnel topic {topic_name}")
         })?;
 
+        let sdv_dt::TopicTypedMetadata {
+            message_count_: message_count,
+            message_size_: message_size,
+        } = subscription_descriptor.dt_metadata;
+        let mut buffer = vec![0u8; message_count * message_size];
+
+        // Discard all existing data after subscribing to the topic. We do not want to trigger on
+        // old data (b/344644795).
+        match Self::read(&subscription_descriptor, topic_name, &mut buffer) {
+            Ok(number_of_messages) => {
+                info!("Discarded {number_of_messages} old messages for topic {topic_name}.")
+            }
+            Err(err) => error!("Could not read old messages for topic {topic_name}: {err:?}"),
+        };
+
         let message_descriptor = self
             .get_metadata(topic_name)?
             .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
@@ -147,12 +162,6 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         let subscription_descriptor_clone = Arc::clone(&subscription_descriptor);
         // Tokio task for fetching data from data tunnel and pushing it to telemetry service.
         tokio::spawn(async move {
-            let sdv_dt::TopicTypedMetadata {
-                message_count_: message_count,
-                message_size_: message_size,
-            } = subscription_descriptor_clone.dt_metadata;
-            let mut buffer = vec![0u8; message_count * message_size];
-
             // This loop runs infinitely until the telemetry service stops. In case of an error
             // while message parsing, the data is lost, as data was retrieved successfully from the
             // data tunnel. In case of data tunnel errors, data is not lost, and can be fetched in
@@ -161,27 +170,27 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             // TODO(b/329515273): Add logic to stop the loop once data tunnel provides support for
             // unsubscribing.
             loop {
+                // Wait for the next message(s) to arrive.
+                notify.notified().await;
+
                 let number_of_messages =
                     match Self::read(&subscription_descriptor_clone, &topic_name, &mut buffer) {
                         Ok(number_of_messages) => number_of_messages,
                         Err(err) => {
-                            error!("Could not read messages: {:?}", err);
+                            error!("Could not read messages for topic {topic_name}: {err:?}");
                             continue;
                         }
                     };
 
-                info!("Received {number_of_messages} messages.");
+                info!("Received {number_of_messages} messages for topic {topic_name}.");
                 for message_bytes in buffer.chunks(message_size).take(number_of_messages) {
                     match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
                         Ok(msg) => (callback)(msg),
-                        Err(err) => error!("Failed to convert bytes to protobuf: {err:?}"),
+                        Err(err) => error!(
+                            "Failed to convert bytes to protobuf for topic {topic_name}: {err:?}"
+                        ),
                     };
                 }
-
-                // Wait for the next message(s) to arrive. We wait here and not at the top of the
-                // loop, so that we read any potentially already available messages right when
-                // subscribing to the data tunnel.
-                notify.notified().await;
             }
         });
 
@@ -418,8 +427,8 @@ mod tests {
             },
         );
 
-        // Write a message before the subscription is created, to verify that we can still receive
-        // it afterwards.
+        // Write a message before the subscription is created, to verify that it will not be
+        // received but ignored - we do not want to trigger on old data (b/344644795).
         write_message(&topic_descriptor, TestMessage { int_field: 1, ..Default::default() });
 
         let subscriber = DataTunnelSubscriber::new();
@@ -433,8 +442,6 @@ mod tests {
             .await
             .unwrap();
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
-
-        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 1);
 
         write_message(&topic_descriptor, TestMessage { int_field: 2, ..Default::default() });
         assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 2);
