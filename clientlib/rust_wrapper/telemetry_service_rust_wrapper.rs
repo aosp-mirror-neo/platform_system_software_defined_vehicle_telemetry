@@ -100,7 +100,8 @@ impl TelemetryServiceHolder {
     /// Gets an instance of telemetry_service and type casts it to an opaque
     /// pointer. This is a blocking call and it will wait until the telemetry binder service
     /// is ready. The returned value will never be null, and will always hold an instance
-    /// of telemetry service.
+    /// of telemetry service. The telemetry service supports only a single instance of the service
+    /// holder. Calling this method more than once may result in undefined or unexpected behavior.
     ///
     /// @return an opaque pointer holding a reference to the telemetry_service
 
@@ -123,6 +124,49 @@ impl TelemetryServiceHolder {
             }
         };
         Ok(TelemetryServiceHolder(service))
+    }
+
+    /// Initializes telemetry service by calling the set methods for the misc status callback and
+    /// the report ready listener. This prevents the user from registering the callbacks multiple times.
+    ///
+    /// This method must be called only once at the start of the application.
+    ///
+    /// @param status_callback function closure that gets called everytime a status catering to
+    /// telemetry service needs to be shared with the client. The status_callback takes an i32
+    /// status_code and a String status_message as params.
+    /// @param report_ready_callback function closure gets called when a report is ready. The
+    /// report_ready_callback takes String, String and i32 that specify
+    /// metrics config uuid, metrics report name and report number of the report that is ready, respectively.
+    ///
+    /// @return an error code and error message in case of incorrect parameters
+
+    pub async fn init(
+        &self,
+        status_callback: impl Fn(i32, String) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
+    ) -> TelemetryResult<()> {
+        info!("Initializing telemetry service");
+
+        self.set_misc_status_listener(status_callback).await?;
+        self.set_report_ready_listener(report_ready_callback).await?;
+
+        Ok(())
+    }
+
+    /// Finishes telemetry service by calling the clear methods for the misc status callback and
+    /// the report ready listener.
+    ///
+    /// This method must be called only once at the end of the application.
+    ///
+    /// @return an error code and error message in case of failure to remove listeners
+
+    pub fn finish(&self) -> TelemetryResult<()> {
+        info!("Finishing telemetry service");
+
+        self.clear_misc_status_listener()?;
+        self.clear_report_ready_listener()?;
+
+        Ok(())
     }
 
     /// Adds a metrics config to the telemetry service passed as a byte array. Any metrics
@@ -204,7 +248,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn set_report_ready_listener(
+    async fn set_report_ready_listener(
         &self,
         report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
@@ -218,7 +262,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn clear_report_ready_listener(&self) -> TelemetryResult<()> {
+    fn clear_report_ready_listener(&self) -> TelemetryResult<()> {
         metrics_report_manager::clear_report_ready_listener(self)
     }
 
@@ -254,7 +298,7 @@ impl TelemetryServiceHolder {
     ///
     /// @return an error code and error message in case of incorrect parameters
 
-    pub async fn set_misc_status_listener(
+    async fn set_misc_status_listener(
         &self,
         status_callback: impl Fn(i32, String) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
@@ -316,9 +360,9 @@ impl TelemetryServiceHolder {
     /// Clears a previously set status listener.
     ///
     ///
-    /// @return an error code and error message in case of incorrect parameters
+    /// @return an error code and error message in case of failure to remove listener
 
-    pub async fn clear_misc_status_listener(&self) -> TelemetryResult<()> {
+    fn clear_misc_status_listener(&self) -> TelemetryResult<()> {
         let mut previous_raw_listener = std::ptr::null_mut::<StatusListener>();
         // SAFETY: `self.0` points to a valid `ServiceHolder`. The output argument,
         // `previous_raw_listener`, is a null-initialized pointer to a `StatusListener`. A
@@ -347,13 +391,5 @@ impl TelemetryServiceHolder {
         }
 
         Ok(())
-    }
-}
-
-impl Drop for TelemetryServiceHolder {
-    fn drop(&mut self) {
-        if let Err(err) = metrics_report_manager::clear_report_ready_listener(self) {
-            error!("Error while clearing report ready listener: {:?}", err);
-        }
     }
 }
