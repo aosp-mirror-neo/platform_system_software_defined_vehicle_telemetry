@@ -19,6 +19,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
+use tokio::task;
 
 async fn process_config(
     path: &PathBuf,
@@ -89,12 +90,38 @@ async fn wrapped_main() -> anyhow::Result<()> {
     // channel in real-world applications.
     let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
 
+    // Note: Creating an unbounded channel will consume unbounded memory if this
+    // sample client does not read misc status fast enough. Consider using a bounded
+    // channel in real-world applications.
+    let (misc_status_tx, mut misc_status_rx) = mpsc::unbounded_channel();
+
+    // Spawn a task to log all received misc status callbacks.
+    // Note: In real world application this should happen in a separate method, and extra logic needs
+    // to be added to take appropriate actions based on the status codes received.
+    task::spawn(async move {
+        while let Some((status_code, status_msg)) = misc_status_rx.recv().await {
+            info!(
+                "Received misc status from service: status code: {} status msg: {}",
+                status_code, status_msg
+            );
+        }
+    });
+
     service
-        .set_report_ready_listener(move |metrics_config_uuid, report_config_name, report_number| {
-            report_ready_tx
-                .send((metrics_config_uuid, report_config_name, report_number))
-                .expect("The receiver has been dropped or has closed the channel.");
-        })
+        .init(
+            move |status_code, status_msg| {
+                misc_status_tx.send((status_code, status_msg)).expect(
+                    "Data should be received until the application exits and closes the channel",
+                );
+            },
+            move |metrics_config_uuid, report_config_name, report_number| {
+                report_ready_tx
+                    .send((metrics_config_uuid, report_config_name, report_number))
+                    .expect(
+                    "Data should be received until the application exits and closes the channel",
+                );
+            },
+        )
         .await?;
 
     let add_config_futures = args
@@ -168,8 +195,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
         }
     }
 
-    service.clear_misc_status_listener().await?;
-    service.clear_report_ready_listener().await?;
+    service.finish()?;
 
     Ok(())
 }
