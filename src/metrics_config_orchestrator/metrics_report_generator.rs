@@ -18,19 +18,16 @@ use crate::metrics_config_orchestrator::Trigger;
 
 #[async_trait]
 pub(crate) trait MetricsReportGenerator: Send + Sync {
-    #[allow(dead_code)]
-    fn get_name(&self) -> &str;
-
     async fn activate(self: &Arc<Self>);
     async fn deactivate(&self);
 }
 
-#[allow(dead_code)]
 pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) name: String,
 
     pub(super) config_uuid: String,
     pub(super) config_version: u32,
+    #[allow(dead_code)]
     pub(super) report_incomplete: bool,
     pub(super) report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
     pub(super) triggers: Vec<Arc<dyn Trigger>>,
@@ -43,10 +40,6 @@ pub(crate) struct MetricsReportGeneratorImpl {
 
 #[async_trait]
 impl MetricsReportGenerator for MetricsReportGeneratorImpl {
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-
     async fn activate(self: &Arc<Self>) {
         let mut is_active = self.is_active.lock().await;
         assert!(!*is_active, "Unable to activate metrics report generator: it's already active");

@@ -992,10 +992,6 @@ mod tests {
 
     #[async_trait]
     impl MetricsReportGenerator for MockMetricsReportGenerator {
-        fn get_name(&self) -> &str {
-            &self.name
-        }
-
         async fn activate(self: &Arc<Self>) {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);

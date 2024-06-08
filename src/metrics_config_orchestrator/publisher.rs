@@ -14,18 +14,19 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::ast::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
-use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceSubscription};
+use crate::metrics_config_orchestrator::service_adapter::{
+    ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
+};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 
 type CallbackFn = Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>;
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
-const PUBLISHER_STATE_ACTIVE: &str = "Active";
+const PUBLISHER_STATE_ACTIVE_GETTER: &str = "Active Getter";
+const PUBLISHER_STATE_ACTIVE_SUBSCRIBED: &str = "Active Subscribed";
 
 #[async_trait]
 pub(crate) trait Publisher: Send + Sync {
-    #[allow(dead_code)]
-    fn get_name(&self) -> &str;
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
@@ -38,11 +39,10 @@ pub(crate) trait Publisher: Send + Sync {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherActivateError {
+    #[error("Service adapter failed to create message provider: {error}")]
+    ServiceAdapterGetMessageProviderError { error: anyhow::Error },
     #[error("Service adapter failed to process subscription request: {error}")]
-    ServiceAdapterSubscribeError {
-        #[from]
-        error: anyhow::Error,
-    },
+    ServiceAdapterSubscribeError { error: anyhow::Error },
 }
 
 #[derive(Error, Debug)]
@@ -64,24 +64,38 @@ pub(crate) struct PublisherImpl {
 }
 
 pub(super) enum PublisherState {
+    /// The publisher is not subscribed to the underlying data source
+    /// and doesn't provide the latest message.
     Inactive,
-    Active {
+    /// The publisher is not subscribed to the underlying data source,
+    /// but provides the latest message on demand.
+    ActiveGetter {
+        // Provider of the latest message.
+        #[allow(dead_code)]
+        message_provider: Box<dyn ServiceMessageProvider>,
+    },
+    /// The publisher is subscribed to the underlying data source
+    /// and maintains the latest message.
+    ActiveSubscribed {
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
+
+        // Subscription to ServiceAdapter.
+        // Set for Service publisher only.
+        service_subscription: Option<ServiceSubscription>,
     },
 }
 
-#[allow(dead_code)]
 pub(super) enum PublisherType {
     Service {
         configuration: Option<Any>,
         connection_type: ConnectionType,
         service_name: String,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-        service_subscription: Mutex<Option<ServiceSubscription>>,
     },
     Aggregation {
         message_builder: Box<dyn MessageBuilder>,
+        #[allow(dead_code)]
         reset_on_get: bool,
         trigger_subscriber: TriggerSubscriber,
         triggers: Vec<Arc<dyn Trigger>>,
@@ -97,17 +111,16 @@ impl Display for PublisherState {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
             PublisherState::Inactive => f.write_str(PUBLISHER_STATE_INACTIVE),
-            PublisherState::Active { .. } => f.write_str(PUBLISHER_STATE_ACTIVE),
+            PublisherState::ActiveGetter { .. } => f.write_str(PUBLISHER_STATE_ACTIVE_GETTER),
+            PublisherState::ActiveSubscribed { .. } => {
+                f.write_str(PUBLISHER_STATE_ACTIVE_SUBSCRIBED)
+            }
         }
     }
 }
 
 #[async_trait]
 impl Publisher for PublisherImpl {
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
         self.latest_message.lock().unwrap().clone()
     }
@@ -123,7 +136,7 @@ impl Publisher for PublisherImpl {
         );
 
         // Perform activation logic specific to the publisher type.
-        match &self.publisher_type {
+        let new_state = match &self.publisher_type {
             PublisherType::Aggregation { trigger_subscriber, triggers, .. } => {
                 // Subscribe to parent triggers.
                 for trigger in triggers {
@@ -137,34 +150,55 @@ impl Publisher for PublisherImpl {
                         )
                         .await;
                 }
+
+                PublisherState::ActiveSubscribed {
+                    callback_map: HashMap::new(),
+                    service_subscription: None,
+                }
             }
             PublisherType::Service {
                 configuration,
+                connection_type,
                 service_name,
                 service_adapter,
-                service_subscription,
-                ..
             } => {
-                assert!(service_subscription.lock().unwrap().is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
+                let maybe_message_provider = match connection_type {
+                    ConnectionType::Getter => {
+                        service_adapter.get_message_provider(service_name).map_err(|error| {
+                            PublisherActivateError::ServiceAdapterGetMessageProviderError { error }
+                        })?
+                    }
+                    ConnectionType::Subscription => None,
+                };
 
-                // Subscribe to the service adapter.
-                let self_clone = Arc::clone(&self);
-                let subscription = service_adapter
-                    .subscribe(
-                        service_name,
-                        configuration,
-                        Box::new(move |msg| self_clone.on_service_publisher_new_message(msg)),
-                    )
-                    .await?;
+                if let Some(message_provider) = maybe_message_provider {
+                    // Don't subscribe to the service adapter and
+                    // store message provider to get the latest message.
+                    PublisherState::ActiveGetter { message_provider }
+                } else {
+                    // Subscribe to the service adapter.
+                    let self_clone = Arc::clone(&self);
+                    let subscription = service_adapter
+                        .subscribe(
+                            service_name,
+                            configuration,
+                            Box::new(move |msg| self_clone.on_service_publisher_new_message(msg)),
+                        )
+                        .await
+                        .map_err(|error| PublisherActivateError::ServiceAdapterSubscribeError {
+                            error,
+                        })?;
 
-                let mut subscription_container = service_subscription.lock().unwrap();
-                assert!(subscription_container.is_none(), "Unable to activate publisher {} because it is in an inconsistent state: it's activating, but subscription is already set", self.name);
-                subscription_container.replace(subscription);
+                    PublisherState::ActiveSubscribed {
+                        callback_map: HashMap::new(),
+                        service_subscription: Some(subscription),
+                    }
+                }
             }
-        }
+        };
 
-        // Set state to Active and release the mutex.
-        *state_lock = PublisherState::Active { callback_map: HashMap::new() };
+        // Set the new state and release the mutex.
+        *state_lock = new_state;
 
         Ok(())
     }
@@ -172,29 +206,46 @@ impl Publisher for PublisherImpl {
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
-        if let PublisherState::Active { callback_map } = &*state_lock {
-            assert!(
-                callback_map.is_empty(),
-                "Unable to deactivate publisher {} with active subscriptions",
-                self.name
-            );
-        } else {
-            panic!("Unable to deactivate publisher {}: it's in {} state", self.name, state_lock);
+        match &*state_lock {
+            PublisherState::ActiveGetter { .. } => {}
+            PublisherState::ActiveSubscribed { callback_map, .. } => {
+                assert!(
+                    callback_map.is_empty(),
+                    "Unable to deactivate publisher {} with active subscriptions",
+                    self.name
+                );
+            }
+            PublisherState::Inactive => {
+                panic!("Unable to deactivate publisher {}: it's inactive", self.name)
+            }
         }
 
         // Perform deactivation logic specific to the publisher type.
         match &self.publisher_type {
             PublisherType::Aggregation { triggers, trigger_subscriber, .. } => {
+                // Verify that the publisher is in the subscribed state.
+                assert!(
+                    matches!(&*state_lock, PublisherState::ActiveSubscribed { .. }),
+                    "Unable to deactivate Aggregation publisher {} because it's in {} state",
+                    self.name,
+                    state_lock
+                );
+
+                // Unsubscribe from parent triggers.
                 for trigger in triggers {
                     trigger.unsubscribe(trigger_subscriber).await;
                 }
             }
-            PublisherType::Service { service_adapter, service_subscription, .. } => {
-                let subscription_container = service_subscription.lock().unwrap().take();
-                if let Some(subscription) = subscription_container {
-                    service_adapter.unsubscribe(subscription).await?;
-                } else {
-                    panic!("Unable to deactivate publisher {} because it's in an inconsistent state: it's deactivating, but subscription is not set", self.name);
+            PublisherType::Service { service_adapter, .. } => {
+                // Unsubscribe from the service adapter if subscribed.
+                if let PublisherState::ActiveSubscribed { service_subscription, .. } =
+                    &mut *state_lock
+                {
+                    if let Some(subscription) = service_subscription.take() {
+                        service_adapter.unsubscribe(subscription).await?;
+                    } else {
+                        panic!("Unable to deactivate publisher {} because it's in an inconsistent state: it's deactivating, but subscription is not set", self.name);
+                    }
                 }
             }
         }
@@ -214,8 +265,10 @@ impl Publisher for PublisherImpl {
         data_trigger_name: &str,
         callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) {
+        // Lock state mutex and hold it until operation is complete.
         let mut state_lock = self.state.lock().await;
-        if let PublisherState::Active { callback_map } = &mut *state_lock {
+
+        if let PublisherState::ActiveSubscribed { callback_map, .. } = &mut *state_lock {
             callback_map.try_insert_value(data_trigger_name.to_owned(), callback).unwrap_or_else(|_| panic!("Unable to subscribe to publisher {}: data trigger {} is already subscribed", self.name, data_trigger_name));
         } else {
             panic!("Unable to subscribe to publisher {}: it's in {} state", self.name, state_lock);
@@ -223,8 +276,10 @@ impl Publisher for PublisherImpl {
     }
 
     async fn unsubscribe(&self, data_trigger_name: &str) {
+        // Lock state mutex and hold it until operation is complete.
         let mut state_lock = self.state.lock().await;
-        if let PublisherState::Active { callback_map } = &mut *state_lock {
+
+        if let PublisherState::ActiveSubscribed { callback_map, .. } = &mut *state_lock {
             let _ = callback_map.remove(data_trigger_name).unwrap_or_else(|| {
                 panic!(
                     "Unable to unsubscribe from publisher {}: data trigger {} wasn't subscribed",
@@ -280,7 +335,6 @@ impl PublisherImpl {
                 connection_type,
                 service_name,
                 service_adapter,
-                service_subscription: None.into(),
             },
         )
     }
@@ -289,7 +343,7 @@ impl PublisherImpl {
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
         let mut state_lock = self.state.lock().await;
 
-        let PublisherState::Active { callback_map } = &mut *state_lock else {
+        let PublisherState::ActiveSubscribed { callback_map, .. } = &mut *state_lock else {
             panic!(
                 "Publisher {} received callback when it was in the {} state",
                 self.name, state_lock
@@ -343,6 +397,7 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use anyhow::anyhow;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -356,21 +411,10 @@ mod tests {
     };
 
     const DATA_TRIGGER_NAME: &str = "datatrigger";
+    const ERROR_MESSAGE: &str = "Error 42";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
     const TRIGGER_NAME: &str = "trigger";
-
-    fn create_inactive_service_publisher(
-        service_adapter: Option<Arc<MockServiceAdapter>>,
-    ) -> Arc<PublisherImpl> {
-        Arc::new(PublisherImpl::new_service_publisher(
-            PUBLISHER_NAME.to_owned(),
-            SERVICE_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
-        ))
-    }
 
     fn create_inactive_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
@@ -383,6 +427,30 @@ mod tests {
         ))
     }
 
+    fn create_inactive_getter_service_publisher(
+        service_adapter: Arc<MockServiceAdapter>,
+    ) -> Arc<PublisherImpl> {
+        Arc::new(PublisherImpl::new_service_publisher(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            service_adapter,
+        ))
+    }
+
+    fn create_inactive_subscription_service_publisher(
+        service_adapter: Option<Arc<MockServiceAdapter>>,
+    ) -> Arc<PublisherImpl> {
+        Arc::new(PublisherImpl::new_service_publisher(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
+        ))
+    }
+
     async fn create_active_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
     ) -> Arc<PublisherImpl> {
@@ -392,10 +460,10 @@ mod tests {
         publisher
     }
 
-    async fn create_active_service_publisher(
+    async fn create_active_subscribed_service_publisher(
         service_adapter: Option<Arc<MockServiceAdapter>>,
     ) -> Arc<PublisherImpl> {
-        let publisher = create_inactive_service_publisher(service_adapter);
+        let publisher = create_inactive_subscription_service_publisher(service_adapter);
 
         Arc::clone(&publisher).activate().await.unwrap();
         publisher
@@ -404,14 +472,63 @@ mod tests {
     async fn create_service_publisher_with_subscription(
         service_adapter: Option<Arc<MockServiceAdapter>>,
     ) -> Arc<PublisherImpl> {
-        let publisher = create_active_service_publisher(service_adapter).await;
+        let publisher = create_active_subscribed_service_publisher(service_adapter).await;
 
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
         publisher
     }
 
     #[tokio::test]
-    async fn activate_passes_configuration() {
+    async fn activate_getter_service_publisher_propagates_adapter_error() {
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
+
+        let err = publisher.activate().await.unwrap_err();
+
+        assert!(
+            matches!(&err, PublisherActivateError::ServiceAdapterGetMessageProviderError { error } if error.to_string() == ERROR_MESSAGE),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn activate_getter_service_publisher_success() {
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_next_message_provider());
+        let publisher = Arc::new(PublisherImpl::new_service_publisher(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            Some(Any::pack(Empty::default_instance()).unwrap()),
+            ConnectionType::Getter,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+        ));
+
+        publisher.activate().await.unwrap();
+
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn activate_getter_service_publisher_falls_back_to_subscription() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher = Arc::new(PublisherImpl::new_service_publisher(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            Some(Any::pack(Empty::default_instance()).unwrap()),
+            ConnectionType::Getter,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+        ));
+
+        publisher.activate().await.unwrap();
+
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+    }
+
+    #[tokio::test]
+    async fn activate_subscription_service_publisher_passes_configuration() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
@@ -438,7 +555,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn activate_when_active_panics() {
-        let publisher = create_active_service_publisher(None).await;
+        let publisher = create_active_subscribed_service_publisher(None).await;
 
         publisher.activate().await.unwrap();
     }
@@ -446,7 +563,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn deactivate_when_inactive_panics() {
-        let publisher = create_inactive_service_publisher(None);
+        let publisher = create_inactive_subscription_service_publisher(None);
 
         publisher.deactivate().await.unwrap();
     }
@@ -460,9 +577,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deactivate_service_publisher_calls_unsubscribe() {
+    async fn deactivate_subscribed_service_publisher_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = create_active_service_publisher(Some(Arc::clone(&service_adapter))).await;
+        let publisher =
+            create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
 
         publisher.deactivate().await.unwrap();
 
@@ -472,7 +590,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn subscribe_when_inactive_panics() {
-        let publisher = create_inactive_service_publisher(None);
+        let publisher = create_inactive_subscription_service_publisher(None);
 
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
     }
@@ -488,7 +606,8 @@ mod tests {
     #[tokio::test]
     async fn subscribe_service_publisher_new_message_notifies_subscriber() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = create_active_service_publisher(Some(Arc::clone(&service_adapter))).await;
+        let publisher =
+            create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
         let (tx, rx) = oneshot::channel();
         let mut maybe_tx = Some(tx);
         let mut msg = Int32Value::new();
@@ -542,7 +661,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_when_inactive_panics() {
-        let publisher = create_inactive_service_publisher(None);
+        let publisher = create_inactive_subscription_service_publisher(None);
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
@@ -550,7 +669,7 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
-        let publisher = create_active_service_publisher(None).await;
+        let publisher = create_active_subscribed_service_publisher(None).await;
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
