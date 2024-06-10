@@ -545,7 +545,7 @@ where
 
         // Validate metrics report configs.
         let context = MetricsReportGeneratorFactoryValidateContext {
-            trigger_protos: &config_proto.triggers,
+            trigger_protos: &triggers,
             file_descriptors: &file_descriptors,
             node_types: &node_types,
         };
