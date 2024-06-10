@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use protobuf::reflect::FileDescriptor;
+use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
+use sdvtelemetry_proto_rust::metrics_configuration::service_publisher::ConnectionType as ConnectionTypeProto;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
     AggregationPublisher as AggregationPublisherProto, Publisher as PublisherProto,
@@ -13,6 +14,7 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,
 };
+use crate::metrics_config_orchestrator::publisher::ConnectionType;
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{
     NodeValueType, Publisher, PublisherImpl, Trigger, TriggerImpl,
@@ -57,17 +59,21 @@ pub(crate) struct PublisherFactoryValidateContext<'a> {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherFactoryError {
-    #[error("Publisher name not set")]
-    NameNotSet,
-    #[error("Unknown message type {message_type} set for aggregation publisher")]
-    UnknownMessageType { message_type: String },
+    #[error("ServicePublisher contains invalid connection type {connection_type}")]
+    InvalidConnectionType { connection_type: i32 },
     #[error("AggregationPublisher contains invalid ProtoMessageBuilder: {e}")]
     InvalidProtoMessageBuilder {
         #[from]
         e: MessageBuilderFactoryError,
     },
+    #[error("Publisher name not set")]
+    NameNotSet,
+    #[error("Unknown message type {message_type} set for aggregation publisher")]
+    UnknownMessageType { message_type: String },
     #[error("Unknown publisher type")]
     UnknownPublisherType,
+    #[error("Connection type for ServicePublisher is not specified")]
+    UnspecifiedConnectionType,
 }
 
 pub(crate) struct PublisherFactoryImpl {
@@ -89,6 +95,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                     publisher_name,
                     service_publisher.service_name.clone(),
                     service_publisher.configuration.as_ref().cloned(),
+                    Self::get_connection_type(service_publisher.connection_type)?,
                     Arc::clone(&self.service_adapter),
                 )));
             }
@@ -110,7 +117,9 @@ impl PublisherFactory for PublisherFactoryImpl {
     ) -> Result<(), PublisherFactoryError> {
         Self::verify_name_set(publisher_proto)?;
         match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::ServicePublisher(_)) => (),
+            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+                Self::get_connection_type(service_publisher.connection_type)?;
+            }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
                 self.message_builder_factory.validate(
                     &aggregation_publisher.message_builder,
@@ -162,6 +171,24 @@ impl PublisherFactoryImpl {
             triggers,
         );
         Ok(publisher)
+    }
+
+    fn get_connection_type(
+        connection_type_proto: EnumOrUnknown<ConnectionTypeProto>,
+    ) -> Result<ConnectionType, PublisherFactoryError> {
+        let connection_type_proto = connection_type_proto
+            .enum_value()
+            .map_err(|i| PublisherFactoryError::InvalidConnectionType { connection_type: i })?;
+
+        let connection_type = match connection_type_proto {
+            ConnectionTypeProto::CONNECTION_TYPE_UNSPECIFIED => {
+                return Err(PublisherFactoryError::UnspecifiedConnectionType)
+            }
+            ConnectionTypeProto::SUBSCRIPTION => ConnectionType::Subscription,
+            ConnectionTypeProto::GETTER => ConnectionType::Getter,
+        };
+
+        Ok(connection_type)
     }
 
     fn verify_name_set(publisher_proto: &PublisherProto) -> Result<(), PublisherFactoryError> {
@@ -240,11 +267,24 @@ mod tests {
         PublisherProto { name: name.to_owned(), ..Default::default() }
     }
 
+    fn create_service_publisher_with_invalid_connection_type() -> PublisherProto {
+        let mut publisher = create_publisher(PUBLISHER_NAME);
+        publisher.mut_service_publisher().connection_type = EnumOrUnknown::from_i32(-1);
+        publisher
+    }
+
+    fn create_service_publisher_with_unspecified_connection_type() -> PublisherProto {
+        let mut publisher = create_publisher(PUBLISHER_NAME);
+        publisher.mut_service_publisher();
+        publisher
+    }
+
     fn create_valid_service_publisher() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let service_publisher = publisher.mut_service_publisher();
         service_publisher.configuration =
             MessageField::some(Any::pack(Empty::default_instance()).unwrap());
+        service_publisher.connection_type = ConnectionTypeProto::SUBSCRIPTION.into();
         SERVICE_NAME.clone_into(&mut service_publisher.service_name);
         publisher
     }
@@ -316,8 +356,36 @@ mod tests {
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
     }
 
-    #[tokio::test]
-    async fn create_service_publisher_success() {
+    #[test]
+    fn create_service_publisher_invalid_connection_type_fails() {
+        let factory = create_default_factory();
+        let publisher = create_service_publisher_with_invalid_connection_type();
+
+        let err = factory.create_using_default_context(&publisher).err().unwrap();
+
+        assert!(
+            matches!(&err, PublisherFactoryError::InvalidConnectionType { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_service_publisher_unspecified_connection_type_fails() {
+        let factory = create_default_factory();
+        let publisher = create_service_publisher_with_unspecified_connection_type();
+
+        let err = factory.create_using_default_context(&publisher).err().unwrap();
+
+        assert!(
+            matches!(&err, PublisherFactoryError::UnspecifiedConnectionType),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn create_service_publisher_success() {
         let factory = create_default_factory();
         let publisher = create_valid_service_publisher();
 
@@ -326,6 +394,7 @@ mod tests {
         assert_eq!(res.name, PUBLISHER_NAME);
         let PublisherType::Service {
             configuration,
+            connection_type,
             service_name,
             service_adapter: _,
             service_subscription,
@@ -339,6 +408,7 @@ mod tests {
             .unwrap()
             .expect("The value of Any should be an Empty");
         assert_eq!(&any_value, Empty::default_instance());
+        assert!(matches!(connection_type, ConnectionType::Subscription));
         assert_eq!(service_name, SERVICE_NAME);
         assert!(service_subscription.lock().unwrap().is_none());
     }
@@ -382,6 +452,34 @@ mod tests {
         let err = factory.validate_using_default_context(&PublisherProto::default()).unwrap_err();
 
         assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+    }
+
+    #[test]
+    fn validate_service_publisher_invalid_connection_type_fails() {
+        let factory = create_default_factory();
+        let publisher = create_service_publisher_with_invalid_connection_type();
+
+        let err = factory.validate_using_default_context(&publisher).unwrap_err();
+
+        assert!(
+            matches!(&err, PublisherFactoryError::InvalidConnectionType { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_service_publisher_unspecified_connection_type_fails() {
+        let factory = create_default_factory();
+        let publisher = create_service_publisher_with_unspecified_connection_type();
+
+        let err = factory.validate_using_default_context(&publisher).unwrap_err();
+
+        assert!(
+            matches!(&err, PublisherFactoryError::UnspecifiedConnectionType),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
