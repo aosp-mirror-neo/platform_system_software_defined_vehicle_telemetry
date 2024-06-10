@@ -15,62 +15,58 @@ use tokio::sync::oneshot;
 ///
 /// # Safety
 ///
-/// `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
+/// `listener` points to a valid `oneshot::Sender` originally sent to the caller during the
+///  `call_config_list_api` call. Listener will not be valid after the function completes
 ///
-/// `listener` points to a valid `oneshot::Sender` originally sent to the caller during
-///    the get_config_list api call. Listener will not be valid after the function completes
+/// `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
 ///
-/// `config_list` must point to valid pointer array containing metrics config uuids
-/// `size` must contain the length of the byte array that can be parsed from config_list
+/// `config_list` must point to valid pointer array containing C raw strings that satisfy
+/// `CStr::from_ptr` safety requirements.
+///
+/// `config_list_size` must contain the length of the byte array that can be parsed from
+/// `config_list`.
 unsafe extern "C" fn on_config_list_received(
     listener: *mut c_void,
     status_code: i32,
     status_msg: *const c_char,
     config_list: *mut *const c_char,
-    count: usize,
+    config_list_size: usize,
 ) {
-    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
-    // global allocator using Box::new(). For more info check
-    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender = unsafe {
-        Box::from_raw(listener as *mut oneshot::Sender<Result<Vec<String>, (i32, String)>>)
-    };
+    // SAFETY: safe to use as the `listener` passed by the caller was originally allocated using a
+    // global allocator using Box::new().
+    let sender =
+        unsafe { Box::from_raw(listener as *mut oneshot::Sender<TelemetryResult<Vec<String>>>) };
 
     // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
     // safety requirements.
-    let c_str = unsafe {
-        // Convert *const std::ffi::c_char to &CStr
-        CStr::from_ptr(status_msg)
-    };
-    // Convert &CStr to String
-    let msg = c_str.to_str().unwrap().to_string();
+    let status_msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
     if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        error!("Error in receiving config list: {}", msg);
-        sender.send(Err((status_code, msg))).unwrap();
+        error!("Error in receiving config list: {}", status_msg);
+        sender.send(Err(TelemetryError { status: status_code, message: status_msg })).unwrap();
         return;
     }
 
     // SAFETY: The caller has provided pointers that satisfy `slice::from_raw_parts`
     // safety requirements.
-    let c_str_array = unsafe { std::slice::from_raw_parts(config_list, count) };
+    let config_list = unsafe { std::slice::from_raw_parts(config_list, config_list_size) };
+    let config_list = config_list
+        .iter()
+        .map(|c_str| {
+            // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+            // safety requirements
+            unsafe { CStr::from_ptr(*c_str) }.to_str().unwrap().to_owned()
+        })
+        .collect::<Vec<_>>();
 
-    let mut rust_strings = Vec::new();
-    for &c_str in c_str_array {
-        // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-        // safety requirements
-        let rust_string = unsafe { CStr::from_ptr(c_str) }.to_str().unwrap().to_string();
-        rust_strings.push(rust_string);
-    }
-
-    sender.send(Ok(rust_strings)).unwrap();
+    sender.send(Ok(config_list)).unwrap();
 }
 
 pub async fn add_metrics_config(
     service: &TelemetryServiceHolder,
     serialized_config: &[u8],
 ) -> TelemetryResult<String> {
-    let (add_config_sender, add_config_receiver) = oneshot::channel();
+    let (add_config_sender, add_config_receiver) = oneshot::channel::<TelemetryResult<String>>();
     let sender_wrapper = Box::new(add_config_sender);
 
     // SAFETY: safe to use as all pointers needed to satisfy safety requirements
@@ -92,19 +88,15 @@ pub async fn add_metrics_config(
         }
     }
 
-    let (status, message) = add_config_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(message)
-    } else {
-        Err(TelemetryError { status, message })
-    }
+    add_config_receiver.await.unwrap()
 }
 
 pub async fn activate_metrics_config(
     service: &TelemetryServiceHolder,
     config_uuid: &str,
 ) -> TelemetryResult<String> {
-    let (activate_config_sender, activate_config_receiver) = oneshot::channel();
+    let (activate_config_sender, activate_config_receiver) =
+        oneshot::channel::<TelemetryResult<String>>();
     let sender_wrapper = Box::new(activate_config_sender);
 
     let uuid_cstring = CString::new(config_uuid).unwrap();
@@ -127,19 +119,15 @@ pub async fn activate_metrics_config(
         }
     }
 
-    let (status, message) = activate_config_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(message)
-    } else {
-        Err(TelemetryError { status, message })
-    }
+    activate_config_receiver.await.unwrap()
 }
 
 pub async fn deactivate_metrics_config(
     service: &TelemetryServiceHolder,
     config_uuid: &str,
 ) -> TelemetryResult<String> {
-    let (deactivate_config_sender, deactivate_config_receiver) = oneshot::channel();
+    let (deactivate_config_sender, deactivate_config_receiver) =
+        oneshot::channel::<TelemetryResult<String>>();
     let sender_wrapper = Box::new(deactivate_config_sender);
 
     let uuid_cstring = CString::new(config_uuid).unwrap();
@@ -162,19 +150,15 @@ pub async fn deactivate_metrics_config(
         }
     }
 
-    let (status, message) = deactivate_config_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(message)
-    } else {
-        Err(TelemetryError { status, message })
-    }
+    deactivate_config_receiver.await.unwrap()
 }
 
 pub async fn remove_metrics_config(
     service: &TelemetryServiceHolder,
     config_uuid: &str,
 ) -> TelemetryResult<String> {
-    let (remove_config_sender, remove_config_receiver) = oneshot::channel();
+    let (remove_config_sender, remove_config_receiver) =
+        oneshot::channel::<TelemetryResult<String>>();
     let sender_wrapper = Box::new(remove_config_sender);
 
     let uuid_cstring = CString::new(config_uuid).unwrap();
@@ -197,16 +181,12 @@ pub async fn remove_metrics_config(
         }
     }
 
-    let (status, message) = remove_config_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(message)
-    } else {
-        Err(TelemetryError { status, message })
-    }
+    remove_config_receiver.await.unwrap()
 }
 
 pub async fn remove_all_metrics_configs(service: &TelemetryServiceHolder) -> TelemetryResult<()> {
-    let (remove_config_sender, remove_config_receiver) = oneshot::channel();
+    let (remove_config_sender, remove_config_receiver) =
+        oneshot::channel::<TelemetryResult<String>>();
     let sender_wrapper = Box::new(remove_config_sender);
 
     // SAFETY: safe to use as all pointers needed to satisfy safety requirements
@@ -223,19 +203,14 @@ pub async fn remove_all_metrics_configs(service: &TelemetryServiceHolder) -> Tel
         }
     }
 
-    let (status, message) = remove_config_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(())
-    } else {
-        Err(TelemetryError { status, message })
-    }
+    remove_config_receiver.await.unwrap().map(|_| ())
 }
 
 pub async fn get_active_metrics_config_uuids(
     service: &TelemetryServiceHolder,
-) -> Result<Vec<String>, (i32, String)> {
+) -> TelemetryResult<Vec<String>> {
     let (get_config_list_sender, get_config_list_receiver) =
-        oneshot::channel::<Result<Vec<String>, (i32, String)>>();
+        oneshot::channel::<TelemetryResult<Vec<String>>>();
     let sender_wrapper = Box::new(get_config_list_sender);
 
     // SAFETY: safe to use as all pointers needed to satisfy safety requirements
@@ -261,9 +236,9 @@ pub async fn get_active_metrics_config_uuids(
 
 pub async fn get_inactive_metrics_config_uuids(
     service: &TelemetryServiceHolder,
-) -> Result<Vec<String>, (i32, String)> {
+) -> TelemetryResult<Vec<String>> {
     let (get_config_list_sender, get_config_list_receiver) =
-        oneshot::channel::<Result<Vec<String>, (i32, String)>>();
+        oneshot::channel::<TelemetryResult<Vec<String>>>();
     let sender_wrapper = Box::new(get_config_list_sender);
 
     // SAFETY: safe to use as all pointers needed to satisfy safety requirements
