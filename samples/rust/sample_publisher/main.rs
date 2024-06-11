@@ -13,22 +13,20 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry
 };
 use google_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
+use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests,
+validated_log_tag};
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 use crate::random_integer_publisher::RandomIntegerPublisher;
 use crate::random_integer_publisher_service::RandomIntegerPublisherService;
 
-use log::{info, LevelFilter};
+use log::info;
 use protobuf::{Message, MessageFull};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
 
-const LOG_TAG: &str = "telemetry_sample_pblshr";
-const _: () = assert!(
-    LOG_TAG.len() <= 23,
-    "LOG_TAG should be less than or equal to 23 characters, as it will otherwise be truncated by adb."
-);
+const LOG_TAG: &str = validated_log_tag("telemetry_sample_pblshr");
 
 pub fn connect() -> Result<binder::Strong<dyn IConfigurablePublisherRegistry>, binder::StatusCode> {
     let configurable_publisher_registry_descriptor = format!(
@@ -40,9 +38,7 @@ pub fn connect() -> Result<binder::Strong<dyn IConfigurablePublisherRegistry>, b
 
 #[tokio::main]
 async fn main() -> Result<(), binder::Status> {
-    logger::init(
-        logger::Config::default().with_tag_on_device(LOG_TAG).with_max_level(LevelFilter::Trace),
-    );
+    init_logger_for_samples_or_tests(LOG_TAG);
 
     info!("Starting thread pool");
     binder::ProcessState::start_thread_pool();

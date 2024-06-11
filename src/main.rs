@@ -14,12 +14,13 @@ use sdv_telemetry_dt_wrapper::data_tunnel_subscriber::DataTunnelSubscriber;
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistryService,
 };
+use sdv_telemetry_utils::logging::validated_log_tag;
 
 use binder_tokio::TokioRuntime;
 use std::sync::Arc;
 use tokio::runtime::Builder;
 
-const LOG_TAG: &str = "SdvTelemetryService";
+const LOG_TAG: &str = validated_log_tag("SdvTelemetryService");
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_log::init_logger(LOG_TAG)?;
