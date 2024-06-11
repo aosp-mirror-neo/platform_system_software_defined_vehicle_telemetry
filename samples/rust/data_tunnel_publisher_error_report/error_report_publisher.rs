@@ -16,7 +16,7 @@ use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_l
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::{thread, time::Duration};
 
-const LOG_TAG: &str = validated_log_tag("TelemetryErrRptDtPblshr");
+const LOG_TAG: &str = validated_log_tag("TelemetryErrRptDataPub");
 
 const DT_TOPIC_NAME: &str = "DataTunnelErrorReportSamplePublisher";
 const DT_QUEUE_SIZE: usize = 2;

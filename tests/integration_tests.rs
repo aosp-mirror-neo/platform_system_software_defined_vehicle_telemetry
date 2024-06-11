@@ -22,7 +22,7 @@ use std::pin::Pin;
 use tokio::sync::oneshot;
 
 const CONFIG_PATH: &str = "tests/config.textproto";
-const LOG_TAG: &str = validated_log_tag("telemetry_integr_test");
+const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
 
 /// Callback that receives status for API calls.
 ///

@@ -15,7 +15,7 @@ use std::{thread, time::Duration};
 use tire_pressure_publisher_proto::tire_pressure_publisher;
 use tire_pressure_publisher_proto::tire_pressure_publisher::TirePressureData;
 
-const LOG_TAG: &str = validated_log_tag("TelemetryTrPrsDtPblshr");
+const LOG_TAG: &str = validated_log_tag("TelemetryTrPrsDataPub");
 
 const DT_TOPIC_NAME: &str = "DataTunnelTirePressureSamplePublisher";
 const DT_QUEUE_SIZE: usize = 2000;

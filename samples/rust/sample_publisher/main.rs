@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Notify;
 
-const LOG_TAG: &str = validated_log_tag("telemetry_sample_pblshr");
+const LOG_TAG: &str = validated_log_tag("TelemetrySamplConfigPub");
 
 pub fn connect() -> Result<binder::Strong<dyn IConfigurablePublisherRegistry>, binder::StatusCode> {
     let configurable_publisher_registry_descriptor = format!(

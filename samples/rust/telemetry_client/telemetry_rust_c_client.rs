@@ -22,7 +22,7 @@ use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::task;
 
-const LOG_TAG: &str = validated_log_tag("telemetry_rust_c_client");
+const LOG_TAG: &str = validated_log_tag("TelemetryRustCClient");
 
 async fn process_config(
     path: &PathBuf,

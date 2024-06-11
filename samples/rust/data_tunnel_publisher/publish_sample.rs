@@ -12,7 +12,7 @@ use log::{error, info};
 use protobuf::{Message, MessageFull};
 use rand::Rng;
 
-const LOG_TAG: &str = validated_log_tag("telemetry_dt_publisher");
+const LOG_TAG: &str = validated_log_tag("TelemetrySampleDataPub");
 
 // Hardcoded topic name and msg size for testing
 const TOPIC_NAME: &str = "DataTunnelSampleService";

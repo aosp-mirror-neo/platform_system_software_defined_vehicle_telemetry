@@ -15,7 +15,7 @@ use speed_publisher_proto::speed_publisher;
 use speed_publisher_proto::speed_publisher::SpeedData;
 use std::{thread, time::Duration};
 
-const LOG_TAG: &str = validated_log_tag("TelemetrySpeedDtPblshr");
+const LOG_TAG: &str = validated_log_tag("TelemetrySpeedDataPub");
 
 const DT_TOPIC_NAME: &str = "DataTunnelSpeedSamplePublisher";
 const DT_QUEUE_SIZE: usize = 2000;
