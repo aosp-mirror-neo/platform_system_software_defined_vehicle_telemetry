@@ -72,8 +72,6 @@ pub enum PublisherFactoryError {
     UnknownMessageType { message_type: String },
     #[error("Unknown publisher type")]
     UnknownPublisherType,
-    #[error("Connection type for ServicePublisher is not specified")]
-    UnspecifiedConnectionType,
 }
 
 pub(crate) struct PublisherFactoryImpl {
@@ -181,10 +179,8 @@ impl PublisherFactoryImpl {
             .map_err(|i| PublisherFactoryError::InvalidConnectionType { connection_type: i })?;
 
         let connection_type = match connection_type_proto {
-            ConnectionTypeProto::CONNECTION_TYPE_UNSPECIFIED => {
-                return Err(PublisherFactoryError::UnspecifiedConnectionType)
-            }
-            ConnectionTypeProto::SUBSCRIPTION => ConnectionType::Subscription,
+            ConnectionTypeProto::CONNECTION_TYPE_UNSPECIFIED
+            | ConnectionTypeProto::SUBSCRIPTION => ConnectionType::Subscription,
             ConnectionTypeProto::GETTER => ConnectionType::Getter,
         };
 
@@ -371,17 +367,16 @@ mod tests {
     }
 
     #[test]
-    fn create_service_publisher_unspecified_connection_type_fails() {
+    fn create_service_publisher_unspecified_connection_type_maps_to_subscription() {
         let factory = create_default_factory();
         let publisher = create_service_publisher_with_unspecified_connection_type();
 
-        let err = factory.create_using_default_context(&publisher).err().unwrap();
+        let res = factory.create_using_default_context(&publisher).unwrap();
 
-        assert!(
-            matches!(&err, PublisherFactoryError::UnspecifiedConnectionType),
-            "Unexpected error: {:?}",
-            err
-        );
+        let PublisherType::Service { connection_type, .. } = &res.publisher_type else {
+            panic!("Unexpected publisher type");
+        };
+        assert!(matches!(connection_type, ConnectionType::Subscription));
     }
 
     #[test]
@@ -469,17 +464,11 @@ mod tests {
     }
 
     #[test]
-    fn validate_service_publisher_unspecified_connection_type_fails() {
+    fn validate_service_publisher_unspecified_connection_type_success() {
         let factory = create_default_factory();
         let publisher = create_service_publisher_with_unspecified_connection_type();
 
-        let err = factory.validate_using_default_context(&publisher).unwrap_err();
-
-        assert!(
-            matches!(&err, PublisherFactoryError::UnspecifiedConnectionType),
-            "Unexpected error: {:?}",
-            err
-        );
+        factory.validate_using_default_context(&publisher).unwrap();
     }
 
     #[test]
