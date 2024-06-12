@@ -4,27 +4,22 @@
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::thread;
 
-use log::{error, info, LevelFilter};
+use log::{error, info};
 use protobuf::{Message, MessageFull};
 use rand::Rng;
 
-const LOG_TAG: &str = "telemetry_dt_publisher";
-const _: () = assert!(
-    LOG_TAG.len() <= 23,
-    "LOG_TAG should be less than or equal to 23 characters, as it will otherwise be truncated by adb."
-);
+const LOG_TAG: &str = validated_log_tag("TelemetrySampleDataPub");
 
 // Hardcoded topic name and msg size for testing
 const TOPIC_NAME: &str = "DataTunnelSampleService";
 const TOPIC_MSG_SIZE: usize = 64;
 
 fn main() {
-    logger::init(
-        logger::Config::default().with_tag_on_device(LOG_TAG).with_max_level(LevelFilter::Trace),
-    );
+    init_logger_for_samples_or_tests(LOG_TAG);
     info!("Creating publisher");
 
     let mut publisher_metadata = TelemetryPublisherMetadata::new();
