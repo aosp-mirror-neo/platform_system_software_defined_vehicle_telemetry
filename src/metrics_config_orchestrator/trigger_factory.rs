@@ -80,6 +80,8 @@ pub enum TriggerFactoryError {
     UnknownTriggerType,
     #[error("Condition type is not specified")]
     UnspecifiedConditionType,
+    #[error("Trigger type is not specified")]
+    UnspecifiedTriggerType,
 }
 
 pub(crate) struct TriggerFactoryImpl {}
@@ -92,8 +94,12 @@ impl TriggerFactory for TriggerFactoryImpl {
     ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
         Self::verify_name_set(trigger_proto)?;
         let trigger_name = trigger_proto.name.clone();
-        let trigger_type = match &trigger_proto.trigger_type {
-            Some(TriggerTypeProto::DataTrigger(data_trigger)) => {
+        let trigger_type = trigger_proto
+            .trigger_type
+            .as_ref()
+            .ok_or_else(|| TriggerFactoryError::UnspecifiedTriggerType)?;
+        let trigger_type = match trigger_type {
+            TriggerTypeProto::DataTrigger(data_trigger) => {
                 let publisher = &context.publishers[&data_trigger.publisher_name];
 
                 if let PublisherType::Service { connection_type, .. } = &publisher.publisher_type {
@@ -111,7 +117,7 @@ impl TriggerFactory for TriggerFactoryImpl {
 
                 TriggerType::Data { publisher: Arc::<PublisherImpl>::clone(publisher) }
             }
-            Some(TriggerTypeProto::PeriodicTrigger(periodic_trigger)) => TriggerType::Periodic {
+            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => TriggerType::Periodic {
                 interval: try_into_duration(&periodic_trigger.interval).map_err(|error| {
                     TriggerFactoryError::PeriodicTriggerInvalidDuration {
                         interval: (*periodic_trigger.interval).clone(),
@@ -119,14 +125,16 @@ impl TriggerFactory for TriggerFactoryImpl {
                     }
                 })?,
             },
-            Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
+            TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
 
                 let selector_node_index = Self::get_selector_node_index(conditional_trigger)?;
-                let selector_expression =
-                    context.expression_nodes.get(selector_node_index as usize).ok_or(
-                        TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
-                    )?;
+                let selector_expression = context
+                    .expression_nodes
+                    .get(selector_node_index as usize)
+                    .ok_or_else(|| TriggerFactoryError::IncorrectNodeIndex {
+                        node_index: selector_node_index,
+                    })?;
                 let condition_type = Self::get_condition_type(
                     conditional_trigger,
                     &context.node_types[selector_node_index as usize],
@@ -159,7 +167,7 @@ impl TriggerFactory for TriggerFactoryImpl {
         let trigger_type = trigger_proto
             .trigger_type
             .as_ref()
-            .ok_or_else(|| TriggerFactoryError::UnknownTriggerType)?;
+            .ok_or_else(|| TriggerFactoryError::UnspecifiedTriggerType)?;
         match trigger_type {
             TriggerTypeProto::DataTrigger(data_trigger) => {
                 let publisher = &context.publishers[&data_trigger.publisher_name];
@@ -440,6 +448,19 @@ mod tests {
     }
 
     #[test]
+    fn create_no_trigger_type_fails() {
+        let factory = create_factory();
+
+        // TODO(b/339033786): We cannot use `unwrap_err` here.
+        let err = factory.create_using_default_context(&new_trigger(TRIGGER_NAME)).err().unwrap();
+
+        assert!(
+            matches!(&err, TriggerFactoryError::UnspecifiedTriggerType),
+            "Unexpected error: {err:?}"
+        );
+    }
+
+    #[test]
     fn create_data_trigger_getter_publisher_fails() {
         let factory = create_factory();
         let trigger = create_valid_data_trigger();
@@ -703,6 +724,18 @@ mod tests {
         let err = factory.validate_using_default_context(&TriggerProto::default()).unwrap_err();
 
         assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+    }
+
+    #[test]
+    fn validate_no_trigger_type_fails() {
+        let factory = create_factory();
+
+        let result = factory.validate_using_default_context(&new_trigger(TRIGGER_NAME));
+
+        assert!(
+            matches!(&result, Err(TriggerFactoryError::UnspecifiedTriggerType)),
+            "Unexpected result: {result:?}"
+        );
     }
 
     #[test]
