@@ -57,7 +57,7 @@ adb shell sdv_ivi_telemetry_service_agent
     .
     adb push configN.bin data/local/tmp/configN.bin
 
-    adb logcat | grep -E 'telemetry|telemetry_rust_c_client'
+    adb logcat | grep -i 'Telemetry'
     ```
 
     EXPECTED:
@@ -79,7 +79,7 @@ adb shell sdv_ivi_telemetry_service_agent
     ```bash
     # restart adbd with root permissions, if you haven't already
     adb root
-    adb shell telemetry_rust_c_client <path_to_config1> ... <path_to_configN>
+    adb shell TelemetryRustCClient <path_to_config1> ... <path_to_configN>
     ```
 
     The client applications will keep running until at least one report is
@@ -91,17 +91,17 @@ adb shell sdv_ivi_telemetry_service_agent
     was already printed in step 2):
 
     ```
-    10-26 23:33:32.166  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
+    10-26 23:33:32.166  1424  1424 I TelemetryRustCClient: TelemetryRustCClient: Connecting to service
     10-26 23:33:32.167  1217  1221 I SdvTelemetryService: sdv_telemetry: registerReportReadyListener
-    10-26 23:33:32.167  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Status code: 208 status message: Status listener successfully added
+    10-26 23:33:32.167  1424  1424 I TelemetryRustCClient: TelemetryRustCClient: Status code: 208 status message: Status listener successfully added
     10-26 23:33:32.170  1217  1221 I SdvTelemetryService: sdv_telemetry: addMetricsConfig: MetricsConfig { uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", version: 1, ... } of size: 701
     10-26 23:33:32.171  1217  1221 I SdvTelemetryService: sdv_telemetry: activateMetricsConfig: "c6005cea-8fde-436a-9f29-c12f06a10c102504"
-    10-26 23:33:36.173  1424  1428 I telemetry_rust_c_client: telemetry_rust_c_client::metrics_report_manager: Report ready: c6005cea-8fde-436a-9f29-c12f06a10c102504 report number: 1
+    10-26 23:33:36.173  1424  1428 I TelemetryRustCClient: TelemetryRustCClient::metrics_report_manager: Report ready: c6005cea-8fde-436a-9f29-c12f06a10c102504 report number: 1
     10-26 23:33:36.174  1217  1221 I SdvTelemetryService: sdv_telemetry: getMetricsReport: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    10-26 23:33:36.174  1424  1427 I telemetry_rust_c_client: telemetry_rust_c_client::metrics_report_manager: Report received: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    10-26 23:33:36.174  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: Report received: MetricsReport { report_number: 1, report_timestamp: MessageField(Some(Timestamp { seconds: 1698363216, nanos: 173714484, special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), report_reason: REGULAR, metrics_config_uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", metrics_config_version: 1, report_data: MessageField(Some(Any { type_url: "type.googleapis.com/android.automotive.telemetry.messages.VehicleConnectivityReport", value: [8, 0], special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } }
+    10-26 23:33:36.174  1424  1427 I TelemetryRustCClient: TelemetryRustCClient::metrics_report_manager: Report received: c6005cea-8fde-436a-9f29-c12f06a10c102504
+    10-26 23:33:36.174  1424  1424 I TelemetryRustCClient: TelemetryRustCClient: Report received: MetricsReport { report_number: 1, report_timestamp: MessageField(Some(Timestamp { seconds: 1698363216, nanos: 173714484, special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), report_reason: REGULAR, metrics_config_uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", metrics_config_version: 1, report_data: MessageField(Some(Any { type_url: "type.googleapis.com/android.automotive.telemetry.messages.VehicleConnectivityReport", value: [8, 0], special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } }
     10-26 23:33:36.174  1217  1221 I SdvTelemetryService: sdv_telemetry: removeMetricsConfig: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    10-26 23:33:36.175  1424  1424 I telemetry_rust_c_client: telemetry_rust_c_client: successfully removed config
+    10-26 23:33:36.175  1424  1424 I TelemetryRustCClient: TelemetryRustCClient: successfully removed config
     ```
 
 Check logs with `adb logcat`
@@ -124,7 +124,7 @@ Steps to reproduce:
     .
     adb push configN.bin data/local/tmp/configN.bin
 
-    adb logcat | grep -E 'telemetry|telemetry_rust_c_client'
+    adb logcat | grep -i 'Telemetry'
     ```
 
     EXPECTED:
@@ -164,7 +164,7 @@ Steps to reproduce:
     ```bash
     # restart adbd with root permissions, if you haven't already
     adb root
-    adb shell telemetry_rust_c_client <path_to_config1> ... <path_to_configN>
+    adb shell TelemetryRustCClient <path_to_config1> ... <path_to_configN>
     ```
 
     The client applications will keep running until at least one report is
@@ -176,16 +176,16 @@ Steps to reproduce:
     was already printed in step 2):
 
     ```
-    11-20 22:35:47.993   627   627 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
+    11-20 22:35:47.993   627   627 I TelemetryRustCClient: TelemetryRustCClient: Connecting to service
     11-20 22:35:47.994   237   243 I SdvTelemetryService: sdv_telemetry: registerReportReadyListener
-    11-20 22:35:47.994   627   627 I telemetry_rust_c_client: telemetry_rust_c_client: Status code: 208 status message: Status listener successfully added
+    11-20 22:35:47.994   627   627 I TelemetryRustCClient: TelemetryRustCClient: Status code: 208 status message: Status listener successfully added
     11-20 22:35:47.994   237   243 I SdvTelemetryService: sdv_telemetry: addMetricsConfig: MetricsConfig { uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", version: 1, ... } of size: 775
     11-20 22:35:47.994   237   243 I SdvTelemetryService: sdv_telemetry: activateMetricsConfig: "c6005cea-8fde-436a-9f29-c12f06a10c102504"
-    11-20 22:35:47.995   627   627 I telemetry_rust_c_client: telemetry_rust_c_client: Config added successfully: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    11-20 22:35:51.997   627   631 I telemetry_rust_c_client: telemetry_rust_c_client::metrics_report_manager: Report ready: c6005cea-8fde-436a-9f29-c12f06a10c102504 report number: 1
+    11-20 22:35:47.995   627   627 I TelemetryRustCClient: TelemetryRustCClient: Config added successfully: c6005cea-8fde-436a-9f29-c12f06a10c102504
+    11-20 22:35:51.997   627   631 I TelemetryRustCClient: TelemetryRustCClient::metrics_report_manager: Report ready: c6005cea-8fde-436a-9f29-c12f06a10c102504 report number: 1
     11-20 22:35:51.997   237   243 I SdvTelemetryService: sdv_telemetry: getMetricsReport: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    11-20 22:35:51.997   627   630 I telemetry_rust_c_client: telemetry_rust_c_client::metrics_report_manager: Report received: c6005cea-8fde-436a-9f29-c12f06a10c102504
-    11-20 22:35:51.997   627   627 I telemetry_rust_c_client: telemetry_rust_c_client: Report received: MetricsReport { report_number: 1, report_timestamp: MessageField(Some(Timestamp { seconds: 1700519751, nanos: 997051620, special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), report_reason: REGULAR, metrics_config_uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", metrics_config_version: 1, report_data: MessageField(Some(Any { type_url: "type.googleapis.com/android.automotive.telemetry.messages.VehicleConnectivityReport", value: [8, 1], special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } }
+    11-20 22:35:51.997   627   630 I TelemetryRustCClient: TelemetryRustCClient::metrics_report_manager: Report received: c6005cea-8fde-436a-9f29-c12f06a10c102504
+    11-20 22:35:51.997   627   627 I TelemetryRustCClient: TelemetryRustCClient: Report received: MetricsReport { report_number: 1, report_timestamp: MessageField(Some(Timestamp { seconds: 1700519751, nanos: 997051620, special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), report_reason: REGULAR, metrics_config_uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504", metrics_config_version: 1, report_data: MessageField(Some(Any { type_url: "type.googleapis.com/android.automotive.telemetry.messages.VehicleConnectivityReport", value: [8, 1], special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } })), special_fields: SpecialFields { unknown_fields: UnknownFields { fields: None }, cached_size: CachedSize { size: 0 } } }
     ```
 
 The configurable publisher executable needs to be terminated manually using
@@ -206,7 +206,7 @@ Steps to reproduce:
 
     adb push data_tunnel_config.bin data/local/tmp/
 
-    adb logcat | grep -E 'telemetry|telemetry_rust_c_client|DataTunnelSampleService'
+    adb logcat | grep -i 'Telemetry'
     ```
 
     EXPECTED:
@@ -257,7 +257,7 @@ Steps to reproduce:
     ```bash
     # restart adbd with root permissions, if you haven't already
     adb root
-    adb shell telemetry_rust_c_client <path_to_data_tunnel_config>
+    adb shell TelemetryRustCClient <path_to_data_tunnel_config>
     ```
 
     The client applications will keep running until at least one report is
@@ -269,7 +269,7 @@ Steps to reproduce:
     was already printed in step 2):
 
     ```
-    01-25 18:47:29.422   232   232 I telemetry_rust_c_client: telemetry_rust_c_client: Connecting to service
+    01-25 18:47:29.422   232   232 I TelemetryRustCClient: TelemetryRustCClient: Connecting to service
     01-25 18:47:29.423   232   232 I StatusListenerImpl: Created
     01-25 18:47:29.423   232   236 D StatusListenerImpl: sending status back to client. API call id: 0, Status: 208, Message: Status listener successfully added
     01-25 18:47:29.423   135   162 I SdvTelemetryService: sdv_telemetry: registerReportReadyListener
@@ -277,7 +277,7 @@ Steps to reproduce:
     01-25 18:47:29.423   232   232 I ServiceClient: TelemetryService Created
     01-25 18:47:29.423   232   232 I StatusListenerImpl: set_status_listener
     01-25 18:47:29.423   232   232 D StatusListenerImpl: sending status back to client. API call id: 0, Status: 208, Message: Status listener successfully added
-    01-25 18:47:29.423   232   232 I telemetry_rust_c_client: telemetry_rust_c_client: Status code: 208 status message: Status listener successfully added
+    01-25 18:47:29.423   232   232 I TelemetryRustCClient: TelemetryRustCClient: Status code: 208 status message: Status listener successfully added
     01-25 18:47:29.423   232   232 I ServiceClient: set status callback from CPP
     01-25 18:47:29.423   232   232 I ServiceClient: registerReportReadyListener from CPP
     01-25 18:47:29.424   232   232 I ServiceClient: addMetricsConfig in CPP

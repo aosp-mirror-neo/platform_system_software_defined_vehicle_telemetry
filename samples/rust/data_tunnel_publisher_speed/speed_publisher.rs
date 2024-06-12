@@ -6,19 +6,16 @@ mod data_generator;
 
 use anyhow::anyhow;
 use data_generator::SpeedDataGenerator;
-use log::{error, info, trace, LevelFilter};
+use log::{error, info, trace};
 use protobuf::{Message, MessageFull};
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use speed_publisher_proto::speed_publisher;
 use speed_publisher_proto::speed_publisher::SpeedData;
 use std::{thread, time::Duration};
 
-const LOG_TAG: &str = "TelemetrySpeedDtPblshr";
-const _: () = assert!(
-    LOG_TAG.len() <= 23,
-    "LOG_TAG should be less than or equal to 23 characters, as it will otherwise be truncated by adb."
-);
+const LOG_TAG: &str = validated_log_tag("TelemetrySpeedDataPub");
 
 const DT_TOPIC_NAME: &str = "DataTunnelSpeedSamplePublisher";
 const DT_QUEUE_SIZE: usize = 2000;
@@ -49,9 +46,7 @@ fn create_dt_publisher() -> anyhow::Result<DataTunnelPublisher> {
 }
 
 fn wrapped_main() -> anyhow::Result<()> {
-    logger::init(
-        logger::Config::default().with_tag_on_device(LOG_TAG).with_max_level(LevelFilter::Trace),
-    );
+    init_logger_for_samples_or_tests(LOG_TAG);
 
     info!("Creating publisher");
     let dt_publisher = create_dt_publisher()?;

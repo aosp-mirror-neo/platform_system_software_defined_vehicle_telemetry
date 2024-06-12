@@ -147,6 +147,8 @@ rust_defaults {
     ],
     rustlibs: [
         "liblazy_static",
+        "liblog_rust",
+        "liblogger",
         "libprotobuf",
         "libtokio",
     ],
@@ -252,6 +254,7 @@ rust_defaults {
         "librustutils",
         "libsdv_log_rust",
         "libsdv_telemetry",
+        "libsdv_telemetry_utils",
         "libsdvtelemetry_proto_rust",
         "libtokio",
     ],
@@ -406,6 +409,7 @@ rust_test {
         "libsdv_telemetry_bindgen",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_status_codes_bindgen",
+        "libsdv_telemetry_utils",
         "libtokio",
     ],
     test_suites: [

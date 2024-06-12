@@ -10,16 +10,19 @@ use crate::clap::Parser;
 use crate::protobuf::Message;
 use anyhow::{anyhow, Context};
 use futures::future::join_all;
-use log::{error, info, trace, LevelFilter};
+use log::{error, info, trace};
 use rust_to_c::TelemetryServiceHolder;
 use sdv_telemetry_rust_wrapper as rust_to_c;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::collections::HashSet;
 use std::fs;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::task;
+
+const LOG_TAG: &str = validated_log_tag("TelemetryRustCClient");
 
 async fn process_config(
     path: &PathBuf,
@@ -62,14 +65,7 @@ struct Args {
 /// Communicate with the telemetry service.
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    assert!(
-        logger::init(
-            logger::Config::default()
-                .with_tag_on_device("telemetry_rust_c_client")
-                .with_max_level(LevelFilter::Trace)
-        ),
-        "Logger was already initialized."
-    );
+    init_logger_for_samples_or_tests(LOG_TAG);
 
     // `wrapped_main` is used solely to make sure that any errors are logged via
     // `error!` so that they show up in logs.

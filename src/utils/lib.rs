@@ -6,5 +6,6 @@ pub mod collection_extension;
 pub mod descriptor_utils;
 pub mod duration_utils;
 pub mod file_io_utils;
+pub mod logging;
 pub mod option_extension;
 pub mod test_utils;

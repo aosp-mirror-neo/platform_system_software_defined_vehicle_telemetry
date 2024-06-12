@@ -11,9 +11,10 @@ use anyhow::{anyhow, Context};
 use protobuf::text_format::parse_from_str;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 
-use log::{info, LevelFilter};
+use log::info;
 use std::ffi::{CStr, OsStr};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,11 +22,7 @@ use std::pin::Pin;
 use tokio::sync::oneshot;
 
 const CONFIG_PATH: &str = "tests/config.textproto";
-const LOG_TAG: &str = "telemetry_integr_test";
-const _: () = assert!(
-    LOG_TAG.len() <= 23,
-    "LOG_TAG should be less than or equal to 23 characters, as it will otherwise be truncated by adb."
-);
+const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
 
 /// Callback that receives status for API calls.
 ///
@@ -83,10 +80,8 @@ async fn process_config(
 /// Communicate with the telemetry service.
 #[tokio::test]
 async fn telemetry_service_simple_config_end_to_end_test() {
+    init_logger_for_samples_or_tests(LOG_TAG);
     binder::ProcessState::start_thread_pool();
-    logger::init(
-        logger::Config::default().with_tag_on_device(LOG_TAG).with_max_level(LevelFilter::Trace),
-    );
 
     info!("Connecting to service");
     // Unsafe block needed to be able to call C API functions
