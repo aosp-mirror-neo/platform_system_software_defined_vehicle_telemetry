@@ -34,27 +34,20 @@ unsafe extern "C" fn on_report_received(
     // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
     // global allocator using Box::new(). For more info check
     // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender = unsafe {
-        Box::from_raw(listener as *mut oneshot::Sender<(Option<MetricsReport>, i32, String)>)
-    };
+    let sender =
+        unsafe { Box::from_raw(listener as *mut oneshot::Sender<TelemetryResult<MetricsReport>>) };
 
     // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
     // safety requirements.
-    let msg = unsafe {
-        // Convert *const std::ffi::c_char to &CStr
-        let c_str = CStr::from_ptr(status_msg);
-
-        // Convert &CStr to String
-        c_str.to_str().unwrap().to_string()
-    };
+    let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
     if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving metrics report: {}", msg);
-        sender.send((None, status_code, msg)).unwrap();
+        sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
         return;
     }
 
-    info!("Report received: {}", msg);
+    info!("Report received: {msg}");
 
     // SAFETY: The caller has provided pointers that satisfy `slice::from_raw_parts`
     // safety requirements.
@@ -62,12 +55,17 @@ unsafe extern "C" fn on_report_received(
     let metrics_report = match MetricsReport::parse_from_bytes(byte_slice) {
         Ok(report) => report,
         Err(e) => {
-            sender.send((None, status_code, format!("Error in parsing report {}", e))).unwrap();
+            sender
+                .send(Err(TelemetryError {
+                    status: status_code,
+                    message: format!("Error in parsing report {}", e),
+                }))
+                .unwrap();
             return;
         }
     };
 
-    sender.send((Some(metrics_report), status_code, msg)).unwrap();
+    sender.send(Ok(metrics_report)).unwrap();
 }
 
 /// Callback that handles report ready event.
@@ -92,18 +90,17 @@ unsafe extern "C" fn on_report_ready(
     // calls to `on_report_ready` can still access the same `listener`.
     let listener = unsafe { &mut *(listener as *mut MetricsReportReadyListener) };
 
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
-    let (metrics_config_uuid, report_config_name) = unsafe {
-        (
-            CStr::from_ptr(metrics_config_uuid).to_str().unwrap().to_string(),
-            CStr::from_ptr(report_config_name).to_str().unwrap().to_string(),
-        )
-    };
+    let metrics_config_uuid =
+        // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
+        // requirements.
+        unsafe { CStr::from_ptr(metrics_config_uuid) }.to_str().unwrap().to_owned();
+    let report_config_name =
+        // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
+        // requirements.
+        unsafe { CStr::from_ptr(report_config_name) }.to_str().unwrap().to_owned();
 
     info!(
-        "Report ready: {:?} {:?} report number: {}",
-        metrics_config_uuid, report_config_name, report_number
+        "Report ready: {metrics_config_uuid:?} {report_config_name:?} report number: {report_number}"
     );
 
     (listener.callback)(metrics_config_uuid, report_config_name, report_number);
@@ -114,16 +111,22 @@ struct MetricsReportReadyListener {
     callback: Box<dyn Fn(String, String, i32)>,
 }
 
+impl MetricsReportReadyListener {
+    fn new(callback: Box<dyn Fn(String, String, i32)>) -> Self {
+        Self { callback }
+    }
+}
+
 pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
     report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
 ) -> TelemetryResult<String> {
-    let listener =
-        Box::new(MetricsReportReadyListener { callback: Box::new(report_ready_callback) });
+    let listener = MetricsReportReadyListener::new(Box::new(report_ready_callback));
 
-    let (set_listener_sender, set_listener_receiver) = oneshot::channel();
+    let (set_listener_sender, set_listener_receiver) =
+        oneshot::channel::<TelemetryResult<String>>();
 
-    let raw_listener: *mut MetricsReportReadyListener = Box::into_raw(listener);
+    let raw_listener: *mut MetricsReportReadyListener = Box::into_raw(Box::new(listener));
     let raw_sender = Box::into_raw(Box::new(set_listener_sender));
     let mut previous_raw_listener = std::ptr::null_mut::<MetricsReportReadyListener>();
     // SAFETY: `service.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
@@ -161,16 +164,12 @@ pub async fn set_report_ready_listener(
         }
     };
 
-    let (status, message) = set_listener_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(message)
-    } else {
+    set_listener_receiver.await.unwrap().inspect_err(|_| {
         // Releasing memory in case of API call failure
         // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
         // raw_listener was created using Box::into_raw above.
         let _ = unsafe { Box::from_raw(raw_listener) };
-        Err(TelemetryError { status, message })
-    }
+    })
 }
 
 pub fn clear_report_ready_listener(service: &TelemetryServiceHolder) -> TelemetryResult<()> {
@@ -205,7 +204,7 @@ pub async fn get_metrics_report(
     report_number: i32,
 ) -> TelemetryResult<MetricsReport> {
     let (get_report_sender, get_report_receiver) =
-        oneshot::channel::<(Option<MetricsReport>, i32, String)>();
+        oneshot::channel::<TelemetryResult<MetricsReport>>();
 
     info!(
         "Report ready: {:?} {:?} report number: {}",
@@ -237,10 +236,5 @@ pub async fn get_metrics_report(
         }
     }
 
-    let (report, status, message) = get_report_receiver.await.unwrap();
-    if status == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        Ok(report.unwrap())
-    } else {
-        Err(TelemetryError { status, message })
-    }
+    get_report_receiver.await.unwrap()
 }
