@@ -151,7 +151,7 @@ message ServicePublisher {
   // Defines connection behavior of Service Publisher.
   enum ConnectionType {
     // Connection type is not specified.
-    // Service Publishers with this connection type are invalid.
+    // Maps to SUBSCRIPTION connection type.
     CONNECTION_TYPE_UNSPECIFIED = 0;
 
     // Service Publisher subscribes to the underlying service.
@@ -162,6 +162,7 @@ message ServicePublisher {
     GETTER = 2;
   }
 
+  // Optional.
   // Connection behavior.
   ConnectionType connection_type = 2;
 
