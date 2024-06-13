@@ -63,3 +63,34 @@ Run the tests:
 ```bash
 atest sdv_telemetry_integration_tests
 ```
+
+## Configure, Build, Run and Test Telemetry Service on an IVI target variant
+
+Configure the sdv IVI build variant:
+
+```bash
+source build/envsetup.sh
+
+#Configure IVI Target
+lunch sdv_ivi_cf-trunk_staging-userdebug
+#Build IVI target
+m -j
+```
+
+Start SDV IVI target (if you want to run it in a second VM instance, otherwise
+you can use `cvd start`):
+
+```bash
+cvd start -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4"
+```
+
+Start the IVI telemetry agent:
+
+```bash
+adb root
+adb shell sdv_ivi_telemetry_service_agent &
+```
+
+```bash
+atest sdv_telemetry_integration_tests
+```
