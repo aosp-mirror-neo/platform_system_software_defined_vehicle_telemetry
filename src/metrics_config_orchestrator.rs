@@ -407,7 +407,13 @@ where
         if let Some(start_trigger) = &config.start_trigger {
             Self::subscribe_to_start_trigger(start_trigger, &config).await;
         } else {
+            // Lock state mutex and hold it mutex until transition is complete.
+            let mut config_state = config.state.lock().await;
+
             Self::start_data_collection(&config).await;
+
+            // Change state to Running and release the mutex.
+            *config_state = MetricsConfigState::Running;
         }
 
         // Subscribe to finish trigger if it's set.
@@ -1919,7 +1925,7 @@ mod tests {
         assert_eq!(config.publishers.len(), 2);
         let config_state = config.state.lock().await;
         assert!(
-            matches!(&*config_state, MetricsConfigState::NotStarted),
+            matches!(&*config_state, MetricsConfigState::Running),
             "Unexpected config state: {:?}",
             config_state
         );
@@ -2185,6 +2191,13 @@ mod tests {
 
         // Verify that the report generator was activated.
         assert_eq!(num_calls.load(Ordering::SeqCst), 1);
+        let config = { Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]) };
+        let config_state = config.state.lock().await;
+        assert!(
+            matches!(&*config_state, MetricsConfigState::Running),
+            "Unexpected config state: {:?}",
+            config_state
+        );
     }
 
     #[tokio::test]
