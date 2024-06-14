@@ -60,8 +60,20 @@ TelemetryService::TelemetryService(std::shared_ptr<ITelemetryService> binder_ser
       mBinderService(std::move(binder_service)) {}
 
 TelemetryService::~TelemetryService() {
-    ALOGI("Unregistering status listener");
+    ALOGI("Unregistering api status listener");
     ndk::ScopedAStatus status = mBinderService->unregisterApiStatusListener();
+    if (!status.isOk()) {
+        ALOGE("Failed to unregister status listener: %s", status.getDescription().c_str());
+    }
+
+    ALOGI("Unregistering misc status listener");
+    status = mBinderService->unregisterMiscStatusListener();
+    if (!status.isOk()) {
+        ALOGE("Failed to unregister status listener: %s", status.getDescription().c_str());
+    }
+
+    ALOGI("Unregistering report ready listener");
+    status = mBinderService->unregisterReportReadyListener();
     if (!status.isOk()) {
         ALOGE("Failed to unregister status listener: %s", status.getDescription().c_str());
     }
