@@ -107,8 +107,8 @@ impl MetricsReportGeneratorImpl {
     }
 
     fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str) {
-        // TODO(b/327009845): This should use the same evaluation context that
-        // was used as part of determining that a trigger fired.
+        // TODO(b/317898437): This should use the same evaluation context that was used as part of
+        // determining that a trigger fired.
         let context = NodeEvaluationContext::new();
         match self.message_builder.build(&context) {
             Ok(report_data) => {

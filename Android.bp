@@ -92,6 +92,7 @@ rust_defaults {
         "libthiserror",
         "libtokio",
         "libsdvtelemetry_proto_rust",
+        "libsdv_telemetry_time_wrapper",
         "libsdv_telemetry_utils",
     ],
     proc_macros: [

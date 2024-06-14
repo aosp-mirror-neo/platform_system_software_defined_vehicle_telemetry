@@ -47,6 +47,14 @@ pub enum NodeError {
     #[error("Only repeated bools or repeated numbers are supported")]
     UnsupportedRepeatedFieldType,
 
+    // Errors related to `FunctionLeafNode`.
+    #[error("Function node did not set a function_type")]
+    FunctionLeafNodeNotSet,
+    #[error("Function node did not have a supported function_type")]
+    FunctionLeafNodeNotSupported,
+    #[error("Function node did not have valid arguments: {error}")]
+    FunctionLeafNodeArgumentError { error: FunctionLeafNodeArgumentError },
+
     // error related to CombinationNode
     #[error("Combination node at index {i} did not set operator")]
     OperatorNotSet { i: usize },
@@ -100,4 +108,22 @@ pub enum DescriptorProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+#[allow(missing_docs)]
+pub enum FunctionLeafNodeArgumentError {
+    #[error("GetCurrentTimestampError: {0}")]
+    GetCurrentTimestampError(FunctionLeafNodeGetCurrentTimestampArgumentError),
+}
+
+#[derive(Error, Debug)]
+#[non_exhaustive]
+#[allow(missing_docs)]
+pub enum FunctionLeafNodeGetCurrentTimestampArgumentError {
+    #[error("Time source is not set")]
+    TimeSourceNotSet,
+    #[error("Time source is unsupported")]
+    TimeSourceNotSupported,
 }

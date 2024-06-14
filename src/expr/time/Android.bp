@@ -1,0 +1,81 @@
+// Copyright 2024 Google LLC. All Rights Reserved.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+cc_library {
+    name: "libsdv_telemetry_time",
+    defaults: ["sdv_telemetry@cc_defaults"],
+    srcs: ["get_time.cc"],
+    shared_libs: [
+        "libbase",
+    ],
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_bindgen {
+    name: "libsdv_telemetry_time_bindgen",
+    crate_name: "sdv_telemetry_time_bindgen",
+    wrapper_src: "time_wrapper.h",
+    cpp_std: "gnu++17",
+    source_stem: "bindings",
+    shared_libs: ["libsdv_telemetry_time"],
+    vendor_available: true,
+    system_ext_specific: true,
+    visibility: ["//system/software_defined_vehicle/telemetry"],
+}
+
+rust_test {
+    name: "libsdv_telemetry_time_bindgen_tests",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        ":libsdv_telemetry_time_bindgen",
+    ],
+    crate_name: "sdv_telemetry_time_bindgen_tests",
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    auto_gen_config: true,
+
+    // Disable all lints because the generated code is not guaranteed to be
+    // lint-free.
+    clippy_lints: "none",
+    lints: "none",
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_time_wrapper_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "time_wrapper.rs",
+    ],
+    rustlibs: [
+        "libsdv_telemetry_time_bindgen",
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_time_wrapper",
+    defaults: ["libsdv_telemetry_time_wrapper_defaults"],
+    crate_name: "sdv_telemetry_time_wrapper",
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_test {
+    name: "libsdv_telemetry_time_wrapper_tests",
+    defaults: ["libsdv_telemetry_time_wrapper_defaults"],
+    crate_name: "sdv_telemetry_time_wrapper_tests",
+    test_suites: [
+        "general-tests",
+        "automotive-sdv-tests",
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+}
