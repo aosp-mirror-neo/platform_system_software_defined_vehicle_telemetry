@@ -8,7 +8,8 @@ use sdvtelemetry_proto_rust::expression::{
     combination_node::Operator as OperatorProto,
     combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
     constant_leaf_node::Node_value as NodeValueProto,
-    ConstantLeafNode, FieldLeafNode,
+    function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
+    ConstantLeafNode, FieldLeafNode, FunctionLeafNode,
 };
 
 use crate::expr::{ast::DescriptorProvider, node_errors::NodeError};
@@ -98,6 +99,16 @@ impl NodeValueTypeExtension for ConstantLeafNode {
                 }
             },
             None => return Err(NodeError::ConstantValueNotSet),
+        })
+    }
+}
+
+impl NodeValueTypeExtension for FunctionLeafNode {
+    fn get_node_value_type(&self) -> Result<NodeValueType, NodeError> {
+        let function_type = self.function_type.as_ref().ok_or(NodeError::FunctionLeafNodeNotSet)?;
+        Ok(match function_type {
+            FunctionLeafNodeTypeProto::GetCurrentTimestamp(_) => NodeValueType::Int,
+            _ => return Err(NodeError::FunctionLeafNodeNotSupported),
         })
     }
 }
