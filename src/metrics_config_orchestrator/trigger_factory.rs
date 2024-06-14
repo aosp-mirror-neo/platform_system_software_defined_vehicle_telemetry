@@ -1,15 +1,14 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use anyhow::anyhow;
 use protobuf::well_known_types::duration::Duration as DurationProto;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionType, publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
-    PeriodicTrigger as PeriodicTriggerProto, Publisher as PublisherProto, Trigger as TriggerProto,
+    Publisher as PublisherProto, Trigger as TriggerProto,
 };
-use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
+use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
 use crate::expr::{ast::Node, node_value_type::NodeValueType};
@@ -72,7 +71,7 @@ pub enum TriggerFactoryError {
     #[error("No parent triggers set for conditional trigger")]
     NoParentTriggers,
     #[error("Periodic trigger interval ({interval}) is invalid: {error}")]
-    PeriodicTriggerInvalidDuration { interval: DurationProto, error: anyhow::Error },
+    PeriodicTriggerInvalidDuration { interval: DurationProto, error: std::num::TryFromIntError },
     #[error("Publisher {publisher_name} has getter connection type and cannot be listened to")]
     UnableToListenToGetterPublisher { publisher_name: String },
     #[error("Unknown condition type {condition_type}")]
@@ -118,9 +117,14 @@ impl TriggerFactory for TriggerFactoryImpl {
 
                 TriggerType::Data { publisher: Arc::<PublisherImpl>::clone(publisher) }
             }
-            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
-                TriggerType::Periodic { interval: Self::get_periodic_interval(periodic_trigger)? }
-            }
+            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => TriggerType::Periodic {
+                interval: try_into_duration(&periodic_trigger.interval).map_err(|error| {
+                    TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                        interval: (*periodic_trigger.interval).clone(),
+                        error,
+                    }
+                })?,
+            },
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
 
@@ -190,7 +194,12 @@ impl TriggerFactory for TriggerFactoryImpl {
                 }
             }
             TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
-                Self::get_periodic_interval(periodic_trigger)?;
+                try_into_duration(&periodic_trigger.interval).map_err(|err| {
+                    TriggerFactoryError::PeriodicTriggerInvalidDuration {
+                        interval: (*periodic_trigger.interval).clone(),
+                        error: err,
+                    }
+                })?;
             }
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
@@ -240,24 +249,6 @@ impl TriggerFactoryImpl {
         conditional_trigger_proto: &ConditionalTriggerProto,
     ) -> Result<u32, TriggerFactoryError> {
         conditional_trigger_proto.selector_node_index.ok_or(TriggerFactoryError::MissingNodeIndex)
-    }
-
-    fn get_periodic_interval(
-        periodic_trigger_proto: &PeriodicTriggerProto,
-    ) -> Result<Duration, TriggerFactoryError> {
-        let interval = try_into_duration(&periodic_trigger_proto.interval).map_err(|err| {
-            TriggerFactoryError::PeriodicTriggerInvalidDuration {
-                interval: (*periodic_trigger_proto.interval).clone(),
-                error: err.into(),
-            }
-        })?;
-        if interval.is_zero() {
-            return Err(TriggerFactoryError::PeriodicTriggerInvalidDuration {
-                interval: (*periodic_trigger_proto.interval).clone(),
-                error: anyhow!("Duration must not be zero."),
-            });
-        }
-        Ok(interval)
     }
 
     fn verify_name_set(trigger_proto: &TriggerProto) -> Result<(), TriggerFactoryError> {
@@ -543,28 +534,6 @@ mod tests {
     }
 
     #[test]
-    fn create_periodic_trigger_zero_interval_failure() {
-        let factory = create_factory();
-
-        let mut trigger = new_trigger(TRIGGER_NAME);
-        let periodic_trigger = trigger.mut_periodic_trigger();
-        periodic_trigger.interval =
-            MessageField::some(DurationProto { seconds: 0, nanos: 0, ..Default::default() });
-
-        let err = factory.create_using_default_context(&trigger).err().unwrap();
-        assert!(
-            matches!(
-                err,
-                TriggerFactoryError::PeriodicTriggerInvalidDuration {
-                    interval: DurationProto { seconds: 0, nanos: 0, .. },
-                    ..
-                }
-            ),
-            "Unexpected error: {err:?}"
-        );
-    }
-
-    #[test]
     fn create_periodic_trigger_negative_interval_failure() {
         let factory = create_factory();
 
@@ -816,21 +785,6 @@ mod tests {
         let trigger = create_valid_periodic_trigger();
 
         factory.validate_using_default_context(&trigger).unwrap();
-    }
-
-    #[test]
-    fn validate_periodic_trigger_zero_interval_fails() {
-        let factory = create_factory();
-        let mut trigger = create_valid_periodic_trigger();
-        trigger.mut_periodic_trigger().interval =
-            MessageField::some(DurationProto { seconds: 0, nanos: 0, ..Default::default() });
-
-        let result = factory.validate_using_default_context(&trigger);
-
-        assert!(
-            matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. })),
-            "Unexpected result: {result:?}"
-        );
     }
 
     #[test]
