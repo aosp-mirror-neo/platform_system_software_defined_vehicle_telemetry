@@ -22,10 +22,6 @@ pub(crate) struct MockPublisher {
 
 #[async_trait]
 impl Publisher for MockPublisher {
-    fn get_name(&self) -> &str {
-        &self.name
-    }
-
     fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
         self.latest_message.clone()
     }
@@ -79,6 +75,10 @@ impl MockPublisher {
             new_message_callback: None.into(),
             unsubscribe_callback: None,
         }
+    }
+
+    pub(crate) fn get_name(&self) -> &str {
+        &self.name
     }
 
     pub(crate) async fn fire_new_message(&self, message: &dyn MessageDyn) {

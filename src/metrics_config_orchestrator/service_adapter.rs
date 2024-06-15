@@ -17,7 +17,6 @@ use crate::service_publisher_accessor::{
 #[async_trait]
 pub(crate) trait ServiceAdapter {
     /// Returns provider of messages from the publisher specified by the service name.
-    #[allow(dead_code)]
     fn get_message_provider(
         &self,
         service_name: &str,
@@ -38,8 +37,8 @@ pub(crate) trait ServiceAdapter {
     async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
 }
 
-#[allow(dead_code)]
 pub(crate) trait ServiceMessageProvider: Send + Sync {
+    #[allow(dead_code)]
     fn get_latest_message(
         &self,
         configuration: &Option<Any>,
@@ -67,7 +66,6 @@ enum ServiceSubscriptionType {
 }
 
 /// An implementation of ServiceAdapter that publishes incrementing i32 messages at random interval.
-#[allow(dead_code)]
 pub(crate) struct ServiceAdapterImpl {
     // Id that will be used for the next subscription.
     next_subscription_id: AtomicU32,

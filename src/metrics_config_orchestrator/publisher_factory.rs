@@ -1,9 +1,9 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
-use sdvtelemetry_proto_rust::metrics_configuration::service_publisher::ConnectionType as ConnectionTypeProto;
 use sdvtelemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
+    service_publisher::ConnectionType as ConnectionTypeProto,
     AggregationPublisher as AggregationPublisherProto, Publisher as PublisherProto,
 };
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
@@ -55,7 +55,6 @@ pub(crate) struct PublisherFactoryValidateContext<'a> {
     pub node_types: &'a [Option<NodeValueType>],
 }
 
-#[allow(dead_code)]
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherFactoryError {
@@ -68,8 +67,6 @@ pub enum PublisherFactoryError {
     },
     #[error("Publisher name not set")]
     NameNotSet,
-    #[error("Unknown message type {message_type} set for aggregation publisher")]
-    UnknownMessageType { message_type: String },
     #[error("Unknown publisher type")]
     UnknownPublisherType,
 }
@@ -392,7 +389,6 @@ mod tests {
             connection_type,
             service_name,
             service_adapter: _,
-            service_subscription,
         } = &res.publisher_type
         else {
             panic!("Unexpected publisher type");
@@ -405,7 +401,6 @@ mod tests {
         assert_eq!(&any_value, Empty::default_instance());
         assert!(matches!(connection_type, ConnectionType::Subscription));
         assert_eq!(service_name, SERVICE_NAME);
-        assert!(service_subscription.lock().unwrap().is_none());
     }
 
     #[test]
