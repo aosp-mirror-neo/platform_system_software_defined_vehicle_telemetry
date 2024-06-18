@@ -2,16 +2,17 @@
 
 //! This module acts as a wrapper around C Client library for telemetry service
 
+mod callbacks;
 mod managers;
 
 use crate::rust_to_c::ServiceHolder;
+use callbacks::call_api_with_status_callback;
 use log::{error, info};
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_status_codes_bindgen as status_codes;
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 pub use status_codes::*;
 use std::ffi::{c_void, CStr};
-use tokio::sync::oneshot;
 
 use managers::metrics_config_manager;
 use managers::metrics_report_manager;
@@ -46,58 +47,28 @@ unsafe impl Send for TelemetryServiceHolder {}
 /// data races or undefined behavior.
 unsafe impl Sync for TelemetryServiceHolder {}
 
-/// Callback that receives status for API calls.
-///
-/// # Safety
-///
-/// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
-///
-/// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
-///    the add_metrics_config api call. Listener will not be valid after the function completes
-pub unsafe extern "C" fn api_callback(
-    listener: *mut std::ffi::c_void,
-    status_code: i32,
-    status_msg: *const std::ffi::c_char,
-) {
-    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
-    // global allocator using Box::new(). For more info check
-    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender =
-        unsafe { Box::from_raw(listener as *mut oneshot::Sender<TelemetryResult<String>>) };
-
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
-    let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
-
-    if status_code == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        sender.send(Ok(msg)).unwrap();
-    } else {
-        sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
-    }
-}
-
 /// Callback function that receives status from telemetry service
 ///
 /// # Safety
 ///
-/// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
-///
 /// * `listener` points to a valid `StatusListener` originally sent to the caller as
 ///    part of the `set_misc_status_listener` API call.
+///
+/// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
 unsafe extern "C" fn on_status(
     listener: *mut std::ffi::c_void,
     status_code: i32,
     status_msg: *const std::ffi::c_char,
 ) {
-    // SAFETY: The caller sends back the reference to `StatusListener` that was
-    // originally sent to the caller during as part of the `set_misc_status_listener` API call.
+    // SAFETY: The caller sends back the reference to `StatusListener` that was originally sent to
+    // the caller as part of the `set_misc_status_listener` API call.
     //
     // We do not use `Box::from_raw` here, because we do not want to take ownership, so that future
     // calls to `on_status` can still access the same `listener`.
     let status_listener = unsafe { &mut *(listener as *mut MiscStatusListener) };
 
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
+    // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
+    // requirements.
     let status_msg = unsafe { CStr::from_ptr(status_msg).to_str().unwrap().to_string() };
 
     info!("Status code: {} status message: {}", status_code, status_msg);
@@ -225,7 +196,7 @@ impl TelemetryServiceHolder {
     ///
     ///
     /// @return an error code and error message in case of failure
-    pub async fn remove_all_metrics_configs(&self) -> TelemetryResult<()> {
+    pub async fn remove_all_metrics_configs(&self) -> TelemetryResult<String> {
         metrics_config_manager::remove_all_metrics_configs(self).await
     }
 
@@ -306,51 +277,39 @@ impl TelemetryServiceHolder {
         &self,
         misc_status_callback: impl Fn(i32, String) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
-        let listener = MiscStatusListener::new(Box::new(misc_status_callback));
-
-        let (set_listener_sender, set_listener_receiver) =
-            oneshot::channel::<TelemetryResult<String>>();
-
-        let raw_listener: *mut MiscStatusListener = Box::into_raw(Box::new(listener));
-        let raw_sender = Box::into_raw(Box::new(set_listener_sender));
-        let mut previous_raw_listener = std::ptr::null_mut::<MiscStatusListener>();
-        // SAFETY: `self.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
-        // `MiscStatusListener` and `raw_sender` points to a valid `oneshot::Sender`, both of
-        // which are created using `Box::into_raw` and remain a valid reference in case of
-        // successful `rust_to_c` API calls. In case of a failed API call, both are
-        // released to avoid memory leaks. The output argument, `previous_raw_listener`, is a
-        // null-initialized pointer to a `MiscStatusListener`. A valid non-null pointer to this
-        // pointer is passed to `set_misc_status_listener`. This makes the function safe to call.
-
-        unsafe {
-            let status_code = rust_to_c::set_misc_status_listener(
-                self.0,
-                raw_listener as *mut c_void,
-                Some(on_status),
-                raw_sender as *mut c_void,
-                Some(api_callback),
-                (&mut previous_raw_listener) as *mut *mut _ as *mut *mut c_void,
-            );
-            if !previous_raw_listener.is_null() {
-                // Regardless of whether the call succeeded or failed, if `previous_raw_listener` is
-                // updated, take back ownership of it to reclaim memory.
-                let _ = Box::from_raw(previous_raw_listener);
+        let raw_listener: *mut MiscStatusListener =
+            Box::into_raw(Box::new(MiscStatusListener::new(Box::new(misc_status_callback))));
+        let mut previous_raw_listener: *mut MiscStatusListener =
+            std::ptr::null_mut::<MiscStatusListener>();
+        call_api_with_status_callback(move |status_callback_data, status_callback| {
+            // SAFETY: `self.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
+            // `StatusListener` created using `Box::into_raw` and remains a valid reference in case
+            // of successful `rust_to_c` API calls. In case of a failed API call, it is released to
+            // avoid memory leaks. The output argument, `previous_raw_listener`, is a
+            // null-initialized pointer to a `StatusListener`. A valid non-null pointer to this
+            // pointer is passed to `set_misc_status_listener`. The validity of
+            // `status_callback_data` and `status_callback` is ensured by
+            // `call_api_with_status_callback`. This makes the function safe to call.
+            unsafe {
+                let status_code = rust_to_c::set_misc_status_listener(
+                    self.0,
+                    raw_listener as *mut c_void,
+                    Some(on_status),
+                    status_callback_data,
+                    status_callback,
+                    (&mut previous_raw_listener) as *mut *mut _ as *mut *mut c_void,
+                );
+                if !previous_raw_listener.is_null() {
+                    // Regardless of whether the call succeeded or failed, if
+                    // `previous_raw_listener` is updated, take back ownership of it to reclaim
+                    // memory.
+                    let _ = Box::from_raw(previous_raw_listener);
+                }
+                status_code
             }
-            if status_code
-                != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
-            {
-                // Releasing memory in case of API call failure
-                let _ = Box::from_raw(raw_listener);
-                let _ = Box::from_raw(raw_sender);
-                error!("Error while setting status listener: {status_code}");
-                return Err(TelemetryError {
-                    status: status_code,
-                    message: "Invalid params".to_owned(),
-                });
-            }
-        };
-
-        set_listener_receiver.await.unwrap().inspect_err(|_| {
+        })
+        .await
+        .inspect_err(|_| {
             // Releasing memory in case of API call failure
             // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
             // raw_listener was created using Box::into_raw above.
@@ -383,7 +342,6 @@ impl TelemetryServiceHolder {
         if status_code
             != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
         {
-            error!("Error while clearing misc status listener: {status_code}");
             return Err(TelemetryError {
                 status: status_code,
                 message: "Error while clearing misc status listener".to_owned(),
