@@ -1,82 +1,23 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-use crate::api_callback;
-use crate::TelemetryError;
-use crate::TelemetryResult;
-use crate::TelemetryServiceHolder;
+use crate::callbacks::{call_api_with_metrics_report_callback, call_api_with_status_callback};
+use crate::{TelemetryError, TelemetryResult, TelemetryServiceHolder};
 
-use log::{error, info};
-use protobuf::Message;
+use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_status_codes_bindgen as status_codes;
-use status_codes::TelemetryServiceStatusCodes;
-use std::ffi::{c_char, c_void, CStr, CString};
-use std::slice;
-use tokio::sync::oneshot;
-
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
-
-/// Callback used to send reports back to client.
-///
-/// # Safety
-///
-/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
-///
-/// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
-///    the get_metrics_report api call. Listener will not be valid after the function completes
-unsafe extern "C" fn on_report_received(
-    listener: *mut c_void,
-    status_code: TelemetryServiceStatusCodes,
-    status_msg: *const c_char,
-    report: *const u8,
-    size: usize,
-) {
-    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
-    // global allocator using Box::new(). For more info check
-    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender =
-        unsafe { Box::from_raw(listener as *mut oneshot::Sender<TelemetryResult<MetricsReport>>) };
-
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
-    let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
-
-    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        error!("Error in receiving metrics report: {}", msg);
-        sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
-        return;
-    }
-
-    info!("Report received: {msg}");
-
-    // SAFETY: The caller has provided pointers that satisfy `slice::from_raw_parts`
-    // safety requirements.
-    let byte_slice = unsafe { slice::from_raw_parts(report, size) };
-    let metrics_report = match MetricsReport::parse_from_bytes(byte_slice) {
-        Ok(report) => report,
-        Err(e) => {
-            sender
-                .send(Err(TelemetryError {
-                    status: status_code,
-                    message: format!("Error in parsing report {}", e),
-                }))
-                .unwrap();
-            return;
-        }
-    };
-
-    sender.send(Ok(metrics_report)).unwrap();
-}
+use std::ffi::{c_char, c_void, CStr, CString};
 
 /// Callback that handles report ready event.
 ///
 /// # Safety
 ///
-/// * `metrics_config_uuid` and `report_config_name` must point to C raw strings that satisfy
-///   `CStr::from_ptr` safety requirements.
-///
 /// * `listener` points to a valid `MetricsReportReadyListener` originally sent to the caller as
 ///    part of the `set_report_ready_listener` API call.
+///
+/// * `metrics_config_uuid` and `report_config_name` must point to C raw strings that satisfy
+///   `CStr::from_ptr` safety requirements.
 unsafe extern "C" fn on_report_ready(
     listener: *mut std::ffi::c_void,
     metrics_config_uuid: *const std::ffi::c_char,
@@ -121,50 +62,38 @@ pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
     report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
 ) -> TelemetryResult<String> {
-    let listener = MetricsReportReadyListener::new(Box::new(report_ready_callback));
-
-    let (set_listener_sender, set_listener_receiver) =
-        oneshot::channel::<TelemetryResult<String>>();
-
-    let raw_listener: *mut MetricsReportReadyListener = Box::into_raw(Box::new(listener));
-    let raw_sender = Box::into_raw(Box::new(set_listener_sender));
-    let mut previous_raw_listener = std::ptr::null_mut::<MetricsReportReadyListener>();
-    // SAFETY: `service.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
-    // `MetricsReportReadyListener` and `raw_sender` points to a valid `oneshot::Sender`, both of
-    // which are created using `Box::into_raw` and thus will not move in memory, and remain a valid
-    // reference in case of successful `rust_to_c` API calls. In case of a failed API call, both are
-    // released to avoid memory leaks. The output argument, `previous_raw_listener`, is a
-    // null-initialized pointer to a `MetricsReportReadyListener`. A valid non-null pointer to this
-    // pointer is passed to `set_report_ready_listener`. This makes the function safe to call.
-    unsafe {
-        let status_code = rust_to_c::set_report_ready_listener(
-            service.0,
-            raw_listener as *mut c_void,
-            Some(on_report_ready),
-            raw_sender as *mut c_void,
-            Some(api_callback),
-            (&mut previous_raw_listener) as *mut *mut _ as *mut *mut c_void,
-        );
-        if !previous_raw_listener.is_null() {
-            // Regardless of whether the call succeeded or failed, if `previous_raw_listener` is
-            // updated, take back ownership of it to reclaim memory.
-            let _ = Box::from_raw(previous_raw_listener);
+    let raw_listener: *mut MetricsReportReadyListener =
+        Box::into_raw(Box::new(MetricsReportReadyListener::new(Box::new(report_ready_callback))));
+    let mut previous_raw_listener: *mut MetricsReportReadyListener =
+        std::ptr::null_mut::<MetricsReportReadyListener>();
+    call_api_with_status_callback(move |status_callback_data, status_callback| {
+        // SAFETY: `service.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
+        // `MetricsReportReadyListener` created using `Box::into_raw` and thus will not move in
+        // memory, and remain a valid reference in case of successful `rust_to_c` API calls. In case
+        // of a failed API call, both are released to avoid memory leaks. The output argument,
+        // `previous_raw_listener`, is a null-initialized pointer to a `MetricsReportReadyListener`.
+        // A valid non-null pointer to this pointer is passed to `set_report_ready_listener`. The
+        // validity of `status_callback_data` and `status_callback` is ensured by
+        // `call_api_with_status_callback`. This makes the function safe to call.
+        unsafe {
+            let status_code = rust_to_c::set_report_ready_listener(
+                service.0,
+                raw_listener as *mut c_void,
+                Some(on_report_ready),
+                status_callback_data,
+                status_callback,
+                (&mut previous_raw_listener) as *mut *mut _ as *mut *mut c_void,
+            );
+            if !previous_raw_listener.is_null() {
+                // Regardless of whether the call succeeded or failed, if `previous_raw_listener` is
+                // updated, take back ownership of it to reclaim memory.
+                let _ = Box::from_raw(previous_raw_listener);
+            }
+            status_code
         }
-        if status_code
-            != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
-        {
-            // Releasing memory in case of API call failure
-            let _ = Box::from_raw(raw_listener);
-            let _ = Box::from_raw(raw_sender);
-            error!("Error while setting report ready listener: {status_code}");
-            return Err(TelemetryError {
-                status: status_code,
-                message: "Invalid params".to_owned(),
-            });
-        }
-    };
-
-    set_listener_receiver.await.unwrap().inspect_err(|_| {
+    })
+    .await
+    .inspect_err(|_| {
         // Releasing memory in case of API call failure
         // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
         // raw_listener was created using Box::into_raw above.
@@ -191,7 +120,6 @@ pub fn clear_report_ready_listener(service: &TelemetryServiceHolder) -> Telemetr
         let _ = unsafe { Box::from_raw(previous_raw_listener) };
     }
     if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        error!("Error while clearing report ready listener: {status_code}");
         return Err(TelemetryError { status: status_code, message: String::default() });
     }
     Ok(())
@@ -203,9 +131,6 @@ pub async fn get_metrics_report(
     report_config_name: String,
     report_number: i32,
 ) -> TelemetryResult<MetricsReport> {
-    let (get_report_sender, get_report_receiver) =
-        oneshot::channel::<TelemetryResult<MetricsReport>>();
-
     info!(
         "Report ready: {:?} {:?} report number: {}",
         metrics_config_uuid, report_config_name, report_number
@@ -216,25 +141,20 @@ pub async fn get_metrics_report(
 
     let config_uuid_ref: *const c_char = metrics_config_uuid.as_ptr();
     let config_name_ref: *const c_char = report_config_name.as_ptr();
-    let raw_sender_wrapper = Box::into_raw(Box::new(get_report_sender));
-    // SAFETY: the caller has provided pointers that are used to safely get the
-    // metrics report from the telemetry service.
-    unsafe {
-        let status_code = rust_to_c::get_metrics_report(
-            service.0,
-            config_uuid_ref,
-            config_name_ref,
-            report_number,
-            raw_sender_wrapper as *mut c_void,
-            Some(on_report_received),
-        );
-        if status_code
-            != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
-        {
-            // Releasing memory in case of API call failure
-            let _ = Box::from_raw(raw_sender_wrapper);
+    call_api_with_metrics_report_callback(move |callback_data, callback| {
+        // SAFETY: the caller has provided pointers that are used to safely get the metrics report
+        // from the telemetry service. The validity of `callback_data` and `callback` is ensured by
+        // `call_api_with_metrics_report_callback`.
+        unsafe {
+            rust_to_c::get_metrics_report(
+                service.0,
+                config_uuid_ref,
+                config_name_ref,
+                report_number,
+                callback_data,
+                callback,
+            )
         }
-    }
-
-    get_report_receiver.await.unwrap()
+    })
+    .await
 }
