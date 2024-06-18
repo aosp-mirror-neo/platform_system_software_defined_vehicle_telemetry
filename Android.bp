@@ -66,7 +66,6 @@ rust_library {
     defaults: ["libsdv_telemetry_defaults"],
     crate_name: "sdv_telemetry",
     vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_defaults {
@@ -95,14 +94,13 @@ rust_defaults {
         "libclap_derive",
         // keep-sorted end
     ],
+    vendor_available: true,
 }
 
 rust_library {
     name: "libsdv_telemetry_configurable_publisher",
     defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     crate_name: "sdv_telemetry_configurable_publisher",
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_defaults {
@@ -120,14 +118,13 @@ rust_defaults {
         "libtokio",
         // keep-sorted end
     ],
+    vendor_available: true,
 }
 
 rust_library {
     name: "libsdv_telemetry_utils",
     defaults: ["libsdv_telemetry_utils_defaults"],
     crate_name: "sdv_telemetry_utils",
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_defaults {
@@ -155,14 +152,13 @@ rust_defaults {
         "libasync_trait",
         // keep-sorted end
     ],
+    vendor_available: true,
 }
 
 rust_library {
     name: "libsdv_telemetry_dt_wrapper",
     crate_name: "sdv_telemetry_dt_wrapper",
     defaults: ["telemetry_dt_wrapper_defaults"],
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_defaults {
@@ -219,13 +215,7 @@ rust_test {
 rust_defaults {
     name: "sdv_telemetry_service_agent_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
-    vendor_available: true,
-    system_ext_specific: true,
-    vintf_fragments: [
-        // keep-sorted start
-        "google.sdv.telemetry-service.xml",
-        // keep-sorted end
-    ],
+
     rustlibs: [
         // keep-sorted start
         "google.sdv.telemetry-V1-rust",
@@ -245,6 +235,7 @@ rust_defaults {
         "libasync_trait",
         // keep-sorted end
     ],
+    vendor: true,
 }
 
 rust_binary {
@@ -253,11 +244,7 @@ rust_binary {
     srcs: [
         "src/main.rs",
     ],
-    vintf_fragments: [
-        // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
-        "google.sdv.telemetry.configurable_publisher-service.xml",
-        // End of configurable publisher fragments
-    ],
+
     rustlibs: [
         // keep-sorted start
         "libsdv_telemetry_dt_wrapper",
@@ -268,8 +255,6 @@ rust_binary {
         "libsdv_telemetry_configurable_publisher",
         // End of configurable publisher deps
     ],
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_binary {
@@ -278,19 +263,13 @@ rust_binary {
     srcs: [
         "src/main_ivi.rs",
     ],
-    vintf_fragments: [
-        // keep-sorted start
-        "google.sdv.telemetry.configurable_publisher-service.xml",
-        // keep-sorted end
-    ],
+
     rustlibs: [
         // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libsdv_telemetry_configurable_publisher",
         // keep-sorted end
     ],
-    system_ext_specific: true,
-    vendor_available: true,
 }
 
 rust_test {
@@ -336,6 +315,7 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    vendor: true,
 }
 
 rust_test {
@@ -436,6 +416,7 @@ rust_test {
     auto_gen_config: true,
     // Requires root so the test can perform Binder calls.
     require_root: true,
+    vendor: true,
 }
 
 rust_bindgen {
@@ -449,7 +430,6 @@ rust_bindgen {
         // keep-sorted end
     ],
     vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_test {
@@ -480,7 +460,6 @@ rust_bindgen {
     cpp_std: "gnu++17",
     source_stem: "bindings",
     vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_test {

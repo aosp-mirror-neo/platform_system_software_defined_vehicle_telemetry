@@ -18,7 +18,7 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.configurable_publisher;
-@VintfStability
+
 interface IConfigurablePublisherRegistry {
   void registerPublisher(in google.sdv.telemetry.configurable_publisher.PublisherInfo pInfo, in google.sdv.telemetry.configurable_publisher.IConfigurablePublisher publisher);
   void unregisterPublisher(in @utf8InCpp String serviceName);

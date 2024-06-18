@@ -13,8 +13,6 @@ aidl_interface {
         "google/sdv/telemetry/*.aidl",
     ],
     vendor_available: true,
-    system_ext_specific: true,
-    stability: "vintf",
     owner: "google",
     backend: {
         java: {
@@ -35,8 +33,6 @@ aidl_interface {
         "google/sdv/telemetry/configurable_publisher/*.aidl",
     ],
     vendor_available: true,
-    system_ext_specific: true,
-    stability: "vintf",
     owner: "google",
     backend: {
         java: {

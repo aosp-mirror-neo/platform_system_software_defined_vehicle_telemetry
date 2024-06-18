@@ -61,7 +61,7 @@ if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then
 elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
   log "Running in SDV IVI"
   PUBLISHERS=$IVI_PUBLISHERS
-  CLIENT=telemetry_ivi_rust_c_client
+  CLIENT=telemetry_rust_c_client
 
   if [[ $# -eq 0 ]]; then
       FILES=$IVI_DEFAULT_CONFIGS

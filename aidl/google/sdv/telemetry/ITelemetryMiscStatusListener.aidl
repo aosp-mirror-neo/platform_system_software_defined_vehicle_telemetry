@@ -7,7 +7,7 @@ import google.sdv.telemetry.TelemetryServiceStatusCodes;
 /**
  * Enables clients to receive error codes and messages for miscellaneous errors
  */
-@VintfStability
+
 oneway interface ITelemetryMiscStatusListener {
     /**
      * Called by telemetry service to send back miscellaneous errors to client

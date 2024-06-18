@@ -8,7 +8,7 @@ package google.sdv.telemetry.configurable_publisher;
  * the data publisher. Interface is not oneway to ensure sendData returns only after received by
  * telemetry service.
  */
-@VintfStability
+
 interface ISubscriber {
     /**
      * Sends data to the subscriber. The data format is already known by the subscriber.

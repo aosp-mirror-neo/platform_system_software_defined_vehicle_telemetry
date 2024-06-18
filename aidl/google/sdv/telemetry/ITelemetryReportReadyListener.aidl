@@ -5,7 +5,7 @@ package google.sdv.telemetry;
 /**
  * Enables clients to receive telemetry report ready notifications.
  */
-@VintfStability
+
 oneway interface ITelemetryReportReadyListener {
     /**
      * Called by telemetry service to provide notifications on finished reports.

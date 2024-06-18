@@ -10,7 +10,7 @@ import google.sdv.telemetry.configurable_publisher.ISubscriber;
  * A configurable publisher can be manipulated using a configuration.
  * The configuration format is opaque to the telemetry service.
  */
-@VintfStability
+
 interface IConfigurablePublisher {
     /**
      * Subscribes to a registered publisher.

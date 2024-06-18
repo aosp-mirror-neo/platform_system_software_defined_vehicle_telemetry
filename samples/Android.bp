@@ -35,13 +35,6 @@ rust_binary {
     vendor: true,
 }
 
-// TODO(b/335224692): Remove IVI-specific target when Telemetry clients are allowed to be on Vendor partition
-// in IVI and telemetry_rust_c_client works there.
-rust_binary {
-    name: "telemetry_ivi_rust_c_client",
-    defaults: ["telemetry_rust_c_client_defaults"],
-}
-
 rust_protobuf {
     name: "libsample_publisher_proto",
     crate_name: "sample_publisher_proto",
@@ -54,7 +47,6 @@ rust_protobuf {
     ],
     source_stem: "configurable_publisher_source",
     vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_binary {
@@ -136,8 +128,7 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "configurable_publisher_source",
-    vendor_available: true,
-    system_ext_specific: true,
+    vendor: true,
 }
 
 rust_binary {
@@ -174,8 +165,7 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "configurable_publisher_source",
-    vendor_available: true,
-    system_ext_specific: true,
+    vendor: true,
 }
 
 rust_binary {
@@ -211,8 +201,7 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "configurable_publisher_source",
-    vendor_available: true,
-    system_ext_specific: true,
+    vendor: true,
 }
 
 rust_defaults {
@@ -228,14 +217,13 @@ rust_defaults {
         "libsdv_telemetry_proto_rust",
         // keep-sorted end
     ],
+    vendor: true,
 }
 
 rust_library {
     name: "libsdv_telemetry_sample_utils",
     defaults: ["libsdv_telemetry_sample_utils_defaults"],
     crate_name: "sdv_telemetry_sample_utils",
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_test {

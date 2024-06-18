@@ -18,7 +18,6 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry;
-@VintfStability
 interface ITelemetryService {
   void addMetricsConfig(in int apiCallId, in byte[] metricsConfig);
   void activateMetricsConfig(in int apiCallId, in @utf8InCpp String metricsConfigUuid);

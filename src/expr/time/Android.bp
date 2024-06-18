@@ -15,7 +15,6 @@ cc_library {
         // keep-sorted end
     ],
     vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_bindgen {
@@ -30,7 +29,6 @@ rust_bindgen {
         // keep-sorted end
     ],
     vendor_available: true,
-    system_ext_specific: true,
     visibility: ["//system/software_defined_vehicle/telemetry"],
 }
 
@@ -73,7 +71,6 @@ rust_library {
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper",
     vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_test {

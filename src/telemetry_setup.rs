@@ -15,8 +15,8 @@ use tokio::runtime::Builder;
 
 const SIZE_MB: usize = 1024 * 1024;
 
-const METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.telemetry.metric_config_store_in_mb";
-const ROOT_DIR: &str = "/data/misc";
+const METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.vendor.telemetry.metric_config_store_in_mb";
+const ROOT_DIR: &str = "/data/vendor/";
 
 pub fn register_services(
     service_publisher_manager_impl: Arc<ServicePublisherManager>,
@@ -47,8 +47,12 @@ pub fn register_services(
         TokioRuntime(telemetry_runtime),
         binder::BinderFeatures::default(),
     );
+
+    info!("Adding telemetry service");
     binder::add_service(&telemetry_descriptor, telemetry_binder.as_binder())
         .expect("Failed to register service");
+
+    println!("Service {telemetry_descriptor} added to binder");
 
     Ok(())
 }
