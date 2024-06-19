@@ -32,7 +32,9 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
-use crate::expr::ast::{MessageProvider, Node, NodeFactory, NodeFactoryContext, NodeFactoryImpl};
+use crate::expr::ast::{
+    MessageProvider, Node, NodeEvaluationContext, NodeFactory, NodeFactoryContext, NodeFactoryImpl,
+};
 use crate::expr::node_errors::{MessageProviderError, NodeError};
 use crate::expr::node_value_type::NodeValueType;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
@@ -161,7 +163,7 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
 
     /// The function that is called when finish trigger of a Metrics Config is fired.
-    finish_trigger_fired_callback: Arc<dyn Fn(String) + Send + Sync>,
+    finish_trigger_fired_callback: Arc<dyn Fn(String, NodeEvaluationContext) + Send + Sync>,
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
@@ -423,10 +425,10 @@ where
             Arc::clone(finish_trigger)
                 .subscribe(
                     &TriggerSubscriber::MetricsConfigFinish,
-                    Box::new(move || {
+                    Box::new(move |context| {
                         if let Some((callback, uuid)) = maybe_parameters.take() {
                             debug!("MetricsConfig {} finish trigger fired", uuid);
-                            callback(uuid);
+                            callback(uuid, context);
                         }
                     }),
                 )
@@ -580,7 +582,7 @@ where
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
-        finish_trigger_fired_callback: impl Fn(String) + Send + Sync + 'static,
+        finish_trigger_fired_callback: impl Fn(String, NodeEvaluationContext) + Send + Sync + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
@@ -696,7 +698,7 @@ where
         Arc::clone(start_trigger)
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move || {
+                Box::new(move |_context| {
                     if let Some(config) = config_clone.take() {
                         Self::on_start_trigger_fired(config);
                     }
@@ -854,7 +856,7 @@ where
                 Arc::clone(end_trigger)
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigEnd,
-                        Box::new(move || {
+                        Box::new(move |_context| {
                             if let Some(config) = config_clone.take() {
                                 Self::on_end_trigger_fired(config);
                             }
@@ -1273,7 +1275,7 @@ mod tests {
                 node_factory: MockNodeFactory::new(),
                 publisher_factory: MockPublisherFactory::new(),
                 trigger_factory: MockTriggerFactory::new(),
-                finish_trigger_fired_callback: Arc::new(|_| {}),
+                finish_trigger_fired_callback: Arc::new(|_, _| {}),
                 report_ready_callback: Arc::new(|_| {}),
                 service_publisher_manager: Arc::new(
                     MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
@@ -2308,8 +2310,9 @@ mod tests {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let (tx, rx) = oneshot::channel();
         let maybe_tx = Mutex::new(Some(tx));
-        orchestrator.finish_trigger_fired_callback =
-            Arc::new(move |uuid| maybe_tx.lock().unwrap().take().unwrap().send(uuid).unwrap());
+        orchestrator.finish_trigger_fired_callback = Arc::new(move |uuid, _context| {
+            maybe_tx.lock().unwrap().take().unwrap().send(uuid).unwrap()
+        });
         orchestrator.trigger_factory.add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
 
         // Setup Metrics Config.

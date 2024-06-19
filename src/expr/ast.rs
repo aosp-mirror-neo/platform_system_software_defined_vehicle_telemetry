@@ -14,6 +14,9 @@ use std::fmt;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
+#[cfg(test)]
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use crate::expr::node_errors::{
     DescriptorProviderError, FunctionLeafNodeArgumentError,
     FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeError,
@@ -386,7 +389,15 @@ impl NodeFactory for NodeFactoryImpl {
     }
 }
 
+#[cfg(test)]
+static NEXT_NODE_EVALUATION_CONTEXT_ID: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct NodeEvaluationContext {
+    #[cfg(test)]
+    id: u64,
+
     // By only querying the time once and putting it into the context, we ensure that it remains
     // constant while nodes are being evaluated, even if multiple nodes as part of the same
     // evaluation query the time.
@@ -397,11 +408,37 @@ pub struct NodeEvaluationContext {
 impl NodeEvaluationContext {
     pub fn new() -> Self {
         Self {
+            #[cfg(test)]
+            id: NEXT_NODE_EVALUATION_CONTEXT_ID.fetch_add(1, Ordering::SeqCst),
+
             unix_timestamp: sdv_telemetry_time_wrapper::get_unix_timestamp(),
             monotonic_time_since_boot: sdv_telemetry_time_wrapper::get_monotonic_time_since_boot(),
         }
     }
+
+    #[cfg(test)]
+    pub fn id(&self) -> u64 {
+        self.id
+    }
 }
+
+/// Equality checks of the context really only make sense in tests.
+#[cfg(test)]
+impl PartialEq for NodeEvaluationContext {
+    fn eq(&self, other: &NodeEvaluationContext) -> bool {
+        let result = self.id.eq(&other.id);
+        if result {
+            // These asserts should never fail, because each `NodeEvaluationContext::id` is only
+            // used once.
+            debug_assert_eq!(self.unix_timestamp, other.unix_timestamp);
+            debug_assert_eq!(self.monotonic_time_since_boot, other.monotonic_time_since_boot);
+        }
+        result
+    }
+}
+
+// #[cfg(test)]
+// impl Eq for NodeEvaluationContext {}
 
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
@@ -620,6 +657,14 @@ mod tests {
         root_node.set_combination_node(combination_node);
 
         vec![leaf_true, leaf_false, root_node]
+    }
+
+    #[test]
+    fn node_evaluation_context_ids_are_ascending() {
+        let context1 = NodeEvaluationContext::new();
+        let context2 = NodeEvaluationContext::new();
+        assert!(context1.id < context2.id);
+        assert!(context1.monotonic_time_since_boot <= context2.monotonic_time_since_boot);
     }
 
     #[test]
@@ -1961,13 +2006,10 @@ mod tests {
             function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
         });
 
-        let context = NodeEvaluationContext {
-            unix_timestamp: Microseconds(123),
-            monotonic_time_since_boot: Microseconds(456),
-        };
+        let context = NodeEvaluationContext::new();
         let result = timestamp_node.evaluate(&context);
 
-        assert_eq!(result.unwrap(), NodeValue::Int64(123));
+        assert_eq!(result.unwrap(), NodeValue::Int64(context.unix_timestamp.0));
     }
 
     #[test]
@@ -1997,12 +2039,9 @@ mod tests {
             },
         });
 
-        let context = NodeEvaluationContext {
-            unix_timestamp: Microseconds(123),
-            monotonic_time_since_boot: Microseconds(456),
-        };
+        let context = NodeEvaluationContext::new();
         let result = timestamp_node.evaluate(&context);
 
-        assert_eq!(result.unwrap(), NodeValue::Int64(456));
+        assert_eq!(result.unwrap(), NodeValue::Int64(context.monotonic_time_since_boot.0));
     }
 }

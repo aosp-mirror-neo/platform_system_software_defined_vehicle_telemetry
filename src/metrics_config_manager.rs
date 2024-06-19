@@ -1,11 +1,8 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
-// External dependencies.
 use async_trait::async_trait;
-use log::{error, info};
-
 use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
-
+use log::{error, info};
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_utils::file_io_utils;
 use std::collections::{HashMap, HashSet};
@@ -123,8 +120,10 @@ impl MetricsConfigManagerImpl {
                 let manager_reference_clone = Weak::clone(manager_reference);
                 let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
                     service_publisher_manager,
-                    move |config_uuid| {
+                    move |config_uuid, _context| {
                         if let Some(manager) = manager_reference_clone.upgrade() {
+                            // TODO(b/308000132): Ensure to use `_context` here once we
+                            // generate partial reports when a Metrics Config is finished.
                             tokio::spawn(async move {
                                 manager
                                     .deactivate_metrics_config(&config_uuid)

@@ -12,15 +12,15 @@ use std::sync::{Arc, Weak};
 use std::{collections::HashMap, fmt::Display, hash::Hash};
 use tokio::sync::Mutex as AsyncMutex;
 
-pub(crate) type CallbackFn = Box<dyn FnMut() + Send + Sync>;
+pub(crate) type CallbackFn<TCallbackArg> = Box<dyn FnMut(TCallbackArg) + Send + Sync>;
 
 #[async_trait]
-pub(crate) trait SubscriptionManager<TKey: Display + Eq + Hash + Send + Sync>:
+pub(crate) trait SubscriptionManager<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>:
     Send + Sync
 {
     /// Adds a new subscription that is associated with the specified unique key
     /// and activates underlying activatable if it's not active.
-    async fn subscribe(&self, key: TKey, callback: CallbackFn);
+    async fn subscribe(&self, key: TKey, callback: CallbackFn<TCallbackArg>);
 
     /// Removes a subscription that is associated with the specified key
     /// and deactivates underlying activatable if this was the last subscription.
@@ -29,11 +29,14 @@ pub(crate) trait SubscriptionManager<TKey: Display + Eq + Hash + Send + Sync>:
 
 /// Trait of an object that can be activated.
 #[async_trait]
-pub trait Activatable<TKey: Eq + Hash>: Send + Sync {
+pub trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
     /// Activates the object.
     /// The function will only be called for an inactive object
     /// that is not going through state transition.
-    async fn activate(self: Arc<Self>, callback_map: Arc<AsyncMutex<HashMap<TKey, CallbackFn>>>);
+    async fn activate(
+        self: Arc<Self>,
+        callback_map: Arc<AsyncMutex<HashMap<TKey, CallbackFn<TCallbackArg>>>>,
+    );
 
     /// Deactivates the object.
     /// The function will only be called for an active object
@@ -42,21 +45,22 @@ pub trait Activatable<TKey: Eq + Hash>: Send + Sync {
 }
 
 /// Manages subscriptions to a specific type of event.
-pub struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Sync> {
+pub struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> {
     /// Reference to the underlying activatable object.
-    activatable_reference: Weak<dyn Activatable<TKey>>,
+    activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>,
 
     /// The callback map stores the callbacks associated with the unique subscription keys.
     /// It is initialized with a new Arc when the first subscription is added.
     /// It is cleared and set to None when the last subscription is removed.
-    maybe_callback_map: AsyncMutex<Option<Arc<AsyncMutex<HashMap<TKey, CallbackFn>>>>>,
+    maybe_callback_map:
+        AsyncMutex<Option<Arc<AsyncMutex<HashMap<TKey, CallbackFn<TCallbackArg>>>>>>,
 }
 
 #[async_trait]
-impl<TKey: Display + Eq + Hash + Send + Sync> SubscriptionManager<TKey>
-    for SubscriptionManagerImpl<TKey>
+impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> SubscriptionManager<TKey, TCallbackArg>
+    for SubscriptionManagerImpl<TKey, TCallbackArg>
 {
-    async fn subscribe(&self, key: TKey, callback: CallbackFn) {
+    async fn subscribe(&self, key: TKey, callback: CallbackFn<TCallbackArg>) {
         let mut maybe_callback_map_lock = self.maybe_callback_map.lock().await;
 
         // Retrieve the callback map, creating a new one if necessary.
@@ -108,10 +112,12 @@ impl<TKey: Display + Eq + Hash + Send + Sync> SubscriptionManager<TKey>
     }
 }
 
-impl<TKey: Display + Eq + Hash + Send + Sync> SubscriptionManagerImpl<TKey> {
+impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
+    SubscriptionManagerImpl<TKey, TCallbackArg>
+{
     /// Creates a new instance of the callback manager that activates the specified activatable
     /// on first subscription and deactivates it on last unsubscription.
-    pub fn new(activatable_reference: Weak<dyn Activatable<TKey>>) -> Self {
+    pub fn new(activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>) -> Self {
         SubscriptionManagerImpl { activatable_reference, maybe_callback_map: None.into() }
     }
 }
@@ -127,7 +133,7 @@ mod tests {
     const KEY2: &str = "test_key2";
 
     struct MockActivatable {
-        callback_map: Mutex<Option<Arc<AsyncMutex<HashMap<String, CallbackFn>>>>>,
+        callback_map: Mutex<Option<Arc<AsyncMutex<HashMap<String, CallbackFn<()>>>>>>,
         num_activate_calls: AtomicU32,
         num_deactivate_calls: AtomicU32,
     }
@@ -151,10 +157,10 @@ mod tests {
     }
 
     #[async_trait]
-    impl Activatable<String> for MockActivatable {
+    impl Activatable<String, ()> for MockActivatable {
         async fn activate(
             self: Arc<Self>,
-            callback_map: Arc<AsyncMutex<HashMap<String, CallbackFn>>>,
+            callback_map: Arc<AsyncMutex<HashMap<String, CallbackFn<()>>>>,
         ) {
             self.num_activate_calls.fetch_add(1, Ordering::SeqCst);
             self.callback_map.lock().unwrap().replace(callback_map);
@@ -165,13 +171,14 @@ mod tests {
         }
     }
 
-    fn create_subscription_manager() -> (SubscriptionManagerImpl<String>, Arc<MockActivatable>) {
+    fn create_subscription_manager() -> (SubscriptionManagerImpl<String, ()>, Arc<MockActivatable>)
+    {
         let activatable = Arc::new(MockActivatable::new());
         (SubscriptionManagerImpl::new(Arc::<MockActivatable>::downgrade(&activatable)), activatable)
     }
 
-    fn create_empty_fn_box() -> CallbackFn {
-        Box::new(|| {})
+    fn create_empty_fn_box() -> CallbackFn<()> {
+        Box::new(|_| {})
     }
 
     #[tokio::test]

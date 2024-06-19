@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{Trigger, TriggerSubscriber};
+use super::*;
+use crate::metrics_config_orchestrator::NodeEvaluationContext;
 
 /// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {
@@ -13,7 +14,7 @@ pub(crate) struct MockTrigger {
     pub unsubscribe_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
 
     name: String,
-    on_fired_callback: AsyncMutex<Option<Box<dyn FnMut() + Send + Sync>>>,
+    on_fired_callback: AsyncMutex<Option<TriggerCallbackFn>>,
 }
 
 #[async_trait]
@@ -25,7 +26,7 @@ impl Trigger for MockTrigger {
     async fn subscribe(
         self: Arc<Self>,
         subscriber: &TriggerSubscriber,
-        on_fired_callback: Box<dyn FnMut() + Send + Sync>,
+        on_fired_callback: TriggerCallbackFn,
     ) {
         self.verify_subscriber(subscriber);
         self.on_fired_callback.lock().await.replace(on_fired_callback);
@@ -45,7 +46,6 @@ impl Trigger for MockTrigger {
 }
 
 impl MockTrigger {
-    /// Returns a new instance of MockTrigger
     pub(crate) fn new(name: String) -> Self {
         Self {
             name,
@@ -62,9 +62,12 @@ impl MockTrigger {
         trigger
     }
 
-    /// Fires the trigger.
     pub(crate) async fn fire(&self) {
-        self.on_fired_callback.lock().await.as_mut().unwrap()();
+        self.fire_with_context(NodeEvaluationContext::new()).await;
+    }
+
+    pub(crate) async fn fire_with_context(&self, context: NodeEvaluationContext) {
+        self.on_fired_callback.lock().await.as_mut().unwrap()(context);
     }
 
     pub(crate) fn set_subscribe_callback(

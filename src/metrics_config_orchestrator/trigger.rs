@@ -25,6 +25,8 @@ use crate::metrics_config_orchestrator::subscription_manager::{
 };
 use crate::metrics_config_orchestrator::Publisher;
 
+type TriggerCallbackFn = CallbackFn<NodeEvaluationContext>;
+
 #[async_trait]
 pub(crate) trait Trigger: Send + Sync {
     /// Returns the name of the trigger.
@@ -37,7 +39,7 @@ pub(crate) trait Trigger: Send + Sync {
     async fn subscribe(
         self: Arc<Self>,
         subscriber: &TriggerSubscriber,
-        on_fired_callback: CallbackFn,
+        on_fired_callback: TriggerCallbackFn,
     );
 
     /// Unsubscribe from trigger fire events.
@@ -64,7 +66,7 @@ pub(crate) struct TriggerImpl {
     // Manages trigger subscriptions.
     // The first subscription to TriggerImpl activates the trigger, passing a reference
     // to the callback map. The last unsubscription deactivates the trigger.
-    subscription_manager: Box<dyn SubscriptionManager<TriggerSubscriber>>,
+    subscription_manager: Box<dyn SubscriptionManager<TriggerSubscriber, NodeEvaluationContext>>,
 }
 
 pub(super) enum TriggerType {
@@ -111,7 +113,7 @@ impl Trigger for TriggerImpl {
     async fn subscribe(
         self: Arc<Self>,
         subscriber: &TriggerSubscriber,
-        on_fired_callback: CallbackFn,
+        on_fired_callback: TriggerCallbackFn,
     ) {
         self.subscription_manager.subscribe(subscriber.clone(), on_fired_callback).await;
     }
@@ -122,11 +124,11 @@ impl Trigger for TriggerImpl {
 }
 
 #[async_trait]
-impl Activatable<TriggerSubscriber> for TriggerImpl {
+impl Activatable<TriggerSubscriber, NodeEvaluationContext> for TriggerImpl {
     /// Performs activation operations specific to each trigger type.
     async fn activate(
         self: Arc<Self>,
-        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
+        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
     ) {
         match &self.trigger_type {
             TriggerType::Data { publisher } => {
@@ -134,11 +136,12 @@ impl Activatable<TriggerSubscriber> for TriggerImpl {
                 publisher
                     .subscribe(
                         &self.name,
-                        Box::new(move |message| {
+                        Box::new(move |message, context| {
                             Self::on_data_trigger_publisher_new_message(
                                 &trigger_name_clone,
                                 &callback_map,
                                 message,
+                                context,
                             )
                         }),
                     )
@@ -189,10 +192,11 @@ impl Activatable<TriggerSubscriber> for TriggerImpl {
                     Arc::clone(trigger)
                         .subscribe(
                             subscriber,
-                            Box::new(move || {
+                            Box::new(move |context| {
                                 self_clone.on_conditional_trigger_parent_trigger_fired(
                                     &callback_map_clone,
                                     condition_checker,
+                                    context,
                                 )
                             }),
                         )
@@ -223,7 +227,7 @@ impl TriggerImpl {
             name,
             trigger_type,
             subscription_manager: Box::new(SubscriptionManagerImpl::new(
-                Weak::clone(me) as Weak<dyn Activatable<_>>
+                Weak::clone(me) as Weak<dyn Activatable<_, _>>
             )),
         })
     }
@@ -252,7 +256,7 @@ impl TriggerImpl {
     async fn call_periodically(
         trigger_name: &str,
         interval: Duration,
-        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
+        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
     ) {
         let mut timer = tokio::time::interval(interval);
 
@@ -269,7 +273,8 @@ impl TriggerImpl {
             timer.tick().await;
 
             // Fire trigger.
-            Self::fire_trigger(trigger_name, &callback_map).await;
+            let context = NodeEvaluationContext::new();
+            Self::fire_trigger(trigger_name, &callback_map, context).await;
         }
     }
 
@@ -277,7 +282,8 @@ impl TriggerImpl {
     /// The operation is performed after asynchronously awaiting on the mutex.
     async fn fire_trigger(
         trigger_name: &str,
-        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
+        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
+        context: NodeEvaluationContext,
     ) {
         // Retrieve callbacks.
         let mut callbacks = callback_map.lock().await;
@@ -293,7 +299,7 @@ impl TriggerImpl {
         // The loop needs to wait before they finish to release the mutex lock when they're
         // done because they're allowed to mutate themselves.
         for callback in callbacks.values_mut() {
-            callback();
+            callback(context.clone());
         }
     }
 
@@ -348,13 +354,14 @@ impl TriggerImpl {
     /// A callback to handle a new message published by the data trigger's associated publisher.
     fn on_data_trigger_publisher_new_message(
         trigger_name: &str,
-        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
+        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
         _message: &dyn MessageDyn,
+        context: NodeEvaluationContext,
     ) {
         let trigger_name_clone = trigger_name.to_owned();
         let callback_map_clone = Arc::clone(callback_map);
         tokio::spawn(async move {
-            Self::fire_trigger(&trigger_name_clone, &callback_map_clone).await;
+            Self::fire_trigger(&trigger_name_clone, &callback_map_clone, context).await;
         });
     }
 
@@ -363,11 +370,12 @@ impl TriggerImpl {
     /// condition_checker and fires the trigger if it returns true.
     fn on_conditional_trigger_parent_trigger_fired(
         self: &Arc<Self>,
-        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>>,
+        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
         condition_checker: impl FnOnce(
             &NodeValue,
             &Mutex<Option<NodeValue>>,
         ) -> Result<bool, anyhow::Error>,
+        context: NodeEvaluationContext,
     ) {
         let TriggerType::Conditional { maybe_previous_value, selector_expression, .. } =
             &self.trigger_type
@@ -375,7 +383,6 @@ impl TriggerImpl {
             panic!("Unexpected trigger type");
         };
 
-        let context = NodeEvaluationContext::new();
         let node_value = match selector_expression.evaluate(&context) {
             Ok(value) => value,
             Err(err) => {
@@ -395,7 +402,7 @@ impl TriggerImpl {
             let trigger_name_clone = self.name.clone();
             let callback_map_clone = Arc::clone(callback_map);
             tokio::spawn(async move {
-                Self::fire_trigger(&trigger_name_clone, &callback_map_clone).await;
+                Self::fire_trigger(&trigger_name_clone, &callback_map_clone, context).await;
             });
         }
     }
@@ -409,7 +416,7 @@ mod tests {
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use sdv_telemetry_utils::test_utils::with_timeout;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use tokio::sync::Notify;
+    use tokio::sync::{mpsc, oneshot};
 
     use super::*;
     use crate::expr::mock::MockMessageProvider;
@@ -422,14 +429,16 @@ mod tests {
     const PUBLISHER_NAME: &str = "publisher";
     const TRIGGER_NAME: &str = "trigger";
 
-    struct CallbackListener {
-        callback_notify: Notify,
+    struct CallbackListener<T: Send + 'static> {
+        callback_tx: mpsc::UnboundedSender<T>,
+        callback_rx: AsyncMutex<mpsc::UnboundedReceiver<T>>,
         fired_count: AtomicU32,
     }
 
-    impl CallbackListener {
-        fn new() -> CallbackListener {
-            CallbackListener { callback_notify: Notify::new(), fired_count: 0.into() }
+    impl<T: Send + 'static> CallbackListener<T> {
+        fn new() -> Self {
+            let (callback_tx, callback_rx) = mpsc::unbounded_channel();
+            CallbackListener { callback_tx, callback_rx: callback_rx.into(), fired_count: 0.into() }
         }
 
         fn get_fired_count(&self) -> u32 {
@@ -439,9 +448,9 @@ mod tests {
         // Creates a map with a callback that is handled by this listener instance.
         fn create_callback_map(
             self: &Arc<Self>,
-        ) -> Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>> {
+        ) -> Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn<T>>>> {
             let self_clone = Arc::clone(self);
-            let callback: CallbackFn = Box::new(move || self_clone.on_callback_fired());
+            let callback: CallbackFn<T> = Box::new(move |data| self_clone.on_callback_fired(data));
             Arc::new(AsyncMutex::new(HashMap::from([(
                 TriggerSubscriber::MetricsConfigStart,
                 callback,
@@ -449,21 +458,25 @@ mod tests {
         }
 
         /// Increases fired count and triggers the notify.
-        fn on_callback_fired(&self) {
+        fn on_callback_fired(&self, data: T) {
             self.fired_count.fetch_add(1, Ordering::SeqCst);
-            self.callback_notify.notify_one();
+            self.callback_tx.send(data).unwrap();
+        }
+
+        async fn wait_for_callback_fired(&self) -> T {
+            self.callback_rx.lock().await.recv().await.unwrap()
         }
     }
 
     #[derive(Clone)]
     struct MockSubscriptionManager {
         key: Arc<Mutex<Option<TriggerSubscriber>>>,
-        callback: Arc<Mutex<Option<CallbackFn>>>,
+        callback: Arc<Mutex<Option<TriggerCallbackFn>>>,
     }
 
     #[async_trait]
-    impl SubscriptionManager<TriggerSubscriber> for MockSubscriptionManager {
-        async fn subscribe(&self, key: TriggerSubscriber, callback: CallbackFn) {
+    impl SubscriptionManager<TriggerSubscriber, NodeEvaluationContext> for MockSubscriptionManager {
+        async fn subscribe(&self, key: TriggerSubscriber, callback: TriggerCallbackFn) {
             self.key.lock().unwrap().replace(key);
             self.callback.lock().unwrap().replace(callback);
         }
@@ -482,12 +495,13 @@ mod tests {
         }
     }
 
-    fn create_empty_callback_map() -> Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn>>> {
+    fn create_empty_callback_map() -> Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>
+    {
         Arc::new(AsyncMutex::new(HashMap::new()))
     }
 
-    fn create_empty_fn_box() -> CallbackFn {
-        Box::new(|| {})
+    fn create_empty_fn_box() -> TriggerCallbackFn {
+        Box::new(|_| {})
     }
 
     fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {
@@ -544,7 +558,8 @@ mod tests {
 
     async fn setup_active_conditional_trigger(
         condition_type: ConditionType,
-    ) -> (Arc<MockMessageProvider>, Arc<MockTrigger>, Arc<CallbackListener>) {
+    ) -> (Arc<MockMessageProvider>, Arc<MockTrigger>, Arc<CallbackListener<NodeEvaluationContext>>)
+    {
         let (trigger, message_provider, parent_trigger) =
             create_valid_conditional_trigger(condition_type, None);
 
@@ -600,13 +615,43 @@ mod tests {
         trigger.activate(callback_listener.create_callback_map()).await;
 
         // Fire publisher message. This should notify subscribed trigger.
-        publisher.fire_new_message(&Int32Value::new()).await;
+        publisher.fire_new_message(&Int32Value::new(), NodeEvaluationContext::new()).await;
 
         // Wait for notification.
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         // Verify that the trigger fired once.
         assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn data_trigger_shares_context_across_subscribers() {
+        let publisher = Arc::new(create_valid_mock_publisher());
+        let trigger = create_valid_data_trigger(Arc::clone(&publisher));
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_map = callback_listener.create_callback_map();
+
+        // Add a second callback to `callback_map`.
+        let (context1_tx, context1_rx) = oneshot::channel();
+        let mut context1_tx = Some(context1_tx);
+        callback_map.lock().await.insert(
+            TriggerSubscriber::AggregationPublisher { name: "publisher-name".to_owned() },
+            Box::new(move |context| context1_tx.take().unwrap().send(context).unwrap()),
+        );
+        // Subscribe to trigger.
+        Arc::clone(&trigger).activate(callback_map).await;
+
+        publisher.fire_new_message(&Int32Value::new(), NodeEvaluationContext::new()).await;
+
+        // Wait for trigger to fire and both callbacks to run.
+        let context1 = with_timeout(context1_rx).await.unwrap();
+        let context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        trigger.deactivate().await;
+
+        assert_eq!(
+            context1, context2,
+            "All contexts of a single firing of a periodic trigger should be equal."
+        );
     }
 
     #[tokio::test]
@@ -618,21 +663,49 @@ mod tests {
         Arc::clone(&trigger).activate(callback_listener.create_callback_map()).await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        let context1 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        let context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         // Unsubscribe from trigger.
         trigger.deactivate().await;
 
         // Verify that the trigger fired twice.
         assert_eq!(callback_listener.get_fired_count(), 2);
+        assert!(context1.id() < context2.id());
+    }
+
+    #[tokio::test]
+    async fn periodic_trigger_shares_context_across_subscribers() {
+        let (trigger, _) = create_valid_periodic_trigger();
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_map = callback_listener.create_callback_map();
+
+        // Add a second callback to `callback_map`.
+        let (context1_tx, context1_rx) = oneshot::channel();
+        let mut context1_tx = Some(context1_tx);
+        callback_map.lock().await.insert(
+            TriggerSubscriber::AggregationPublisher { name: "publisher-name".to_owned() },
+            Box::new(move |context| context1_tx.take().unwrap().send(context).unwrap()),
+        );
+        // Subscribe to trigger.
+        Arc::clone(&trigger).activate(callback_map).await;
+
+        // Wait for trigger to fire and both callbacks to run.
+        let context1 = with_timeout(context1_rx).await.unwrap();
+        let context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        trigger.deactivate().await;
+
+        assert_eq!(
+            context1, context2,
+            "All contexts of a single firing of a periodic trigger should be equal."
+        );
     }
 
     #[tokio::test]
     async fn activate_periodic_trigger_deactivate_from_callback_success() {
         let (trigger, _) = create_valid_periodic_trigger();
         let mut trigger_clone = Some(Arc::clone(&trigger));
-        let callback: CallbackFn = Box::new(move || {
+        let callback: TriggerCallbackFn = Box::new(move |_| {
             let trigger_clone = trigger_clone.take().unwrap();
             tokio::spawn(async move {
                 trigger_clone.deactivate().await;
@@ -685,10 +758,49 @@ mod tests {
         parent_trigger2.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         // Verify that the trigger fired once.
         assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn conditional_trigger_shares_context_across_subscribers() {
+        let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let parent_context = NodeEvaluationContext::new();
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = TriggerImpl::new_conditional_trigger(
+            TRIGGER_NAME.to_owned(),
+            ConditionType::IS_TRUE,
+            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
+            Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+        );
+        let callback_listener = Arc::new(CallbackListener::new());
+        let callback_map = callback_listener.create_callback_map();
+
+        // Add a second callback to `callback_map`.
+        let (child_context1_tx, child_context1_rx) = oneshot::channel();
+        let mut child_context1_tx = Some(child_context1_tx);
+        callback_map.lock().await.insert(
+            TriggerSubscriber::AggregationPublisher { name: "publisher-name".to_owned() },
+            Box::new(move |context| child_context1_tx.take().unwrap().send(context).unwrap()),
+        );
+
+        trigger.activate(callback_map).await;
+
+        message_provider
+            .set_next_result(Ok(Some(Box::new(Int32Value { value: 1, ..Default::default() }))));
+        parent_trigger.fire_with_context(parent_context.clone()).await;
+
+        let child_context1 = with_timeout(child_context1_rx).await.unwrap();
+        let child_context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
+        assert_eq!(parent_context, child_context1);
+        assert_eq!(parent_context, child_context2);
     }
 
     #[tokio::test]
@@ -712,7 +824,7 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         // Verify that the trigger fired once.
         assert_eq!(callback_listener.get_fired_count(), 1);
@@ -740,7 +852,7 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
@@ -767,7 +879,7 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
@@ -794,8 +906,8 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
@@ -822,8 +934,8 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
@@ -850,8 +962,8 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
@@ -878,8 +990,8 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
@@ -903,8 +1015,8 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
@@ -928,8 +1040,8 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.callback_notify.notified()).await;
-        with_timeout(callback_listener.callback_notify.notified()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        with_timeout(callback_listener.wait_for_callback_fired()).await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
@@ -939,7 +1051,7 @@ mod tests {
         let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = Arc::clone(&callback_listener);
         let mut publisher = create_valid_mock_publisher();
-        publisher.set_unsubscribe_callback(move || callback_listener_clone.on_callback_fired());
+        publisher.set_unsubscribe_callback(move || callback_listener_clone.on_callback_fired(()));
         let publisher = Arc::new(publisher);
         let trigger = create_valid_data_trigger(Arc::clone(&publisher));
 
@@ -962,7 +1074,7 @@ mod tests {
         let callback_listener = Arc::new(CallbackListener::new());
         let callback_listener_clone = Arc::clone(&callback_listener);
         parent_trigger
-            .set_unsubscribe_callback(move |_| callback_listener_clone.on_callback_fired());
+            .set_unsubscribe_callback(move |_| callback_listener_clone.on_callback_fired(()));
         let (trigger, _, _) = create_valid_conditional_trigger(
             ConditionType::ALL_CHANGES,
             Some(Arc::new(parent_trigger)),

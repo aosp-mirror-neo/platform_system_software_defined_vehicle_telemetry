@@ -52,7 +52,9 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
             Arc::clone(trigger)
                 .subscribe(
                     &self.subscriber,
-                    Box::new(move || self_clone.on_trigger_fired(&trigger_name_clone)),
+                    Box::new(move |context| {
+                        self_clone.on_trigger_fired(&trigger_name_clone, context)
+                    }),
                 )
                 .await;
         }
@@ -99,10 +101,7 @@ impl MetricsReportGeneratorImpl {
         }
     }
 
-    fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str) {
-        // TODO(b/317898437): This should use the same evaluation context that was used as part of
-        // determining that a trigger fired.
-        let context = NodeEvaluationContext::new();
+    fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str, context: NodeEvaluationContext) {
         match self.message_builder.build(&context) {
             Ok(report_data) => {
                 let mut report = MetricsReport::new();
@@ -246,6 +245,36 @@ mod test {
         assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
         // as built by MockMessageBuilder
         assert!(report.report_data.is::<TestMessage>());
+    }
+
+    #[tokio::test]
+    async fn on_trigger_fired_creates_reports_with_trigger_context() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = MockMessageBuilder::new();
+        message_builder.set_result_callback(|context| {
+            Ok(Box::new(TestMessage {
+                repeated_i64s: vec![i64::try_from(context.id()).unwrap()],
+                ..Default::default()
+            }))
+        });
+        let mut generator = create_generator(Box::new(message_builder));
+        let (tx, mut rx) = mpsc::channel(1);
+        generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+
+        // Activate the generator.
+        Arc::new(generator).activate().await;
+
+        let context = NodeEvaluationContext::new();
+        trigger.fire_with_context(context.clone()).await;
+
+        // Wait for the report to be delivered.
+        let report = rx.recv().await.unwrap();
+
+        // Verify the report.
+        let test_message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(test_message.repeated_i64s, vec![i64::try_from(context.id()).unwrap()]);
     }
 
     #[tokio::test]
