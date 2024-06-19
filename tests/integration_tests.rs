@@ -1,109 +1,71 @@
 // Copyright 2023 Google LLC
-/// Telemetry Service device integration tests
-#[cfg(test)]
-mod metrics_config_manager;
-mod metrics_report_manager;
 
-use crate::metrics_config_manager::MetricsConfigManager;
-use crate::metrics_report_manager::MetricsReportManager;
-extern crate protobuf;
-use anyhow::{anyhow, Context};
-use protobuf::text_format::parse_from_str;
-use sdv_telemetry_bindgen as rust_to_c;
+#![cfg(test)]
+
+/// Telemetry Service device integration tests
+use anyhow::anyhow;
+use log::info;
+use protobuf::{text_format::parse_from_str, Message};
+use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
-
-use log::info;
-use std::ffi::{CStr, OsStr};
+use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use tokio::sync::oneshot;
+use tokio::sync::mpsc;
 
 const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
 
-/// Callback that receives status for API calls.
-///
-/// # Safety
-///
-/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
-///
-/// * `listener` points to a valid `oneshot::Sender` originally sent to the caller during
-///    the add_metrics_config api call. Listener will not be valid after the function completes
-pub unsafe extern "C" fn api_callback(
-    listener: *mut std::ffi::c_void,
-    status_code: i32,
-    status_msg: *const std::ffi::c_char,
-) {
-    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
-    // global allocator using Box::new(). For more info check
-    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender = unsafe { Box::from_raw(listener as *mut oneshot::Sender<(i32, String)>) };
-
-    // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-    // safety requirements.
-    let msg = unsafe {
-        // Convert *const std::ffi::c_char to &CStr
-        let c_str = CStr::from_ptr(status_msg);
-
-        // Convert &CStr to String
-        c_str.to_str().unwrap().to_string()
-    };
-    info!("status code: {} msg: {}", status_code, msg);
-    sender.send((status_code, msg)).unwrap();
-}
-
-async fn process_config(
-    path: &PathBuf,
-    config_manager: &Pin<Box<MetricsConfigManager>>,
-) -> anyhow::Result<String> {
-    let serialized_config = metrics_config_reader_utils::read(path)
-        .with_context(|| format!("Error while reading config: {}", path.display()))?;
-
-    let config_name = config_manager
-        .add_metrics_config(&serialized_config)
-        .await
-        .map_err(|e| anyhow!(e))
-        .with_context(|| format!("Error while adding config: {}", path.display()))?;
-
-    config_manager
-        .activate_metrics_config(&config_name)
-        .await
-        .map_err(|e| anyhow!(e))
-        .with_context(|| format!("Error while activating config: {}", &config_name))?;
-
-    Ok(config_name)
-}
-
-/// Communicate with the telemetry service.
 #[tokio::test]
 async fn telemetry_service_simple_config_end_to_end_test() {
     init_logger_for_samples_or_tests(LOG_TAG);
     binder::ProcessState::start_thread_pool();
 
     info!("Connecting to service");
-    // Unsafe block needed to be able to call C API functions
-    // More info at: https://doc.rust-lang.org/book/ch19-01-unsafe-rust.html
-    // SAFETY: safe to use as the return value is asserted against before moving forward.
-    let service = unsafe { rust_to_c::get_telemetry_service() };
-    assert!(!service.is_null());
+    let service = TelemetryServiceHolder::get().unwrap();
 
-    // SAFETY: safe to use as the service passed is non null and points to a valid ServiceHolder.
-    let (mut report_manager, config_manager) =
-        unsafe { (MetricsReportManager::new(service).await, MetricsConfigManager::new(service)) };
+    info!("Initializing service");
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status_code, status_msg| {
+                info!("Received status message {status_code}: {status_msg}");
+            },
+            move |config_uuid, report_name, report_number| {
+                report_ready_tx.send((config_uuid, report_name, report_number)).unwrap();
+            },
+        )
+        .await
+        .unwrap();
 
-    let config_path = PathBuf::from(CONFIG_PATH);
-    info!("Adding config: {}", config_path.display());
-    let config_name = process_config(&config_path, &config_manager).await.unwrap();
-    info!("Config added: {}", config_name);
+    let serialized_config = metrics_config_reader_utils::read(&PathBuf::from(CONFIG_PATH)).unwrap();
+    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
 
-    let metrics_report = report_manager.as_mut().get_metrics_report().await.unwrap();
-    info!("Report received: {:?}", metrics_report);
+    info!("Adding config");
+    service.add_metrics_config(&serialized_config).await.unwrap();
 
-    config_manager.remove_metrics_config(&metrics_report.metrics_config_uuid).await.unwrap();
-    info!("successfully removed config");
+    info!("Activating config");
+    service.activate_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Waiting for metrics report ready notification");
+    let (config_uuid, report_name, report_number) = report_ready_rx.recv().await.unwrap();
+    assert_eq!(config_uuid, config.uuid);
+
+    info!("Retrieving metrics report");
+    let metrics_report =
+        service.get_metrics_report(config_uuid.clone(), report_name, report_number).await.unwrap();
+    info!("Report received: {metrics_report:?}");
+    assert_eq!(config_uuid, metrics_report.metrics_config_uuid);
+
+    info!("Removing metrics config");
+    service.remove_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Finishing service");
+    service.finish().unwrap();
+
+    info!("Successfully finished service");
 }
 
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
