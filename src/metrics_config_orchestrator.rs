@@ -24,6 +24,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
+    operation_result::OperationResult,
 };
 use std::collections::{HashMap, HashSet};
 use std::marker::{PhantomData, Sync};
@@ -222,11 +223,15 @@ where
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-        self.metrics_config.get().unwrap().publishers.get(publisher_name).map_or_else(
-            || Err(MessageProviderError::InvalidPublisherName),
-            |publisher| Ok(publisher.get_latest_message()),
-        )
+    ) -> OperationResult<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+        self.metrics_config
+            .get()
+            .unwrap()
+            .publishers
+            .get(publisher_name)
+            .ok_or(MessageProviderError::InvalidPublisherName)
+            .map(|publisher| publisher.get_latest_message())
+            .into()
     }
 }
 
@@ -1921,11 +1926,19 @@ mod tests {
             let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
             assert_eq!(message_providers.len(), 1);
             assert_eq!(
-                &message_providers[0].get_message(SERVICE_PUBLISHER_NAME).unwrap().unwrap(),
+                &message_providers[0]
+                    .get_message(SERVICE_PUBLISHER_NAME)
+                    .unwrap_sync()
+                    .unwrap()
+                    .unwrap(),
                 &(value1 as Box<dyn MessageDyn>)
             );
             assert_eq!(
-                &message_providers[0].get_message(AGGREGATION_PUBLISHER_NAME).unwrap().unwrap(),
+                &message_providers[0]
+                    .get_message(AGGREGATION_PUBLISHER_NAME)
+                    .unwrap_sync()
+                    .unwrap()
+                    .unwrap(),
                 &(value2 as Box<dyn MessageDyn>)
             );
         }

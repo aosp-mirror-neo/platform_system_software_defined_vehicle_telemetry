@@ -63,7 +63,9 @@ impl MessageBuilder for MessageBuilderImpl {
                 .field_by_name(field_name)
                 .expect("All fields should have been validated to exist");
             let mut field_aggregator = field_aggregator_mutex.lock().unwrap();
-            let node_value = field_aggregator.compute(context).map_err(to_builder_err)?;
+            // TODO(b/349862095): Handle asynchronous OperationResult.
+            let node_value =
+                field_aggregator.compute(context).unwrap_sync().map_err(to_builder_err)?;
             // if node_value is none, skip populating this field
             if node_value.is_none() {
                 // TODO: b/307547570 - properly handle absent values

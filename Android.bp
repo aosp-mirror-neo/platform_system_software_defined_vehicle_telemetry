@@ -45,6 +45,7 @@ rust_defaults {
         "google.sdv.telemetry-V1-rust",
         "libanyhow",
         "libbinder_rs",
+        "libfutures",
         "liblog_rust",
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
@@ -111,6 +112,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
+        "libfutures",
         "liblazy_static",
         "liblog_rust",
         "liblogger",

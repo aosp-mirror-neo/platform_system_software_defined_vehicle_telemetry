@@ -10,6 +10,7 @@ use sdv_telemetry_proto_rust::expression::{
     node::Node_type as NodeTypeProto, FunctionLeafNode as FunctionLeafNodeProto, Node as NodeProto,
 };
 use sdv_telemetry_time_wrapper::Microseconds;
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::fmt;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
@@ -65,7 +66,7 @@ pub trait MessageProvider: Send + Sync {
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError>;
+    ) -> OperationResult<Option<Box<dyn MessageDyn>>, MessageProviderError>;
 }
 
 /// Provides descriptors for published message types.
@@ -442,54 +443,57 @@ impl Eq for NodeEvaluationContext {}
 
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
-    pub fn evaluate(&self, context: &NodeEvaluationContext) -> Result<NodeValue, NodeError> {
-        match &self {
+    pub fn evaluate<'a>(
+        &'a self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, NodeError> {
+        match self {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
-                Ok(value.clone())
+                Ok(value.clone()).into()
             }
             Node::FieldLeaf { fields, message_provider, publisher_name } => {
                 // Base case of recursion: node is a leaf node, return value
-                message_provider
-                    .get_message(publisher_name)
-                    .map_err(|e| NodeError::MessageProviderError { e })?
-                    .map_or_else(
+                message_provider.get_message(publisher_name).err_into().and_then_sync(|maybe_msg| {
+                    maybe_msg.map_or_else(
                         || Ok(NodeValue::None),
                         |msg| NodeValue::extract_value(msg, fields),
                     )
+                })
             }
             Node::Combination { operator, left, right } => {
                 // evaluate left branch recursively
-                let left_val = left
+                left
                     .as_ref()
                     .expect(
                         "Incorrect Node! Node construction should have verified that \
-                         every non-leaf Node has a left child, but evaluate() encountered \
-                         a node without left child",
+                        every non-leaf Node has a left child, but evaluate() encountered \
+                        a node without left child",
                     )
-                    .evaluate(context)?;
-
-                // If unary operator, then operate on self.
-                // If binary operator, then [left] <operator> [right]
-                // The function short-circuits if possible. The closure provides right operand.
-                left_val.operate(operator, || {
-                    right.as_ref()
-                        .unwrap_or_else(|| {
-                            if operator.is_unary_operator() {
-                                panic!(
-                                    "When the operator is unary, NodeValue should not invoke \
-                                     right operand's provider function"
-                                );
-                            } else {
-                                panic!(
-                                    "Incorrect Node! Node construction should have verified that \
-                                     nodes with binary operator specify two children, but evaluate() \
-                                     encountered a node with binary operator but no right child"
-                                );
-                            }
+                    .evaluate(context)
+                    .and_then(move |left| {
+                        // If unary operator, then operate on self.
+                        // If binary operator, then [left] <operator> [right]
+                        // The function short-circuits if possible. The closure provides right operand.
+                        left.operate(operator, || {
+                            right.as_ref()
+                                .unwrap_or_else(|| {
+                                    if operator.is_unary_operator() {
+                                        panic!(
+                                            "When the operator is unary, NodeValue should not invoke \
+                                            right operand's provider function"
+                                        );
+                                    } else {
+                                        panic!(
+                                            "Incorrect Node! Node construction should have verified that \
+                                            nodes with binary operator specify two children, but evaluate() \
+                                            encountered a node with binary operator but no right child"
+                                        );
+                                    }
+                                })
+                                .evaluate(context)
                         })
-                        .evaluate(context)
-                })
+                    })
             }
             Node::FunctionLeaf { function } => match function {
                 FunctionType::GetCurrentTimestamp { time_source } => {
@@ -497,7 +501,7 @@ impl Node {
                         TimeSource::RealtimeClock => context.unix_timestamp,
                         TimeSource::MonotonicTimeSinceBoot => context.monotonic_time_since_boot,
                     };
-                    Ok(NodeValue::Int64(timestamp.0))
+                    Ok(NodeValue::Int64(timestamp.0)).into()
                 }
             },
         }
@@ -542,6 +546,7 @@ impl fmt::Debug for Node {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
     use paste::paste;
     use protobuf::{EnumOrUnknown, MessageFull};
     use sdv_telemetry_proto_rust::expression::combination_node::{
@@ -1705,7 +1710,7 @@ mod tests {
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             // action + assertion
-            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1773,7 +1778,7 @@ mod tests {
         let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1817,7 +1822,7 @@ mod tests {
         let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1842,7 +1847,7 @@ mod tests {
         let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1894,7 +1899,7 @@ mod tests {
         let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1943,7 +1948,7 @@ mod tests {
         let context = NodeEvaluationContext::new();
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context)?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -1960,7 +1965,7 @@ mod tests {
 
         let context = NodeEvaluationContext::new();
         // expr is "0 < True"
-        let err = lt_node.evaluate(&context).unwrap_err();
+        let err = lt_node.evaluate(&context).unwrap_sync().unwrap_err();
 
         // 0 cannot be less than True
         assert!(
@@ -1973,12 +1978,12 @@ mod tests {
     #[test]
     fn evaluate_message_provider_invalid_publisher_name_fails() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        message_provider.set_next_result(Err(MessageProviderError::InvalidPublisherName));
+        message_provider.set_next_sync_result(Err(MessageProviderError::InvalidPublisherName));
         let node =
             Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
         let context = NodeEvaluationContext::new();
-        let err = node.evaluate(&context).unwrap_err();
+        let err = node.evaluate(&context).unwrap_sync().unwrap_err();
 
         assert!(
             matches!(&err, NodeError::MessageProviderError { .. }),
@@ -1990,12 +1995,12 @@ mod tests {
     #[test]
     fn evaluate_no_provided_message_returns_none() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        message_provider.set_next_result(Ok(None));
+        message_provider.set_next_sync_result(Ok(None));
         let node =
             Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
 
         let context = NodeEvaluationContext::new();
-        let res = node.evaluate(&context).unwrap();
+        let res = node.evaluate(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -2007,9 +2012,9 @@ mod tests {
         });
 
         let context = NodeEvaluationContext::new();
-        let result = timestamp_node.evaluate(&context);
+        let res = timestamp_node.evaluate(&context).unwrap_sync().unwrap();
 
-        assert_eq!(result.unwrap(), NodeValue::Int64(context.unix_timestamp.0));
+        assert_eq!(res, NodeValue::Int64(context.unix_timestamp.0));
     }
 
     #[test]
@@ -2023,7 +2028,7 @@ mod tests {
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros(),
         )
         .unwrap();
-        let result = timestamp_node.evaluate(&context);
+        let result = timestamp_node.evaluate(&context).unwrap_sync();
 
         let Ok(NodeValue::Int64(actual_timestamp)) = result else {
             panic!("Unexpected result: {:?}", result);
@@ -2040,8 +2045,96 @@ mod tests {
         });
 
         let context = NodeEvaluationContext::new();
-        let result = timestamp_node.evaluate(&context);
+        let res = timestamp_node.evaluate(&context).unwrap_sync().unwrap();
 
-        assert_eq!(result.unwrap(), NodeValue::Int64(context.monotonic_time_since_boot.0));
+        assert_eq!(res, NodeValue::Int64(context.monotonic_time_since_boot.0));
+    }
+
+    #[tokio::test]
+    async fn evaluate_asynchronous_provider_left_node_propagates_error() {
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider.set_next_async_result(
+            async { Err(MessageProviderError::InvalidPublisherName) }.boxed(),
+        );
+        let field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: String::default(),
+            fields: vec![],
+            message_provider,
+        });
+        let constant_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
+        let combination_node = Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::LT.into()),
+            left: Some(field_node),
+            right: Some(constant_node),
+        };
+
+        let context = NodeEvaluationContext::new();
+        let err = combination_node.evaluate(&context).unwrap_async().await.unwrap_err();
+
+        assert!(
+            matches!(&err, NodeError::MessageProviderError { e } if matches!(e, MessageProviderError::InvalidPublisherName)),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_asynchronous_provider_right_node_propagates_error() {
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider.set_next_async_result(
+            async { Err(MessageProviderError::InvalidPublisherName) }.boxed(),
+        );
+        let field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: String::default(),
+            fields: vec![],
+            message_provider,
+        });
+        let constant_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) });
+        let combination_node = Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::LT.into()),
+            left: Some(constant_node),
+            right: Some(field_node),
+        };
+
+        let context = NodeEvaluationContext::new();
+        let err = combination_node.evaluate(&context).unwrap_async().await.unwrap_err();
+
+        assert!(
+            matches!(&err, NodeError::MessageProviderError { e } if matches!(e, MessageProviderError::InvalidPublisherName)),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_asynchronous_provider_result_success() {
+        let left_message_provider = Arc::new(MockMessageProvider::new());
+        left_message_provider.set_next_async_result(
+            async { Ok(Some(Box::new(TEST_MESSAGE.clone()) as Box<dyn MessageDyn>)) }.boxed(),
+        );
+        let left_field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![FLOAT_FIELD_NAME.to_owned()],
+            message_provider: left_message_provider,
+        });
+        let right_message_provider = Arc::new(MockMessageProvider::new());
+        right_message_provider.set_next_async_result(
+            async { Ok(Some(Box::new(TEST_MESSAGE.clone()) as Box<dyn MessageDyn>)) }.boxed(),
+        );
+        let right_field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![INT_FIELD_NAME.to_owned()],
+            message_provider: right_message_provider,
+        });
+        let combination_node = Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::GT.into()),
+            left: Some(left_field_node),
+            right: Some(right_field_node),
+        };
+
+        let context = NodeEvaluationContext::new();
+        let res = combination_node.evaluate(&context).unwrap_async().await.unwrap();
+
+        assert_eq!(&res, &NodeValue::Bool(true));
     }
 }

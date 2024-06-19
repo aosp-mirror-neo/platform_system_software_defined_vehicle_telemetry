@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use futures::future::BoxFuture;
 use lazy_static::lazy_static;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::expression::combination_node::{
@@ -7,6 +8,7 @@ use sdv_telemetry_proto_rust::expression::combination_node::{
     RoundingOperator,
 };
 use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
@@ -104,7 +106,8 @@ lazy_static! {
 }
 
 pub struct MockMessageProvider {
-    pub next_result: Mutex<Option<Result<Option<Box<dyn MessageDyn>>, MessageProviderError>>>,
+    pub next_result:
+        Mutex<Option<OperationResult<'static, Option<Box<dyn MessageDyn>>, MessageProviderError>>>,
 }
 
 impl MockMessageProvider {
@@ -112,9 +115,23 @@ impl MockMessageProvider {
         Self { next_result: None.into() }
     }
 
-    pub fn set_next_result(
+    pub fn set_next_async_result(
+        &self,
+        future: BoxFuture<'static, Result<Option<Box<dyn MessageDyn>>, MessageProviderError>>,
+    ) {
+        self.set_next_result(OperationResult::Asynchronous(future));
+    }
+
+    pub fn set_next_sync_result(
         &self,
         result: Result<Option<Box<dyn MessageDyn>>, MessageProviderError>,
+    ) {
+        self.set_next_result(OperationResult::Synchronous(result));
+    }
+
+    fn set_next_result(
+        &self,
+        result: OperationResult<'static, Option<Box<dyn MessageDyn>>, MessageProviderError>,
     ) {
         self.next_result.lock().unwrap().replace(result);
     }
@@ -124,12 +141,10 @@ impl MessageProvider for MockMessageProvider {
     fn get_message(
         &self,
         _publisher_name: &str,
-    ) -> Result<Option<Box<dyn MessageDyn>>, MessageProviderError> {
-        self.next_result
-            .lock()
-            .unwrap()
-            .take()
-            .unwrap_or_else(|| Ok(Some(Box::new(TEST_MESSAGE.clone()))))
+    ) -> OperationResult<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+        self.next_result.lock().unwrap().take().unwrap_or_else(|| {
+            OperationResult::Synchronous(Ok(Some(Box::new(TEST_MESSAGE.clone()))))
+        })
     }
 }
 

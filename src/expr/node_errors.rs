@@ -32,7 +32,10 @@ pub enum NodeError {
 
     // errors related to FieldLeafNode
     #[error("Field leaf node encountered error: {e}")]
-    MessageProviderError { e: MessageProviderError },
+    MessageProviderError {
+        #[from]
+        e: MessageProviderError,
+    },
     #[error("Descriptor not found: {e}")]
     DescriptorProviderError {
         #[from]

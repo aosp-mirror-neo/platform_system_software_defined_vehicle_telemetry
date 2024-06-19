@@ -4,20 +4,16 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-use protobuf::{
-    reflect::{ReflectEqMode, ReflectFieldRef, ReflectValueRef},
-    MessageDyn,
+use protobuf::reflect::{ReflectEqMode, ReflectFieldRef, ReflectValueRef};
+use protobuf::MessageDyn;
+use sdv_telemetry_proto_rust::expression::combination_node::{
+    ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
+    RoundingOperator,
 };
-use sdv_telemetry_proto_rust::expression::{
-    combination_node::{
-        ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
-        RoundingOperator,
-    },
-    constant_leaf_node::Node_value as NodeValueProto,
-    ConstantLeafNode as ConstantLeafNodeProto,
-};
-use std::convert::From;
-use std::error::Error;
+use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
+use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodeProto;
+use sdv_telemetry_utils::operation_result::OperationResult;
+use std::{convert::From, error::Error};
 
 use crate::expr::{
     node_errors::NodeError,
@@ -117,82 +113,23 @@ impl PartialEq for NodeValue {
 }
 
 impl NodeValue {
-    /// Converts a ConstantLeafNode into a NodeValue.
-    pub fn from_constant_leaf_node(
-        constant_leaf_node: &ConstantLeafNodeProto,
-    ) -> Result<NodeValue, NodeError> {
-        Ok(match &constant_leaf_node.node_value {
-            Some(NodeValueProto::BoolValue(val)) => NodeValue::Bool(*val),
-            Some(NodeValueProto::Int32Value(val)) => NodeValue::Int32(*val),
-            Some(NodeValueProto::Int64Value(val)) => NodeValue::Int64(*val),
-            Some(NodeValueProto::FloatValue(val)) => NodeValue::Float(*val),
-            Some(NodeValueProto::DoubleValue(val)) => NodeValue::Double(*val),
-            Some(node_value) => {
-                return Err(NodeError::ConstantValueNotSupported { node_value: node_value.clone() })
-            }
-            None => return Err(NodeError::ConstantValueNotSet),
-        })
-    }
-
-    /// Performs operations using the operator.
+    /// Performs operation synchronously using the operator and synchronous right operand provider.
     /// This call will short-circuit and skip evaluating the right branch if the
     /// left operand uniquely determines the result.
     ///
     /// # Arguments:
     ///
-    /// * `&self` - The left operand.
+    /// * `self` - The left operand.
     /// * `op` - The operator.
     ///          If unary operator, then operates on self.
     ///          If binary operator, then [self] <operator> [right].
     /// * `get_right_operand` - The function that provides the right operand when called.
-    pub fn operate(
-        &self,
+    pub fn operate_sync(
+        self,
         op: &OperatorProto,
-        get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError>,
+        get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError> + Send,
     ) -> Result<NodeValue, NodeError> {
-        // None occurs when message is missing or incomplete, and None propagates up.
-        if self.is_none() {
-            return Ok(self.clone());
-        }
-        match op {
-            OperatorProto::ArithmeticOperator(op) => self.handle_arithmetic(
-                &op.enum_value().map_err(|i| NodeError::UnknownOperator {
-                    op: format!("Arithmetic operator with enum value {}", i),
-                })?,
-                get_right_operand,
-            ),
-            OperatorProto::LogicalOperator(op) => self.handle_logical(
-                &op.enum_value().map_err(|i| NodeError::UnknownOperator {
-                    op: format!("Logical operator with enum value {}", i),
-                })?,
-                get_right_operand,
-            ),
-            OperatorProto::RelationalOperator(op) => self.handle_relational(
-                &op.enum_value().map_err(|i| NodeError::UnknownOperator {
-                    op: format!("Relational operator with enum value {}", i),
-                })?,
-                &get_right_operand()?,
-            ),
-            OperatorProto::RoundingOperator(op) => {
-                self.handle_rounding(&op.enum_value().map_err(|i| NodeError::UnknownOperator {
-                    op: format!("Rounding operator with enum value {}", i),
-                })?)
-            }
-            _ => Err(NodeError::UnknownOperator { op: format!("{:?}", op) }),
-        }
-    }
-
-    /// Gets a NodeValue from a protobuf message and its fields.
-    pub fn extract_value(
-        msg: Box<dyn MessageDyn>,
-        fields: &[String],
-    ) -> Result<NodeValue, NodeError> {
-        // if no field names, return the message itself as the NodeValue
-        if fields.is_empty() {
-            return Ok(NodeValue::Message(msg));
-        }
-        // recursively gets the field value from field names
-        Self::extract_field_value(msg.as_ref(), fields)
+        self.operate(op, move || OperationResult::Synchronous(get_right_operand())).unwrap_sync()
     }
 
     /// Returns the bool value or a custom error message if NodeValue is not a bool.
@@ -295,6 +232,115 @@ impl NodeValue {
         })
     }
 
+    /// Converts a ConstantLeafNode into a NodeValue.
+    pub(super) fn from_constant_leaf_node(
+        constant_leaf_node: &ConstantLeafNodeProto,
+    ) -> Result<NodeValue, NodeError> {
+        Ok(match &constant_leaf_node.node_value {
+            Some(NodeValueProto::BoolValue(val)) => NodeValue::Bool(*val),
+            Some(NodeValueProto::Int32Value(val)) => NodeValue::Int32(*val),
+            Some(NodeValueProto::Int64Value(val)) => NodeValue::Int64(*val),
+            Some(NodeValueProto::FloatValue(val)) => NodeValue::Float(*val),
+            Some(NodeValueProto::DoubleValue(val)) => NodeValue::Double(*val),
+            Some(node_value) => {
+                return Err(NodeError::ConstantValueNotSupported { node_value: node_value.clone() })
+            }
+            None => return Err(NodeError::ConstantValueNotSet),
+        })
+    }
+
+    /// Gets a NodeValue from a protobuf message and its fields.
+    pub(super) fn extract_value(
+        msg: Box<dyn MessageDyn>,
+        fields: &[String],
+    ) -> Result<NodeValue, NodeError> {
+        // if no field names, return the message itself as the NodeValue
+        if fields.is_empty() {
+            return Ok(NodeValue::Message(msg));
+        }
+        // recursively gets the field value from field names
+        Self::extract_field_value(msg.as_ref(), fields)
+    }
+
+    /// Performs operation using the operator and right operand provider.
+    /// This call will short-circuit and skip evaluating the right branch if the
+    /// left operand uniquely determines the result.
+    ///
+    /// # Arguments:
+    ///
+    /// * `self` - The left operand.
+    /// * `op` - The operator.
+    ///          If unary operator, then operates on self.
+    ///          If binary operator, then [self] <operator> [right].
+    /// * `right_operand_provider` - The function that provides the right operand when called.
+    pub(super) fn operate<'a>(
+        self,
+        op: &OperatorProto,
+        right_operand_provider: impl FnOnce() -> OperationResult<'a, NodeValue, NodeError> + Send,
+    ) -> OperationResult<'a, NodeValue, NodeError> {
+        // None occurs when message is missing or incomplete, and None propagates up.
+        if self.is_none() {
+            return Ok(NodeValue::None).into();
+        }
+
+        match op {
+            OperatorProto::ArithmeticOperator(op) => {
+                let op = match op.enum_value() {
+                    Ok(value) => value,
+                    Err(i) => {
+                        return Err(NodeError::UnknownOperator {
+                            op: format!("Arithmetic operator with enum value {}", i),
+                        })
+                        .into()
+                    }
+                };
+
+                self.handle_arithmetic(&op, right_operand_provider)
+            }
+            OperatorProto::LogicalOperator(op) => {
+                let op = match op.enum_value() {
+                    Ok(value) => value,
+                    Err(i) => {
+                        return Err(NodeError::UnknownOperator {
+                            op: format!("Logical operator with enum value {}", i),
+                        })
+                        .into()
+                    }
+                };
+
+                self.handle_logical(&op, right_operand_provider)
+            }
+            OperatorProto::RelationalOperator(op) => {
+                let op = match op.enum_value() {
+                    Ok(value) => value,
+                    Err(i) => {
+                        return Err(NodeError::UnknownOperator {
+                            op: format!("Relational operator with enum value {}", i),
+                        })
+                        .into()
+                    }
+                };
+
+                self.handle_binary(right_operand_provider, move |left, right| {
+                    left.handle_relational(&op, right)
+                })
+            }
+            OperatorProto::RoundingOperator(op) => self.handle_unary(|value| {
+                let op = match op.enum_value() {
+                    Ok(value) => value,
+                    Err(i) => {
+                        return Err(NodeError::UnknownOperator {
+                            op: format!("Rounding operator with enum value {}", i),
+                        })
+                    }
+                };
+
+                value.handle_rounding(&op)
+            }),
+            _ => Err(NodeError::UnknownOperator { op: format!("{:?}", op) }).into(),
+        }
+    }
+
     // private functions and methods below
 
     /// Reads a field value from a protobuf message using the reflection.
@@ -342,139 +388,145 @@ impl NodeValue {
         }
     }
 
-    /// Handle logical operations.
-    fn handle_logical(
-        &self,
-        op: &LogicalOperator,
-        get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError>,
-    ) -> Result<NodeValue, NodeError> {
-        let err_provider = || NodeError::LogicalOperatorIncompatibleOperands;
-        if !self.is_bool() {
-            return Err(err_provider());
-        }
-        Ok(NodeValue::Bool(match op {
-            LogicalOperator::AND => {
-                if !(self.get_bool(&err_provider)?) {
-                    return Ok(self.clone());
-                }
-                let right = get_right_operand()?;
-                // None occurs when message is missing or incomplete, and None propagates up.
-                if right.is_none() {
-                    return Ok(right.clone());
-                }
-                self.get_bool(&err_provider)? && right.get_bool(&err_provider)?
-            }
-            LogicalOperator::OR => {
-                if self.get_bool(&err_provider)? {
-                    return Ok(self.clone());
-                }
-                let right = get_right_operand()?;
-                // None occurs when message is missing or incomplete, and None propagates up.
-                if right.is_none() {
-                    return Ok(right.clone());
-                }
-                self.get_bool(&err_provider)? || right.get_bool(&err_provider)?
-            }
-            LogicalOperator::XOR => {
-                let right = get_right_operand()?;
-                // None occurs when message is missing or incomplete, and None propagates up.
-                if right.is_none() {
-                    return Ok(right.clone());
-                }
-                self.get_bool(&err_provider)? != right.get_bool(&err_provider)?
-            }
-            LogicalOperator::NOT => !self.get_bool(&err_provider)?,
-        }))
-    }
-
     /// Handle arithmetic operations.
-    fn handle_arithmetic(
-        &self,
+    fn handle_arithmetic<'a>(
+        self,
         op: &ArithmeticOperator,
-        get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError>,
-    ) -> Result<NodeValue, NodeError> {
-        if *op == ArithmeticOperator::UNARY_MINUS {
-            let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
-            if self.is_int() {
-                return Ok(NodeValue::Int64(-self.get_int(&err_provider)?));
-            } else if self.is_numeric() {
-                return Ok(NodeValue::Double(-self.get_double(&err_provider)?));
-            } else if self.is_none() {
-                return Ok(self.clone());
-            } else {
-                return Err(err_provider());
-            }
-        } else if *op == ArithmeticOperator::ABSOLUTE {
-            let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
-            if self.is_int() {
-                return Ok(NodeValue::Int64(self.get_int(&err_provider)?.abs()));
-            } else if self.is_numeric() {
-                return Ok(NodeValue::Double(self.get_double(&err_provider)?.abs()));
-            } else if self.is_none() {
-                return Ok(self.clone());
-            } else {
-                return Err(err_provider());
-            }
+        right_operand_provider: impl FnOnce() -> OperationResult<'a, NodeValue, NodeError> + Send,
+    ) -> OperationResult<'a, NodeValue, NodeError> {
+        let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
+
+        if !self.is_numeric() {
+            return Err(err_provider()).into();
         }
 
-        let other = get_right_operand()?;
-        // None occurs when message is missing or incomplete, and None propagates up.
-        if other.is_none() {
-            return Ok(other.clone());
-        }
-        let err_provider = || NodeError::ArithmeticOperatorIncompatibleOperands;
-        // assert that both operands are numeric types
-        if !self.is_numeric() || !other.is_numeric() {
-            return Err(err_provider());
-        }
         match op {
-            ArithmeticOperator::ADD => self.apply_numeric(
-                &other,
-                |a, b| NodeValue::Int64(a + b),
-                |a, b| NodeValue::Double(a + b),
-                &err_provider,
-            ),
-            ArithmeticOperator::SUBTRACT => self.apply_numeric(
-                &other,
-                |a, b| NodeValue::Int64(a - b),
-                |a, b| NodeValue::Double(a - b),
-                &err_provider,
-            ),
-            ArithmeticOperator::MULTIPLY => self.apply_numeric(
-                &other,
-                |a, b| NodeValue::Int64(a * b),
-                |a, b| NodeValue::Double(a * b),
-                &err_provider,
-            ),
+            ArithmeticOperator::ABSOLUTE => self.handle_unary(|value| {
+                value.apply_numeric_unary(
+                    |a| NodeValue::Int64(a.abs()),
+                    |a| NodeValue::Double(a.abs()),
+                    &err_provider,
+                )
+            }),
+            ArithmeticOperator::ADD => {
+                self.handle_binary(right_operand_provider, move |left, right| {
+                    left.apply_numeric_binary(
+                        right,
+                        |a, b| NodeValue::Int64(a + b),
+                        |a, b| NodeValue::Double(a + b),
+                        &err_provider,
+                    )
+                })
+            }
             ArithmeticOperator::DIVIDE => {
-                if other.is_zero()? {
-                    return Err(NodeError::DivideByZero);
-                }
-                Ok(NodeValue::Double(
-                    self.get_double(&err_provider)? / other.get_double(&err_provider)?,
-                ))
+                self.handle_binary(right_operand_provider, move |left, right| {
+                    let left_double = left.get_double(&err_provider)?;
+                    let right_double = right.get_double(&err_provider)?;
+
+                    if approximately_equal(right_double, 0.0) {
+                        return Err(NodeError::DivideByZero);
+                    }
+
+                    Ok(NodeValue::Double(left_double / right_double))
+                })
             }
             ArithmeticOperator::MODULO_TRUNC => {
-                // First, verify that both operands have the corrected data
-                // types, and only then perform further checks.
-                let err_provider = || NodeError::ModuloOperatorIncompatibleOperands;
-                let dividend = self.get_int(&err_provider)?;
-                let divisor = other.get_int(&err_provider)?;
+                self.handle_binary(right_operand_provider, |left, right| {
+                    // First, verify that both operands have the corrected data
+                    // types, and only then perform further checks.
+                    let err_provider = || NodeError::ModuloOperatorIncompatibleOperands;
+                    let dividend = left.get_int(&err_provider)?;
+                    let divisor = right.get_int(&err_provider)?;
 
-                if divisor == 0 {
-                    return Err(NodeError::DivideByZero);
+                    if divisor == 0 {
+                        return Err(NodeError::DivideByZero);
+                    }
+
+                    Ok(NodeValue::Int64(dividend % divisor))
+                })
+            }
+            ArithmeticOperator::MULTIPLY => {
+                self.handle_binary(right_operand_provider, move |left, right| {
+                    left.apply_numeric_binary(
+                        right,
+                        |a, b| NodeValue::Int64(a * b),
+                        |a, b| NodeValue::Double(a * b),
+                        &err_provider,
+                    )
+                })
+            }
+            ArithmeticOperator::POWER => {
+                self.handle_binary(right_operand_provider, move |left, right| {
+                    left.apply_numeric_binary(
+                        right,
+                        |a, b| NodeValue::Int64(a.pow(b as u32)),
+                        |a, b| NodeValue::Double(a.powf(b)),
+                        &err_provider,
+                    )
+                })
+            }
+            ArithmeticOperator::SUBTRACT => {
+                self.handle_binary(right_operand_provider, move |left, right| {
+                    left.apply_numeric_binary(
+                        right,
+                        |a, b| NodeValue::Int64(a - b),
+                        |a, b| NodeValue::Double(a - b),
+                        &err_provider,
+                    )
+                })
+            }
+            ArithmeticOperator::UNARY_MINUS => self.handle_unary(|value| {
+                value.apply_numeric_unary(
+                    |a| NodeValue::Int64(-a),
+                    |a| NodeValue::Double(-a),
+                    &err_provider,
+                )
+            }),
+        }
+    }
+
+    /// Handle logical operations.
+    fn handle_logical<'a>(
+        self,
+        op: &LogicalOperator,
+        right_operand_provider: impl FnOnce() -> OperationResult<'a, NodeValue, NodeError> + Send,
+    ) -> OperationResult<'a, NodeValue, NodeError> {
+        let err_provider = || NodeError::LogicalOperatorIncompatibleOperands;
+
+        let left_value = match self.get_bool(&err_provider) {
+            Ok(value) => value,
+            Err(err) => return Err(err).into(),
+        };
+
+        match op {
+            LogicalOperator::AND => {
+                if !left_value {
+                    // Short-circuit and don't evaluate right operand if the left operand is false.
+                    Ok(NodeValue::Bool(false)).into()
+                } else {
+                    // If left is true, the result depends on the right operand.
+                    self.handle_binary(right_operand_provider, move |_left, right| {
+                        Ok(NodeValue::Bool(right.get_bool(&err_provider)?))
+                    })
                 }
-                Ok(NodeValue::Int64(dividend % divisor))
             }
-            ArithmeticOperator::POWER => self.apply_numeric(
-                &other,
-                |a, b| NodeValue::Int64(a.pow(b as u32)),
-                |a, b| NodeValue::Double(a.powf(b)),
-                &err_provider,
-            ),
-            ArithmeticOperator::UNARY_MINUS | ArithmeticOperator::ABSOLUTE => {
-                unreachable!("Unary operators should be handled outside of this match statement")
+            LogicalOperator::OR => {
+                if left_value {
+                    // Short-circuit and don't evaluate right operand if the left operand is true.
+                    Ok(NodeValue::Bool(true)).into()
+                } else {
+                    // If left is false, the result depends on the right operand.
+                    self.handle_binary(right_operand_provider, move |_left, right| {
+                        Ok(NodeValue::Bool(right.get_bool(&err_provider)?))
+                    })
+                }
             }
+            LogicalOperator::XOR => {
+                self.handle_binary(right_operand_provider, move |_left, right| {
+                    Ok(NodeValue::Bool(left_value != right.get_bool(&err_provider)?))
+                })
+            }
+            LogicalOperator::NOT => Ok(NodeValue::Bool(!left_value)).into(),
         }
     }
 
@@ -486,7 +538,7 @@ impl NodeValue {
     ) -> Result<NodeValue, NodeError> {
         // None occurs when message is missing or incomplete, and None propagates up.
         if other.is_none() {
-            return Ok(other.clone());
+            return Ok(NodeValue::None);
         }
         let err_provider = || NodeError::ComparisonOperatorIncomptaibleOperands;
         Ok(NodeValue::Bool(match op {
@@ -494,13 +546,13 @@ impl NodeValue {
                 if !self.is_numeric() || !other.is_numeric() {
                     return Ok(NodeValue::Bool(self == other));
                 }
-                self.apply_numeric(other, |a, b| a == b, approximately_equal, &err_provider)
+                self.apply_numeric_binary(other, |a, b| a == b, approximately_equal, &err_provider)
             }
             RelationalOperator::NOT_EQ => {
                 if !self.is_numeric() || !other.is_numeric() {
                     return Ok(NodeValue::Bool(self != other));
                 }
-                self.apply_numeric(
+                self.apply_numeric_binary(
                     other,
                     |a, b| a != b,
                     |a, b| !approximately_equal(a, b),
@@ -556,6 +608,30 @@ impl NodeValue {
             RoundingOperator::ROUND => value.round() as i64,
             RoundingOperator::CEIL => value.ceil() as i64,
         }))
+    }
+
+    /// Handles unary operation on self using provided node value handler.
+    fn handle_unary(
+        &self,
+        handler: impl FnOnce(&NodeValue) -> Result<NodeValue, NodeError>,
+    ) -> OperationResult<'static, NodeValue, NodeError> {
+        handler(self).into()
+    }
+
+    /// Handles binary operation on self using provided node value handler.
+    fn handle_binary<'a>(
+        self,
+        right_operand_provider: impl FnOnce() -> OperationResult<'a, NodeValue, NodeError> + Send,
+        handler: impl FnOnce(&NodeValue, &NodeValue) -> Result<NodeValue, NodeError> + Send + 'a,
+    ) -> OperationResult<'a, NodeValue, NodeError> {
+        right_operand_provider().and_then_sync(move |right| {
+            if right.is_none() {
+                // None occurs when message is missing or incomplete, and None propagates up.
+                return Ok(NodeValue::None);
+            }
+
+            handler(&self, &right)
+        })
     }
 
     /// Check if list contains some element.
@@ -638,7 +714,7 @@ impl NodeValue {
     /// Applies the provided function on two numeric NodeValues based on
     /// the numeric type (integer or floating point).
     /// Returns an error if the NodeValues are not numeric types.
-    fn apply_numeric<R>(
+    fn apply_numeric_binary<R>(
         &self,
         other: &NodeValue,
         int_func: impl FnOnce(i64, i64) -> R,
@@ -649,6 +725,24 @@ impl NodeValue {
             Ok(int_func(self.get_int(err_provider)?, other.get_int(err_provider)?))
         } else if self.is_numeric() && other.is_numeric() {
             Ok(float_func(self.get_double(err_provider)?, other.get_double(err_provider)?))
+        } else {
+            Err(err_provider())
+        }
+    }
+
+    /// Applies the provided function on a numeric NodeValue based on
+    /// the numeric type (integer or floating point).
+    /// Returns an error if the NodeValues are not numeric types.
+    fn apply_numeric_unary<R>(
+        &self,
+        int_func: impl FnOnce(i64) -> R,
+        float_func: impl FnOnce(f64) -> R,
+        err_provider: &impl Fn() -> NodeError,
+    ) -> Result<R, NodeError> {
+        if self.is_int() {
+            Ok(int_func(self.get_int(err_provider)?))
+        } else if self.is_numeric() {
+            Ok(float_func(self.get_double(err_provider)?))
         } else {
             Err(err_provider())
         }
@@ -668,7 +762,7 @@ impl NodeValue {
         if self.is_bool() && other.is_bool() {
             Ok(bool_func(self.get_bool(err_provider)?, other.get_bool(err_provider)?))
         } else {
-            self.apply_numeric(other, int_func, float_func, err_provider)
+            self.apply_numeric_binary(other, int_func, float_func, err_provider)
         }
     }
 }
@@ -1063,39 +1157,48 @@ mod tests {
     }
 
     #[test]
-    fn operate_logical_requires_boolean_types() {
+    fn operate_sync_logical_requires_boolean_types() {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
         assert!(matches!(
-            true_val.operate(&OP_AND, || provide(&int_val)).unwrap_err(),
+            true_val.clone().operate_sync(&OP_AND, || provide(&int_val)).unwrap_err(),
             NodeError::LogicalOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            int_val.operate(&OP_AND, || provide(&true_val)).unwrap_err(),
+            int_val.operate_sync(&OP_AND, || provide(&true_val)).unwrap_err(),
             NodeError::LogicalOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_logical_and() -> Result<(), NodeError> {
+    fn operate_sync_logical_and() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
         let none_val = NodeValue::None;
 
         // true && true = true
-        assert_eq!(true_val.operate(&OP_AND, || provide(&true_val))?, NodeValue::Bool(true));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_AND, || provide(&true_val))?,
+            NodeValue::Bool(true)
+        );
         // true && false = false
-        assert_eq!(true_val.operate(&OP_AND, || provide(&false_val))?, NodeValue::Bool(false));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_AND, || provide(&false_val))?,
+            NodeValue::Bool(false)
+        );
         // false && false = false
-        assert_eq!(false_val.operate(&OP_AND, || provide(&false_val))?, NodeValue::Bool(false));
+        assert_eq!(
+            false_val.clone().operate_sync(&OP_AND, || provide(&false_val))?,
+            NodeValue::Bool(false)
+        );
         // true && None = None
-        assert_eq!(true_val.operate(&OP_AND, || provide(&none_val))?, NodeValue::None);
+        assert_eq!(true_val.operate_sync(&OP_AND, || provide(&none_val))?, NodeValue::None);
         Ok(())
     }
 
     #[test]
-    fn operate_logical_and_short_circuits() -> Result<(), NodeError> {
+    fn operate_sync_logical_and_short_circuits() -> Result<(), NodeError> {
         let false_val = NodeValue::Bool(false);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1103,7 +1206,7 @@ mod tests {
             provide(&false_val)
         };
 
-        let res = false_val.operate(&OP_AND, right_operand_provider)?;
+        let res = false_val.clone().operate_sync(&OP_AND, right_operand_provider)?;
 
         // false && anything = false
         assert_eq!(res, NodeValue::Bool(false));
@@ -1113,7 +1216,7 @@ mod tests {
     }
 
     #[test]
-    fn operate_logical_and_short_circuiting_attempted() -> Result<(), NodeError> {
+    fn operate_sync_logical_and_short_circuiting_attempted() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1122,7 +1225,7 @@ mod tests {
         };
 
         // true && [right_operand] = [right_operand]
-        let res = true_val.operate(&OP_AND, right_operand_provider)?;
+        let res = true_val.clone().operate_sync(&OP_AND, right_operand_provider)?;
 
         assert_eq!(res, NodeValue::Bool(true));
         // should compute right operand because left operand does not uniquely determine result
@@ -1131,24 +1234,30 @@ mod tests {
     }
 
     #[test]
-    fn operate_logical_or() -> Result<(), NodeError> {
+    fn operate_sync_logical_or() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
         let none_val = NodeValue::None;
 
         // true || true = true
-        assert_eq!(true_val.operate(&OP_OR, || provide(&true_val))?, NodeValue::Bool(true));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_OR, || provide(&true_val))?,
+            NodeValue::Bool(true)
+        );
         // true || false = true
-        assert_eq!(true_val.operate(&OP_OR, || provide(&false_val))?, NodeValue::Bool(true));
+        assert_eq!(true_val.operate_sync(&OP_OR, || provide(&false_val))?, NodeValue::Bool(true));
         // false || false = false
-        assert_eq!(false_val.operate(&OP_OR, || provide(&false_val))?, NodeValue::Bool(false));
+        assert_eq!(
+            false_val.clone().operate_sync(&OP_OR, || provide(&false_val))?,
+            NodeValue::Bool(false)
+        );
         // false || None = None
-        assert_eq!(false_val.operate(&OP_OR, || provide(&none_val))?, NodeValue::None);
+        assert_eq!(false_val.operate_sync(&OP_OR, || provide(&none_val))?, NodeValue::None);
         Ok(())
     }
 
     #[test]
-    fn operate_logical_or_short_circuits() -> Result<(), NodeError> {
+    fn operate_sync_logical_or_short_circuits() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1156,7 +1265,7 @@ mod tests {
             provide(&true_val)
         };
 
-        let res = true_val.operate(&OP_OR, right_operand_provider)?;
+        let res = true_val.clone().operate_sync(&OP_OR, right_operand_provider)?;
 
         // true || anything = true
         assert_eq!(res, NodeValue::Bool(true));
@@ -1166,7 +1275,7 @@ mod tests {
     }
 
     #[test]
-    fn operate_logical_or_short_circuiting_attempted() -> Result<(), NodeError> {
+    fn operate_sync_logical_or_short_circuiting_attempted() -> Result<(), NodeError> {
         let false_val = NodeValue::Bool(false);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
@@ -1175,7 +1284,7 @@ mod tests {
         };
 
         // false || [right_operand] = [right_operand]
-        let res = false_val.operate(&OP_OR, right_operand_provider)?;
+        let res = false_val.clone().operate_sync(&OP_OR, right_operand_provider)?;
 
         assert_eq!(res, NodeValue::Bool(false));
         // should compute right operand because left operand does not uniquely determine result
@@ -1184,37 +1293,43 @@ mod tests {
     }
 
     #[test]
-    fn operate_logical_xor() -> Result<(), NodeError> {
+    fn operate_sync_logical_xor() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
         let none_val = NodeValue::None;
 
         // true XOR true = false
-        assert_eq!(true_val.operate(&OP_XOR, || provide(&true_val))?, NodeValue::Bool(false));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_XOR, || provide(&true_val))?,
+            NodeValue::Bool(false)
+        );
         // true XOR false = true
-        assert_eq!(true_val.operate(&OP_XOR, || provide(&false_val))?, NodeValue::Bool(true));
+        assert_eq!(true_val.operate_sync(&OP_XOR, || provide(&false_val))?, NodeValue::Bool(true));
         // false XOR false = false
-        assert_eq!(false_val.operate(&OP_XOR, || provide(&false_val))?, NodeValue::Bool(false));
+        assert_eq!(
+            false_val.clone().operate_sync(&OP_XOR, || provide(&false_val))?,
+            NodeValue::Bool(false)
+        );
         // false || None = None
-        assert_eq!(false_val.operate(&OP_XOR, || provide(&none_val))?, NodeValue::None);
+        assert_eq!(false_val.operate_sync(&OP_XOR, || provide(&none_val))?, NodeValue::None);
         Ok(())
     }
 
     #[test]
-    fn operate_logical_not() -> Result<(), NodeError> {
+    fn operate_sync_logical_not() -> Result<(), NodeError> {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         // !true = false
         assert_eq!(
-            true_val.operate(&OP_NOT, || panic!(
+            true_val.operate_sync(&OP_NOT, || panic!(
                 "Unary operator should not call right operand provider"
             ))?,
             NodeValue::Bool(false)
         );
         // !false = true
         assert_eq!(
-            false_val.operate(&OP_NOT, || panic!(
+            false_val.operate_sync(&OP_NOT, || panic!(
                 "Unary operator should not call right operand provider"
             ))?,
             NodeValue::Bool(true)
@@ -1223,33 +1338,40 @@ mod tests {
     }
 
     #[test]
-    fn operate_arithmetic_requires_numeric_types() {
+    fn operate_sync_arithmetic_requires_numeric_types() {
         let true_val = NodeValue::Bool(true);
         let int_val = NodeValue::Int32(1);
 
         assert!(matches!(
-            true_val.operate(&OP_ADD, || provide(&int_val)).unwrap_err(),
+            true_val.clone().operate_sync(&OP_ADD, || provide(&int_val)).unwrap_err(),
             NodeError::ArithmeticOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            int_val.operate(&OP_ADD, || provide(&true_val)).unwrap_err(),
+            int_val.operate_sync(&OP_ADD, || provide(&true_val)).unwrap_err(),
             NodeError::ArithmeticOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_arithmetic_propagates_up_none_values() {
+    fn operate_sync_arithmetic_propagates_up_none_values() {
         let int_val = NodeValue::Int32(1);
         let none_val = NodeValue::None;
 
         // 1 + None = None
-        assert_eq!(int_val.operate(&OP_ADD, || provide(&none_val)).unwrap(), NodeValue::None);
+        assert_eq!(
+            int_val.clone().operate_sync(&OP_ADD, || provide(&none_val)).unwrap(),
+            NodeValue::None
+        );
         // None + 1 = None
-        assert_eq!(none_val.operate(&OP_ADD, || provide(&int_val)).unwrap(), NodeValue::None);
+        assert_eq!(
+            none_val.clone().operate_sync(&OP_ADD, || provide(&int_val)).unwrap(),
+            NodeValue::None
+        );
         // - None = None
         assert_eq!(
             none_val
-                .operate(&OP_UNARY_MINUS, || panic!(
+                .clone()
+                .operate_sync(&OP_UNARY_MINUS, || panic!(
                     "Unary operator should not call right operand provider"
                 ))
                 .unwrap(),
@@ -1258,7 +1380,7 @@ mod tests {
         // |None| = None
         assert_eq!(
             none_val
-                .operate(&OP_ABSOLUTE, || panic!(
+                .operate_sync(&OP_ABSOLUTE, || panic!(
                     "Unary operator should not call right operand provider"
                 ))
                 .unwrap(),
@@ -1267,89 +1389,92 @@ mod tests {
     }
 
     #[test]
-    fn operate_arithmetic_add_integers() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_add_integers() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let twenty = NodeValue::Int32(20);
 
         // 5 + 20 = 25
-        assert_eq!(five.operate(&OP_ADD, || provide(&twenty))?, NodeValue::Int64(25));
+        assert_eq!(five.operate_sync(&OP_ADD, || provide(&twenty))?, NodeValue::Int64(25));
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_add_floats() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_add_floats() -> Result<(), NodeError> {
         let five = NodeValue::Float(5.2);
         let twenty = NodeValue::Double(20.1);
 
         // 5.2 + 20.1 = 25.3
-        assert_eq!(five.operate(&OP_ADD, || provide(&twenty))?, NodeValue::Double(25.3));
+        assert_eq!(five.operate_sync(&OP_ADD, || provide(&twenty))?, NodeValue::Double(25.3));
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_subtract_integers() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_subtract_integers() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let twenty = NodeValue::Int32(20);
 
         // 5 - 20 = -15
-        assert_eq!(five.operate(&OP_SUBTRACT, || provide(&twenty))?, NodeValue::Int64(-15));
+        assert_eq!(five.operate_sync(&OP_SUBTRACT, || provide(&twenty))?, NodeValue::Int64(-15));
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_subtract_floats() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_subtract_floats() -> Result<(), NodeError> {
         let five = NodeValue::Float(5.2);
         let twenty = NodeValue::Double(20.1);
 
         // 5.2 - 20.1 = -14.9
-        assert_eq!(five.operate(&OP_SUBTRACT, || provide(&twenty))?, NodeValue::Double(-14.9));
+        assert_eq!(five.operate_sync(&OP_SUBTRACT, || provide(&twenty))?, NodeValue::Double(-14.9));
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_multiply() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_multiply() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let point_five = NodeValue::Float(0.5);
 
         // 5 * 0.5 = 2.5
-        assert_eq!(five.operate(&OP_MULTIPLY, || provide(&point_five))?, NodeValue::Double(2.5));
+        assert_eq!(
+            five.operate_sync(&OP_MULTIPLY, || provide(&point_five))?,
+            NodeValue::Double(2.5)
+        );
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_divide_by_zero() {
+    fn operate_sync_arithmetic_divide_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
         assert!(matches!(
-            five.operate(&OP_DIVIDE, || provide(&zero)).unwrap_err(),
+            five.operate_sync(&OP_DIVIDE, || provide(&zero)).unwrap_err(),
             NodeError::DivideByZero
         ));
     }
 
     #[test]
-    fn operate_arithmetic_divide() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_divide() -> Result<(), NodeError> {
         let five = NodeValue::Int32(5);
         let two = NodeValue::Int32(2);
 
         // 5 / 2 = 2.5
-        assert_eq!(five.operate(&OP_DIVIDE, || provide(&two))?, NodeValue::Double(2.5));
+        assert_eq!(five.operate_sync(&OP_DIVIDE, || provide(&two))?, NodeValue::Double(2.5));
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_modulo_trunc_by_zero() {
+    fn operate_sync_arithmetic_modulo_trunc_by_zero() {
         let five = NodeValue::Int32(5);
         let zero = NodeValue::Int32(0);
 
         assert!(matches!(
-            five.operate(&OP_MODULO_TRUNC, || provide(&zero)).unwrap_err(),
+            five.operate_sync(&OP_MODULO_TRUNC, || provide(&zero)).unwrap_err(),
             NodeError::DivideByZero
         ));
     }
 
     #[test]
-    fn operate_arithmetic_modulo_trunc_ok() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_modulo_trunc_ok() -> Result<(), NodeError> {
         let cases = [
             (8, /*%*/ 3, /*=*/ 2),
             (8, /*%*/ -3, /*=*/ 2),
@@ -1359,7 +1484,7 @@ mod tests {
         for (dividend, divisor, expected) in cases {
             assert_eq!(
                 NodeValue::Int32(dividend)
-                    .operate(&OP_MODULO_TRUNC, || provide(&NodeValue::Int32(divisor)))?,
+                    .operate_sync(&OP_MODULO_TRUNC, || provide(&NodeValue::Int32(divisor)))?,
                 NodeValue::Int64(expected)
             );
         }
@@ -1367,57 +1492,57 @@ mod tests {
     }
 
     #[test]
-    fn operate_arithmetic_modulo_trunc_no_floating_points() {
+    fn operate_sync_arithmetic_modulo_trunc_no_floating_points() {
         let five = NodeValue::Float(5.0);
         let two = NodeValue::Int32(2);
 
         // both operands must be integers
         assert!(matches!(
-            five.operate(&OP_MODULO_TRUNC, || provide(&two)).unwrap_err(),
+            five.clone().operate_sync(&OP_MODULO_TRUNC, || provide(&two)).unwrap_err(),
             NodeError::ModuloOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            two.operate(&OP_MODULO_TRUNC, || provide(&five)).unwrap_err(),
+            two.operate_sync(&OP_MODULO_TRUNC, || provide(&five)).unwrap_err(),
             NodeError::ModuloOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_arithmetic_power_integers() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_power_integers() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
 
         // 2^2 = 4
-        assert_eq!(two.operate(&OP_POWER, || provide(&two))?, NodeValue::Int64(4));
+        assert_eq!(two.clone().operate_sync(&OP_POWER, || provide(&two))?, NodeValue::Int64(4));
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_power_floats() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_power_floats() -> Result<(), NodeError> {
         let val = 2.5_f64;
         let expected = val.powf(val);
         let two_point_five = NodeValue::Double(val);
 
         assert_eq!(
-            two_point_five.operate(&OP_POWER, || provide(&two_point_five))?,
+            two_point_five.clone().operate_sync(&OP_POWER, || provide(&two_point_five))?,
             NodeValue::Double(expected)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_arithmetic_unary_minus() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_unary_minus() -> Result<(), NodeError> {
         let two = NodeValue::Int32(2);
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
         assert_eq!(
-            two.operate(&OP_UNARY_MINUS, || panic!(
+            two.operate_sync(&OP_UNARY_MINUS, || panic!(
                 "Unary operator should not call right operand provider"
             ))?,
             NodeValue::Int64(-2)
         );
         assert_eq!(
-            five.operate(&OP_UNARY_MINUS, || panic!(
+            five.operate_sync(&OP_UNARY_MINUS, || panic!(
                 "Unary operator should not call right operand provider"
             ))?,
             NodeValue::Double(-5.5)
@@ -1425,7 +1550,7 @@ mod tests {
         // fails for non-numeric operand
         assert!(matches!(
             true_val
-                .operate(&OP_UNARY_MINUS, || panic!(
+                .operate_sync(&OP_UNARY_MINUS, || panic!(
                     "Unary operator should not call right operand provider"
                 ))
                 .unwrap_err(),
@@ -1436,46 +1561,52 @@ mod tests {
     }
 
     #[test]
-    fn operate_arithmetic_absolute() -> Result<(), NodeError> {
+    fn operate_sync_arithmetic_absolute() -> Result<(), NodeError> {
         let one = NodeValue::Int64(1);
         let negative_three = NodeValue::Int64(-3);
         let two_point_seven = NodeValue::Float(2.7);
         let negative_two_point_seven = NodeValue::Float(-2.7);
         let zero = NodeValue::Float(0.0);
 
-        assert_eq!(one.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?, NodeValue::Int64(1));
         assert_eq!(
-            negative_three.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            one.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            NodeValue::Int64(1)
+        );
+        assert_eq!(
+            negative_three.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
             NodeValue::Int64(3)
         );
         assert_eq!(
-            two_point_seven.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            two_point_seven.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
             NodeValue::Double(2.7)
         );
         assert_eq!(
-            negative_two_point_seven.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            negative_two_point_seven.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
             NodeValue::Double(2.7)
         );
         assert_eq!(
-            zero.operate(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
+            zero.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None))?,
             NodeValue::Double(0.0)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_propagates_up_none_values() {
+    fn operate_sync_relational_propagates_up_none_values() {
         let int_val = NodeValue::Int32(1);
         let none_val = NodeValue::None;
 
         // 1 > None = None
-        assert_eq!(int_val.operate(&OP_GT, || provide(&none_val)).unwrap(), NodeValue::None);
+        assert_eq!(
+            int_val.clone().operate_sync(&OP_GT, || provide(&none_val)).unwrap(),
+            NodeValue::None
+        );
         // None > 1 = None
-        assert_eq!(none_val.operate(&OP_GT, || provide(&int_val)).unwrap(), NodeValue::None);
+        assert_eq!(none_val.operate_sync(&OP_GT, || provide(&int_val)).unwrap(), NodeValue::None);
     }
 
     #[test]
-    fn operate_relational_eq() -> Result<(), NodeError> {
+    fn operate_sync_relational_eq() -> Result<(), NodeError> {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
@@ -1490,18 +1621,18 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(one.operate(&OP_EQ, || provide(&one_epsilon))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_EQ, || provide(&two))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_EQ, || provide(&two_i64))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_EQ, || provide(&two_f32))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_EQ, || provide(&two_f64))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_EQ, || provide(&five))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_EQ, || provide(&true_val))?, NodeValue::Bool(false));
+        assert_eq!(one.operate_sync(&OP_EQ, || provide(&one_epsilon))?, NodeValue::Bool(true));
+        assert_eq!(two.clone().operate_sync(&OP_EQ, || provide(&two))?, NodeValue::Bool(true));
+        assert_eq!(two.clone().operate_sync(&OP_EQ, || provide(&two_i64))?, NodeValue::Bool(true));
+        assert_eq!(two.clone().operate_sync(&OP_EQ, || provide(&two_f32))?, NodeValue::Bool(true));
+        assert_eq!(two.clone().operate_sync(&OP_EQ, || provide(&two_f64))?, NodeValue::Bool(true));
+        assert_eq!(two.clone().operate_sync(&OP_EQ, || provide(&five))?, NodeValue::Bool(false));
+        assert_eq!(two.operate_sync(&OP_EQ, || provide(&true_val))?, NodeValue::Bool(false));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_not_eq() -> Result<(), NodeError> {
+    fn operate_sync_relational_not_eq() -> Result<(), NodeError> {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
@@ -1514,16 +1645,19 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(one.operate(&OP_NOT_EQ, || provide(&one_epsilon))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&two))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&two_f32))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&five))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_NOT_EQ, || provide(&true_val))?, NodeValue::Bool(true));
+        assert_eq!(one.operate_sync(&OP_NOT_EQ, || provide(&one_epsilon))?, NodeValue::Bool(false));
+        assert_eq!(two.clone().operate_sync(&OP_NOT_EQ, || provide(&two))?, NodeValue::Bool(false));
+        assert_eq!(
+            two.clone().operate_sync(&OP_NOT_EQ, || provide(&two_f32))?,
+            NodeValue::Bool(false)
+        );
+        assert_eq!(two.clone().operate_sync(&OP_NOT_EQ, || provide(&five))?, NodeValue::Bool(true));
+        assert_eq!(two.operate_sync(&OP_NOT_EQ, || provide(&true_val))?, NodeValue::Bool(true));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_gt() -> Result<(), NodeError> {
+    fn operate_sync_relational_gt() -> Result<(), NodeError> {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
@@ -1536,20 +1670,23 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(true_val.operate(&OP_GT, || provide(&false_val))?, NodeValue::Bool(true));
-        assert_eq!(one_epsilon.operate(&OP_GT, || provide(&one))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_GT, || provide(&five))?, NodeValue::Bool(false));
-        assert_eq!(five.operate(&OP_GT, || provide(&two))?, NodeValue::Bool(true));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_GT, || provide(&false_val))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(one_epsilon.operate_sync(&OP_GT, || provide(&one))?, NodeValue::Bool(false));
+        assert_eq!(two.clone().operate_sync(&OP_GT, || provide(&two))?, NodeValue::Bool(false));
+        assert_eq!(two.clone().operate_sync(&OP_GT, || provide(&five))?, NodeValue::Bool(false));
+        assert_eq!(five.clone().operate_sync(&OP_GT, || provide(&two))?, NodeValue::Bool(true));
         assert!(matches!(
-            five.operate(&OP_GT, || provide(&true_val)).unwrap_err(),
+            five.operate_sync(&OP_GT, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_gt_or_eq() -> Result<(), NodeError> {
+    fn operate_sync_relational_gt_or_eq() -> Result<(), NodeError> {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
@@ -1561,20 +1698,35 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(true_val.operate(&OP_GT_OR_EQ, || provide(&true_val))?, NodeValue::Bool(true));
-        assert_eq!(one.operate(&OP_GT_OR_EQ, || provide(&one_epsilon))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_GT_OR_EQ, || provide(&five))?, NodeValue::Bool(false));
-        assert_eq!(five.operate(&OP_GT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_GT_OR_EQ, || provide(&true_val))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            one.operate_sync(&OP_GT_OR_EQ, || provide(&one_epsilon))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            two.clone().operate_sync(&OP_GT_OR_EQ, || provide(&two))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            two.clone().operate_sync(&OP_GT_OR_EQ, || provide(&five))?,
+            NodeValue::Bool(false)
+        );
+        assert_eq!(
+            five.clone().operate_sync(&OP_GT_OR_EQ, || provide(&two))?,
+            NodeValue::Bool(true)
+        );
         assert!(matches!(
-            five.operate(&OP_GT_OR_EQ, || provide(&true_val)).unwrap_err(),
+            five.operate_sync(&OP_GT_OR_EQ, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_lt() -> Result<(), NodeError> {
+    fn operate_sync_relational_lt() -> Result<(), NodeError> {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
@@ -1587,20 +1739,23 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(true_val.operate(&OP_LT, || provide(&false_val))?, NodeValue::Bool(false));
-        assert_eq!(one.operate(&OP_LT, || provide(&one_epsilon))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
-        assert_eq!(two.operate(&OP_LT, || provide(&five))?, NodeValue::Bool(true));
-        assert_eq!(five.operate(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_LT, || provide(&false_val))?,
+            NodeValue::Bool(false)
+        );
+        assert_eq!(one.operate_sync(&OP_LT, || provide(&one_epsilon))?, NodeValue::Bool(false));
+        assert_eq!(two.clone().operate_sync(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
+        assert_eq!(two.clone().operate_sync(&OP_LT, || provide(&five))?, NodeValue::Bool(true));
+        assert_eq!(five.clone().operate_sync(&OP_LT, || provide(&two))?, NodeValue::Bool(false));
         assert!(matches!(
-            five.operate(&OP_LT, || provide(&true_val)).unwrap_err(),
+            five.operate_sync(&OP_LT, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_lt_or_eq() -> Result<(), NodeError> {
+    fn operate_sync_relational_lt_or_eq() -> Result<(), NodeError> {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
@@ -1612,55 +1767,73 @@ mod tests {
         let five = NodeValue::Float(5.5);
         let true_val = NodeValue::Bool(true);
 
-        assert_eq!(true_val.operate(&OP_LT_OR_EQ, || provide(&true_val))?, NodeValue::Bool(true));
-        assert_eq!(one_epsilon.operate(&OP_LT_OR_EQ, || provide(&one))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(true));
-        assert_eq!(two.operate(&OP_LT_OR_EQ, || provide(&five))?, NodeValue::Bool(true));
-        assert_eq!(five.operate(&OP_LT_OR_EQ, || provide(&two))?, NodeValue::Bool(false));
+        assert_eq!(
+            true_val.clone().operate_sync(&OP_LT_OR_EQ, || provide(&true_val))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            one_epsilon.operate_sync(&OP_LT_OR_EQ, || provide(&one))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            two.clone().operate_sync(&OP_LT_OR_EQ, || provide(&two))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            two.clone().operate_sync(&OP_LT_OR_EQ, || provide(&five))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            five.clone().operate_sync(&OP_LT_OR_EQ, || provide(&two))?,
+            NodeValue::Bool(false)
+        );
         assert!(matches!(
-            five.operate(&OP_LT_OR_EQ, || provide(&true_val)).unwrap_err(),
+            five.operate_sync(&OP_LT_OR_EQ, || provide(&true_val)).unwrap_err(),
             NodeError::ComparisonOperatorIncomptaibleOperands
         ));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_contains_errs_if_left_operand_not_a_list() {
+    fn operate_sync_relational_contains_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
-            two.operate(&OP_CONTAINS, || provide(&two)).unwrap_err(),
+            two.clone().operate_sync(&OP_CONTAINS, || provide(&two)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_relational_contains_errs_if_operands_have_incompatible_types() {
+    fn operate_sync_relational_contains_errs_if_operands_have_incompatible_types() {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
         assert!(matches!(
-            bool_list.operate(&OP_CONTAINS, || provide(&five)).unwrap_err(),
+            bool_list.operate_sync(&OP_CONTAINS, || provide(&five)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_relational_contains_bool_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_contains_bool_type_ok() -> Result<(), NodeError> {
         let bool_list = NodeValue::BoolList(vec![true, true, true]);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(bool_list.operate(&OP_CONTAINS, || provide(&true_val))?, NodeValue::Bool(true));
         assert_eq!(
-            bool_list.operate(&OP_CONTAINS, || provide(&false_val))?,
+            bool_list.clone().operate_sync(&OP_CONTAINS, || provide(&true_val))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            bool_list.operate_sync(&OP_CONTAINS, || provide(&false_val))?,
             NodeValue::Bool(false)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_contains_int_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_contains_int_type_ok() -> Result<(), NodeError> {
         let int_list = NodeValue::Int32List(vec![3, 30, 300]);
         let zero = NodeValue::Int32(0);
         let three = NodeValue::Int32(3);
@@ -1668,18 +1841,27 @@ mod tests {
         // not int
         let three_hundred = NodeValue::Double(300.0);
 
-        assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&zero))?, NodeValue::Bool(false));
-        assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&three))?, NodeValue::Bool(true));
-        assert_eq!(int_list.operate(&OP_CONTAINS, || provide(&thirty))?, NodeValue::Bool(true));
+        assert_eq!(
+            int_list.clone().operate_sync(&OP_CONTAINS, || provide(&zero))?,
+            NodeValue::Bool(false)
+        );
+        assert_eq!(
+            int_list.clone().operate_sync(&OP_CONTAINS, || provide(&three))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            int_list.clone().operate_sync(&OP_CONTAINS, || provide(&thirty))?,
+            NodeValue::Bool(true)
+        );
         assert!(matches!(
-            int_list.operate(&OP_CONTAINS, || provide(&three_hundred)).unwrap_err(),
+            int_list.operate_sync(&OP_CONTAINS, || provide(&three_hundred)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_contains_float_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_contains_float_type_ok() -> Result<(), NodeError> {
         let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
         let point_five = NodeValue::Float(0.5);
         // f64 PI, not f32 PI
@@ -1689,67 +1871,82 @@ mod tests {
         let thirty = NodeValue::Float(30.0);
 
         assert_eq!(
-            float_list.operate(&OP_CONTAINS, || provide(&point_five))?,
+            float_list.clone().operate_sync(&OP_CONTAINS, || provide(&point_five))?,
             NodeValue::Bool(true)
         );
-        assert_eq!(float_list.operate(&OP_CONTAINS, || provide(&pi))?, NodeValue::Bool(true));
-        assert_eq!(float_list.operate(&OP_CONTAINS, || provide(&ten))?, NodeValue::Bool(true));
-        assert_eq!(float_list.operate(&OP_CONTAINS, || provide(&thirty))?, NodeValue::Bool(false));
+        assert_eq!(
+            float_list.clone().operate_sync(&OP_CONTAINS, || provide(&pi))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            float_list.clone().operate_sync(&OP_CONTAINS, || provide(&ten))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            float_list.operate_sync(&OP_CONTAINS, || provide(&thirty))?,
+            NodeValue::Bool(false)
+        );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_contains_message_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_contains_message_type_ok() -> Result<(), NodeError> {
         let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
         let msg_list = NodeValue::MessageList(vec![boxed_message.clone()]);
         let msg_1 = NodeValue::Message(boxed_message);
         let msg_2 = NodeValue::Message(Box::new(EMPTY_TEST_MESSAGE.clone()));
 
-        assert_eq!(msg_list.operate(&OP_CONTAINS, || provide(&msg_1))?, NodeValue::Bool(true));
-        assert_eq!(msg_list.operate(&OP_CONTAINS, || provide(&msg_2))?, NodeValue::Bool(false));
+        assert_eq!(
+            msg_list.clone().operate_sync(&OP_CONTAINS, || provide(&msg_1))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            msg_list.operate_sync(&OP_CONTAINS, || provide(&msg_2))?,
+            NodeValue::Bool(false)
+        );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_does_not_contain_errs_if_left_operand_not_a_list() {
+    fn operate_sync_relational_does_not_contain_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
-            two.operate(&OP_DOES_NOT_CONTAIN, || provide(&two)).unwrap_err(),
+            two.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&two)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_relational_does_not_contain_errs_if_operands_have_incompatible_types() {
+    fn operate_sync_relational_does_not_contain_errs_if_operands_have_incompatible_types() {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
         assert!(matches!(
-            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&five)).unwrap_err(),
+            bool_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&five)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_relational_does_not_contain_bool_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_does_not_contain_bool_type_ok() -> Result<(), NodeError> {
         let bool_list = NodeValue::BoolList(vec![true, true, true]);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
         assert_eq!(
-            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&true_val))?,
+            bool_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&true_val))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            bool_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&false_val))?,
+            bool_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&false_val))?,
             NodeValue::Bool(true)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_does_not_contain_int_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_does_not_contain_int_type_ok() -> Result<(), NodeError> {
         let int_list = NodeValue::Int32List(vec![3, 30, 300]);
         let zero = NodeValue::Int32(0);
         let three = NodeValue::Int32(3);
@@ -1758,26 +1955,26 @@ mod tests {
         let three_hundred = NodeValue::Double(300.0);
 
         assert_eq!(
-            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&zero))?,
+            int_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&zero))?,
             NodeValue::Bool(true)
         );
         assert_eq!(
-            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&three))?,
+            int_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&three))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&thirty))?,
+            int_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&thirty))?,
             NodeValue::Bool(false)
         );
         assert!(matches!(
-            int_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&three_hundred)).unwrap_err(),
+            int_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&three_hundred)).unwrap_err(),
             NodeError::ContainsOperatorIncompatibleOperands
         ));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_does_not_contain_float_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_does_not_contain_float_type_ok() -> Result<(), NodeError> {
         let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
         let point_five = NodeValue::Float(0.5);
         // f64 PI, not f32 PI
@@ -1787,145 +1984,154 @@ mod tests {
         let thirty = NodeValue::Float(30.0);
 
         assert_eq!(
-            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&point_five))?,
+            float_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&point_five))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&pi))?,
+            float_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&pi))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&ten))?,
+            float_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&ten))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            float_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&thirty))?,
+            float_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&thirty))?,
             NodeValue::Bool(true)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_does_not_contain_message_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_does_not_contain_message_type_ok() -> Result<(), NodeError> {
         let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
         let msg_list = NodeValue::MessageList(vec![boxed_message.clone()]);
         let msg_1 = NodeValue::Message(boxed_message);
         let msg_2 = NodeValue::Message(Box::new(EMPTY_TEST_MESSAGE.clone()));
 
         assert_eq!(
-            msg_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&msg_1))?,
+            msg_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&msg_1))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            msg_list.operate(&OP_DOES_NOT_CONTAIN, || provide(&msg_2))?,
+            msg_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&msg_2))?,
             NodeValue::Bool(true)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_all_eq_errs_if_left_operand_not_a_list() {
+    fn operate_sync_relational_all_eq_errs_if_left_operand_not_a_list() {
         let two = NodeValue::Int32(2);
 
         assert!(matches!(
-            two.operate(&OP_ALL_EQ, || provide(&two)).unwrap_err(),
+            two.clone().operate_sync(&OP_ALL_EQ, || provide(&two)).unwrap_err(),
             NodeError::AllEqualsOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_relational_all_eq_errs_if_operands_have_incompatible_types() {
+    fn operate_sync_relational_all_eq_errs_if_operands_have_incompatible_types() {
         let bool_list = NodeValue::BoolList(vec![true, true, false]);
         let five = NodeValue::Float(5.5);
 
         assert!(matches!(
-            bool_list.operate(&OP_ALL_EQ, || provide(&five)).unwrap_err(),
+            bool_list.operate_sync(&OP_ALL_EQ, || provide(&five)).unwrap_err(),
             NodeError::AllEqualsOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_relational_all_eq_bool_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_all_eq_bool_type_ok() -> Result<(), NodeError> {
         let bool_list_1 = NodeValue::BoolList(vec![true, true, true]);
         let bool_list_2 = NodeValue::BoolList(vec![true, false, false]);
         let true_val = NodeValue::Bool(true);
         let false_val = NodeValue::Bool(false);
 
-        assert_eq!(bool_list_1.operate(&OP_ALL_EQ, || provide(&true_val))?, NodeValue::Bool(true));
         assert_eq!(
-            bool_list_1.operate(&OP_ALL_EQ, || provide(&false_val))?,
+            bool_list_1.clone().operate_sync(&OP_ALL_EQ, || provide(&true_val))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(
+            bool_list_1.operate_sync(&OP_ALL_EQ, || provide(&false_val))?,
             NodeValue::Bool(false)
         );
-        assert_eq!(bool_list_2.operate(&OP_ALL_EQ, || provide(&true_val))?, NodeValue::Bool(false));
         assert_eq!(
-            bool_list_2.operate(&OP_ALL_EQ, || provide(&false_val))?,
+            bool_list_2.clone().operate_sync(&OP_ALL_EQ, || provide(&true_val))?,
+            NodeValue::Bool(false)
+        );
+        assert_eq!(
+            bool_list_2.operate_sync(&OP_ALL_EQ, || provide(&false_val))?,
             NodeValue::Bool(false)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_all_eq_int_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_all_eq_int_type_ok() -> Result<(), NodeError> {
         let int_list_1 = NodeValue::Int64List(vec![3, 30, 300]);
         let int_list_2 = NodeValue::Int64List(vec![0, 0]);
         let zero = NodeValue::Int32(0);
 
-        assert_eq!(int_list_1.operate(&OP_ALL_EQ, || provide(&zero))?, NodeValue::Bool(false));
-        assert_eq!(int_list_2.operate(&OP_ALL_EQ, || provide(&zero))?, NodeValue::Bool(true));
+        assert_eq!(int_list_1.operate_sync(&OP_ALL_EQ, || provide(&zero))?, NodeValue::Bool(false));
+        assert_eq!(int_list_2.operate_sync(&OP_ALL_EQ, || provide(&zero))?, NodeValue::Bool(true));
         Ok(())
     }
 
     #[test]
-    fn operate_relational_all_eq_float_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_all_eq_float_type_ok() -> Result<(), NodeError> {
         let float_list_1 = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
         let float_list_2 = NodeValue::FloatList(vec![0.5, 0.5]);
 
         let point_five = NodeValue::Double(0.5);
 
         assert_eq!(
-            float_list_1.operate(&OP_ALL_EQ, || provide(&point_five))?,
+            float_list_1.operate_sync(&OP_ALL_EQ, || provide(&point_five))?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            float_list_2.operate(&OP_ALL_EQ, || provide(&point_five))?,
+            float_list_2.operate_sync(&OP_ALL_EQ, || provide(&point_five))?,
             NodeValue::Bool(true)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_relational_all_eq_message_type_ok() -> Result<(), NodeError> {
+    fn operate_sync_relational_all_eq_message_type_ok() -> Result<(), NodeError> {
         let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
         let msg_list = NodeValue::MessageList(vec![boxed_message.clone(); 2]);
         let msg_1 = NodeValue::Message(boxed_message);
         let msg_2 = NodeValue::Message(Box::new(EMPTY_TEST_MESSAGE.clone()));
 
-        assert_eq!(msg_list.operate(&OP_ALL_EQ, || provide(&msg_1))?, NodeValue::Bool(true));
-        assert_eq!(msg_list.operate(&OP_ALL_EQ, || provide(&msg_2))?, NodeValue::Bool(false));
+        assert_eq!(
+            msg_list.clone().operate_sync(&OP_ALL_EQ, || provide(&msg_1))?,
+            NodeValue::Bool(true)
+        );
+        assert_eq!(msg_list.operate_sync(&OP_ALL_EQ, || provide(&msg_2))?, NodeValue::Bool(false));
         Ok(())
     }
 
     #[test]
-    fn operate_rounding_errs_if_operand_is_incompatible() {
+    fn operate_sync_rounding_errs_if_operand_is_incompatible() {
         let true_val = NodeValue::Bool(true);
         let one = NodeValue::Int32(1);
 
         assert!(matches!(
-            one.operate(&OP_FLOOR, || provide(&NodeValue::None)).unwrap_err(),
+            one.clone().operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap_err(),
             NodeError::RoundingOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            true_val.operate(&OP_ROUND, || provide(&NodeValue::None)).unwrap_err(),
+            true_val.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap_err(),
             NodeError::RoundingOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            one.operate(&OP_CEIL, || provide(&NodeValue::None)).unwrap_err(),
+            one.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap_err(),
             NodeError::RoundingOperatorIncompatibleOperands
         ));
     }
 
     #[test]
-    fn operate_rounding_floor_ok() -> Result<(), NodeError> {
+    fn operate_sync_rounding_floor_ok() -> Result<(), NodeError> {
         let point_one = NodeValue::Double(0.1);
         let two_point_nine = NodeValue::Float(2.9);
         let five = NodeValue::Float(5.0);
@@ -1933,27 +2139,30 @@ mod tests {
         let negative_point_nine = NodeValue::Double(-0.99);
 
         assert_eq!(
-            point_one.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            point_one.operate_sync(&OP_FLOOR, || provide(&NodeValue::None))?,
             NodeValue::Int64(0)
         );
         assert_eq!(
-            two_point_nine.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            two_point_nine.operate_sync(&OP_FLOOR, || provide(&NodeValue::None))?,
             NodeValue::Int64(2)
         );
-        assert_eq!(five.operate(&OP_FLOOR, || provide(&NodeValue::None))?, NodeValue::Int64(5));
         assert_eq!(
-            negative_point_three.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            five.operate_sync(&OP_FLOOR, || provide(&NodeValue::None))?,
+            NodeValue::Int64(5)
+        );
+        assert_eq!(
+            negative_point_three.operate_sync(&OP_FLOOR, || provide(&NodeValue::None))?,
             NodeValue::Int64(-1)
         );
         assert_eq!(
-            negative_point_nine.operate(&OP_FLOOR, || provide(&NodeValue::None))?,
+            negative_point_nine.operate_sync(&OP_FLOOR, || provide(&NodeValue::None))?,
             NodeValue::Int64(-1)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_rounding_round_ok() -> Result<(), NodeError> {
+    fn operate_sync_rounding_round_ok() -> Result<(), NodeError> {
         let point_one = NodeValue::Double(0.1);
         let two_point_nine = NodeValue::Float(2.9);
         let five = NodeValue::Float(5.0);
@@ -1961,45 +2170,51 @@ mod tests {
         let negative_point_nine = NodeValue::Double(-0.99);
 
         assert_eq!(
-            point_one.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            point_one.operate_sync(&OP_ROUND, || provide(&NodeValue::None))?,
             NodeValue::Int64(0)
         );
         assert_eq!(
-            two_point_nine.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            two_point_nine.operate_sync(&OP_ROUND, || provide(&NodeValue::None))?,
             NodeValue::Int64(3)
         );
-        assert_eq!(five.operate(&OP_ROUND, || provide(&NodeValue::None))?, NodeValue::Int64(5));
         assert_eq!(
-            negative_point_three.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            five.operate_sync(&OP_ROUND, || provide(&NodeValue::None))?,
+            NodeValue::Int64(5)
+        );
+        assert_eq!(
+            negative_point_three.operate_sync(&OP_ROUND, || provide(&NodeValue::None))?,
             NodeValue::Int64(0)
         );
         assert_eq!(
-            negative_point_nine.operate(&OP_ROUND, || provide(&NodeValue::None))?,
+            negative_point_nine.operate_sync(&OP_ROUND, || provide(&NodeValue::None))?,
             NodeValue::Int64(-1)
         );
         Ok(())
     }
 
     #[test]
-    fn operate_rounding_ceil_ok() -> Result<(), NodeError> {
+    fn operate_sync_rounding_ceil_ok() -> Result<(), NodeError> {
         let point_one = NodeValue::Double(0.1);
         let two_point_nine = NodeValue::Float(2.9);
         let five = NodeValue::Float(5.0);
         let negative_point_three = NodeValue::Double(-0.33);
         let negative_point_nine = NodeValue::Double(-0.99);
 
-        assert_eq!(point_one.operate(&OP_CEIL, || provide(&NodeValue::None))?, NodeValue::Int64(1));
         assert_eq!(
-            two_point_nine.operate(&OP_CEIL, || provide(&NodeValue::None))?,
+            point_one.operate_sync(&OP_CEIL, || provide(&NodeValue::None))?,
+            NodeValue::Int64(1)
+        );
+        assert_eq!(
+            two_point_nine.operate_sync(&OP_CEIL, || provide(&NodeValue::None))?,
             NodeValue::Int64(3)
         );
-        assert_eq!(five.operate(&OP_CEIL, || provide(&NodeValue::None))?, NodeValue::Int64(5));
+        assert_eq!(five.operate_sync(&OP_CEIL, || provide(&NodeValue::None))?, NodeValue::Int64(5));
         assert_eq!(
-            negative_point_three.operate(&OP_CEIL, || provide(&NodeValue::None))?,
+            negative_point_three.operate_sync(&OP_CEIL, || provide(&NodeValue::None))?,
             NodeValue::Int64(0)
         );
         assert_eq!(
-            negative_point_nine.operate(&OP_CEIL, || provide(&NodeValue::None))?,
+            negative_point_nine.operate_sync(&OP_CEIL, || provide(&NodeValue::None))?,
             NodeValue::Int64(0)
         );
         Ok(())

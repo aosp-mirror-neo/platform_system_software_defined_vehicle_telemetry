@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
@@ -25,20 +26,25 @@ impl VectorAggregator {
 }
 
 impl ValueAggregator for VectorAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate(context)?;
-        if latest_value.is_none() {
-            return Ok(latest_value);
-        }
-        if let Some(existing_vec) = &mut self.current_vec {
-            existing_vec.push(&latest_value, &self.max_length)?;
-            Ok(existing_vec.clone())
-        } else {
-            // convert the single value NodeValue into a list type NodeValue
-            let new_vec = latest_value.to_list()?;
-            self.current_vec = Some(new_vec.clone());
-            Ok(new_vec)
-        }
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
+            if latest_value.is_none() {
+                return Ok(NodeValue::None);
+            }
+
+            if let Some(existing_vec) = &mut self.current_vec {
+                existing_vec.push(&latest_value, &self.max_length)?;
+                Ok(existing_vec.clone())
+            } else {
+                // convert the single value NodeValue into a list type NodeValue
+                let new_vec = latest_value.to_list()?;
+                self.current_vec = Some(new_vec.clone());
+                Ok(new_vec)
+            }
+        })
     }
 }
 
@@ -63,7 +69,7 @@ mod tests {
             let expected_vec = vec![test_int; i + 1];
 
             // action
-            let res = aggregate_int_value.compute(&context).unwrap();
+            let res = aggregate_int_value.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int32List(expected_vec));
@@ -93,7 +99,7 @@ mod tests {
                 Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(i as i64) });
 
             // action
-            let res = aggregate_int_value.compute(&context).unwrap();
+            let res = aggregate_int_value.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int64List(expected_vec));
@@ -114,7 +120,7 @@ mod tests {
             let expected_vec = vec![test_double; i + 1];
 
             // action
-            let res = aggregate_double_value.compute(&context).unwrap();
+            let res = aggregate_double_value.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::DoubleList(expected_vec));
@@ -144,7 +150,7 @@ mod tests {
                 Arc::new(Node::ConstantLeaf { value: NodeValue::Float(i as f32 / 5.0) });
 
             // action
-            let res = aggregate_int_value.compute(&context).unwrap();
+            let res = aggregate_int_value.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::FloatList(expected_vec));
@@ -165,7 +171,7 @@ mod tests {
             let expected_vec = vec![boxed_message.clone(); i + 1];
 
             // action
-            let res = aggregate_message_value.compute(&context).unwrap();
+            let res = aggregate_message_value.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::MessageList(expected_vec));
@@ -191,7 +197,7 @@ mod tests {
             };
 
             // action
-            let res = aggregate_message_value.compute(&context).unwrap();
+            let res = aggregate_message_value.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::MessageList(expected_vec));
@@ -204,7 +210,7 @@ mod tests {
             VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }), &None);
 
         let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap();
+        let res = aggregator.compute(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -217,6 +223,8 @@ mod tests {
         );
 
         let context = NodeEvaluationContext::new();
-        assert!(aggregate_list_of_list.compute(&context).is_err());
+        let res = aggregate_list_of_list.compute(&context).unwrap_sync();
+
+        assert!(res.is_err());
     }
 }

@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::Arc;
 
 use crate::expr::ast::NodeEvaluationContext;
@@ -18,8 +19,11 @@ impl PassThroughAggregator {
 }
 
 impl ValueAggregator for PassThroughAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        self.node.evaluate(context).map_err(|e| AggregationError::ExpressionEvaluationError { e })
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into()
     }
 }
 
@@ -35,7 +39,7 @@ mod tests {
             PassThroughAggregator::new(&Arc::new(Node::ConstantLeaf { value: int64_val.clone() }));
 
         let context = NodeEvaluationContext::new();
-        assert_eq!(int64_field_value.compute(&context).unwrap(), int64_val);
+        assert_eq!(int64_field_value.compute(&context).unwrap_sync().unwrap(), int64_val);
     }
 
     #[test]
@@ -49,8 +53,8 @@ mod tests {
         let mut bad_value = PassThroughAggregator::new(&bad_node);
 
         let context = NodeEvaluationContext::new();
-        let res = bad_value.compute(&context);
+        let err = bad_value.compute(&context).unwrap_sync().unwrap_err();
 
-        assert!(matches!(res.unwrap_err(), AggregationError::ExpressionEvaluationError { .. }));
+        assert!(matches!(err, AggregationError::ExpressionEvaluationError { .. }));
     }
 }

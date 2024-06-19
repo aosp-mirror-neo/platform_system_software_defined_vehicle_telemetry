@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
@@ -24,14 +25,18 @@ impl AvgAggregator {
 }
 
 impl ValueAggregator for AvgAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate(context)?;
-        if latest_value.is_none() {
-            return Ok(latest_value);
-        }
-        self.current_avg.update_running_average(self.n, &latest_value)?;
-        self.n += 1;
-        Ok(self.current_avg.clone())
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
+            if latest_value.is_none() {
+                return Ok(NodeValue::None);
+            }
+            self.current_avg.update_running_average(self.n, &latest_value)?;
+            self.n += 1;
+            Ok(self.current_avg.clone())
+        })
     }
 }
 
@@ -50,7 +55,7 @@ mod tests {
 
         let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            result.push(aggregator.compute(&context).unwrap());
+            result.push(aggregator.compute(&context).unwrap_sync().unwrap());
 
             // update the next exrp eval result, so we can test correctness of compute()
             aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
@@ -84,7 +89,7 @@ mod tests {
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
         let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap();
+        let res = aggregator.compute(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -95,7 +100,7 @@ mod tests {
             AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
         let context = NodeEvaluationContext::new();
-        let err = bad_avg.compute(&context).unwrap_err();
+        let err = bad_avg.compute(&context).unwrap_sync().unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),

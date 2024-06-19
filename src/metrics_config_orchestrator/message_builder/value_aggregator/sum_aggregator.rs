@@ -1,8 +1,9 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::Arc;
 
-use super::node_value_extension::NodeValueExtension;
 use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
@@ -22,14 +23,21 @@ impl SumAggregator {
 }
 
 impl ValueAggregator for SumAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate(context)?;
-        if latest_value.is_none() {
-            return Ok(latest_value);
-        }
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
+            if latest_value.is_none() {
+                return Ok(NodeValue::None);
+            }
 
-        self.current_sum.update_sum(&latest_value)?;
-        Ok(self.current_sum.clone())
+            self.current_sum = self.current_sum.clone().operate_sync(
+                &Operator::ArithmeticOperator(ArithmeticOperator::ADD.into()),
+                move || Ok(latest_value),
+            )?;
+            Ok(self.current_sum.clone())
+        })
     }
 }
 
@@ -48,7 +56,7 @@ mod tests {
 
         let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            let res = sum_aggregator.compute(&context).unwrap();
+            let res = sum_aggregator.compute(&context).unwrap_sync().unwrap();
             result_sums.push(res);
 
             // update the next exrp eval result, so we can test correctness of compute()
@@ -81,7 +89,7 @@ mod tests {
             SumAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
         let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap();
+        let res = aggregator.compute(&context).unwrap_sync().unwrap();
         assert_eq!(res, NodeValue::None);
     }
 
@@ -92,6 +100,6 @@ mod tests {
             SumAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
         let context = NodeEvaluationContext::new();
-        bad_sum_aggregator.compute(&context).unwrap();
+        bad_sum_aggregator.compute(&context).unwrap_sync().unwrap();
     }
 }
