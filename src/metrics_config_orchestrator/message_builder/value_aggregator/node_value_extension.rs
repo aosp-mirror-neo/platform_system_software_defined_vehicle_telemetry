@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-use sdvtelemetry_proto_rust::expression::combination_node::{
+use sdv_telemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, Operator, RelationalOperator,
 };
 

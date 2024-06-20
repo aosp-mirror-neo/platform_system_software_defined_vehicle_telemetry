@@ -8,7 +8,7 @@ use crate::metrics_config_orchestrator::MetricsConfigOrchestratorError as Config
 use crate::{
     metrics_config_manager::MetricsConfigManagerError as ConfigManagerError, MetricsConfigManager,
 };
-use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 
 pub(crate) struct MockMetricsConfigManager {
     num_add_metrics_config_calls: Arc<Mutex<i32>>,

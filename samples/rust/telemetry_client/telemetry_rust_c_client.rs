@@ -3,14 +3,11 @@
 //! Binary for testing Telemetry service.
 #![allow(missing_docs)]
 
-extern crate clap;
-extern crate protobuf;
-
-use crate::clap::Parser;
-use crate::protobuf::Message;
 use anyhow::{anyhow, Context};
+use clap::Parser;
 use futures::future::join_all;
 use log::{error, info, trace};
+use protobuf::Message;
 use rust_to_c::TelemetryServiceHolder;
 use sdv_telemetry_rust_wrapper as rust_to_c;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;

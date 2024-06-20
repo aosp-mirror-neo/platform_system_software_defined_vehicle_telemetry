@@ -2,7 +2,7 @@
 
 //! This module contains helper functions to read metrics configurations from a file.
 use protobuf::{text_format::parse_from_str, Message};
-use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 
 use anyhow::{anyhow, Context};
 use std::fs;

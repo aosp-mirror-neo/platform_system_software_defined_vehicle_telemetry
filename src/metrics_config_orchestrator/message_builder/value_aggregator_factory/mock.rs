@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
+use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
 
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{

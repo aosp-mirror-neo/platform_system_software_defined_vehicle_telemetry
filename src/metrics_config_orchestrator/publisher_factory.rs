@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
     AggregationPublisher as AggregationPublisherProto, Publisher as PublisherProto,
@@ -198,8 +198,8 @@ mod tests {
     use async_trait::async_trait;
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
+    use sdv_telemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use sdv_telemetry_utils::collection_extension::VecExtension;
-    use sdvtelemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use std::collections::HashMap;
     use std::time::Duration;
 

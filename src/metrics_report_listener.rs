@@ -3,8 +3,8 @@
 use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
 use google_sdv_telemetry::binder::Strong;
 use log::warn;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex};

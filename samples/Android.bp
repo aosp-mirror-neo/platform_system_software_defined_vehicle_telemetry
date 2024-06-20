@@ -18,8 +18,8 @@ rust_defaults {
         "liblog_rust",
         "libbinder_rs",
         "liblogger",
-        "libsdvtelemetry_proto_rust",
         "libprotobuf",
+        "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
@@ -82,8 +82,8 @@ rust_binary {
     srcs: ["rust/data_tunnel_publisher/publish_sample.rs"],
     rustlibs: [
         "libsample_publisher_proto",
-        "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libsdv_dt_rust",
         "libcxx",
@@ -102,8 +102,8 @@ rust_binary {
     srcs: ["rust/data_tunnel_publisher_speed/speed_publisher.rs"],
     rustlibs: [
         "libspeed_publisher_proto",
-        "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libsdv_dt_rust",
         "libcxx",
@@ -138,8 +138,8 @@ rust_binary {
     srcs: ["rust/data_tunnel_publisher_tire_pressure/tire_pressure_publisher.rs"],
     rustlibs: [
         "libtire_pressure_publisher_proto",
-        "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libsdv_dt_rust",
         "libcxx",
@@ -173,8 +173,8 @@ rust_binary {
     srcs: ["rust/data_tunnel_publisher_error_report/error_report_publisher.rs"],
     rustlibs: [
         "liberror_report_publisher_proto",
-        "libsdvtelemetry_metadata_proto_rust",
         "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libsdv_dt_rust",
         "libcxx",
@@ -212,7 +212,7 @@ rust_defaults {
     rustlibs: [
         "libanyhow",
         "libprotobuf",
-        "libsdvtelemetry_proto_rust",
+        "libsdv_telemetry_proto_rust",
     ],
 }
 

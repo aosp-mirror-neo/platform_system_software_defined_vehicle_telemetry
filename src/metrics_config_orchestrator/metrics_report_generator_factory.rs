@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::FileDescriptor;
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
 };
 use std::collections::HashMap;
@@ -194,8 +194,8 @@ impl MetricsReportGeneratorFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
     use sdv_telemetry_utils::collection_extension::VecExtension;
-    use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
     use std::time::Duration;
 
     use super::*;

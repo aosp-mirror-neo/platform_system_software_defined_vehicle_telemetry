@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::FileDescriptor;
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
 };
 use std::collections::HashMap;
@@ -92,10 +92,10 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::reflect::MessageDescriptor;
     use protobuf::MessageFull;
-    use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
-    use sdvtelemetry_proto_rust::metrics_configuration::{
+    use sdv_telemetry_proto_rust::metrics_configuration::{
         publisher::Publisher_type as PublisherTypeProto, AggregationPublisher, ProtoMessageBuilder,
     };
+    use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
 
     use super::*;
     use crate::expr::node_errors::DescriptorProviderError;

@@ -4,7 +4,7 @@ use anyhow::anyhow;
 use async_trait::async_trait;
 use log::{error, trace};
 use protobuf::MessageDyn;
-use sdvtelemetry_proto_rust::{
+use sdv_telemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
     metrics_configuration::conditional_trigger::ConditionType,
 };

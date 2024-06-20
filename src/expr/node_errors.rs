@@ -4,7 +4,7 @@
 
 use thiserror::Error;
 
-use sdvtelemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
+use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

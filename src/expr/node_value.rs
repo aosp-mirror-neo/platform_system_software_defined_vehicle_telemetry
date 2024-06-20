@@ -8,7 +8,7 @@ use protobuf::{
     reflect::{ReflectEqMode, ReflectFieldRef, ReflectValueRef},
     MessageDyn,
 };
-use sdvtelemetry_proto_rust::expression::{
+use sdv_telemetry_proto_rust::expression::{
     combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
         RoundingOperator,
@@ -679,8 +679,8 @@ impl From<f64> for NodeValue {
 mod tests {
 
     use protobuf::reflect::ReflectEqMode;
+    use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
-    use sdvtelemetry_proto_rust::expression::ConstantLeafNode;
     use std::sync::Mutex;
 
     use super::*;

@@ -2,13 +2,13 @@
 
 use anyhow::anyhow;
 use protobuf::well_known_types::duration::Duration as DurationProto;
-use sdv_telemetry_utils::duration_utils::try_into_duration;
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionType, publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
     PeriodicTrigger as PeriodicTriggerProto, Publisher as PublisherProto, Trigger as TriggerProto,
 };
+use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
@@ -280,11 +280,11 @@ impl TriggerFactoryImpl {
 #[cfg(test)]
 mod tests {
     use protobuf::{EnumOrUnknown, MessageField};
-    use sdv_telemetry_utils::collection_extension::VecExtension;
-    use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
-    use sdvtelemetry_proto_rust::metrics_configuration::{
+    use sdv_telemetry_proto_rust::metrics_configuration::{
         conditional_trigger::ConditionType, ServicePublisher as ServicePublisherProto,
     };
+    use sdv_telemetry_utils::collection_extension::VecExtension;
+    use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::collections::HashMap;
     use std::time::Duration;
 

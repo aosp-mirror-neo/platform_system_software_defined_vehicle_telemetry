@@ -3,14 +3,14 @@
 //! Helper functions used for AST tree validation.
 
 use protobuf::reflect::{MessageDescriptor, RuntimeFieldType, RuntimeType};
-use sdv_telemetry_utils::option_extension::OptionExtension;
-use sdvtelemetry_proto_rust::expression::{
+use sdv_telemetry_proto_rust::expression::{
     combination_node::Operator as OperatorProto,
     combination_node::{ArithmeticOperator, LogicalOperator, RelationalOperator},
     constant_leaf_node::Node_value as NodeValueProto,
     function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
     ConstantLeafNode, FieldLeafNode, FunctionLeafNode,
 };
+use sdv_telemetry_utils::option_extension::OptionExtension;
 
 use crate::expr::{ast::DescriptorProvider, node_errors::NodeError};
 

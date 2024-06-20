@@ -6,10 +6,10 @@
 use anyhow::anyhow;
 use log::info;
 use protobuf::{text_format::parse_from_str, Message};
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
-use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -16,22 +16,6 @@ cc_defaults {
     ],
 }
 
-cc_library {
-    name: "libsdvtelemetry_proto_cpp",
-    defaults: [
-        "sdv_telemetry@cc_defaults",
-    ],
-    srcs: [":sdvtelemetryservice-proto-srcs"],
-    proto: {
-        export_proto_headers: true,
-        include_dirs: ["external/protobuf/src"],
-        type: "full",
-    },
-    shared_libs: ["libprotobuf-cpp-full"],
-    vendor_available: true,
-    system_ext_specific: true,
-}
-
 rust_defaults {
     name: "sdv_telemetry@rust_defaults",
     defaults: [
@@ -50,33 +34,6 @@ rust_defaults {
     ],
 }
 
-rust_protobuf {
-    name: "libsdvtelemetry_proto_rust",
-    crate_name: "sdvtelemetry_proto_rust",
-    protos: [":sdvtelemetryservice-proto-srcs"],
-    proto_flags: [
-        "-I external/protobuf/src",
-        "-I .",
-    ],
-    source_stem: "sdvtelemetry_proto_rust_source",
-    vendor_available: true,
-    system_ext_specific: true,
-    visibility: ["//visibility:public"],
-}
-
-rust_protobuf {
-    name: "libsdvtelemetry_metadata_proto_rust",
-    crate_name: "sdvtelemetry_metadata_proto_rust",
-    protos: [":sdvtelemetryservice-metadata-proto-srcs"],
-    proto_flags: [
-        "-I external/protobuf/src",
-        "-I .",
-    ],
-    source_stem: "sdvtelemetry_metadata_proto_rust_source",
-    vendor_available: true,
-    system_ext_specific: true,
-}
-
 rust_defaults {
     name: "libsdv_telemetry_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
@@ -91,7 +48,7 @@ rust_defaults {
         "libprotobuf",
         "libthiserror",
         "libtokio",
-        "libsdvtelemetry_proto_rust",
+        "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_time_wrapper",
         "libsdv_telemetry_utils",
     ],
@@ -174,7 +131,7 @@ rust_defaults {
         "libprotobuf",
         "libsdv_dt_rust",
         "libsdv_telemetry",
-        "libsdvtelemetry_metadata_proto_rust",
+        "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
@@ -255,8 +212,8 @@ rust_defaults {
         "librustutils",
         "libsdv_log_rust",
         "libsdv_telemetry",
+        "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_utils",
-        "libsdvtelemetry_proto_rust",
         "libtokio",
     ],
     proc_macros: [
@@ -309,8 +266,8 @@ rust_test {
     rustlibs: [
         "liblazy_static",
         "librand",
+        "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_proto",
-        "libsdvtelemetry_proto_rust",
         "libsdv_telemetry_utils",
     ],
     proc_macros: [
@@ -406,10 +363,10 @@ rust_test {
         "liblog_rust",
         "liblogger",
         "libprotobuf",
+        "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
-        "libsdvtelemetry_proto_rust",
         "libtokio",
     ],
     test_suites: [

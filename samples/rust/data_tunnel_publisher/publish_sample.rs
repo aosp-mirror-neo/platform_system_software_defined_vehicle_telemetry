@@ -4,8 +4,8 @@
 use sample_publisher_proto::sample_publisher;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
-use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::thread;
 
 use log::{error, info};

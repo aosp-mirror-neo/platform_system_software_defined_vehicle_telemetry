@@ -2,8 +2,8 @@
 
 use lazy_static::lazy_static;
 use protobuf::reflect::FileDescriptor;
+use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use sdv_telemetry_test_proto::test_message;
-use sdvtelemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use std::sync::Arc;
 
 use super::{

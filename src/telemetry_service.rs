@@ -489,8 +489,8 @@ mod tests {
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
     };
     use protobuf::Message;
-    use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig;
-    use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
+    use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
+    use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 
     use super::*;
     use crate::metrics_config_manager::mock::MockMetricsConfigManager;

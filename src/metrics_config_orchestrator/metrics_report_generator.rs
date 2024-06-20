@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use log::{debug, error};
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
 };
 use std::marker::{Send, Sync};

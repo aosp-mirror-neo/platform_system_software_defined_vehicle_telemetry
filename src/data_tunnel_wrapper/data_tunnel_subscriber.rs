@@ -17,8 +17,8 @@ use sdv_telemetry::service_publisher_accessor::{
     ServicePublisherSubscription,
 };
 use sdv_telemetry::ServicePublisherAccessor;
+use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
-use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 
 use crate::data_tunnel_api_client::{
     self, DataTunnelError, ReadMessagesError, SubscriptionDescriptor,

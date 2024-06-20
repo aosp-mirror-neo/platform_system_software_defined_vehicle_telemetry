@@ -3,13 +3,13 @@
 //! Module for building and traversing the abstract syntax tree.
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_telemetry_time_wrapper::Microseconds;
-use sdvtelemetry_proto_rust::expression::{
+use sdv_telemetry_proto_rust::expression::{
     combination_node::Operator as OperatorProto,
     function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
     get_current_timestamp_function::TimeSource as TimeSourceProto,
     node::Node_type as NodeTypeProto, FunctionLeafNode as FunctionLeafNodeProto, Node as NodeProto,
 };
+use sdv_telemetry_time_wrapper::Microseconds;
 use std::fmt;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
@@ -507,14 +507,14 @@ impl fmt::Debug for Node {
 mod tests {
     use paste::paste;
     use protobuf::{EnumOrUnknown, MessageFull};
-    use sdv_telemetry_test_proto::test_message::TestMessage;
-    use sdvtelemetry_proto_rust::expression::combination_node::{
+    use sdv_telemetry_proto_rust::expression::combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
         RoundingOperator,
     };
-    use sdvtelemetry_proto_rust::expression::{
+    use sdv_telemetry_proto_rust::expression::{
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::time::SystemTime;
 
     use super::*;

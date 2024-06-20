@@ -5,8 +5,8 @@ use crate::{TelemetryError, TelemetryResult, TelemetryServiceHolder};
 
 use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use sdv_telemetry_status_codes_bindgen as status_codes;
-use sdvtelemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::ffi::{c_char, c_void, CStr, CString};
 
 /// Callback that handles report ready event.

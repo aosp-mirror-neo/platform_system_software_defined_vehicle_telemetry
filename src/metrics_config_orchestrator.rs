@@ -17,13 +17,13 @@ mod trigger_factory;
 use async_trait::async_trait;
 use log::{debug, error};
 use protobuf::{reflect::FileDescriptor, MessageDyn};
-use sdv_telemetry_utils::{
-    collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
-};
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
     MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
     Trigger as TriggerProto,
+};
+use sdv_telemetry_utils::{
+    collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
 };
 use std::collections::{HashMap, HashSet};
 use std::marker::{PhantomData, Sync};
@@ -923,8 +923,8 @@ mod tests {
     };
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::{well_known_types, MessageDyn, MessageFull};
-    use sdvtelemetry_proto_rust::expression::Node as NodeProto;
-    use sdvtelemetry_proto_rust::metrics_configuration::{
+    use sdv_telemetry_proto_rust::expression::Node as NodeProto;
+    use sdv_telemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
         MetricsConfig as MetricsConfigProto, MetricsReportConfig,

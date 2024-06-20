@@ -1,11 +1,54 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 filegroup {
-    name: "sdvtelemetryservice-proto-srcs",
+    name: "sdv_telemetry_proto_srcs",
     srcs: ["*.proto"],
 }
 
 filegroup {
-    name: "sdvtelemetryservice-metadata-proto-srcs",
+    name: "sdv_telemetry_metadata_proto_srcs",
     srcs: ["metadata_protos/*.proto"],
+}
+
+cc_library {
+    name: "libsdv_telemetry_proto_cpp",
+    defaults: [
+        "sdv_telemetry@cc_defaults",
+    ],
+    srcs: [":sdv_telemetry_proto_srcs"],
+    proto: {
+        export_proto_headers: true,
+        include_dirs: ["external/protobuf/src"],
+        type: "full",
+    },
+    shared_libs: ["libprotobuf-cpp-full"],
+    vendor_available: true,
+    system_ext_specific: true,
+}
+
+rust_protobuf {
+    name: "libsdv_telemetry_proto_rust",
+    crate_name: "sdv_telemetry_proto_rust",
+    protos: [":sdv_telemetry_proto_srcs"],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "sdv_telemetry_proto_rust_source",
+    vendor_available: true,
+    system_ext_specific: true,
+    visibility: ["//visibility:public"],
+}
+
+rust_protobuf {
+    name: "libsdv_telemetry_metadata_proto_rust",
+    crate_name: "sdv_telemetry_metadata_proto_rust",
+    protos: [":sdv_telemetry_metadata_proto_srcs"],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "sdv_telemetry_metadata_proto_rust_source",
+    vendor_available: true,
+    system_ext_specific: true,
 }

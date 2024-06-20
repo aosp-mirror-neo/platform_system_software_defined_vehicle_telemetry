@@ -6,8 +6,8 @@ use log::{error, info};
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
 
+use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_utils::file_io_utils;
-use sdvtelemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::marker::{Send, Sync};
@@ -522,7 +522,7 @@ mod tests {
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
     use protobuf::Message;
     use rand::prelude::SliceRandom;
-    use sdvtelemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
+    use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use tokio::sync::oneshot;
 
     use super::*;

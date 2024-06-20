@@ -12,8 +12,8 @@ use log::{error, info, trace};
 use protobuf::{Message, MessageFull};
 use rand::Rng;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
-use sdvtelemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use std::{thread, time::Duration};
 
 const LOG_TAG: &str = validated_log_tag("TelemetryErrRptDataPub");

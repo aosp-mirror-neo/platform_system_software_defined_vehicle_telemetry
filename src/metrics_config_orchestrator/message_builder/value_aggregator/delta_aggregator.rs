@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::expr::ast::NodeEvaluationContext;
 use crate::expr::{ast::Node, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
-use sdvtelemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
+use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
 
 /// Field value type where numeric delta is calculated.
 pub struct DeltaAggregator {

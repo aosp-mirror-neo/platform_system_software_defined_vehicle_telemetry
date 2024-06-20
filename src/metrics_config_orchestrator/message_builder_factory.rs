@@ -1,11 +1,11 @@
 // Copyright 2023 Google LLC. All Rights Reserved.
 
 use protobuf::reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor};
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use sdvtelemetry_proto_rust::metrics_configuration::{
+use sdv_telemetry_proto_rust::metrics_configuration::{
     proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto,
     ProtoMessageBuilder,
 };
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex},
@@ -231,7 +231,7 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
-    use sdvtelemetry_proto_rust::metrics_configuration::proto_message_builder::{
+    use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::{
         field_assignment::NoAggregation, FieldAssignment,
     };
 
