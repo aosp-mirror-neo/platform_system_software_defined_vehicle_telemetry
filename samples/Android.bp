@@ -12,11 +12,12 @@ rust_defaults {
         "rust/telemetry_client/telemetry_rust_c_client.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "libanyhow",
+        "libbinder_rs",
         "libclap",
         "libfutures",
         "liblog_rust",
-        "libbinder_rs",
         "liblogger",
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
@@ -24,6 +25,7 @@ rust_defaults {
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
         "libtokio",
+        // keep-sorted end
     ],
 }
 
@@ -62,16 +64,18 @@ rust_binary {
         "rust/sample_publisher/main.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libbinder_rs",
-        "libsample_publisher_proto",
-        "libsdv_telemetry_utils",
         "libfutures",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "librand",
+        "libsample_publisher_proto",
+        "libsdv_telemetry_utils",
         "libtokio",
+        // keep-sorted end
     ],
     vendor: true,
 }
@@ -81,17 +85,19 @@ rust_binary {
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["rust/data_tunnel_publisher/publish_sample.rs"],
     rustlibs: [
-        "libsample_publisher_proto",
-        "libsdv_telemetry_dt_wrapper",
-        "libsdv_telemetry_metadata_proto_rust",
-        "libsdv_telemetry_utils",
-        "libsdv_dt_rust",
+        // keep-sorted start
         "libcxx",
         "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "librand",
+        "libsample_publisher_proto",
+        "libsdv_dt_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
+        "libsdv_telemetry_utils",
+        // keep-sorted end
     ],
     vendor: true,
 }
@@ -101,18 +107,20 @@ rust_binary {
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["rust/data_tunnel_publisher_speed/speed_publisher.rs"],
     rustlibs: [
-        "libspeed_publisher_proto",
-        "libsdv_telemetry_dt_wrapper",
-        "libsdv_telemetry_metadata_proto_rust",
-        "libsdv_telemetry_utils",
-        "libsdv_dt_rust",
+        // keep-sorted start
+        "libanyhow",
         "libcxx",
         "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "librand",
-        "libanyhow",
+        "libsdv_dt_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
+        "libsdv_telemetry_utils",
+        "libspeed_publisher_proto",
+        // keep-sorted end
     ],
     vendor: true,
 }
@@ -137,18 +145,20 @@ rust_binary {
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["rust/data_tunnel_publisher_tire_pressure/tire_pressure_publisher.rs"],
     rustlibs: [
-        "libtire_pressure_publisher_proto",
-        "libsdv_telemetry_dt_wrapper",
-        "libsdv_telemetry_metadata_proto_rust",
-        "libsdv_telemetry_utils",
-        "libsdv_dt_rust",
+        // keep-sorted start
+        "libanyhow",
         "libcxx",
         "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "librand",
-        "libanyhow",
+        "libsdv_dt_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
+        "libsdv_telemetry_utils",
+        "libtire_pressure_publisher_proto",
+        // keep-sorted end
     ],
     vendor: true,
 }
@@ -172,18 +182,20 @@ rust_binary {
     name: "telemetry_sample_data_tunnel_publisher_error_report",
     srcs: ["rust/data_tunnel_publisher_error_report/error_report_publisher.rs"],
     rustlibs: [
-        "liberror_report_publisher_proto",
-        "libsdv_telemetry_dt_wrapper",
-        "libsdv_telemetry_metadata_proto_rust",
-        "libsdv_telemetry_utils",
-        "libsdv_dt_rust",
+        // keep-sorted start
+        "libanyhow",
         "libcxx",
+        "liberror_report_publisher_proto",
         "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "librand",
-        "libanyhow",
+        "libsdv_dt_rust",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
+        "libsdv_telemetry_utils",
+        // keep-sorted end
     ],
     vendor: true,
 }
@@ -210,9 +222,11 @@ rust_defaults {
         "rust/utils/lib.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "libanyhow",
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
+        // keep-sorted end
     ],
 }
 
@@ -228,14 +242,20 @@ rust_test {
     name: "sdv_telemetry_sample_utils_unit_tests",
     defaults: ["libsdv_telemetry_sample_utils_defaults"],
     rustlibs: [
+        // keep-sorted start
         "libsdv_telemetry_utils",
+        // keep-sorted end
     ],
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     data: [
+        // keep-sorted start
         "sample_protos/metric_configJan10.textproto",
+        // keep-sorted end
     ],
     auto_gen_config: true,
     test_options: {

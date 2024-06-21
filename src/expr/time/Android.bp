@@ -10,7 +10,9 @@ cc_library {
     defaults: ["sdv_telemetry@cc_defaults"],
     srcs: ["get_time.cc"],
     shared_libs: [
+        // keep-sorted start
         "libbase",
+        // keep-sorted end
     ],
     vendor_available: true,
     system_ext_specific: true,
@@ -22,7 +24,11 @@ rust_bindgen {
     wrapper_src: "time_wrapper.h",
     cpp_std: "gnu++17",
     source_stem: "bindings",
-    shared_libs: ["libsdv_telemetry_time"],
+    shared_libs: [
+        // keep-sorted start
+        "libsdv_telemetry_time",
+        // keep-sorted end
+    ],
     vendor_available: true,
     system_ext_specific: true,
     visibility: ["//system/software_defined_vehicle/telemetry"],
@@ -36,8 +42,10 @@ rust_test {
     ],
     crate_name: "sdv_telemetry_time_bindgen_tests",
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     auto_gen_config: true,
 
@@ -54,7 +62,9 @@ rust_defaults {
         "time_wrapper.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "libsdv_telemetry_time_bindgen",
+        // keep-sorted end
     ],
 }
 
@@ -71,8 +81,10 @@ rust_test {
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper_tests",
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     auto_gen_config: true,
     test_options: {

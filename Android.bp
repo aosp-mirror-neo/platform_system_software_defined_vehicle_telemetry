@@ -41,19 +41,23 @@ rust_defaults {
         "src/telemetry_service.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "google.sdv.telemetry-V1-rust",
         "libanyhow",
         "libbinder_rs",
         "liblog_rust",
         "libprotobuf",
-        "libthiserror",
-        "libtokio",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_time_wrapper",
         "libsdv_telemetry_utils",
+        "libthiserror",
+        "libtokio",
+        // keep-sorted end
     ],
     proc_macros: [
+        // keep-sorted start
         "libasync_trait",
+        // keep-sorted end
     ],
 }
 
@@ -72,20 +76,24 @@ rust_defaults {
         "src/configurable_publisher_registry_service.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libanyhow",
         "libbinder_rs",
         "libbinder_tokio_rs",
         "liblog_rust",
+        "libprotobuf",
         "libsdv_telemetry",
         "libsdv_telemetry_utils",
-        "libprotobuf",
         "libthiserror",
         "libtokio",
+        // keep-sorted end
     ],
     proc_macros: [
+        // keep-sorted start
         "libasync_trait",
         "libclap_derive",
+        // keep-sorted end
     ],
 }
 
@@ -104,11 +112,13 @@ rust_defaults {
         "src/utils/lib.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "liblazy_static",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "libtokio",
+        // keep-sorted end
     ],
 }
 
@@ -125,7 +135,10 @@ rust_defaults {
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["src/data_tunnel_wrapper/lib.rs"],
     rustlibs: [
+        // keep-sorted start
         "libanyhow",
+        "libcxx",
+        "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
@@ -135,11 +148,12 @@ rust_defaults {
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
-        "libcxx",
-        "liblibc",
+        // keep-sorted end
     ],
     proc_macros: [
+        // keep-sorted start
         "libasync_trait",
+        // keep-sorted end
     ],
 }
 
@@ -155,19 +169,23 @@ rust_defaults {
     name: "telemetry_dt_wrapper_tests_defaults",
     defaults: ["telemetry_dt_wrapper_defaults"],
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     target: {
         host: {
             data_libs: [
-                "libcutils",
+                // keep-sorted start
                 "libbase",
-                "libc++",
-                "libutils",
-                "liblog",
-                "libbinder_ndk",
                 "libbinder",
+                "libbinder_ndk",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
             ],
         },
     },
@@ -188,8 +206,10 @@ rust_test {
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
     rustlibs: [
+        // keep-sorted start
         "librand",
         "libsdv_telemetry_test_proto",
+        // keep-sorted end
     ],
     // Requires root so the test can perform Binder calls to the data tunnel
     // agent.
@@ -202,9 +222,12 @@ rust_defaults {
     vendor_available: true,
     system_ext_specific: true,
     vintf_fragments: [
+        // keep-sorted start
         "google.sdv.telemetry-service.xml",
+        // keep-sorted end
     ],
     rustlibs: [
+        // keep-sorted start
         "google.sdv.telemetry-V1-rust",
         "libbinder_rs",
         "libbinder_tokio_rs",
@@ -215,9 +238,12 @@ rust_defaults {
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_utils",
         "libtokio",
+        // keep-sorted end
     ],
     proc_macros: [
+        // keep-sorted start
         "libasync_trait",
+        // keep-sorted end
     ],
 }
 
@@ -233,7 +259,10 @@ rust_binary {
         // End of configurable publisher fragments
     ],
     rustlibs: [
+        // keep-sorted start
         "libsdv_telemetry_dt_wrapper",
+        // keep-sorted end
+
         // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libsdv_telemetry_configurable_publisher",
@@ -250,11 +279,15 @@ rust_binary {
         "src/main_ivi.rs",
     ],
     vintf_fragments: [
+        // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-service.xml",
+        // keep-sorted end
     ],
     rustlibs: [
+        // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libsdv_telemetry_configurable_publisher",
+        // keep-sorted end
     ],
     system_ext_specific: true,
     vendor_available: true,
@@ -264,30 +297,38 @@ rust_test {
     name: "libsdv_telemetry_unit_tests",
     defaults: ["libsdv_telemetry_defaults"],
     rustlibs: [
+        // keep-sorted start
         "liblazy_static",
         "librand",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_proto",
         "libsdv_telemetry_utils",
+        // keep-sorted end
     ],
     proc_macros: [
+        // keep-sorted start
         "libasync_trait",
         "libpaste",
+        // keep-sorted end
     ],
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     target: {
         host: {
             data_libs: [
-                "libcutils",
+                // keep-sorted start
                 "libbase",
-                "libc++",
-                "libutils",
-                "liblog",
-                "libbinder_ndk",
                 "libbinder",
+                "libbinder_ndk",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
             ],
         },
     },
@@ -301,22 +342,28 @@ rust_test {
     name: "libsdv_telemetry_configurable_publisher_unit_tests",
     defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     rustlibs: [
+        // keep-sorted start
         "libsample_publisher_proto",
+        // keep-sorted end
     ],
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     target: {
         host: {
             data_libs: [
-                "libcutils",
+                // keep-sorted start
                 "libbase",
-                "libc++",
-                "libutils",
-                "liblog",
-                "libbinder_ndk",
                 "libbinder",
+                "libbinder_ndk",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
             ],
         },
     },
@@ -330,17 +377,21 @@ rust_test {
     name: "libsdv_telemetry_utils_unit_tests",
     defaults: ["libsdv_telemetry_utils_defaults"],
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     target: {
         host: {
             data_libs: [
-                "libcutils",
+                // keep-sorted start
                 "libbase",
                 "libc++",
-                "libutils",
+                "libcutils",
                 "liblog",
+                "libutils",
+                // keep-sorted end
             ],
         },
     },
@@ -357,6 +408,7 @@ rust_test {
         "tests/integration_tests.rs",
     ],
     rustlibs: [
+        // keep-sorted start
         "libanyhow",
         "libbinder_rs",
         "libfutures",
@@ -368,13 +420,18 @@ rust_test {
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
         "libtokio",
+        // keep-sorted end
     ],
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     data: [
+        // keep-sorted start
         "**/*.textproto",
+        // keep-sorted end
     ],
     auto_gen_config: true,
     // Requires root so the test can perform Binder calls.
@@ -387,7 +444,9 @@ rust_bindgen {
     wrapper_src: "clientlib/export/lib.h",
     source_stem: "bindings",
     shared_libs: [
+        // keep-sorted start
         "libtelemetry_c",
+        // keep-sorted end
     ],
     vendor_available: true,
     system_ext_specific: true,
@@ -401,8 +460,10 @@ rust_test {
     ],
     crate_name: "sdv_telemetry_bindgen_tests",
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     auto_gen_config: true,
 
@@ -430,8 +491,10 @@ rust_test {
     ],
     crate_name: "sdv_telemetry_status_codes_bindgen_tests",
     test_suites: [
-        "general-tests",
+        // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
     ],
     auto_gen_config: true,
 

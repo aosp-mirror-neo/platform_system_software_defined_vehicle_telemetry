@@ -11,12 +11,14 @@ cc_defaults {
         "sdv_telemetry@cc_defaults",
     ],
     shared_libs: [
-        "libprotobuf-cpp-full",
+        // keep-sorted start
+        "libbase",
         "libbinder",
         "libbinder_ndk",
         "liblog",
+        "libprotobuf-cpp-full",
         "libutils",
-        "libbase",
+        // keep-sorted end
     ],
     static_libs: ["libgtest"],
 }
@@ -27,14 +29,16 @@ cc_library {
         "libtelemetry_c_defaults",
     ],
     srcs: [
+        // keep-sorted start
+        "src/api_status_listener_impl.cpp",
         "src/callback_container.cpp",
         "src/config_list_listener_impl.cpp",
-        "src/api_status_listener_impl.cpp",
+        "src/lib.cpp",
         "src/misc_status_listener_impl.cpp",
         "src/report_listener_impl.cpp",
         "src/report_ready_listener_impl.cpp",
         "src/telemetry_service.cpp",
-        "src/lib.cpp",
+        // keep-sorted end
     ],
     local_include_dirs: [
         "include",
@@ -43,8 +47,10 @@ cc_library {
         "export",
     ],
     shared_libs: [
+        // keep-sorted start
         "google.sdv.telemetry-V1-ndk",
         "libsdv_telemetry_proto_cpp",
+        // keep-sorted end
     ],
     vendor_available: true,
     system_ext_specific: true,
@@ -56,9 +62,10 @@ rust_library {
     crate_name: "sdv_telemetry_rust_wrapper",
     srcs: ["rust_wrapper/telemetry_service_rust_wrapper.rs"],
     rustlibs: [
+        // keep-sorted start
+        "libbinder_rs",
         "libfutures",
         "liblog_rust",
-        "libbinder_rs",
         "liblogger",
         "libprotobuf",
         "libsdv_telemetry_bindgen",
@@ -66,10 +73,13 @@ rust_library {
         "libsdv_telemetry_status_codes_bindgen",
         "libthiserror",
         "libtokio",
+        // keep-sorted end
     ],
     proc_macros: [
+        // keep-sorted start
         "libasync_trait",
         "libclap_derive",
+        // keep-sorted end
     ],
     system_ext_specific: true,
     vendor_available: true,
