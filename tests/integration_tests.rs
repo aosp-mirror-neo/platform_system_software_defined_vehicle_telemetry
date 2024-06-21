@@ -18,6 +18,7 @@ use tokio::sync::mpsc;
 const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
 
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_simple_config_end_to_end_test() {
     init_logger_for_samples_or_tests(LOG_TAG);

@@ -484,6 +484,7 @@ mod tests {
         publisher
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_service_publisher_propagates_adapter_error() {
         let service_adapter =
@@ -499,6 +500,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_service_publisher_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_next_message_provider());
@@ -516,6 +518,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_service_publisher_falls_back_to_subscription() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -533,6 +536,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_subscription_service_publisher_passes_configuration() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -558,6 +562,7 @@ mod tests {
         assert_eq!(&latest_configuration, Empty::default_instance());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn activate_when_active_panics() {
@@ -566,6 +571,7 @@ mod tests {
         publisher.activate().await.unwrap();
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_when_inactive_panics() {
@@ -574,6 +580,7 @@ mod tests {
         publisher.deactivate().await.unwrap();
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_with_subscriptions_panics() {
@@ -582,6 +589,7 @@ mod tests {
         publisher.deactivate().await.unwrap();
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn deactivate_subscribed_service_publisher_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -593,6 +601,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_when_inactive_panics() {
@@ -601,6 +610,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
@@ -609,6 +619,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_service_publisher_new_message_notifies_subscriber() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -634,6 +645,7 @@ mod tests {
         assert_eq!(publisher.get_latest_message().as_ref().unwrap(), &expected);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_aggregation_publisher_triggered_notifies_subscriber() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -662,6 +674,7 @@ mod tests {
         }
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn aggregation_publisher_notifies_all_subscriber_with_trigger_context() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -692,6 +705,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_when_inactive_panics() {
@@ -700,6 +714,7 @@ mod tests {
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -708,6 +723,7 @@ mod tests {
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_success() {
         let publisher = create_service_publisher_with_subscription(None).await;

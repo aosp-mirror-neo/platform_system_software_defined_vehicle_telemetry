@@ -181,6 +181,7 @@ mod test {
         )
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn activate_already_active_panics() {
@@ -190,6 +191,7 @@ mod test {
         generator.activate().await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_subscribes_to_trigger() {
         let mut trigger = create_trigger();
@@ -207,6 +209,7 @@ mod test {
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn on_trigger_fired_creates_reports() {
         let trigger = Arc::new(create_trigger());
@@ -247,6 +250,7 @@ mod test {
         assert!(report.report_data.is::<TestMessage>());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn on_trigger_fired_creates_reports_with_trigger_context() {
         let trigger = Arc::new(create_trigger());
@@ -277,6 +281,7 @@ mod test {
         assert_eq!(test_message.repeated_i64s, vec![i64::try_from(context.id()).unwrap()]);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn report_ready_callback_doesnt_block_trigger_fire() {
         let trigger = Arc::new(create_trigger());
@@ -289,6 +294,7 @@ mod test {
         trigger.fire().await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_already_inactive_panics() {
@@ -297,6 +303,7 @@ mod test {
         generator.deactivate().await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn deactivate_unsubscribes_from_trigger() {
         let mut trigger = create_trigger();

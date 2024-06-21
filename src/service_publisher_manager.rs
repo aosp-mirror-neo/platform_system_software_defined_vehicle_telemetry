@@ -89,6 +89,7 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_metadata_success() {
         let service_publisher =
@@ -103,6 +104,7 @@ mod tests {
         assert_eq!(res.message_descriptor, Empty::descriptor());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_metadata_propagates_error() {
         let service_publisher = Arc::new(
@@ -117,6 +119,7 @@ mod tests {
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_metadata_no_match_returns_none() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
@@ -129,6 +132,7 @@ mod tests {
         assert!(res.is_none());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
@@ -141,6 +145,7 @@ mod tests {
         assert_eq!(service_publisher.get_num_get_message_provider_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_propagates_error() {
         let service_publisher = Arc::new(
@@ -155,6 +160,7 @@ mod tests {
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_no_match_returns_none() {
         let service_publisher =
@@ -168,6 +174,7 @@ mod tests {
         assert!(res.is_none());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
@@ -183,6 +190,7 @@ mod tests {
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_propagates_error() {
         let service_publisher = Arc::new(
@@ -201,6 +209,7 @@ mod tests {
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_no_match_returns_not_available() {
         let service_publisher =
@@ -217,6 +226,7 @@ mod tests {
         assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_returns_valid_subscription() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());

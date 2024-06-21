@@ -305,6 +305,7 @@ mod tests {
         assert!(res.is_none());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_metadata_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
@@ -317,6 +318,7 @@ mod tests {
         assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_returns_none() {
         let configurable_publisher = MockConfigurablePublisher::new();
@@ -328,6 +330,7 @@ mod tests {
         assert!(res.is_none());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
@@ -347,6 +350,7 @@ mod tests {
             .contains_key(SERVICE_NAME));
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_incorrect_service_name_returns_not_available() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
@@ -359,6 +363,7 @@ mod tests {
         assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
@@ -376,6 +381,7 @@ mod tests {
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unregister_success() {
         let configurable_publisher = MockConfigurablePublisher::new();
@@ -399,6 +405,7 @@ mod tests {
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 0);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unregister_incorrect_service_name_gets_ignored() {
         let configurable_publisher = MockConfigurablePublisher::new();

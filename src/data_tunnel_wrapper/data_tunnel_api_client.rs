@@ -675,6 +675,7 @@ mod tests {
         assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 0);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn set_notification_handler_success() {
         let topic_name = unique_topic_name();
@@ -694,6 +695,7 @@ mod tests {
         assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn set_notification_handler_ingores_overflow() {
         let topic_name = unique_topic_name();

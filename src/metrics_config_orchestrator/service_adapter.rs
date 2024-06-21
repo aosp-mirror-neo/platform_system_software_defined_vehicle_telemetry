@@ -300,7 +300,6 @@ pub(super) mod tests {
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageFull;
-    use sdv_telemetry_utils::test_utils::with_timeout;
     use tokio::sync::mpsc;
 
     use super::*;
@@ -384,6 +383,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_configured_accessor_returns_error_fails() {
         let accessor =
@@ -401,6 +401,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_configured_accessor_returns_not_available_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
@@ -417,6 +418,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -437,7 +439,7 @@ pub(super) mod tests {
 
         // Notify about a new message and receive the message.
         accessor.notify_subscriber(SERVICE_NAME, msg.clone());
-        let msg_received = with_timeout(rx.recv()).await.unwrap();
+        let msg_received = rx.recv().await.unwrap();
 
         // Verify that the received message is the same as the one sent.
         assert_eq!(&msg_received, &(msg as Box<dyn MessageDyn>));
@@ -446,6 +448,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_shared_accessor_returns_error_fails() {
         let accessor =
@@ -463,6 +466,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_shared_accessor_returns_not_available_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
@@ -479,6 +483,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_shared_different_services_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -511,10 +516,10 @@ pub(super) mod tests {
 
         // Notify about a new message from each service and receive the message.
         accessor.notify_subscriber(SERVICE_NAME, msg1.clone());
-        let msg1_received = with_timeout(rx.recv()).await.unwrap();
+        let msg1_received = rx.recv().await.unwrap();
 
         accessor.notify_subscriber(SERVICE_NAME_2, msg2.clone());
-        let msg2_received = with_timeout(rx.recv()).await.unwrap();
+        let msg2_received = rx.recv().await.unwrap();
 
         // Verify that the received messages are the same as the ones sent.
         assert_eq!(&msg1_received, &(msg1 as Box<dyn MessageDyn>));
@@ -524,6 +529,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_shared_same_service_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -555,8 +561,8 @@ pub(super) mod tests {
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
         accessor.notify_subscriber(SERVICE_NAME, msg.clone());
-        let msg1_received = with_timeout(rx.recv()).await.unwrap();
-        let msg2_received = with_timeout(rx.recv()).await.unwrap();
+        let msg1_received = rx.recv().await.unwrap();
+        let msg2_received = rx.recv().await.unwrap();
 
         // Verify that the received messages are the same as the one sent.
         let msg = msg as Box<dyn MessageDyn>;
@@ -567,6 +573,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -579,6 +586,7 @@ pub(super) mod tests {
         service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap();
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_configured_accessor_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -596,6 +604,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -612,6 +621,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_accessor_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -627,6 +637,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -641,6 +652,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_not_called_unless_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -659,6 +671,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 0);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_called_after_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());

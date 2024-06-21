@@ -195,6 +195,11 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
 }
 
 rust_test {
@@ -205,6 +210,11 @@ rust_test {
         // keep-sorted start
         "librand",
         "libsdv_telemetry_test_proto",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
     // Requires root so the test can perform Binder calls to the data tunnel
@@ -288,6 +298,7 @@ rust_test {
         // keep-sorted start
         "libasync_trait",
         "libpaste",
+        "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
     test_suites: [
@@ -324,6 +335,11 @@ rust_test {
     rustlibs: [
         // keep-sorted start
         "libsample_publisher_proto",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
     test_suites: [
@@ -400,6 +416,11 @@ rust_test {
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
         "libtokio",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
     test_suites: [

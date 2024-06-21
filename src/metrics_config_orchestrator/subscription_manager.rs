@@ -181,6 +181,7 @@ mod tests {
         Box::new(|_| {})
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
@@ -191,6 +192,7 @@ mod tests {
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_twice_activates_once() {
         let (manager, activatable) = create_subscription_manager();
@@ -204,6 +206,7 @@ mod tests {
         assert_eq!(activatable.get_num_deactivate_calls(), 0);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_adds_callback() {
         let (manager, activatable) = create_subscription_manager();
@@ -216,6 +219,7 @@ mod tests {
         assert!(callback_map_lock.contains_key(KEY));
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -225,6 +229,7 @@ mod tests {
         manager.unsubscribe(&KEY.to_owned()).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_twice_deactivates_once() {
         let (manager, activatable) = create_subscription_manager();
@@ -242,6 +247,7 @@ mod tests {
         assert_eq!(activatable.get_num_activate_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_removes_callback() {
         let (manager, activatable) = create_subscription_manager();

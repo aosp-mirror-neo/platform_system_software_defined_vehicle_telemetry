@@ -414,7 +414,6 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
-    use sdv_telemetry_utils::test_utils::with_timeout;
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::sync::{mpsc, oneshot};
 
@@ -569,6 +568,7 @@ mod tests {
         (message_provider, parent_trigger, callback_listener)
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_calls_subscription_manager() {
         let (trigger, subscription_manager) = create_valid_periodic_trigger();
@@ -588,6 +588,7 @@ mod tests {
         assert!(subscription_manager.callback.lock().unwrap().is_some());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_calls_subscription_manager() {
         let (trigger, subscription_manager) = create_valid_periodic_trigger();
@@ -605,6 +606,7 @@ mod tests {
         assert!(subscription_manager.callback.lock().unwrap().is_none());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_data_trigger_subscribes_to_publisher() {
         let publisher = Arc::new(create_valid_mock_publisher());
@@ -618,12 +620,13 @@ mod tests {
         publisher.fire_new_message(&Int32Value::new(), NodeEvaluationContext::new()).await;
 
         // Wait for notification.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
 
         // Verify that the trigger fired once.
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn data_trigger_shares_context_across_subscribers() {
         let publisher = Arc::new(create_valid_mock_publisher());
@@ -644,8 +647,8 @@ mod tests {
         publisher.fire_new_message(&Int32Value::new(), NodeEvaluationContext::new()).await;
 
         // Wait for trigger to fire and both callbacks to run.
-        let context1 = with_timeout(context1_rx).await.unwrap();
-        let context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        let context1 = context1_rx.await.unwrap();
+        let context2 = callback_listener.wait_for_callback_fired().await;
         trigger.deactivate().await;
 
         assert_eq!(
@@ -654,6 +657,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_periodic_trigger_fires_twice() {
         let (trigger, _) = create_valid_periodic_trigger();
@@ -663,8 +667,8 @@ mod tests {
         Arc::clone(&trigger).activate(callback_listener.create_callback_map()).await;
 
         // Wait for trigger to fire twice.
-        let context1 = with_timeout(callback_listener.wait_for_callback_fired()).await;
-        let context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        let context1 = callback_listener.wait_for_callback_fired().await;
+        let context2 = callback_listener.wait_for_callback_fired().await;
 
         // Unsubscribe from trigger.
         trigger.deactivate().await;
@@ -674,6 +678,7 @@ mod tests {
         assert!(context1.id() < context2.id());
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn periodic_trigger_shares_context_across_subscribers() {
         let (trigger, _) = create_valid_periodic_trigger();
@@ -691,8 +696,8 @@ mod tests {
         Arc::clone(&trigger).activate(callback_map).await;
 
         // Wait for trigger to fire and both callbacks to run.
-        let context1 = with_timeout(context1_rx).await.unwrap();
-        let context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        let context1 = context1_rx.await.unwrap();
+        let context2 = callback_listener.wait_for_callback_fired().await;
         trigger.deactivate().await;
 
         assert_eq!(
@@ -701,6 +706,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_periodic_trigger_deactivate_from_callback_success() {
         let (trigger, _) = create_valid_periodic_trigger();
@@ -720,6 +726,7 @@ mod tests {
         trigger.activate(callback_map).await;
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_subscribes_to_parents() {
         let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
@@ -758,12 +765,13 @@ mod tests {
         parent_trigger2.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
 
         // Verify that the trigger fired once.
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn conditional_trigger_shares_context_across_subscribers() {
         let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -795,14 +803,15 @@ mod tests {
             .set_next_result(Ok(Some(Box::new(Int32Value { value: 1, ..Default::default() }))));
         parent_trigger.fire_with_context(parent_context.clone()).await;
 
-        let child_context1 = with_timeout(child_context1_rx).await.unwrap();
-        let child_context2 = with_timeout(callback_listener.wait_for_callback_fired()).await;
+        let child_context1 = child_context1_rx.await.unwrap();
+        let child_context2 = callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
         assert_eq!(parent_context, child_context1);
         assert_eq!(parent_context, child_context2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_filters_all_changes() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -824,12 +833,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
 
         // Verify that the trigger fired once.
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_filters_falling_edge() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -852,11 +862,12 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_filters_rising_edge() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -879,11 +890,12 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_is_true_filters_true() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -906,12 +918,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_is_false_filters_false() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -934,12 +947,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_is_true_filters_non_zero() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -962,12 +976,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_is_false_filters_zero() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -990,12 +1005,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_is_true_filters_none() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -1015,12 +1031,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_conditional_trigger_is_false_filters_none() {
         let (message_provider, parent_trigger, callback_listener) =
@@ -1040,12 +1057,13 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
-        with_timeout(callback_listener.wait_for_callback_fired()).await;
+        callback_listener.wait_for_callback_fired().await;
+        callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn deactivate_data_trigger_unsubscribes_from_publisher() {
         let callback_listener = Arc::new(CallbackListener::new());
@@ -1065,6 +1083,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn deactivate_conditional_trigger_unsubscribes_from_parents() {
         let mut parent_trigger = MockTrigger::new_for_subscriber(

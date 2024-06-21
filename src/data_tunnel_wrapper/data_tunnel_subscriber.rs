@@ -369,6 +369,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_when_topic_does_not_exist_failure() {
         let topic_name = unique_topic_name();
@@ -387,6 +388,7 @@ mod tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered(_)));
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
         let topic_name = unique_topic_name();
@@ -414,6 +416,7 @@ mod tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_read_messages_success() {
         let topic_name = unique_topic_name();
