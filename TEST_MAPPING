@@ -1,0 +1,40 @@
+{
+  "sdv_telemetry_tests_presubmit": [
+    {
+      "name": "libsdv_telemetry_dt_wrapper_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_configurable_publisher_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_utils_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_bindgen_tests"
+    },
+    {
+      "name": "libsdv_telemetry_status_codes_bindgen_tests"
+    },
+    {
+      "name": "sdv_telemetry_sample_utils_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_time_bindgen_tests"
+    },
+    {
+      "name": "libsdv_telemetry_time_wrapper_tests"
+    }
+  ],
+  "sdv_telemetry_tests_postsubmit": [],
+  "sdv_telemetry_integration_tests_presubmit": [
+    {
+      "name": "libsdv_telemetry_dt_wrapper_integration_tests"
+    },
+    {
+      "name": "sdv_telemetry_integration_tests"
+    }
+  ]
+}
