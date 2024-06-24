@@ -19,7 +19,7 @@ use crate::metrics_config_orchestrator::service_adapter::{
 };
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 
-type CallbackFn = Box<dyn FnMut(&dyn MessageDyn) + Send + Sync>;
+type CallbackFn = Box<dyn FnMut(&dyn MessageDyn, NodeEvaluationContext) + Send + Sync>;
 
 const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
 const PUBLISHER_STATE_ACTIVE_GETTER: &str = "Active Getter";
@@ -144,8 +144,8 @@ impl Publisher for PublisherImpl {
                     Arc::clone(trigger)
                         .subscribe(
                             trigger_subscriber,
-                            Box::new(move || {
-                                self_clone.on_aggregation_publisher_trigger_fired();
+                            Box::new(move |context| {
+                                self_clone.on_aggregation_publisher_trigger_fired(context);
                             }),
                         )
                         .await;
@@ -263,7 +263,7 @@ impl Publisher for PublisherImpl {
     async fn subscribe(
         &self,
         data_trigger_name: &str,
-        callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+        callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn, NodeEvaluationContext) + Send + Sync>,
     ) {
         // Lock state mutex and hold it until operation is complete.
         let mut state_lock = self.state.lock().await;
@@ -339,7 +339,11 @@ impl PublisherImpl {
         )
     }
 
-    async fn set_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
+    async fn set_new_message(
+        self: &Arc<Self>,
+        message: &dyn MessageDyn,
+        context: NodeEvaluationContext,
+    ) {
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
         let mut state_lock = self.state.lock().await;
 
@@ -356,16 +360,15 @@ impl PublisherImpl {
         // Notify subscribed data triggers.
         // TODO(b/294129114): Replace callback_map with just a single callback.
         for callback in callback_map.values_mut() {
-            callback(message);
+            callback(message, context.clone());
         }
     }
 
-    fn on_aggregation_publisher_trigger_fired(self: &Arc<Self>) {
+    fn on_aggregation_publisher_trigger_fired(self: &Arc<Self>, context: NodeEvaluationContext) {
         let PublisherType::Aggregation { message_builder, .. } = &self.publisher_type else {
             panic!("Publisher {} that is not an Aggregation publisher received Aggregation publisher callback", self.name);
         };
 
-        let context = NodeEvaluationContext::new();
         let msg = match message_builder.build(&context) {
             Ok(msg) => msg,
             Err(err) => {
@@ -379,15 +382,16 @@ impl PublisherImpl {
 
         let self_clone = Arc::clone(self);
         tokio::spawn(async move {
-            self_clone.set_new_message(msg.as_ref()).await;
+            self_clone.set_new_message(msg.as_ref(), context).await;
         });
     }
 
     fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
         let self_clone = Arc::clone(self);
         let message_clone = message.clone_box();
+        let context = NodeEvaluationContext::new();
         tokio::spawn(async move {
-            self_clone.set_new_message(message_clone.as_ref()).await;
+            self_clone.set_new_message(message_clone.as_ref(), context).await;
         });
     }
 }
@@ -418,10 +422,11 @@ mod tests {
 
     fn create_inactive_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
+        message_builder: Box<dyn MessageBuilder>,
     ) -> Arc<PublisherImpl> {
         Arc::new(PublisherImpl::new_aggregation_publisher(
             PUBLISHER_NAME.to_owned(),
-            Box::new(MockMessageBuilder::new()),
+            message_builder,
             false,
             triggers,
         ))
@@ -454,7 +459,8 @@ mod tests {
     async fn create_active_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
     ) -> Arc<PublisherImpl> {
-        let publisher = create_inactive_aggregation_publisher(triggers);
+        let publisher =
+            create_inactive_aggregation_publisher(triggers, Box::new(MockMessageBuilder::new()));
 
         Arc::clone(&publisher).activate().await.unwrap();
         publisher
@@ -474,7 +480,7 @@ mod tests {
     ) -> Arc<PublisherImpl> {
         let publisher = create_active_subscribed_service_publisher(service_adapter).await;
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
         publisher
     }
 
@@ -592,7 +598,7 @@ mod tests {
     async fn subscribe_when_inactive_panics() {
         let publisher = create_inactive_subscription_service_publisher(None);
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
     }
 
     #[tokio::test]
@@ -600,7 +606,7 @@ mod tests {
     async fn subscribe_already_subscribed_panics() {
         let publisher = create_service_publisher_with_subscription(None).await;
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_| {})).await;
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
     }
 
     #[tokio::test]
@@ -616,7 +622,7 @@ mod tests {
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
-                Box::new(move |message| {
+                Box::new(move |message, _context| {
                     maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
                 }),
             )
@@ -642,20 +648,48 @@ mod tests {
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
-                Box::new(move |message| {
+                Box::new(move |message, _context| {
                     maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
                 }),
             )
             .await;
         trigger.fire().await;
 
-        let test_message =
-            <dyn MessageDyn>::downcast_box::<TestMessage>(rx.await.unwrap()).unwrap();
-        assert_eq!(test_message.int_field, 1);
-        let test_message =
-            <dyn MessageDyn>::downcast_box::<TestMessage>(publisher.get_latest_message().unwrap())
-                .unwrap();
-        assert_eq!(test_message.int_field, 1);
+        let messages = [rx.await.unwrap(), publisher.get_latest_message().unwrap()];
+        for message in messages {
+            let test_message = <dyn MessageDyn>::downcast_box::<TestMessage>(message).unwrap();
+            assert_eq!(test_message.int_field, 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn aggregation_publisher_notifies_all_subscriber_with_trigger_context() {
+        let trigger = Arc::new(MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
+        ));
+        let publisher =
+            create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
+        let (context_tx, context_rx) = oneshot::channel();
+        let mut context_tx = Some(context_tx);
+
+        publisher
+            .subscribe(
+                DATA_TRIGGER_NAME,
+                Box::new(move |_message, context| {
+                    context_tx.take().unwrap().send(context).unwrap()
+                }),
+            )
+            .await;
+        let trigger_context = NodeEvaluationContext::new();
+        trigger.fire_with_context(trigger_context.clone()).await;
+
+        let context = context_rx.await.unwrap();
+
+        assert_eq!(
+            trigger_context, context,
+            "Node evaluation context should be equal to the trigger context."
+        );
     }
 
     #[tokio::test]

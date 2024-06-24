@@ -4,8 +4,8 @@
 
 use sdv_telemetry_time_bindgen::{getMonotonicTimeSinceBoot, getUnixTimestamp};
 
-/// Wrapper around an `i64` that represents a time in microseconds.
-#[derive(Debug, Clone, Copy)]
+/// Wrapper around an `i64` that represents a duration in microseconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Microseconds(pub i64);
 
 /// Get the current system time in microseconds as a UNIX timestamp.
