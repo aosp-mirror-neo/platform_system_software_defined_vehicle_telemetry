@@ -22,6 +22,9 @@
       "name": "sdv_telemetry_sample_utils_unit_tests"
     },
     {
+      "name": "libsdv_telemetry_test_utils_macros_tests"
+    },
+    {
       "name": "libsdv_telemetry_time_bindgen_tests"
     },
     {
