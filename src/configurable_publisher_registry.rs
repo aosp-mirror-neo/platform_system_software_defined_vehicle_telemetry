@@ -188,7 +188,7 @@ impl ConfigurablePublisherRegistry {
 
 #[async_trait]
 impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription {
-    async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error> {
+    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
         if !self.join_handle.is_finished() {
             self.join_handle.abort();
         }
