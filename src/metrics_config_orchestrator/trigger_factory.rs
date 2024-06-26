@@ -71,7 +71,7 @@ pub enum TriggerFactoryError {
     NameNotSet,
     #[error("No parent triggers set for conditional trigger")]
     NoParentTriggers,
-    #[error("Periodic trigger interval ({interval}) is invalid: {error}")]
+    #[error("Periodic trigger interval ({interval}) is invalid: {error:#}")]
     PeriodicTriggerInvalidDuration { interval: DurationProto, error: anyhow::Error },
     #[error("Publisher {publisher_name} has getter connection type and cannot be listened to")]
     UnableToListenToGetterPublisher { publisher_name: String },

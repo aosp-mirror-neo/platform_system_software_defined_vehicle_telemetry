@@ -185,7 +185,7 @@ impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
 
 #[async_trait]
 impl ServicePublisherSubscription for MockServicePublisherSubscription {
-    async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error> {
+    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
         let data_reference = self.data.upgrade().unwrap();
         let mut data = data_reference.lock().unwrap();
         data.num_unsubscribe_calls += 1;

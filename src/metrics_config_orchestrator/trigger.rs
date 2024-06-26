@@ -371,10 +371,7 @@ impl TriggerImpl {
     fn on_conditional_trigger_parent_trigger_fired(
         self: &Arc<Self>,
         callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-        condition_checker: impl FnOnce(
-            &NodeValue,
-            &Mutex<Option<NodeValue>>,
-        ) -> Result<bool, anyhow::Error>,
+        condition_checker: impl FnOnce(&NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>,
         context: NodeEvaluationContext,
     ) {
         let TriggerType::Conditional { maybe_previous_value, selector_expression, .. } =

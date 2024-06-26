@@ -39,16 +39,16 @@ pub(crate) trait Publisher: Send + Sync {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum PublisherActivateError {
-    #[error("Service adapter failed to create message provider: {error}")]
+    #[error("Service adapter failed to create message provider: {error:#}")]
     ServiceAdapterGetMessageProviderError { error: anyhow::Error },
-    #[error("Service adapter failed to process subscription request: {error}")]
+    #[error("Service adapter failed to process subscription request: {error:#}")]
     ServiceAdapterSubscribeError { error: anyhow::Error },
 }
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub(crate) enum PublisherDeactivateError {
-    #[error("Service adapter failed to process unsubscription request: {error}")]
+    #[error("Service adapter failed to process unsubscription request: {error:#}")]
     ServiceAdapterUnsubscribeError {
         #[from]
         error: anyhow::Error,

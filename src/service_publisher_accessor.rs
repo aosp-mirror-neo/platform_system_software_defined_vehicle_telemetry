@@ -63,7 +63,7 @@ pub enum CreateSubscriptionOutcome {
 #[async_trait]
 pub trait ServicePublisherSubscription: Send + Sync {
     /// Ends the underlying subscription.
-    async fn unsubscribe(self: Box<Self>) -> Result<(), anyhow::Error>;
+    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()>;
 }
 
 impl CreateSubscriptionOutcome {

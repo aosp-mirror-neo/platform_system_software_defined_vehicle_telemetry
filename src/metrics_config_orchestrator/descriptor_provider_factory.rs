@@ -31,7 +31,7 @@ pub(crate) enum DescriptorProviderFactoryError {
     use missing message descriptor of type {msg_type}"
     )]
     MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("Error when calling ServicePublisherManager: {error}")]
+    #[error("Error when calling ServicePublisherManager: {error:#}")]
     ServicePublisherManagerError {
         #[from]
         error: anyhow::Error,

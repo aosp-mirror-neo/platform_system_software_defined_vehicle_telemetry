@@ -403,6 +403,11 @@ rust_test {
     srcs: [
         "tests/integration_tests.rs",
     ],
+    // Use a custom test config template as per
+    // https://source.android.com/docs/core/tests/vts/setup11, because we need
+    // to ensure that the integration tests are run serially, not in parallel,
+    // by adding the `--test-threads=1` flag to the test execution.
+    test_config_template: "tests/integration_tests_config_template.config",
     rustlibs: [
         // keep-sorted start
         "libanyhow",
