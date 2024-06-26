@@ -5,8 +5,8 @@ use std::sync::Arc;
 use sdv_telemetry_utils::operation_result::OperationResult;
 
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::{ast::Node, node_value::NodeValue};
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric standard deviation is calculated.

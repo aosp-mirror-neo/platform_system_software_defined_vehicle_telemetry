@@ -9,13 +9,12 @@ use std::collections::HashMap;
 use std::sync::Mutex;
 use thiserror::Error;
 
-use crate::expr::{
-    ast::NodeEvaluationContext,
-    node_errors::NodeError,
-    proto_node_value_converter::node_value_to_protobuf_reflection::{
-        ReflectRepeatedMutExt, ToReflectValueBox,
-    },
+use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_error::NodeError;
+use crate::expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
+    ReflectRepeatedMutExt, ToReflectValueBox,
 };
+
 use value_aggregator::{AggregationError, ValueAggregator};
 
 pub(crate) trait MessageBuilder: Send + Sync {

@@ -12,7 +12,7 @@ use sdv_telemetry_proto_rust::expression::{
 };
 use sdv_telemetry_utils::option_extension::OptionExtension;
 
-use crate::expr::{ast::DescriptorProvider, node_errors::NodeError};
+use crate::expr::{node_error::NodeError, node_factory::DescriptorProvider};
 
 /// Used for compatibility type checking in expression nodes, such as
 /// operator-operand compatibility and protobuf field assignment compatibility.

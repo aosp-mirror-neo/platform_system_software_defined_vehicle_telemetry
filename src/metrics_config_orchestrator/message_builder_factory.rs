@@ -6,23 +6,16 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     ProtoMessageBuilder,
 };
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
-use crate::{
-    expr::{ast::Node, node_value_type::NodeValueType},
-    metrics_config_orchestrator::message_builder::{
-        value_aggregator_factory::{
-            ValueAggregatorFactory, ValueAggregatorFactoryCreateContext,
-            ValueAggregatorFactoryError, ValueAggregatorFactoryImpl,
-            ValueAggregatorFactoryValidateContext,
-        },
-        MessageBuilder, MessageBuilderImpl,
-    },
+use crate::expr::{node::Node, node_value_type::NodeValueType};
+use crate::metrics_config_orchestrator::message_builder::value_aggregator_factory::{
+    ValueAggregatorFactory, ValueAggregatorFactoryCreateContext, ValueAggregatorFactoryError,
+    ValueAggregatorFactoryImpl, ValueAggregatorFactoryValidateContext,
 };
+use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderImpl};
 
 /// Factory that validates MetricsConfig's ProtoMessageBuilder and creates
 /// corresponding Rust representations.

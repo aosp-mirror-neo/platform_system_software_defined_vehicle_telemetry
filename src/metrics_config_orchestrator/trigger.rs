@@ -8,18 +8,14 @@ use sdv_telemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
     metrics_configuration::conditional_trigger::ConditionType,
 };
-use std::{
-    collections::HashMap,
-    fmt,
-    marker::{Send, Sync},
-    sync::{Arc, Mutex, Weak},
-};
+use std::collections::HashMap;
+use std::fmt;
+use std::marker::{Send, Sync};
+use std::sync::{Arc, Mutex, Weak};
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
-use crate::expr::{
-    ast::{Node, NodeEvaluationContext},
-    node_value::NodeValue,
-};
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, CallbackFn, SubscriptionManager, SubscriptionManagerImpl,
 };

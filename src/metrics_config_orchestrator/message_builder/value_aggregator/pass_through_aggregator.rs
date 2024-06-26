@@ -3,8 +3,8 @@
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::Arc;
 
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::{ast::Node, node_value::NodeValue};
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where no aggregation is performed.

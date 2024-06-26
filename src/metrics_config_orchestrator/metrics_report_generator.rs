@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::{sync::Mutex as AsyncMutex, task};
 
-use crate::expr::ast::NodeEvaluationContext;
+use crate::expr::node::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;

@@ -16,7 +16,7 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{convert::From, error::Error};
 
 use crate::expr::{
-    node_errors::NodeError,
+    node_error::NodeError,
     proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt,
 };
 

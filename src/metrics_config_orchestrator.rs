@@ -33,10 +33,11 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
-use crate::expr::ast::{
-    MessageProvider, Node, NodeEvaluationContext, NodeFactory, NodeFactoryContext, NodeFactoryImpl,
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_error::{MessageProviderError, NodeError};
+use crate::expr::node_factory::{
+    MessageProvider, NodeFactory, NodeFactoryContext, NodeFactoryImpl,
 };
-use crate::expr::node_errors::{MessageProviderError, NodeError};
 use crate::expr::node_value_type::NodeValueType;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
 

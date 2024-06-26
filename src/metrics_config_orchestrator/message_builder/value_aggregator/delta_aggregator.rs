@@ -4,7 +4,7 @@ use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator,
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{mem, sync::Arc};
 
-use crate::expr::ast::{Node, NodeEvaluationContext};
+use crate::expr::node::{Node, NodeEvaluationContext};
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 

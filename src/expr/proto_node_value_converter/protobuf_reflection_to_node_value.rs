@@ -10,7 +10,7 @@ use protobuf::{
     MessageDyn,
 };
 
-use crate::expr::{node_errors::NodeError, node_value::NodeValue};
+use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
 pub trait MessageDescriptorExt {
     fn get_field_value(

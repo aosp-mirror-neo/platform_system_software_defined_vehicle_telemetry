@@ -12,7 +12,7 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
-use crate::expr::{ast::Node, node_value_type::NodeValueType};
+use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::publisher::{ConnectionType, PublisherType};
 use crate::metrics_config_orchestrator::{
     trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,

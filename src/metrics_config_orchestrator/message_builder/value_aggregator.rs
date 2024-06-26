@@ -14,7 +14,7 @@ pub(super) mod vector_aggregator;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use thiserror::Error;
 
-use crate::expr::{ast::NodeEvaluationContext, node_errors::NodeError, node_value::NodeValue};
+use crate::expr::{node::NodeEvaluationContext, node_error::NodeError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use super::{MessageBuilder, MessageBuilderError};
-use crate::expr::ast::NodeEvaluationContext;
+use crate::expr::node::NodeEvaluationContext;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use std::sync::{Arc, Mutex};

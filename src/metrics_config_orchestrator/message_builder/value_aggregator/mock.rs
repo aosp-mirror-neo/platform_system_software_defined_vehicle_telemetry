@@ -2,8 +2,7 @@
 
 use sdv_telemetry_utils::operation_result::OperationResult;
 
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::node_value::NodeValue;
+use crate::expr::{node::NodeEvaluationContext, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{
     value_aggregator::AggregationError, ValueAggregator,
 };

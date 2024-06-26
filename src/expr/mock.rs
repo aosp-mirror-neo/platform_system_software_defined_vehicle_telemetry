@@ -12,8 +12,8 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use crate::expr::ast::{DescriptorProvider, MessageProvider};
-use crate::expr::node_errors::{DescriptorProviderError, MessageProviderError};
+use crate::expr::node_error::{DescriptorProviderError, MessageProviderError};
+use crate::expr::node_factory::{DescriptorProvider, MessageProvider};
 
 // Common constants to be reused across tests.
 
