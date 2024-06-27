@@ -1,0 +1,46 @@
+// Copyright 2024 Google LLC
+
+use protobuf::MessageDyn;
+use std::{cmp::min, fmt, time::Duration};
+
+use crate::util::printable_small_duration;
+
+pub struct PublisherConfig {
+    pub service_name: String,
+    pub loop_data: bool,
+    pub parsed_data: Vec<ParsedDataEntry>,
+}
+
+pub struct ParsedDataEntry {
+    pub message: Box<dyn MessageDyn>,
+    pub delay: Duration,
+}
+
+impl fmt::Display for PublisherConfig {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "Configuration for publisher with service name \"{}\"", self.service_name)?;
+        if self.loop_data {
+            writeln!(f, "Data will be looped indefinitely.")?;
+        } else {
+            writeln!(f, "Data will be replayed once.")?;
+        }
+
+        let num_messages = self.parsed_data.len();
+        let max_displayed_messages = 20;
+        writeln!(f, "Contains {num_messages} messages")?;
+        if num_messages > max_displayed_messages {
+            write!(f, ", showing the first {max_displayed_messages}")?;
+        }
+        for parsed_data_entry in &self.parsed_data[..min(max_displayed_messages, num_messages)] {
+            writeln!(f, "{}", parsed_data_entry)?;
+        }
+        Ok(())
+    }
+}
+
+impl fmt::Display for ParsedDataEntry {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "Delay: {}", printable_small_duration(self.delay)?)?;
+        writeln!(f, "{}", self.message)
+    }
+}

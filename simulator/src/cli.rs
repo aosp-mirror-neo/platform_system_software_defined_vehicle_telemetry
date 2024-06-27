@@ -1,7 +1,7 @@
 // Copyright 2024 Google LLC
 
 use chrono::Duration as ChronoDuration;
-use clap::{error::ErrorKind, Error, Parser};
+use clap::{error::ErrorKind, ArgAction::Append, Error, Parser};
 use std::{fmt, path::PathBuf, time::Duration};
 
 use crate::util::printable_duration;
@@ -10,8 +10,12 @@ use crate::util::printable_duration;
 #[command(long_about = None)]
 pub struct Args {
     /// Metrics config files to execute
-    #[arg(long = "metrics-configs", required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath)]
+    #[arg(long = "metrics-configs", required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath, action = Append)]
     pub metrics_config_paths: Vec<PathBuf>,
+
+    /// Publisher config files to execute. If not provided, will run as simple telemetry client.
+    #[arg(long = "publisher-configs", num_args = 0.., value_hint = clap::ValueHint::FilePath, action = Append)]
+    pub publisher_config_paths: Vec<PathBuf>,
 
     /// Disable writing metrics reports to disk and only write human readable
     /// reports to report log(s)
@@ -33,12 +37,17 @@ pub struct Args {
 impl fmt::Display for Args {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Metrics configs: {:?}", self.metrics_config_paths)?;
+        if self.publisher_config_paths.is_empty() {
+            writeln!(f, "Running as simple telemetry client without simulation publishers.")?;
+        } else {
+            writeln!(f, "Publisher configs: {:?}", self.publisher_config_paths)?;
+        }
         if self.no_binary_reports {
-            writeln!(f, "not writing reports to disk")?;
+            writeln!(f, "Not writing reports to disk.")?;
         }
         writeln!(
             f,
-            "will finish after {} or {} returned reports, whichever comes first",
+            "Finish simulator after {} or {} returned reports, whichever comes first.",
             printable_duration(self.max_simulation_time)?,
             self.max_report_count
         )

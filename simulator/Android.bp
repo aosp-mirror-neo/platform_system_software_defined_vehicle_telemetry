@@ -18,11 +18,13 @@ rust_defaults {
         "libbinder_rs",
         "libchrono",
         "libclap",
+        "libcsv",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "libsdv_log_rust",
         "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_proto_simulation_publisher",
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
@@ -57,4 +59,16 @@ rust_defaults {
 rust_binary {
     name: "sdv_telemetry_simulator",
     defaults: ["telemetry_simulator@rust_defaults"],
+}
+
+rust_protobuf {
+    name: "libsdv_telemetry_proto_simulation_publisher",
+    crate_name: "sdv_telemetry_proto_simulation_publisher",
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    protos: ["src/simulation_publisher.proto"],
+    source_stem: "sdv_telemetry_proto_simulation_publisher_source",
+    vendor_available: true,
 }

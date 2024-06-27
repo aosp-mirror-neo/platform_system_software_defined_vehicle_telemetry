@@ -9,6 +9,8 @@ mod metrics_config_info;
 mod metrics_configs_tracker;
 mod output_strings;
 mod protobuf_parsing;
+mod publisher_config;
+mod publisher_config_parser;
 mod simulator_errors;
 mod telemetry_service_handler;
 mod util;
@@ -27,6 +29,7 @@ use tokio::{
 use crate::{
     io::create_output_directory,
     metrics_configs_tracker::MetricsConfigsTracker,
+    publisher_config_parser::parse_publisher_config,
     simulator_errors::SimulatorError,
     telemetry_service_handler::{
         get_report, get_telemetry_service_instance, get_telemetry_service_listeners,
@@ -47,14 +50,19 @@ async fn main() -> anyhow::Result<()> {
 
 async fn wrapped_main() -> anyhow::Result<()> {
     let cli_args = cli::Args::parse();
-    info!("Running simulator with args: {cli_args}");
+    info!("Running simulator with args:\n{cli_args}");
 
     create_output_directory(!cli_args.no_binary_reports)?;
 
     let mut metrics_configs_tracker = MetricsConfigsTracker::new(!cli_args.no_binary_reports);
 
     for path in &cli_args.metrics_config_paths {
-        metrics_configs_tracker.parse_metrics_config(path.clone())?;
+        metrics_configs_tracker.parse_metrics_config(path)?;
+    }
+
+    for path in &cli_args.publisher_config_paths {
+        let publisher_config = parse_publisher_config(path)?;
+        info!("Parsed publisher config:\n{}", publisher_config);
     }
 
     binder::ProcessState::start_thread_pool();

@@ -31,10 +31,10 @@ impl MetricsConfigsTracker {
     /// Reads a metrics config from the provided file path, deserializes the
     /// content into a MetricsConfig object. Returns an error if the tracker
     /// already contains a metrics config with the same UUID.
-    pub fn parse_metrics_config(&mut self, file_path: PathBuf) -> Result<(), SimulatorError> {
-        let (file_name, serialized_config) = read_metrics_config_from_file(file_path.clone())?;
+    pub fn parse_metrics_config(&mut self, file_path: &PathBuf) -> Result<(), SimulatorError> {
+        let (file_name, serialized_config) = read_metrics_config_from_file(file_path)?;
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(&serialized_config)
-            .map_err(|error| SimulatorError::FileParsingError {
+            .map_err(|error| SimulatorError::FailedToParseFile {
                 file_name: file_name.clone(),
                 error_message: error.to_string(),
             })?;

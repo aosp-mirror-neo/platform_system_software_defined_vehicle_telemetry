@@ -2,6 +2,7 @@
 
 use anyhow::Error;
 use sdv_telemetry_rust_wrapper::TelemetryError;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -28,13 +29,16 @@ pub enum SimulatorError {
     FailedToDecodeReport { report_config_name: String, error: protobuf::Error },
 
     #[error("Failed to parse file \"{file_name}\":\n{error_message}")]
-    FileParsingError { file_name: String, error_message: String },
+    FailedToParseFile { file_name: String, error_message: String },
 
     #[error(
         "Failed to read file at \"{}\":\n\"{error}\"",
         .file_path.display()
     )]
     FailedToReadFile { file_path: PathBuf, error: Error },
+
+    #[error("Failed to parse CSV headers in \"{file_name}\". Missing header(s) {missing:?} and/or containing redundant header(s) {redundant:?}.")]
+    IncorrectCSVHeaders { file_name: String, missing: HashSet<String>, redundant: HashSet<String> },
 
     #[error("{error_message}")]
     Error { error_message: String },
@@ -50,6 +54,9 @@ pub enum SimulatorError {
 
     #[error("Error in the application (this should never happen and is a bug): {error_message}")]
     ProgrammingError { error_message: String },
+
+    #[error("{feature} is not supported (yet).")]
+    NotImplemented { feature: String },
 
     #[error("{file_name}\" is missing the descriptor proto message \"{message_name}\"")]
     MissingDescriptorProto { file_name: String, message_name: String },
