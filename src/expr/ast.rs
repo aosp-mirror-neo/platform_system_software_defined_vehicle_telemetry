@@ -437,8 +437,8 @@ impl PartialEq for NodeEvaluationContext {
     }
 }
 
-// #[cfg(test)]
-// impl Eq for NodeEvaluationContext {}
+#[cfg(test)]
+impl Eq for NodeEvaluationContext {}
 
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
