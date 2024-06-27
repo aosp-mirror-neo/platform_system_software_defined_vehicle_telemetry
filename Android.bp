@@ -277,7 +277,11 @@ rust_binary {
     srcs: [
         "src/main.rs",
     ],
-
+    vintf_fragments: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-service.xml",
+        // keep-sorted end
+    ],
     rustlibs: [
         // keep-sorted start
         "libsdv_telemetry_dt_wrapper",
@@ -296,7 +300,11 @@ rust_binary {
     srcs: [
         "src/main_ivi.rs",
     ],
-
+    vintf_fragments: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-service.xml",
+        // keep-sorted end
+    ],
     rustlibs: [
         // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",

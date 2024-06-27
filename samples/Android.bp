@@ -29,6 +29,89 @@ rust_defaults {
     ],
 }
 
+cc_library {
+    name: "libbinder_accessor",
+    srcs: ["cpp/binder_access.cpp"],
+    vendor_available: true,
+    shared_libs: [
+        "liblog",
+        "libbinder_ndk",
+    ],
+    header_libs: ["jni_headers"],
+    stl: "c++_shared",
+    visibility: [":__subpackages__"],
+}
+
+android_app {
+    name: "telemetry_java_sample_ivi_publisher",
+    vendor: true,
+    sdk_version: "system_current",
+    srcs: [
+        "java/sample_ivi_publisher/BinderServiceAccessor.java",
+        "java/sample_ivi_publisher/IPublisherImpl.java",
+        "java/sample_ivi_publisher/IPublisherSubscriptionImpl.java",
+        "java/sample_ivi_publisher/JavaSampleIviPublisher.java",
+        "rust/data_tunnel_publisher_error_report/error_report_publisher.proto",
+    ],
+    manifest: "java/sample_ivi_publisher/AndroidManifest.xml",
+    static_libs: [
+        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "libprotobuf-java-lite",
+        "guava",
+        "libtime-android",
+        "libmdscommon_lib",
+        "libmdslib_lib",
+    ],
+    proto: {
+        type: "lite",
+        local_include_dirs: [
+            "rust/data_tunnel_publisher_error_report/error_report_publisher.proto",
+        ],
+    },
+    optimize: {
+        enabled: false,
+    },
+    privileged: true,
+    jni_libs: ["libbinder_accessor"],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
+}
+
+android_app {
+    name: "telemetry_java_sample_ivi_publisher_prod",
+    product_specific: true,
+    sdk_version: "system_current",
+    srcs: [
+        "java/sample_ivi_publisher/BinderServiceAccessor.java",
+        "java/sample_ivi_publisher/IPublisherImpl.java",
+        "java/sample_ivi_publisher/IPublisherSubscriptionImpl.java",
+        "java/sample_ivi_publisher/JavaSampleIviPublisherProd.java",
+        "rust/data_tunnel_publisher_error_report/error_report_publisher.proto",
+    ],
+    manifest: "java/sample_ivi_publisher/AndroidManifestProd.xml",
+    static_libs: [
+        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "libprotobuf-java-lite",
+        "guava",
+        "libtime-android",
+        "libmdscommon_lib",
+        "libmdslib_lib",
+    ],
+    proto: {
+        type: "lite",
+        local_include_dirs: [
+            "rust/data_tunnel_publisher_error_report/error_report_publisher.proto",
+        ],
+    },
+    optimize: {
+        enabled: false,
+    },
+    privileged: true,
+    jni_libs: ["libbinder_accessor"],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
+}
+
 rust_binary {
     name: "telemetry_rust_c_client",
     defaults: ["telemetry_rust_c_client_defaults"],
