@@ -2,6 +2,8 @@
 
 syntax = "proto3";
 
+package com.google.sdv.telemetry.samples;
+
 message ErrorReportData {
   uint64 timestamp = 1;
   ErrorInfo error_info = 2;

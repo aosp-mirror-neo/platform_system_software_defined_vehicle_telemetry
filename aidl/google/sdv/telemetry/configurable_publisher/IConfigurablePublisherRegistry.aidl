@@ -11,6 +11,7 @@ import google.sdv.telemetry.configurable_publisher.PublisherInfo;
  * when they are available for publishing data.
  */
 
+@VintfStability
 interface IConfigurablePublisherRegistry {
     /**
      * Registers configurable publishers with

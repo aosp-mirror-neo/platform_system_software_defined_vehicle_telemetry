@@ -6,6 +6,7 @@ package google.sdv.telemetry.configurable_publisher;
  * Describes a configurable publisher
  */
 
+@VintfStability
 parcelable PublisherInfo {
     // Name of the publisher service. Must be unique across all publishers
     // across SDV. Must be non-null
