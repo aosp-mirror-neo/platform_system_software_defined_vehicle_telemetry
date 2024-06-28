@@ -1,7 +1,7 @@
 // Copyright 2025 Google LLC. All Rights Reserved.
 
 #include "callback_functions.h"
-#include "system/software_defined_vehicle/telemetry/proto/metrics_configuration.pb.h"
+#include "system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.pb.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryConfigListListener.h>
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
