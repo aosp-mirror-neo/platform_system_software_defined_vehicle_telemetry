@@ -1,17 +1,11 @@
 // Copyright 2024 Google LLC
 
-use sdv_telemetry_utils::operation_result::OperationResult;
-use std::sync::Arc;
-
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::node::{Node, NodeEvaluationContext};
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where vector(concatenation) aggregation is performed.
 pub struct VectorAggregator {
-    // Produces the latest value.
-    node: Arc<Node>,
     // Stores the existing vector. New values to be appended to the existing vector.
     current_vec: Option<NodeValue>,
     // Maximum length of the vector. If the vector is too long, the oldest value will be dropped.
@@ -20,37 +14,34 @@ pub struct VectorAggregator {
 }
 
 impl VectorAggregator {
-    pub fn new(node: &Arc<Node>, max_length: &Option<u32>) -> Self {
-        Self { node: Arc::clone(node), current_vec: None, max_length: *max_length }
+    pub fn new(max_length: Option<u32>) -> Self {
+        Self { current_vec: None, max_length }
     }
 }
 
 impl ValueAggregator for VectorAggregator {
-    fn compute<'a>(
-        &'a mut self,
-        context: &'a NodeEvaluationContext,
-    ) -> OperationResult<NodeValue, AggregationError> {
-        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
-            if latest_value.is_none() {
-                return Ok(NodeValue::None);
-            }
+    fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
+        let node_value = node_value.expect("Aggregator should be provided with a value");
+        if node_value.is_none() {
+            return Ok(NodeValue::None);
+        }
 
-            if let Some(existing_vec) = &mut self.current_vec {
-                existing_vec.push(&latest_value, &self.max_length)?;
-                Ok(existing_vec.clone())
-            } else {
-                // convert the single value NodeValue into a list type NodeValue
-                let new_vec = latest_value.to_list()?;
-                self.current_vec = Some(new_vec.clone());
-                Ok(new_vec)
-            }
-        })
+        if let Some(existing_vec) = &mut self.current_vec {
+            existing_vec.push(&node_value, &self.max_length)?;
+            Ok(existing_vec.clone())
+        } else {
+            // convert the single value NodeValue into a list type NodeValue
+            let new_vec = node_value.to_list()?;
+            self.current_vec = Some(new_vec.clone());
+            Ok(new_vec)
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use protobuf::MessageDyn;
+    use std::sync::Arc;
 
     use super::*;
     use crate::expr::mock::TEST_MESSAGE;
@@ -58,18 +49,14 @@ mod tests {
     #[test]
     fn vector_aggregator_compute_with_int_ok() {
         let test_int = 100;
-        let mut aggregate_int_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(test_int) }),
-            &None,
-        );
+        let mut aggregator = VectorAggregator::new(None);
 
-        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
             let expected_vec = vec![test_int; i + 1];
 
             // action
-            let res = aggregate_int_value.compute(&context).unwrap_sync().unwrap();
+            let res = aggregator.compute(Some(NodeValue::Int32(test_int))).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int32List(expected_vec));
@@ -78,9 +65,8 @@ mod tests {
 
     #[test]
     fn vector_aggregator_compute_with_int_and_limited_length_ok() {
-        let mut aggregate_int_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(0) }),
-            &Some(3), // max length = 3
+        let mut aggregator = VectorAggregator::new(
+            Some(3), // max length = 3
         );
         let expected_vectors = vec![
             vec![0],
@@ -91,15 +77,10 @@ mod tests {
             vec![2, 3, 4],
         ];
 
-        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector aggregation output is as expected
         for (i, expected_vec) in expected_vectors.into_iter().enumerate() {
-            // make the next expression output equals to i
-            aggregate_int_value.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Int64(i as i64) });
-
             // action
-            let res = aggregate_int_value.compute(&context).unwrap_sync().unwrap();
+            let res = aggregator.compute(Some(NodeValue::Int64(i as i64))).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int64List(expected_vec));
@@ -109,18 +90,14 @@ mod tests {
     #[test]
     fn vector_aggregator_compute_with_float_ok() {
         let test_double = 1.2_f64;
-        let mut aggregate_double_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Double(test_double) }),
-            &None,
-        );
+        let mut aggregator = VectorAggregator::new(None);
 
-        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
             let expected_vec = vec![test_double; i + 1];
 
             // action
-            let res = aggregate_double_value.compute(&context).unwrap_sync().unwrap();
+            let res = aggregator.compute(Some(NodeValue::Double(test_double))).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::DoubleList(expected_vec));
@@ -129,9 +106,8 @@ mod tests {
 
     #[test]
     fn vector_aggregator_compute_with_float_and_limited_length_ok() {
-        let mut aggregate_int_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.0) }),
-            &Some(3), // max length = 3
+        let mut aggregator = VectorAggregator::new(
+            Some(3), // max length = 3
         );
         let expected_vectors = vec![
             vec![0.0],
@@ -142,15 +118,10 @@ mod tests {
             vec![0.4, 0.6, 0.8],
         ];
 
-        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector aggregation output is as expected
         for (i, expected_vec) in expected_vectors.into_iter().enumerate() {
-            // make the next expression output equals to i / 5 as a float
-            aggregate_int_value.node =
-                Arc::new(Node::ConstantLeaf { value: NodeValue::Float(i as f32 / 5.0) });
-
             // action
-            let res = aggregate_int_value.compute(&context).unwrap_sync().unwrap();
+            let res = aggregator.compute(Some(NodeValue::Float(i as f32 / 5.0))).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::FloatList(expected_vec));
@@ -159,19 +130,15 @@ mod tests {
 
     #[test]
     fn vector_aggregator_compute_with_message_value_ok() {
-        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
-        let mut aggregate_message_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(Arc::clone(&message)) }),
-            &None,
-        );
+        let message = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+        let mut aggregator = VectorAggregator::new(None);
 
-        let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
             let expected_vec = vec![Arc::clone(&message); i + 1];
 
             // action
-            let res = aggregate_message_value.compute(&context).unwrap_sync().unwrap();
+            let res = aggregator.compute(Some(NodeValue::Message(Arc::clone(&message)))).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::MessageList(expected_vec));
@@ -181,13 +148,9 @@ mod tests {
     #[test]
     fn vector_aggregator_compute_with_message_value_and_limited_length_ok() {
         let max_len: usize = 3;
-        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
-        let mut aggregate_message_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(Arc::clone(&message)) }),
-            &Some(max_len as u32),
-        );
+        let message = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+        let mut aggregator = VectorAggregator::new(Some(max_len as u32));
 
-        let context = NodeEvaluationContext::new();
         // compute 5 times and verify the output never exceeds max_len
         for i in 0..5 {
             let expected_vec = if i < max_len {
@@ -197,7 +160,7 @@ mod tests {
             };
 
             // action
-            let res = aggregate_message_value.compute(&context).unwrap_sync().unwrap();
+            let res = aggregator.compute(Some(NodeValue::Message(Arc::clone(&message)))).unwrap();
 
             // assert
             assert_eq!(res, NodeValue::MessageList(expected_vec));
@@ -206,25 +169,28 @@ mod tests {
 
     #[test]
     fn vector_aggregator_compute_with_none_value_ok() {
-        let mut aggregator =
-            VectorAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }), &None);
-
-        let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap_sync().unwrap();
+        let mut aggregator = VectorAggregator::new(None);
+        let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
 
     #[test]
     fn vector_aggregator_compute_with_vector_fails() {
-        let mut aggregate_list_of_list = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::BoolList(vec![true, false]) }),
-            &None,
+        let mut aggregator = VectorAggregator::new(None);
+        let err = aggregator.compute(Some(NodeValue::BoolList(vec![true, false]))).unwrap_err();
+
+        assert!(
+            matches!(&err, AggregationError::VectorInitializationError { .. }),
+            "Unexpected error: {:?}",
+            err
         );
+    }
 
-        let context = NodeEvaluationContext::new();
-        let res = aggregate_list_of_list.compute(&context).unwrap_sync();
-
-        assert!(res.is_err());
+    #[test]
+    #[should_panic]
+    fn vector_aggregator_compute_without_node_value_panics() {
+        let mut aggregator = VectorAggregator::new(None);
+        aggregator.compute(None).unwrap();
     }
 }

@@ -1,17 +1,14 @@
 // Copyright 2024 Google LLC
 
-//! Result of operation that can be either synchronous or asynchronous.
+//! Defines functions for an operation that can be either synchronous or asynchronous.
 
 use futures::{future::BoxFuture, FutureExt, TryFutureExt};
 use std::future;
 
-/// Operation result
-pub enum OperationResult<'a, T, E> {
-    /// The operation completed synchronously.
-    Synchronous(Result<T, E>),
-    /// The operation will complete asynchronously.
-    Asynchronous(BoxFuture<'a, Result<T, E>>),
-}
+use crate::value_holder::ValueHolder;
+
+/// Result of an operation that can be either synchronous or asynchronous.
+pub type OperationResult<'a, T, E> = ValueHolder<'a, Result<T, E>>;
 
 impl<'a, T: 'a, E: 'a> OperationResult<'a, T, E> {
     /// Executes another operation after this one resolves successfully.
@@ -76,22 +73,6 @@ impl<'a, T: 'a, E: 'a> OperationResult<'a, T, E> {
             OperationResult::Asynchronous(future) => future.map_ok(op).boxed().into(),
         }
     }
-
-    /// Return asynchronous result of the operation or panic if the result is synchronous.
-    pub fn unwrap_async(self) -> BoxFuture<'a, Result<T, E>> {
-        match self {
-            OperationResult::Synchronous(_) => panic!("The operation result is synchronous"),
-            OperationResult::Asynchronous(future) => future,
-        }
-    }
-
-    /// Return synchronous result of the operation or panic if the result is asynchronous.
-    pub fn unwrap_sync(self) -> Result<T, E> {
-        match self {
-            OperationResult::Synchronous(result) => result,
-            OperationResult::Asynchronous(_) => panic!("The operation result is asynchronous"),
-        }
-    }
 }
 
 impl<T, E> From<Result<T, E>> for OperationResult<'_, T, E> {
@@ -103,5 +84,105 @@ impl<T, E> From<Result<T, E>> for OperationResult<'_, T, E> {
 impl<'a, T, E> From<BoxFuture<'a, Result<T, E>>> for OperationResult<'a, T, E> {
     fn from(future: BoxFuture<'a, Result<T, E>>) -> Self {
         OperationResult::Asynchronous(future)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn and_then_first_async_err_returns_err() {
+        let err = OperationResult::Asynchronous(future::ready(Err(1)).boxed())
+            .and_then(|_: String| -> OperationResult<f32, _> { unreachable!() })
+            .unwrap_async()
+            .await
+            .unwrap_err();
+
+        assert_eq!(err, 1);
+    }
+
+    #[test]
+    fn and_then_first_sync_err_returns_err() {
+        let err = OperationResult::Synchronous(Err(1))
+            .and_then(|_: String| -> OperationResult<f32, _> { unreachable!() })
+            .unwrap_sync()
+            .unwrap_err();
+
+        assert_eq!(err, 1);
+    }
+
+    #[tokio::test]
+    async fn and_then_async_sync_success() {
+        let res = OperationResult::Asynchronous(future::ready(Ok::<_, String>(1)).boxed())
+            .and_then(|i| OperationResult::Synchronous(Ok(i + 1)))
+            .unwrap_async()
+            .await
+            .unwrap();
+
+        assert_eq!(res, 2);
+    }
+
+    #[tokio::test]
+    async fn and_then_async_async_success() {
+        let res = OperationResult::Asynchronous(future::ready(Ok::<_, String>(1)).boxed())
+            .and_then(|i| OperationResult::Asynchronous(future::ready(Ok(i + 1)).boxed()))
+            .unwrap_async()
+            .await
+            .unwrap();
+
+        assert_eq!(res, 2);
+    }
+
+    #[test]
+    fn and_then_sync_sync_success() {
+        let res = OperationResult::Synchronous(Ok::<_, String>(1))
+            .and_then(|i| OperationResult::Synchronous(Ok(i + 1)))
+            .unwrap_sync()
+            .unwrap();
+
+        assert_eq!(res, 2);
+    }
+
+    #[tokio::test]
+    async fn and_then_sync_first_async_err_returns_err() {
+        let err = OperationResult::Asynchronous(future::ready(Err(1)).boxed())
+            .and_then_sync(|_: String| -> Result<f32, _> { unreachable!() })
+            .unwrap_async()
+            .await
+            .unwrap_err();
+
+        assert_eq!(err, 1);
+    }
+
+    #[test]
+    fn and_then_sync_first_sync_err_returns_err() {
+        let err = OperationResult::Synchronous(Err(1))
+            .and_then_sync(|_: String| -> Result<f32, _> { unreachable!() })
+            .unwrap_sync()
+            .unwrap_err();
+
+        assert_eq!(err, 1);
+    }
+
+    #[tokio::test]
+    async fn and_then_sync_first_async_success() {
+        let res = OperationResult::Asynchronous(future::ready(Ok::<_, String>(1)).boxed())
+            .and_then_sync(|i| Ok(i + 1))
+            .unwrap_async()
+            .await
+            .unwrap();
+
+        assert_eq!(res, 2);
+    }
+
+    #[test]
+    fn and_then_sync_first_sync_success() {
+        let res = OperationResult::Synchronous(Ok::<_, String>(1))
+            .and_then_sync(|i| Ok(i + 1))
+            .unwrap_sync()
+            .unwrap();
+
+        assert_eq!(res, 2);
     }
 }

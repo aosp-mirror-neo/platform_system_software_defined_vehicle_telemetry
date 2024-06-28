@@ -94,7 +94,7 @@ pub(super) enum PublisherType {
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     },
     Aggregation {
-        message_builder: Box<dyn MessageBuilder>,
+        message_builder: Arc<dyn MessageBuilder>,
         #[allow(dead_code)]
         reset_on_get: bool,
         trigger_subscriber: TriggerSubscriber,
@@ -316,7 +316,7 @@ impl PublisherImpl {
             reset_on_get,
             trigger_subscriber,
             triggers,
-            message_builder,
+            message_builder: message_builder.into(),
         };
         Self::new(name, publisher_type)
     }
@@ -369,7 +369,9 @@ impl PublisherImpl {
             panic!("Publisher {} that is not an Aggregation publisher received Aggregation publisher callback", self.name);
         };
 
-        let msg = match message_builder.build(&context) {
+        // TODO(b/349862095): Handle asynchronous OperationResult.
+        let res = Arc::clone(message_builder).build(&Arc::new(context.clone())).unwrap_sync();
+        let msg = match res {
             Ok(msg) => msg,
             Err(err) => {
                 error!(
@@ -387,9 +389,12 @@ impl PublisherImpl {
     }
 
     fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
+        // Create context outside of the task, so that the date/time is set as fast as possible,
+        // and not just at the moment when this async task should start running.
+        let context = NodeEvaluationContext::new();
+
         let self_clone = Arc::clone(self);
         let message_clone = message.clone_box().into();
-        let context = NodeEvaluationContext::new();
         tokio::spawn(async move {
             self_clone.set_new_message(&message_clone, context).await;
         });

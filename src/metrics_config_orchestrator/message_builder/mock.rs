@@ -4,6 +4,7 @@ use super::{MessageBuilder, MessageBuilderError};
 use crate::expr::node::NodeEvaluationContext;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Mutex};
 
 type MockResultCallbackBox = Box<
@@ -21,17 +22,20 @@ pub(crate) struct MockMessageBuilder {
 
 impl MessageBuilder for MockMessageBuilder {
     fn build(
-        &self,
-        context: &NodeEvaluationContext,
-    ) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
+        self: Arc<Self>,
+        context: &Arc<NodeEvaluationContext>,
+    ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError> {
         if let Some(error) = self.next_error.lock().unwrap().take() {
-            return Err(error);
+            return Err(error).into();
         }
 
         if let Some(result_callback) = self.result_callback.lock().unwrap().as_ref() {
-            result_callback(context)
+            result_callback(context).into()
         } else {
-            Ok(Box::new(TestMessage { int_field: 1, ..Default::default() }))
+            OperationResult::Synchronous(Ok(Box::new(TestMessage {
+                int_field: 1,
+                ..Default::default()
+            })))
         }
     }
 }

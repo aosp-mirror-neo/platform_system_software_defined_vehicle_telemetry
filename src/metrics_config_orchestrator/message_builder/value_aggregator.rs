@@ -11,10 +11,9 @@ pub(super) mod std_dev_aggregator;
 pub(super) mod sum_aggregator;
 pub(super) mod vector_aggregator;
 
-use sdv_telemetry_utils::operation_result::OperationResult;
 use thiserror::Error;
 
-use crate::expr::{node::NodeEvaluationContext, node_error::NodeError, node_value::NodeValue};
+use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -24,21 +23,18 @@ pub enum AggregationError {
         #[from]
         e: NodeError,
     },
+    #[error("Numeric aggregation requires expressions to output numeric values, but the value is {value}")]
+    NumericAggregationTypeMismatch { value: String },
     #[error("Cannot create a vector containing elements of type: {value}.")]
     VectorInitializationError { value: String },
     #[error("Append has incompatible types. List is {list} and value to append is {value}")]
     VectorAppendTypeMismatch { list: String, value: String },
-    #[error("Numeric aggregation requires expressions to output numeric values, but the value is {value}")]
-    NumericAggregationTypeMismatch { value: String },
 }
 
 /// Aggregation types should implement this trait and perform the corresponding
 /// aggregation at `compute()`.
 pub trait ValueAggregator: Send + Sync {
-    fn compute<'a>(
-        &'a mut self,
-        context: &'a NodeEvaluationContext,
-    ) -> OperationResult<NodeValue, AggregationError>;
+    fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError>;
 }
 
 #[cfg(test)]

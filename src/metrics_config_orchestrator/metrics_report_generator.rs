@@ -35,7 +35,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     is_active: AsyncMutex<bool>,
     report_number: AtomicI32,
     subscriber: TriggerSubscriber,
-    message_builder: Box<dyn MessageBuilder>,
+    message_builder: Arc<dyn MessageBuilder>,
 }
 
 #[async_trait]
@@ -97,12 +97,14 @@ impl MetricsReportGeneratorImpl {
             is_active: false.into(),
             report_number: 1.into(),
             subscriber,
-            message_builder,
+            message_builder: message_builder.into(),
         }
     }
 
     fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str, context: NodeEvaluationContext) {
-        match self.message_builder.build(&context) {
+        // TODO(b/349862095): Handle asynchronous OperationResult.
+        let res = Arc::clone(&self.message_builder).build(&Arc::new(context)).unwrap_sync();
+        match res {
             Ok(report_data) => {
                 let mut report = MetricsReport::new();
                 report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);
@@ -229,6 +231,7 @@ mod test {
 
         // Setup generator to return an error to make sure no reports can be generated past this point.
         message_builder.set_next_error(MessageBuilderError::FailedToAssignValueToField {
+            field_name: String::default(),
             e: NodeError::ConstantValueNotSet,
         });
 

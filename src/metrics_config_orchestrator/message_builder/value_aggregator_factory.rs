@@ -46,7 +46,7 @@ pub trait ValueAggregatorFactory: Send + Sync {
         &self,
         aggregated_field_value: &AggregatedFieldValueProto,
         context: &ValueAggregatorFactoryCreateContext,
-    ) -> Result<Box<dyn ValueAggregator>, ValueAggregatorFactoryError>;
+    ) -> Result<(Box<dyn ValueAggregator>, Option<Arc<Node>>), ValueAggregatorFactoryError>;
 
     fn validate(
         &self,
@@ -73,55 +73,49 @@ impl ValueAggregatorFactory for ValueAggregatorFactoryImpl {
         &self,
         aggregated_field_value: &AggregatedFieldValueProto,
         context: &ValueAggregatorFactoryCreateContext,
-    ) -> Result<Box<dyn ValueAggregator>, ValueAggregatorFactoryError> {
+    ) -> Result<(Box<dyn ValueAggregator>, Option<Arc<Node>>), ValueAggregatorFactoryError> {
         Self::is_field_assignment_valid(
             context.field_descriptor,
             aggregated_field_value,
             context.node_types,
         )?;
+        let get_node_func = |i: Option<u32>| Some(Arc::clone(&context.nodes[i.unwrap() as usize]));
         match aggregated_field_value {
             AggregatedFieldValueProto::NoAggregation(aggr_proto) => {
-                Ok(Box::new(PassThroughAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(PassThroughAggregator {}), expression_node))
             }
             AggregatedFieldValueProto::VectorAggregation(aggr_proto) => {
-                Ok(Box::new(VectorAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                    &aggr_proto.max_length,
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(VectorAggregator::new(aggr_proto.max_length)), expression_node))
             }
             AggregatedFieldValueProto::MaxAggregation(aggr_proto) => {
-                Ok(Box::new(MaxAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(MaxAggregator::new()), expression_node))
             }
             AggregatedFieldValueProto::MinAggregation(aggr_proto) => {
-                Ok(Box::new(MinAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(MinAggregator::new()), expression_node))
             }
             AggregatedFieldValueProto::AvgAggregation(aggr_proto) => {
-                Ok(Box::new(AvgAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(AvgAggregator::new()), expression_node))
             }
             AggregatedFieldValueProto::SumAggregation(aggr_proto) => {
-                Ok(Box::new(SumAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(SumAggregator::new()), expression_node))
             }
             AggregatedFieldValueProto::StdDevAggregation(aggr_proto) => {
-                Ok(Box::new(StdDevAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(StdDevAggregator::new()), expression_node))
             }
             AggregatedFieldValueProto::DeltaAggregation(aggr_proto) => {
-                Ok(Box::new(DeltaAggregator::new(
-                    &context.nodes[aggr_proto.expression_node_index.unwrap() as usize],
-                )))
+                let expression_node = get_node_func(aggr_proto.expression_node_index);
+                Ok((Box::new(DeltaAggregator::new()), expression_node))
             }
-            AggregatedFieldValueProto::CountAggregation(_) => Ok(Box::new(CountAggregator::new())),
+            AggregatedFieldValueProto::CountAggregation(_) => {
+                Ok((Box::new(CountAggregator::new()), None))
+            }
             _ => Err(ValueAggregatorFactoryError::UnknownAggregationType {
                 msg: format!("{:?}", aggregated_field_value),
             }),

@@ -379,7 +379,7 @@ impl TriggerImpl {
 
         // TODO(b/349862095): Handle asynchronous OperationResult.
         let res = selector_expression
-            .evaluate(&context)
+            .evaluate(&Arc::new(context.clone()))
             .map_err(|err| anyhow!(err))
             .and_then_sync(|node_value| condition_checker(node_value, maybe_previous_value))
             .unwrap_sync();

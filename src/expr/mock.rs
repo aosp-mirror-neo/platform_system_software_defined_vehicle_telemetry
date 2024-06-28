@@ -141,7 +141,7 @@ impl MessageProvider for MockMessageProvider {
     fn get_message(
         &self,
         _publisher_name: &str,
-    ) -> OperationResult<Option<Arc<dyn MessageDyn>>, MessageProviderError> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
         self.next_result.lock().unwrap().take().unwrap_or_else(|| {
             OperationResult::Synchronous(Ok(Some(Arc::new(TEST_MESSAGE.clone()))))
         })

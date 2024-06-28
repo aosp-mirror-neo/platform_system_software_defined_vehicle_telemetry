@@ -7,7 +7,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::expr::{node::Node, node_value_type::NodeValueType};
@@ -137,6 +137,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
         let map = Self::map_field_to_descriptor(proto_message_builder, &message_descriptor)?;
 
         // iterate through raw assignments to build concrete ValueAggregators
+        let mut value_providers = Vec::new();
         let field_assignments = map
             .into_iter()
             .map(|(field_name, (aggregated_field_value_proto, field_descriptor))| {
@@ -145,7 +146,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
                     context.node_types,
                     context.nodes,
                 );
-                let aggregator = self
+                let (aggregator, node) = self
                     .value_aggregator_factory
                     .create(aggregated_field_value_proto, &context)
                     .map_err(|e| MessageBuilderFactoryError::InvalidAssignment {
@@ -153,11 +154,19 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
                         message_type: proto_message_builder.message_type.clone(),
                         e: e.into(),
                     })?;
-                Ok((field_name, Mutex::new(aggregator)))
+                if let Some(node) = node {
+                    value_providers.push((field_name.clone(), node));
+                }
+                Ok((field_name, aggregator))
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Box::new(MessageBuilderImpl::new(owner_name, message_descriptor, field_assignments)))
+        Ok(Box::new(MessageBuilderImpl::new(
+            owner_name,
+            message_descriptor,
+            field_assignments,
+            value_providers,
+        )))
     }
 }
 
