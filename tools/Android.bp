@@ -1,0 +1,6 @@
+// Copyright 2024 Google LLC
+
+sh_binary_host {
+    name: "sdv_telemetry_get_proto_file_descriptors",
+    src: "get_proto_file_descriptors.sh",
+}
