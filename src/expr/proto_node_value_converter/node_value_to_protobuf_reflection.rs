@@ -95,7 +95,12 @@ impl ToReflectValueBox for NodeValue {
                     Ok(ReflectValueBox::Message(msg.clone_box()))
                 }
             }
-            _ => Err(err_provider()),
+            ProtobufRuntimeType::String => {
+                self.get_string(&err_provider)?.to_owned().to_reflect_value_box(protobuf_type)
+            }
+            ProtobufRuntimeType::VecU8 => {
+                self.get_bytes(&err_provider)?.to_owned().to_reflect_value_box(protobuf_type)
+            }
         }
     }
 }
@@ -210,5 +215,70 @@ impl ToReflectValueBox for Box<dyn MessageDyn> {
                 refl_type: format!("{:?}", protobuf_type),
             }),
         }
+    }
+}
+
+/// A String can be converted into a protobuf reflection value.
+impl ToReflectValueBox for String {
+    fn to_reflect_value_box(
+        &self,
+        protobuf_type: &ProtobufRuntimeType,
+    ) -> Result<ReflectValueBox, NodeError> {
+        match protobuf_type {
+            ProtobufRuntimeType::String => Ok(ReflectValueBox::String(self.clone())),
+            _ => Err(NodeError::ValueToProtoConversionError {
+                value: format!("{:?}", self),
+                refl_type: format!("{:?}", protobuf_type),
+            }),
+        }
+    }
+}
+
+/// A Vec<u8> can be converted into a protobuf reflection value.
+impl ToReflectValueBox for Vec<u8> {
+    fn to_reflect_value_box(
+        &self,
+        protobuf_type: &ProtobufRuntimeType,
+    ) -> Result<ReflectValueBox, NodeError> {
+        match protobuf_type {
+            ProtobufRuntimeType::VecU8 => Ok(ReflectValueBox::Bytes(self.clone())),
+            _ => Err(NodeError::ValueToProtoConversionError {
+                value: format!("{:?}", self),
+                refl_type: format!("{:?}", protobuf_type),
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn string_to_reflect_value_box_with_string_protobuf_runtime_type_success() {
+        let result = "kukkula".to_owned().to_reflect_value_box(&ProtobufRuntimeType::String);
+
+        assert_eq!(result.unwrap(), ReflectValueBox::String("kukkula".to_owned()));
+    }
+
+    #[test]
+    fn string_to_reflect_value_box_with_i32_protobuf_runtime_type_failure() {
+        let result = "kukkula".to_owned().to_reflect_value_box(&ProtobufRuntimeType::I32);
+
+        assert!(matches!(result, Err(NodeError::ValueToProtoConversionError { .. })));
+    }
+
+    #[test]
+    fn vec_to_reflect_value_box_with_bytes_protobuf_runtime_type_success() {
+        let result = vec![1, 2, 3].to_owned().to_reflect_value_box(&ProtobufRuntimeType::VecU8);
+
+        assert_eq!(result.unwrap(), ReflectValueBox::Bytes(vec![1, 2, 3].to_owned()));
+    }
+
+    #[test]
+    fn vec_to_reflect_value_box_with_i32_protobuf_runtime_type_failure() {
+        let result = vec![1, 2, 3].to_owned().to_reflect_value_box(&ProtobufRuntimeType::I32);
+
+        assert!(matches!(result, Err(NodeError::ValueToProtoConversionError { .. })));
     }
 }

@@ -245,6 +245,28 @@ impl NodeValue {
         }
     }
 
+    /// Returns the string value or the provided error if NodeValue is not a string.
+    pub fn get_string<E>(&self, err_provider: &impl Fn() -> E) -> Result<&str, E>
+    where
+        E: Error,
+    {
+        Ok(match self {
+            NodeValue::String(val) => val,
+            _ => return Err(err_provider()),
+        })
+    }
+
+    /// Returns the bytes value or the provided error if NodeValue is not bytes.
+    pub fn get_bytes<E>(&self, err_provider: &impl Fn() -> E) -> Result<&[u8], E>
+    where
+        E: Error,
+    {
+        Ok(match self {
+            NodeValue::ByteList(val) => val,
+            _ => return Err(err_provider()),
+        })
+    }
+
     /// Check if node value is none.
     pub fn is_none(&self) -> bool {
         matches!(self, NodeValue::None)
