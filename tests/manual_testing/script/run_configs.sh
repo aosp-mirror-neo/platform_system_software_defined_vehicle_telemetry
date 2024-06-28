@@ -128,7 +128,7 @@ for FILE in $TEMP_DIR/binary_reports/*.pb; do
     convert_proto \
       "rawproto:$TEMP_DIR/binary_reports/$BASE.pb" \
       "textproto:$OUT_DIR/reports/$BASE.textproto" \
-      system/software_defined_vehicle/telemetry/proto/metrics_configuration.proto:MetricsReport
+      system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto:MetricsReport
     ((num_reports += 1))
 done
 

@@ -2,7 +2,7 @@
 
 filegroup {
     name: "sdv_telemetry_proto_srcs",
-    srcs: ["*.proto"],
+    srcs: ["metrics_configuration/*.proto"],
 }
 
 filegroup {
