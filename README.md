@@ -1,3 +1,5 @@
+<!-- Copyright 2024 Google LLC -->
+
 # Telemetry Services
 
 This repository contains the telemetry specific services for the software

@@ -1,3 +1,5 @@
+<!-- Copyright 2024 Google LLC -->
+
 # Manual testing helper script
 
 [run_configs.sh](run_configs.sh) is a helper script to make running many configs

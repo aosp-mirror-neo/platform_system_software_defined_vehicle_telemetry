@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 ///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
@@ -19,5 +19,6 @@
 
 package google.sdv.telemetry;
 interface ITelemetryConfigListListener {
-  oneway void sendConfigList(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode, in @utf8InCpp String statusMessage, in List<String> configList);
+    oneway void sendConfigList(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode,
+            in @utf8InCpp String statusMessage, in List<String> configList);
 }

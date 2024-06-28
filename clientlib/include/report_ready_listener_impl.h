@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 #include <aidl/google/sdv/telemetry/BnTelemetryReportReadyListener.h>
 #include <utils/Log.h>

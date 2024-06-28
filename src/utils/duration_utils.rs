@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 //! This module contains conversion functions from Rust's `Duration` type to protobuf's duration
 //! type.

@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 rust_defaults {
     name: "libsdv_telemetry_test_utils_macros_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],

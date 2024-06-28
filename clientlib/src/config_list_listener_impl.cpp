@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 #include <cstddef>
 #define LOG_TAG "ConfigListListenerImpl"

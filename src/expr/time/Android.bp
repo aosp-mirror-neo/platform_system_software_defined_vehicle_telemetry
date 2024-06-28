@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 package {
     default_team: "trendy_team_connectivity_telemetry",

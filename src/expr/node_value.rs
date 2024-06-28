@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 //! Wrapper around a generic value.
 //! Should be able to hold all the values in a ConstantLeafNode protobuf

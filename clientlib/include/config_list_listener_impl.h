@@ -1,4 +1,4 @@
-// Copyright 2025 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 #include "callback_functions.h"
 #include "system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.pb.h"

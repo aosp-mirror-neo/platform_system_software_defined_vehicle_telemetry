@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 //! This module acts as a wrapper around C Client library for telemetry service
 

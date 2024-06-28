@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 use log::trace;
 use rand::Rng;

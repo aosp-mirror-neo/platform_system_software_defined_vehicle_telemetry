@@ -1,3 +1,5 @@
+<!-- Copyright 2024 Google LLC -->
+
 # Sample Vendor Client Application
 
 This directory contains vendor client application which communicates with the

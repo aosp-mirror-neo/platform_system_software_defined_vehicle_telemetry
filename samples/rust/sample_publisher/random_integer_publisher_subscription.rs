@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisherSubscription::IConfigurablePublisherSubscription};
 use google_sdv_telemetry_configurable_publisher::binder::{Interface, Strong, Result as BinderResult};

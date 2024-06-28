@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 ///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
@@ -20,7 +20,7 @@
 package google.sdv.telemetry.configurable_publisher;
 
 parcelable PublisherInfo {
-  @utf8InCpp String serviceName;
-  byte[] fileDescriptorProto;
-  @utf8InCpp String messageTypeName;
+    @utf8InCpp String serviceName;
+    byte[] fileDescriptorProto;
+    @utf8InCpp String messageTypeName;
 }

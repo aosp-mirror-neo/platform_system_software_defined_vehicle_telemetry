@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 // build target to archive sample code to be shared with OEM's partners
 // with access only to the binary PDK.
 genrule {

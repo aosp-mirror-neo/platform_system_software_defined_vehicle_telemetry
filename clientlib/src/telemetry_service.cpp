@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 #include "android-base/expected.h"
 #define LOG_TAG "ServiceClient"

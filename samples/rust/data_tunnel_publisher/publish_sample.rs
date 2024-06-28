@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 //! Test the rust wrapper for telemetry and DT.
 use sample_publisher_proto::sample_publisher;
