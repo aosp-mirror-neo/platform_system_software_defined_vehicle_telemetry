@@ -45,7 +45,12 @@ convert_proto() {
 
 # The vm seems to take a bit of time to be ready after the command finishes
 wait $CVD_START_PID
-sleep 10
+echo "Waiting for VM to come online."
+until adb shell echo 'VM running' &> /dev/null; do
+  echo "."
+  sleep 1
+done
+
 adb root
 
 if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then

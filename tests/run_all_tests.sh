@@ -44,6 +44,12 @@ cvd reset -y
 log "Starting VM instance..."
 cvd start
 
+echo "Waiting for VM to come online."
+until adb shell echo 'VM running' &> /dev/null; do
+  echo "."
+  sleep 1
+done
+
 log "Running telemetry tests..."
 atest $TEST_TARGETS
 
