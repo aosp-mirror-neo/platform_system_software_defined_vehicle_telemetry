@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 ///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
@@ -19,5 +19,6 @@
 
 package google.sdv.telemetry;
 interface ITelemetryReportListener {
-  oneway void onReport(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode, in @utf8InCpp String statusMessage, in byte[] metricsReport);
+    oneway void onReport(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode,
+            in @utf8InCpp String statusMessage, in byte[] metricsReport);
 }

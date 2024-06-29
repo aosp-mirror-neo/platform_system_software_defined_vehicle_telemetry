@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 mod value_aggregator;
 pub(super) mod value_aggregator_factory;

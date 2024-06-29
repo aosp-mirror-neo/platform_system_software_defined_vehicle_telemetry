@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 ///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
@@ -20,5 +20,5 @@
 package google.sdv.telemetry.configurable_publisher;
 
 interface ISubscriber {
-  void sendData(in byte[] data);
+    void sendData(in byte[] data);
 }

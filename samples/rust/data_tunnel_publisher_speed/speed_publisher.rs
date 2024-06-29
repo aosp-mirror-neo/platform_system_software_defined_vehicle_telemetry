@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 //! A sample data tunnel publisher that publishes information about a car's speed.
 

@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
 use google_sdv_telemetry::binder::Strong;

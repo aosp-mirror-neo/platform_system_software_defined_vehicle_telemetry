@@ -1,3 +1,5 @@
+// Copyright 2024 Google LLC
+
 rust_protobuf {
     name: "libsdv_telemetry_test_proto",
     crate_name: "sdv_telemetry_test_proto",

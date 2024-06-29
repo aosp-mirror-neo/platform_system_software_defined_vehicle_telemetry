@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 ///////////////////////////////////////////////////////////////////////////////
 // THIS FILE IS IMMUTABLE. DO NOT EDIT IN ANY CASE.                          //
 ///////////////////////////////////////////////////////////////////////////////
@@ -20,6 +20,7 @@
 package google.sdv.telemetry.configurable_publisher;
 
 interface IConfigurablePublisherRegistry {
-  void registerPublisher(in google.sdv.telemetry.configurable_publisher.PublisherInfo pInfo, in google.sdv.telemetry.configurable_publisher.IConfigurablePublisher publisher);
-  void unregisterPublisher(in @utf8InCpp String serviceName);
+    void registerPublisher(in google.sdv.telemetry.configurable_publisher.PublisherInfo pInfo,
+            in google.sdv.telemetry.configurable_publisher.IConfigurablePublisher publisher);
+    void unregisterPublisher(in @utf8InCpp String serviceName);
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 //! This module contains helper functions to read metrics configurations from a file.
 use protobuf::{text_format::parse_from_str, Message};

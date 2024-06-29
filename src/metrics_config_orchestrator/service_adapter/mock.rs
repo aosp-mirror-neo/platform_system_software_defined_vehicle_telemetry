@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 use std::future;
 use std::sync::atomic::{AtomicU32, Ordering};

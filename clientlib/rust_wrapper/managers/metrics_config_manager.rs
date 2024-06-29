@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 use crate::callbacks::{call_api_with_config_list_callback, call_api_with_status_callback};
 use crate::TelemetryResult;

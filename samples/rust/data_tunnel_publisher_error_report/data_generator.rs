@@ -1,4 +1,4 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 use error_report_publisher_proto::error_report_publisher::{ErrorInfo, ErrorReportData, Severity};
 use protobuf::Enum;

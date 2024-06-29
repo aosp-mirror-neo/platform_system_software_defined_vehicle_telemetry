@@ -1,3 +1,3 @@
-// Copyright 2024 Google LLC. All Rights Reserved.
+// Copyright 2024 Google LLC
 
 #include "get_time.h"

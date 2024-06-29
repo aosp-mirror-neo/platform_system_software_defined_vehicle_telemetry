@@ -1,4 +1,4 @@
-// Copyright 2023 Google LLC. All Rights Reserved.
+// Copyright 2023 Google LLC
 
 //! This module contains async functions for file read and write operations
 use std::path::PathBuf;
