@@ -62,6 +62,7 @@ pub fn parse_publisher_config(file_path: &PathBuf) -> Result<PublisherConfig, Si
                 service_name: publisher_config_proto.service_name,
                 loop_data: data_generator.loop_data,
                 parsed_data,
+                message_descriptor,
             })
         }
         _ => Err(SimulatorError::FailedToParseFile {

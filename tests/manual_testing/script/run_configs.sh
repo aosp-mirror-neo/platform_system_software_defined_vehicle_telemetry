@@ -7,11 +7,10 @@ OUT_DIR=$(realpath $OUT_DIR)
 CF_REPORTS_PATH="/data/local/tmp/binary_reports"
 
 log() {
-    echo -e "\n$1\n"
+  echo -e "\n$1\n"
 }
 
-if [[ -z "$ANDROID_BUILD_TOP" ]]
-then
+if [[ -z "$ANDROID_BUILD_TOP" ]]; then
   log "[ERROR] ANDROID_BUILD_TOP is missing. Please, lunch the Android target."
   exit -1
 fi
@@ -31,22 +30,22 @@ trap "rm -rf $TEMP_DIR" 0 2 3 15 # Run the command when one of these signals is 
 
 # These are necessary for gqui to pick up the right protos.
 ln -s $ANDROID_BUILD_TOP/external/protobuf/src/google $TEMP_DIR/google
-ln -s $ANDROID_BUILD_TOP/system                       $TEMP_DIR/system
+ln -s $ANDROID_BUILD_TOP/system $TEMP_DIR/system
 
 convert_proto() {
   log "Converting $1 to $2 as $3"
 
   cd $TEMP_DIR
   gqui from "$1" \
-      proto $3 \
-      --outfile="$2"
+    proto $3 \
+    --outfile="$2"
   cd -
 }
 
 # The vm seems to take a bit of time to be ready after the command finishes
 wait $CVD_START_PID
 echo "Waiting for VM to come online."
-until adb shell echo 'VM running' &> /dev/null; do
+until adb shell echo 'VM running' &>/dev/null; do
   echo "."
   sleep 1
 done
@@ -59,9 +58,9 @@ if [ "$TARGET_PRODUCT" = "sdv_core_cf" ]; then
   CLIENT=telemetry_rust_c_client
 
   if [[ $# -eq 0 ]]; then
-      FILES=$CORE_DEFAULT_CONFIGS
+    FILES=$CORE_DEFAULT_CONFIGS
   else
-      FILES="$@"
+    FILES="$@"
   fi
 elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
   log "Running in SDV IVI"
@@ -69,9 +68,9 @@ elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
   CLIENT=telemetry_rust_c_client
 
   if [[ $# -eq 0 ]]; then
-      FILES=$IVI_DEFAULT_CONFIGS
+    FILES=$IVI_DEFAULT_CONFIGS
   else
-      FILES="$@"
+    FILES="$@"
   fi
 
   log "Starting Telemetry Service"
@@ -82,24 +81,23 @@ else
   exit 1
 fi
 
-
 log "Pushing configs to vm"
 
 num_configs=0
 CONFIG_FILE_NAMES=""
 for FILE in $FILES; do
-    NAME=${FILE##*/}
-    adb push "$FILE" "/data/local/tmp/$NAME"
-    CONFIG_FILE_NAMES+="/data/local/tmp/$NAME "
-    ((num_configs += 1))
+  NAME=${FILE##*/}
+  adb push "$FILE" "/data/local/tmp/$NAME"
+  CONFIG_FILE_NAMES+="/data/local/tmp/$NAME "
+  ((num_configs += 1))
 done
 
 log "Pushed $num_configs configs"
 
 log "Starting publishers: $PUBLISHERS"
 for PUBLISHER in ${PUBLISHERS//,/ }; do
-    adb shell "$PUBLISHER" &
-    trap "pkill -f $PUBLISHER" 0 2 3 15
+  adb shell "$PUBLISHER" &
+  trap "pkill -f $PUBLISHER" 0 2 3 15
 done
 
 PUBS_TO_CLIENT_SLEEP_DURATION=2s
@@ -113,10 +111,10 @@ TELEMETRY_CLIENT_PID=$!
 
 mkdir -p "$OUT_DIR"
 if [ "$LOG_TO_FILE" ]; then
-    NOW=$(date '+%F_%H-%M-%S')
-    adb logcat | stdbuf -o0 grep -i telemetry >"$OUT_DIR/$NOW.log" &
+  NOW=$(date '+%F_%H-%M-%S')
+  adb logcat | stdbuf -o0 grep -i telemetry >"$OUT_DIR/$NOW.log" &
 else
-    adb logcat | stdbuf -o0 grep -i telemetry &
+  adb logcat | stdbuf -o0 grep -i telemetry &
 fi
 LOGCAT_PID=$!
 
@@ -131,14 +129,14 @@ adb pull "$CF_REPORTS_PATH" "$TEMP_DIR"
 mkdir -p "$OUT_DIR/reports"
 num_reports=0
 for FILE in $TEMP_DIR/binary_reports/*.pb; do
-    NAME=${FILE##*/}
-    BASE=${NAME%.pb}
-    # Convert report from binary 'pb' to human-readable 'textproto' format
-    convert_proto \
-      "rawproto:$TEMP_DIR/binary_reports/$BASE.pb" \
-      "textproto:$OUT_DIR/reports/$BASE.textproto" \
-      system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto:MetricsReport
-    ((num_reports += 1))
+  NAME=${FILE##*/}
+  BASE=${NAME%.pb}
+  # Convert report from binary 'pb' to human-readable 'textproto' format
+  convert_proto \
+    "rawproto:$TEMP_DIR/binary_reports/$BASE.pb" \
+    "textproto:$OUT_DIR/reports/$BASE.textproto" \
+    system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto:MetricsReport
+  ((num_reports += 1))
 done
 
 log "Got $num_reports reports (from $num_configs configs)."
