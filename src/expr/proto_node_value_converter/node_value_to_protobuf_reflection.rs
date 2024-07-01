@@ -6,7 +6,7 @@ use protobuf::reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as Prot
 use protobuf::well_known_types::any::Any;
 use protobuf::{MessageDyn, MessageFull};
 
-use crate::expr::{node_errors::NodeError, node_value::NodeValue};
+use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
 /// Implementing type will be able to convert self into a ReflectValueBox.
 pub trait ToReflectValueBox {

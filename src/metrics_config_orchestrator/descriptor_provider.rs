@@ -3,7 +3,7 @@
 use protobuf::reflect::MessageDescriptor;
 use std::collections::HashMap;
 
-use crate::expr::{ast::DescriptorProvider, node_errors::DescriptorProviderError};
+use crate::expr::{node_error::DescriptorProviderError, node_factory::DescriptorProvider};
 
 pub struct DescriptorProviderImpl {
     // key = publisher name, value = MessageDescriptor for the data it publishes

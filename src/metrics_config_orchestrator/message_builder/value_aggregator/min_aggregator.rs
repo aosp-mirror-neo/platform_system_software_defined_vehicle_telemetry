@@ -1,10 +1,11 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::Arc;
 
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::{ast::Node, node_value::NodeValue};
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where aggregation for numeric minimum is performed.
@@ -22,27 +23,33 @@ impl MinAggregator {
 }
 
 impl ValueAggregator for MinAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        let latest_value = self.node.evaluate(context)?;
-        if latest_value.is_none() {
-            return Ok(latest_value);
-        }
-        if !latest_value.is_numeric() {
-            return Err(AggregationError::NumericAggregationTypeMismatch {
-                value: format!("{:?}", latest_value),
-            });
-        }
-        if let Some(min) = &self.current_min {
-            if latest_value.is_less_than(min)? {
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
+            if latest_value.is_none() {
+                return Ok(NodeValue::None);
+            }
+
+            if !latest_value.is_numeric() {
+                return Err(AggregationError::NumericAggregationTypeMismatch {
+                    value: format!("{:?}", latest_value),
+                });
+            }
+
+            if let Some(min) = &self.current_min {
+                if latest_value.clone().less_than(min)? {
+                    self.current_min = Some(latest_value.clone());
+                    Ok(latest_value)
+                } else {
+                    Ok(min.clone())
+                }
+            } else {
                 self.current_min = Some(latest_value.clone());
                 Ok(latest_value)
-            } else {
-                Ok(min.clone())
             }
-        } else {
-            self.current_min = Some(latest_value.clone());
-            Ok(latest_value)
-        }
+        })
     }
 }
 
@@ -61,7 +68,7 @@ mod tests {
 
         let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            result.push(aggregator.compute(&context).unwrap());
+            result.push(aggregator.compute(&context).unwrap_sync().unwrap());
 
             // update the next exrp eval result, so we can test correctness of compute()
             aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
@@ -95,7 +102,7 @@ mod tests {
             MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
         let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap();
+        let res = aggregator.compute(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -106,7 +113,7 @@ mod tests {
             MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
         let context = NodeEvaluationContext::new();
-        let err = bad_min.compute(&context).unwrap_err();
+        let err = bad_min.compute(&context).unwrap_sync().unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),

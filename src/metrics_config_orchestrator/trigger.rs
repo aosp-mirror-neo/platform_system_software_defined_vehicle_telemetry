@@ -8,18 +8,14 @@ use sdv_telemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
     metrics_configuration::conditional_trigger::ConditionType,
 };
-use std::{
-    collections::HashMap,
-    fmt,
-    marker::{Send, Sync},
-    sync::{Arc, Mutex, Weak},
-};
+use std::collections::HashMap;
+use std::fmt;
+use std::marker::{Send, Sync};
+use std::sync::{Arc, Mutex, Weak};
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
-use crate::expr::{
-    ast::{Node, NodeEvaluationContext},
-    node_value::NodeValue,
-};
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, CallbackFn, SubscriptionManager, SubscriptionManagerImpl,
 };
@@ -155,9 +151,9 @@ impl Activatable<TriggerSubscriber, NodeEvaluationContext> for TriggerImpl {
                 });
             }
             TriggerType::Conditional { condition_type, subscriber, triggers, .. } => {
-                let condition_checker: for<'a, 'b> fn(
-                    &'a NodeValue,
-                    &'b Mutex<Option<NodeValue>>,
+                let condition_checker: for<'a> fn(
+                    NodeValue,
+                    &'a Mutex<Option<NodeValue>>,
                 ) -> anyhow::Result<bool> = match condition_type {
                     ConditionType::CONDITION_TYPE_UNSPECIFIED => {
                         panic!("Condition type for trigger {} is not specified", self.name)
@@ -183,8 +179,8 @@ impl Activatable<TriggerSubscriber, NodeEvaluationContext> for TriggerImpl {
                             &Operator::RelationalOperator(RelationalOperator::NOT_EQ.into()),
                         )
                     },
-                    ConditionType::IS_TRUE => |current_value, _| Self::is_true(current_value),
-                    ConditionType::IS_FALSE => |current_value, _| Self::is_false(current_value),
+                    ConditionType::IS_TRUE => |current_value, _| Self::is_true(&current_value),
+                    ConditionType::IS_FALSE => |current_value, _| Self::is_false(&current_value),
                 };
                 for trigger in triggers {
                     let self_clone = Arc::clone(&self);
@@ -306,7 +302,7 @@ impl TriggerImpl {
     /// Compares current value with the previous value using provided operator, stores
     /// current value in the new previous value holder and returns comparison result.
     fn compare_with_previous(
-        current_value: &NodeValue,
+        current_value: NodeValue,
         previous_value_holder: &Mutex<Option<NodeValue>>,
         operator: &Operator,
     ) -> anyhow::Result<bool> {
@@ -316,7 +312,7 @@ impl TriggerImpl {
 
         // Perform comparison or return false if there's no previous value.
         if let Some(previous_value) = maybe_previous_value {
-            let result = current_value.operate(operator, || Ok(previous_value)).unwrap();
+            let result = current_value.operate_sync(operator, || Ok(previous_value)).unwrap();
             if let NodeValue::Bool(bool_result) = result {
                 Ok(bool_result)
             } else {
@@ -371,7 +367,8 @@ impl TriggerImpl {
     fn on_conditional_trigger_parent_trigger_fired(
         self: &Arc<Self>,
         callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-        condition_checker: impl FnOnce(&NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>,
+        condition_checker: impl FnOnce(NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>
+            + Send,
         context: NodeEvaluationContext,
     ) {
         let TriggerType::Conditional { maybe_previous_value, selector_expression, .. } =
@@ -380,21 +377,21 @@ impl TriggerImpl {
             panic!("Unexpected trigger type");
         };
 
-        let node_value = match selector_expression.evaluate(&context) {
-            Ok(value) => value,
+        // TODO(b/349862095): Handle asynchronous OperationResult.
+        let res = selector_expression
+            .evaluate(&context)
+            .map_err(|err| anyhow!(err))
+            .and_then_sync(|node_value| condition_checker(node_value, maybe_previous_value))
+            .unwrap_sync();
+
+        let check_succeeded = match res {
+            Ok(check_succeeded) => check_succeeded,
             Err(err) => {
-                error!(
-                    "Error when performing expression evaluation for trigger {}: {}",
-                    self.name, err
-                );
+                error!("Error when checking trigger {}: {:?}", self.name, err);
                 return;
             }
         };
 
-        let check_succeeded =
-            condition_checker(&node_value, maybe_previous_value).unwrap_or_else(|err| {
-                panic!("Failed to perform comparison for trigger {}: {:?}", self.name, err)
-            });
         if check_succeeded {
             let trigger_name_clone = self.name.clone();
             let callback_map_clone = Arc::clone(callback_map);
@@ -754,11 +751,11 @@ mod tests {
         msg2.value = 2;
 
         // Set the first message and fire the first parent trigger.
-        message_provider.set_next_result(Ok(Some(msg1)));
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger1.fire().await;
 
         // Set a different message and fire the second parent trigger.
-        message_provider.set_next_result(Ok(Some(msg2)));
+        message_provider.set_next_sync_result(Ok(Some(msg2)));
         parent_trigger2.fire().await;
 
         // Wait for trigger to fire once.
@@ -796,8 +793,10 @@ mod tests {
 
         trigger.activate(callback_map).await;
 
-        message_provider
-            .set_next_result(Ok(Some(Box::new(Int32Value { value: 1, ..Default::default() }))));
+        message_provider.set_next_sync_result(Ok(Some(Box::new(Int32Value {
+            value: 1,
+            ..Default::default()
+        }))));
         parent_trigger.fire_with_context(parent_context.clone()).await;
 
         let child_context1 = child_context1_rx.await.unwrap();
@@ -820,13 +819,13 @@ mod tests {
         msg2.value = 2;
 
         // Fire parent trigger three times with the message changing once.
-        message_provider.set_next_result(Ok(Some(msg1)));
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg2.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg2.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg2)));
+        message_provider.set_next_sync_result(Ok(Some(msg2)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
@@ -849,13 +848,13 @@ mod tests {
 
         // Fire parent trigger three times.
         // The first change is the rising edge and the second change is the falling edge.
-        message_provider.set_next_result(Ok(Some(msg1.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg1.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg2)));
+        message_provider.set_next_sync_result(Ok(Some(msg2)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg1)));
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
@@ -877,13 +876,13 @@ mod tests {
 
         // Fire parent trigger three times.
         // The first change is the falling edge and the second change is the rising edge.
-        message_provider.set_next_result(Ok(Some(msg2.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg2.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg1)));
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg2)));
+        message_provider.set_next_sync_result(Ok(Some(msg2)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
@@ -905,13 +904,13 @@ mod tests {
 
         // Fire parent trigger three times: [false, true, true].
         // This is to verify it filters out false and lets repeated true go through.
-        message_provider.set_next_result(Ok(Some(false_msg)));
+        message_provider.set_next_sync_result(Ok(Some(false_msg)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(true_msg.clone())));
+        message_provider.set_next_sync_result(Ok(Some(true_msg.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(true_msg)));
+        message_provider.set_next_sync_result(Ok(Some(true_msg)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
@@ -934,13 +933,13 @@ mod tests {
 
         // Fire parent trigger three times: [true, false, false].
         // This is to verify it filters out false and lets repeated true go through.
-        message_provider.set_next_result(Ok(Some(true_msg)));
+        message_provider.set_next_sync_result(Ok(Some(true_msg)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(false_msg.clone())));
+        message_provider.set_next_sync_result(Ok(Some(false_msg.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(false_msg)));
+        message_provider.set_next_sync_result(Ok(Some(false_msg)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
@@ -963,13 +962,13 @@ mod tests {
 
         // Fire parent trigger three times: [0, 1, 1].
         // This is to verify it filters out zeo and lets repeated non-zeroes go through.
-        message_provider.set_next_result(Ok(Some(msg0)));
+        message_provider.set_next_sync_result(Ok(Some(msg0)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg1.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg1.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg1)));
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
@@ -992,13 +991,13 @@ mod tests {
 
         // Fire parent trigger three times: [1, 0, 0].
         // This is to verify it filters out non-zero and lets repeated zero go through.
-        message_provider.set_next_result(Ok(Some(msg1)));
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg0.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg0.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg0)));
+        message_provider.set_next_sync_result(Ok(Some(msg0)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
@@ -1021,10 +1020,10 @@ mod tests {
         // This is to verify it filters out None and lets repeated non-zeroes go through.
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg)));
+        message_provider.set_next_sync_result(Ok(Some(msg)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.
@@ -1047,10 +1046,10 @@ mod tests {
         // This is to verify it filters out None and lets repeated zero go through.
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg.clone())));
+        message_provider.set_next_sync_result(Ok(Some(msg.clone())));
         parent_trigger.fire().await;
 
-        message_provider.set_next_result(Ok(Some(msg)));
+        message_provider.set_next_sync_result(Ok(Some(msg)));
         parent_trigger.fire().await;
 
         // Wait for trigger to fire twice.

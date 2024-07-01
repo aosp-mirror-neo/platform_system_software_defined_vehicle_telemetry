@@ -1,8 +1,6 @@
 // Copyright 2024 Google LLC
 
-use sdv_telemetry_proto_rust::expression::combination_node::{
-    ArithmeticOperator, Operator, RelationalOperator,
-};
+use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::AggregationError;
@@ -18,7 +16,7 @@ pub trait NodeValueExtension {
         -> Result<(), AggregationError>;
 
     // Returns true if self is less than other.
-    fn is_less_than(&self, other: &NodeValue) -> Result<bool, AggregationError>;
+    fn less_than(self, other: &NodeValue) -> Result<bool, AggregationError>;
 
     // Update the running average after learning the new sample.
     // Caller must be a NodeValue::Double.
@@ -27,10 +25,6 @@ pub trait NodeValueExtension {
         n: u32,
         new_value: &NodeValue,
     ) -> Result<(), AggregationError>;
-
-    // Update the sum average after learning the new sample.
-    // Caller must be a NodeValue::Double.
-    fn update_sum(&mut self, new_value: &NodeValue) -> Result<(), AggregationError>;
 }
 
 impl NodeValueExtension for NodeValue {
@@ -91,13 +85,12 @@ impl NodeValueExtension for NodeValue {
         Ok(())
     }
 
-    fn is_less_than(&self, other: &NodeValue) -> Result<bool, AggregationError> {
+    fn less_than(self, other: &NodeValue) -> Result<bool, AggregationError> {
         let other_clone = other.clone();
-        if let NodeValue::Bool(res) = self
-            .operate(&Operator::RelationalOperator(RelationalOperator::LT.into()), move || {
-                Ok(other_clone)
-            })?
-        {
+        if let NodeValue::Bool(res) = self.operate_sync(
+            &Operator::RelationalOperator(RelationalOperator::LT.into()),
+            move || Ok(other_clone),
+        )? {
             Ok(res)
         } else {
             panic!("Relational operation LT should produce a boolean output");
@@ -120,14 +113,6 @@ impl NodeValueExtension for NodeValue {
         let n = f64::from(n);
         let sum = *avg * n;
         *avg = (sum + new_sample) / (n + 1.0);
-        Ok(())
-    }
-
-    fn update_sum(&mut self, new_value: &NodeValue) -> Result<(), AggregationError> {
-        *self = self
-            .operate(&Operator::ArithmeticOperator(ArithmeticOperator::ADD.into()), move || {
-                Ok(new_value.clone())
-            })?;
         Ok(())
     }
 }

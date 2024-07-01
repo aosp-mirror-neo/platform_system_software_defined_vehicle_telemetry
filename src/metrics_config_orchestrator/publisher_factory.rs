@@ -9,7 +9,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
-use crate::expr::ast::Node;
+use crate::expr::node::Node;
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,

@@ -6,20 +6,16 @@ use sdv_telemetry_utils::option_extension::OptionExtension;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::{
-    ast::Node,
-    node_value_type::{NodeValueType, NodeValueTypeExtension},
+use crate::expr::node::Node;
+use crate::expr::node_value_type::{NodeValueType, NodeValueTypeExtension};
+use crate::metrics_config_orchestrator::message_builder::value_aggregator::{
+    avg_aggregator::AvgAggregator, count_aggregator::CountAggregator,
+    delta_aggregator::DeltaAggregator, max_aggregator::MaxAggregator,
+    min_aggregator::MinAggregator, pass_through_aggregator::PassThroughAggregator,
+    std_dev_aggregator::StdDevAggregator, sum_aggregator::SumAggregator,
+    vector_aggregator::VectorAggregator,
 };
-use crate::metrics_config_orchestrator::message_builder::{
-    value_aggregator::{
-        avg_aggregator::AvgAggregator, count_aggregator::CountAggregator,
-        delta_aggregator::DeltaAggregator, max_aggregator::MaxAggregator,
-        min_aggregator::MinAggregator, pass_through_aggregator::PassThroughAggregator,
-        std_dev_aggregator::StdDevAggregator, sum_aggregator::SumAggregator,
-        vector_aggregator::VectorAggregator,
-    },
-    ValueAggregator,
-};
+use crate::metrics_config_orchestrator::message_builder::ValueAggregator;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]

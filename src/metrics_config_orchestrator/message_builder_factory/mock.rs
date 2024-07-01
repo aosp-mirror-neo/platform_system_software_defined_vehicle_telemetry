@@ -10,7 +10,7 @@ use super::{
     MessageBuilder, MessageBuilderFactory, MessageBuilderFactoryCreateContext,
     MessageBuilderFactoryError, MessageBuilderFactoryValidateContext,
 };
-use crate::expr::{ast::Node, node_value::NodeValue, node_value_type::NodeValueType};
+use crate::expr::{node::Node, node_value::NodeValue, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
 
 lazy_static! {

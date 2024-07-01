@@ -1,11 +1,12 @@
 // Copyright 2024 Google LLC
 
-use std::sync::Arc;
-
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::{ast::Node, node_value::NodeValue};
-use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
+use sdv_telemetry_utils::operation_result::OperationResult;
+use std::{mem, sync::Arc};
+
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
+use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric delta is calculated.
 pub struct DeltaAggregator {
@@ -22,32 +23,35 @@ impl DeltaAggregator {
 }
 
 impl ValueAggregator for DeltaAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        let new_value = self.node.evaluate(context)?;
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into().and_then_sync(|new_value| {
+            if new_value.is_none() {
+                return Ok(NodeValue::None);
+            }
 
-        if new_value.is_none() {
-            return Ok(new_value);
-        }
+            if !new_value.is_numeric() {
+                panic!(
+                    "Validation should have ensured that delta aggregation type \
+                        has numeric expression evaluation results"
+                );
+            }
 
-        if !new_value.is_numeric() {
-            panic!(
-                "Validation should have ensured that delta aggregation type \
-              has numeric expression evaluation results"
-            );
-        }
-
-        // Previous valus is none for the first received node.
-        if self.previous_value.is_none() {
-            self.previous_value = new_value;
-            Ok(NodeValue::None)
-        } else {
-            let current_delta = new_value.operate(
-                &Operator::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into()),
-                || Ok(self.previous_value.clone()),
-            )?;
-            self.previous_value = new_value;
-            Ok(current_delta)
-        }
+            // Previous valus is none for the first received node.
+            if self.previous_value.is_none() {
+                self.previous_value = new_value;
+                Ok(NodeValue::None)
+            } else {
+                let previous_value = mem::replace(&mut self.previous_value, new_value.clone());
+                let current_delta = new_value.operate_sync(
+                    &Operator::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into()),
+                    || Ok(previous_value),
+                )?;
+                Ok(current_delta)
+            }
+        })
     }
 }
 
@@ -66,7 +70,7 @@ mod tests {
 
         let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            let res = aggregator.compute(&context).unwrap();
+            let res = aggregator.compute(&context).unwrap_sync().unwrap();
             // Index 0 is ignored as delta for that is None which cannot be converted into a number.
             if i > 0 {
                 result.push(res);
@@ -77,7 +81,7 @@ mod tests {
         }
 
         // To make sure the last node also gets calculated.
-        result.push(aggregator.compute(&context).unwrap());
+        result.push(aggregator.compute(&context).unwrap_sync().unwrap());
 
         result
     }
@@ -108,7 +112,7 @@ mod tests {
             DeltaAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
         let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap();
+        let res = aggregator.compute(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -120,6 +124,6 @@ mod tests {
             DeltaAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
         let context = NodeEvaluationContext::new();
-        bad_delta_aggregator.compute(&context).unwrap();
+        bad_delta_aggregator.compute(&context).unwrap_sync().unwrap();
     }
 }

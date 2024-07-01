@@ -1,7 +1,8 @@
 // Copyright 2024 Google LLC
 
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::node_value::NodeValue;
+use sdv_telemetry_utils::operation_result::OperationResult;
+
+use crate::expr::{node::NodeEvaluationContext, node_value::NodeValue};
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where count aggregation is performed.
@@ -16,9 +17,12 @@ impl CountAggregator {
 }
 
 impl ValueAggregator for CountAggregator {
-    fn compute(&mut self, _context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
+    fn compute(
+        &mut self,
+        _context: &NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
         self.count += 1;
-        Ok(NodeValue::Int32(self.count))
+        Ok(NodeValue::Int32(self.count)).into()
     }
 }
 
@@ -34,7 +38,7 @@ mod tests {
         // compute 5 times to see the count is incrementing
         for i in 0..5 {
             // action
-            let res = aggregator.compute(&context).unwrap();
+            let res = aggregator.compute(&context).unwrap_sync().unwrap();
 
             // assert
             assert_eq!(res, NodeValue::Int32(i + 1));

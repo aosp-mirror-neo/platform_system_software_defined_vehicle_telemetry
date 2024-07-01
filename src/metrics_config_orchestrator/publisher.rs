@@ -12,7 +12,7 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::expr::ast::NodeEvaluationContext;
+use crate::expr::node::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceMessageProvider, ServiceSubscription,

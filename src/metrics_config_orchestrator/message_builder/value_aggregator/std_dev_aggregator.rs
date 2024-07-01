@@ -2,9 +2,11 @@
 
 use std::sync::Arc;
 
+use sdv_telemetry_utils::operation_result::OperationResult;
+
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::ast::NodeEvaluationContext;
-use crate::expr::{ast::Node, node_value::NodeValue};
+use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric standard deviation is calculated.
@@ -62,30 +64,35 @@ fn update_running_standard_deviation(
 }
 
 impl ValueAggregator for StdDevAggregator {
-    fn compute(&mut self, context: &NodeEvaluationContext) -> Result<NodeValue, AggregationError> {
-        let new_value = self.node.evaluate(context)?;
-        if new_value.is_none() {
-            return Ok(new_value);
-        }
-        if !new_value.is_numeric() {
-            panic!(
-                "Validation should have ensured that standard deviation aggregation type \
-                has numeric expression evaluation results"
-            );
-        }
+    fn compute<'a>(
+        &'a mut self,
+        context: &'a NodeEvaluationContext,
+    ) -> OperationResult<NodeValue, AggregationError> {
+        self.node.evaluate(context).err_into().and_then_sync(|new_value| {
+            if new_value.is_none() {
+                return Ok(NodeValue::None);
+            }
 
-        let prev_avg = self.current_avg.clone();
-        self.current_avg.update_running_average(self.n, &new_value)?;
+            if !new_value.is_numeric() {
+                panic!(
+                    "Validation should have ensured that standard deviation aggregation type \
+                    has numeric expression evaluation results"
+                );
+            }
 
-        update_running_standard_deviation(
-            self.n,
-            &mut self.current_std_dev,
-            &prev_avg,
-            &self.current_avg,
-            &new_value,
-        )?;
-        self.n += 1;
-        Ok(self.current_std_dev.clone())
+            let prev_avg = self.current_avg.clone();
+            self.current_avg.update_running_average(self.n, &new_value)?;
+
+            update_running_standard_deviation(
+                self.n,
+                &mut self.current_std_dev,
+                &prev_avg,
+                &self.current_avg,
+                &new_value,
+            )?;
+            self.n += 1;
+            Ok(self.current_std_dev.clone())
+        })
     }
 }
 
@@ -115,7 +122,7 @@ mod tests {
 
         let context = NodeEvaluationContext::new();
         for i in 0..node_outputs.len() - 1 {
-            let res = std_dev_aggregator.compute(&context).unwrap();
+            let res = std_dev_aggregator.compute(&context).unwrap_sync().unwrap();
             result_std_devs.push(res);
 
             // update the next exrp eval result, so we can test correctness of compute()
@@ -124,7 +131,7 @@ mod tests {
         }
 
         // To make sure the last node also gets calculated.
-        result_std_devs.push(std_dev_aggregator.compute(&context).unwrap());
+        result_std_devs.push(std_dev_aggregator.compute(&context).unwrap_sync().unwrap());
 
         result_std_devs
     }
@@ -171,7 +178,7 @@ mod tests {
             StdDevAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
 
         let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap();
+        let res = aggregator.compute(&context).unwrap_sync().unwrap();
         assert_eq!(res, NodeValue::None);
     }
 
@@ -182,6 +189,6 @@ mod tests {
             StdDevAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
 
         let context = NodeEvaluationContext::new();
-        bad_std_dev.compute(&context).unwrap();
+        bad_std_dev.compute(&context).unwrap_sync().unwrap();
     }
 }

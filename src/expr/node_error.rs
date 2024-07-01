@@ -1,10 +1,9 @@
-// Copyright 2023 Google LLC
+// Copyright 2024 Google LLC
 
 //! Errors that can arise from incorrect node setup and from AST traversal.
 
-use thiserror::Error;
-
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
@@ -32,7 +31,10 @@ pub enum NodeError {
 
     // errors related to FieldLeafNode
     #[error("Field leaf node encountered error: {e}")]
-    MessageProviderError { e: MessageProviderError },
+    MessageProviderError {
+        #[from]
+        e: MessageProviderError,
+    },
     #[error("Descriptor not found: {e}")]
     DescriptorProviderError {
         #[from]

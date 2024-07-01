@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::ast::DescriptorProvider;
+use crate::expr::node_factory::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
 
@@ -98,7 +98,7 @@ mod tests {
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
 
     use super::*;
-    use crate::expr::node_errors::DescriptorProviderError;
+    use crate::expr::node_error::DescriptorProviderError;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
