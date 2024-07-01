@@ -87,6 +87,9 @@ rust_test {
     // lint-free.
     clippy_lints: "none",
     lints: "none",
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
 
 rust_bindgen {
@@ -117,6 +120,9 @@ rust_test {
     // lint-free.
     clippy_lints: "none",
     lints: "none",
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
 
 rust_library {

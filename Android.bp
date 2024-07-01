@@ -208,6 +208,9 @@ rust_test {
         "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
 
 rust_test {
@@ -335,6 +338,9 @@ rust_test {
         unit_test: true,
     },
     vendor: true,
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
 
 rust_test {
@@ -375,6 +381,9 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
 
 rust_test {
@@ -403,6 +412,9 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
 
 rust_test {
