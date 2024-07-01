@@ -250,10 +250,11 @@ impl NodeValue {
     where
         E: Error,
     {
-        Ok(match self {
-            NodeValue::String(val) => val,
-            _ => return Err(err_provider()),
-        })
+        if let NodeValue::String(val) = self {
+            Ok(val)
+        } else {
+            Err(err_provider())
+        }
     }
 
     /// Returns the bytes value or the provided error if NodeValue is not bytes.
@@ -261,10 +262,11 @@ impl NodeValue {
     where
         E: Error,
     {
-        Ok(match self {
-            NodeValue::ByteList(val) => val,
-            _ => return Err(err_provider()),
-        })
+        if let NodeValue::ByteList(val) = self {
+            Ok(val)
+        } else {
+            Err(err_provider())
+        }
     }
 
     /// Check if node value is none.

@@ -31,6 +31,12 @@ rust_defaults {
         // something being cloned is actually just cloning a pointer, or cloning
         // the actual object.
         "-D clippy::clone_on_ref_ptr",
+        // We prefer `if let ... {} else {}` over a `match` with two arms (note:
+        // this lint will not apply if the `match` statement has very simple
+        // arms).
+        "-D clippy::single_match_else",
+        // Similarly, we prefer `if ... {} else {}` over a `match` for bools.
+        "-D clippy::match_bool",
     ],
 }
 

@@ -44,11 +44,10 @@ impl MessageDescriptorExt for MessageDescriptor {
     ) -> Result<NodeValue, NodeError> {
         match field_descriptor.get_reflect(msg) {
             // `optional` or singular protobuf field
-            ReflectFieldRef::Optional(singular_field) => match singular_field.value() {
-                Some(field_value) => field_value.to_node_value(),
-                // "None" has different meanings based on whether a field is explicitly
-                // marked as optional
-                None => {
+            ReflectFieldRef::Optional(singular_field) => singular_field.value().map_or_else(
+                move || {
+                    // "None" has different meanings based on whether a field is explicitly marked
+                    // as optional
                     let field_full_name = field_descriptor.full_name();
                     // proto3 optional fields will have a "synthetic oneof descriptor"
                     let proto3_optional = self.all_oneofs().any(|oneof| {
@@ -62,8 +61,9 @@ impl MessageDescriptorExt for MessageDescriptor {
                         // value should actually be the default (either some sort of zero or None)
                         get_default_node_value_from_type(&field_descriptor.singular_runtime_type())
                     }
-                }
-            },
+                },
+                |field_value| field_value.to_node_value(),
+            ),
             // `repeated` protobuf field
             ReflectFieldRef::Repeated(repeated_field) => repeated_field.to_node_value(),
             // map field
