@@ -4,3 +4,34 @@ sh_binary_host {
     name: "sdv_telemetry_get_proto_file_descriptors",
     src: "get_proto_file_descriptors.sh",
 }
+
+rust_test_host {
+    name: "sdv_telemetry_get_proto_file_descriptors_test",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: ["get_proto_file_descriptors_test/test.rs"],
+    data: [
+        // keep-sorted start
+        "get_proto_file_descriptors_test/descriptor.pb",
+        "get_proto_file_descriptors_test/descriptor.textproto",
+        "get_proto_file_descriptors_test/descriptor.txt",
+        "get_proto_file_descriptors_test/descriptor_set.pb",
+        "get_proto_file_descriptors_test/descriptor_set.textproto",
+        "get_proto_file_descriptors_test/descriptor_set.txt",
+        // keep-sorted end
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libprotobuf",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+}

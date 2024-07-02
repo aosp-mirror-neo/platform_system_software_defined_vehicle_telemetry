@@ -1,0 +1,15 @@
+file {
+  name: "sample_publisher.proto"
+  message_type {
+    name: "SampleMessage"
+    field {
+      name: "sample_data"
+      number: 1
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      json_name: "sampleData"
+    }
+  }
+  syntax: "proto3"
+}
+
