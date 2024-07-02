@@ -745,10 +745,8 @@ mod tests {
 
         trigger.activate(callback_listener.create_callback_map()).await;
 
-        let mut msg1 = Box::new(Int32Value::new());
-        msg1.value = 1;
-        let mut msg2 = Box::new(Int32Value::new());
-        msg2.value = 2;
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
+        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
 
         // Set the first message and fire the first parent trigger.
         message_provider.set_next_sync_result(Ok(Some(msg1)));
@@ -793,7 +791,7 @@ mod tests {
 
         trigger.activate(callback_map).await;
 
-        message_provider.set_next_sync_result(Ok(Some(Box::new(Int32Value {
+        message_provider.set_next_sync_result(Ok(Some(Arc::new(Int32Value {
             value: 1,
             ..Default::default()
         }))));
@@ -813,16 +811,14 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::ALL_CHANGES).await;
 
-        let mut msg1 = Box::new(Int32Value::new());
-        msg1.value = 1;
-        let mut msg2 = Box::new(Int32Value::new());
-        msg2.value = 2;
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
+        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
 
         // Fire parent trigger three times with the message changing once.
         message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(msg2.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg2) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg2)));
@@ -841,14 +837,12 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::FALLING_EDGE).await;
 
-        let mut msg1 = Box::new(Int32Value::new());
-        msg1.value = 1;
-        let mut msg2 = Box::new(Int32Value::new());
-        msg2.value = 2;
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
+        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
 
         // Fire parent trigger three times.
         // The first change is the rising edge and the second change is the falling edge.
-        message_provider.set_next_sync_result(Ok(Some(msg1.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg1) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg2)));
@@ -869,14 +863,12 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::RISING_EDGE).await;
 
-        let mut msg1 = Box::new(Int32Value::new());
-        msg1.value = 1;
-        let mut msg2 = Box::new(Int32Value::new());
-        msg2.value = 2;
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
+        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
 
         // Fire parent trigger three times.
         // The first change is the falling edge and the second change is the rising edge.
-        message_provider.set_next_sync_result(Ok(Some(msg2.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg2) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg1)));
@@ -897,17 +889,16 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
 
-        let mut false_msg = Box::new(BoolValue::new());
-        false_msg.value = false;
-        let mut true_msg = Box::new(BoolValue::new());
-        true_msg.value = true;
+        let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
+        let true_msg = Arc::new(BoolValue { value: true, ..Default::default() });
 
         // Fire parent trigger three times: [false, true, true].
         // This is to verify it filters out false and lets repeated true go through.
         message_provider.set_next_sync_result(Ok(Some(false_msg)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(true_msg.clone())));
+        message_provider
+            .set_next_sync_result(Ok(Some(Arc::clone(&true_msg) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(true_msg)));
@@ -926,17 +917,16 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IS_FALSE).await;
 
-        let mut false_msg = Box::new(BoolValue::new());
-        false_msg.value = false;
-        let mut true_msg = Box::new(BoolValue::new());
-        true_msg.value = true;
+        let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
+        let true_msg = Arc::new(BoolValue { value: true, ..Default::default() });
 
         // Fire parent trigger three times: [true, false, false].
         // This is to verify it filters out false and lets repeated true go through.
         message_provider.set_next_sync_result(Ok(Some(true_msg)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(false_msg.clone())));
+        message_provider
+            .set_next_sync_result(Ok(Some(Arc::clone(&false_msg) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(false_msg)));
@@ -955,17 +945,15 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
 
-        let mut msg0 = Box::new(Int32Value::new());
-        msg0.value = 0;
-        let mut msg1 = Box::new(Int32Value::new());
-        msg1.value = 1;
+        let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
 
         // Fire parent trigger three times: [0, 1, 1].
         // This is to verify it filters out zeo and lets repeated non-zeroes go through.
         message_provider.set_next_sync_result(Ok(Some(msg0)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(msg1.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg1) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg1)));
@@ -984,17 +972,15 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IS_FALSE).await;
 
-        let mut msg0 = Box::new(Int32Value::new());
-        msg0.value = 0;
-        let mut msg1 = Box::new(Int32Value::new());
-        msg1.value = 1;
+        let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
 
         // Fire parent trigger three times: [1, 0, 0].
         // This is to verify it filters out non-zero and lets repeated zero go through.
         message_provider.set_next_sync_result(Ok(Some(msg1)));
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(msg0.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg0) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg0)));
@@ -1013,14 +999,13 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
 
-        let mut msg = Box::new(Int32Value::new());
-        msg.value = 1;
+        let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
 
         // Fire parent trigger three times: [None, 1, 1].
         // This is to verify it filters out None and lets repeated non-zeroes go through.
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(msg.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg)));
@@ -1039,14 +1024,13 @@ mod tests {
         let (message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IS_FALSE).await;
 
-        let mut msg = Box::new(Int32Value::new());
-        msg.value = 0;
+        let msg = Arc::new(Int32Value { value: 0, ..Default::default() });
 
         // Fire parent trigger three times: [None, 0, 0].
         // This is to verify it filters out None and lets repeated zero go through.
         parent_trigger.fire().await;
 
-        message_provider.set_next_sync_result(Ok(Some(msg.clone())));
+        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg) as Arc<dyn MessageDyn>)));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(msg)));

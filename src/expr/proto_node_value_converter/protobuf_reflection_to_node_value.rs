@@ -9,6 +9,7 @@ use protobuf::{
     },
     MessageDyn,
 };
+use std::sync::Arc;
 
 use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
@@ -86,7 +87,7 @@ impl ToNodeValue for ReflectValueRef<'_> {
             ReflectValueRef::Bool(v) => NodeValue::Bool(*v),
             ReflectValueRef::String(v) => NodeValue::String((*v).to_owned()),
             ReflectValueRef::Enum(_, v) => NodeValue::Int32(*v),
-            ReflectValueRef::Message(v) => NodeValue::Message(v.clone_box()),
+            ReflectValueRef::Message(v) => NodeValue::Message(Arc::from((*v).clone_box())),
             ReflectValueRef::Bytes(v) => NodeValue::ByteList((*v).to_vec()),
         })
     }
@@ -175,15 +176,16 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
             ProtobufRuntimeType::Message(_) => NodeValue::MessageList(self.to_vec(
                 // unwraps a protobuf message from a value reflection or error
                 |val: ReflectValueRef<'_>| {
-                    Ok(val
-                        .to_message()
-                        .ok_or(NodeError::TypeMismatch {
-                            msg: format!(
-                                "Repeated field {:?} type expected to be protobuf message",
-                                self
-                            ),
-                        })?
-                        .clone_box())
+                    Ok(Arc::from(
+                        val.to_message()
+                            .ok_or(NodeError::TypeMismatch {
+                                msg: format!(
+                                    "Repeated field {:?} type expected to be protobuf message",
+                                    self
+                                ),
+                            })?
+                            .clone_box(),
+                    ))
                 },
             )?),
             _ => {

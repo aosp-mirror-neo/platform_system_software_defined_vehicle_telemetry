@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
+use std::sync::Arc;
 
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::AggregationError;
@@ -35,7 +36,7 @@ impl NodeValueExtension for NodeValue {
             NodeValue::Int64(val) => NodeValue::Int64List(vec![*val]),
             NodeValue::Float(val) => NodeValue::FloatList(vec![*val]),
             NodeValue::Double(val) => NodeValue::DoubleList(vec![*val]),
-            NodeValue::Message(val) => NodeValue::MessageList(vec![val.clone_box()]),
+            NodeValue::Message(val) => NodeValue::MessageList(vec![Arc::clone(val)]),
             _ => {
                 return Err(AggregationError::VectorInitializationError {
                     value: format!("{:?}", self),
@@ -77,7 +78,7 @@ impl NodeValueExtension for NodeValue {
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::MessageList(v) => {
-                v.push(value.get_message(err_provider)?.clone_box());
+                v.push(Arc::clone(value.get_message(err_provider)?));
                 pop_front_to_size_n(v, max_length);
             }
             _ => panic!("push() should never be called on non-list: {:?}", self),

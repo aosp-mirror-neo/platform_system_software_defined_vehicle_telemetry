@@ -224,7 +224,7 @@ where
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> OperationResult<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+    ) -> OperationResult<Option<Arc<dyn MessageDyn>>, MessageProviderError> {
         self.metrics_config
             .get()
             .unwrap()
@@ -929,8 +929,9 @@ mod tests {
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
     };
+    use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-    use protobuf::{well_known_types, MessageDyn, MessageFull};
+    use protobuf::{well_known_types, MessageFull};
     use sdv_telemetry_proto_rust::expression::Node as NodeProto;
     use sdv_telemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -1882,17 +1883,17 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_with_dependencies_success() {
-        let mut value1 = Box::new(Int32Value::new());
-        value1.value = 101;
-        let mut value2 = Box::new(Int32Value::new());
-        value2.value = 10101;
+        let value1 = Arc::new(Int32Value { value: 101, ..Default::default() });
+        let value2 = Arc::new(Int32Value { value: 10101, ..Default::default() });
 
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
-        service_publisher_mock.latest_message.replace(value1.clone());
+        service_publisher_mock.latest_message.replace(Arc::clone(&value1) as Arc<dyn MessageDyn>);
 
         let mut aggregation_publisher_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
-        aggregation_publisher_mock.latest_message.replace(value2.clone());
+        aggregation_publisher_mock
+            .latest_message
+            .replace(Arc::clone(&value2) as Arc<dyn MessageDyn>);
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
@@ -1926,21 +1927,23 @@ mod tests {
         {
             let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
             assert_eq!(message_providers.len(), 1);
-            assert_eq!(
-                &message_providers[0]
-                    .get_message(SERVICE_PUBLISHER_NAME)
-                    .unwrap_sync()
-                    .unwrap()
-                    .unwrap(),
-                &(value1 as Box<dyn MessageDyn>)
+            let message = message_providers[0]
+                .get_message(SERVICE_PUBLISHER_NAME)
+                .unwrap_sync()
+                .unwrap()
+                .unwrap();
+            assert!(
+                message.reflect_eq_dyn(value1.as_ref(), &ReflectEqMode::default()),
+                "Expected {message:?} to equal {value1:?}"
             );
-            assert_eq!(
-                &message_providers[0]
-                    .get_message(AGGREGATION_PUBLISHER_NAME)
-                    .unwrap_sync()
-                    .unwrap()
-                    .unwrap(),
-                &(value2 as Box<dyn MessageDyn>)
+            let message = message_providers[0]
+                .get_message(AGGREGATION_PUBLISHER_NAME)
+                .unwrap_sync()
+                .unwrap()
+                .unwrap();
+            assert!(
+                message.reflect_eq_dyn(value2.as_ref(), &ReflectEqMode::default()),
+                "Expected {message:?} to equal {value2:?}"
             );
         }
         let config = {
