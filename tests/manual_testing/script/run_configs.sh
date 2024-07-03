@@ -102,6 +102,10 @@ for PUBLISHER in ${PUBLISHERS//,/ }; do
     trap "pkill -f $PUBLISHER" 0 2 3 15
 done
 
+PUBS_TO_CLIENT_SLEEP_DURATION=2s
+log "Waiting for $PUBS_TO_CLIENT_SLEEP_DURATION to allow all publishers to register before starting the telemetry client..."
+sleep $PUBS_TO_CLIENT_SLEEP_DURATION
+
 adb shell mkdir "$CF_REPORTS_PATH"
 log "Starting telemetry client"
 adb shell "$CLIENT" --write-reports-to="$CF_REPORTS_PATH" "$CONFIG_FILE_NAMES" &
