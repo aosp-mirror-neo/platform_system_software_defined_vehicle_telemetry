@@ -137,8 +137,9 @@ impl MockServiceAdapter {
     }
 }
 
+#[async_trait]
 impl ServiceMessageProvider for MockServiceMessageProvider {
-    fn get_latest_message(
+    async fn get_latest_message(
         &self,
         _configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {

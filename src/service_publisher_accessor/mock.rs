@@ -170,8 +170,9 @@ impl MockServicePublisherAccessorData {
     }
 }
 
+#[async_trait]
 impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
-    fn get_latest_message(
+    async fn get_latest_message(
         &self,
         _configuration: Option<&[u8]>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
