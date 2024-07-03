@@ -224,7 +224,7 @@ where
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> OperationResult<Option<Arc<dyn MessageDyn>>, MessageProviderError> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
         self.metrics_config
             .get()
             .unwrap()

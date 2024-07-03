@@ -10,3 +10,4 @@ pub mod logging;
 pub mod operation_result;
 pub mod option_extension;
 pub mod test_utils;
+pub mod value_holder;

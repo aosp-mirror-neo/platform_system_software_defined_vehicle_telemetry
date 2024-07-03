@@ -121,26 +121,35 @@ impl Eq for NodeEvaluationContext {}
 
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
-    pub fn evaluate<'a>(
-        &'a self,
-        context: &'a NodeEvaluationContext,
-    ) -> OperationResult<NodeValue, NodeError> {
-        match self {
+    pub fn evaluate(
+        self: &Arc<Self>,
+        context: &Arc<NodeEvaluationContext>,
+    ) -> OperationResult<'static, NodeValue, NodeError> {
+        match self.as_ref() {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
                 Ok(value.clone()).into()
             }
-            Node::FieldLeaf { fields, message_provider, publisher_name } => {
+            Node::FieldLeaf { message_provider, publisher_name, .. } => {
                 // Base case of recursion: node is a leaf node, return value
-                message_provider.get_message(publisher_name).err_into().and_then_sync(|maybe_msg| {
-                    maybe_msg.map_or_else(
-                        || Ok(NodeValue::None),
-                        |msg| NodeValue::extract_value(msg, fields),
-                    )
-                })
+                let self_clone = Arc::clone(self);
+                message_provider.get_message(publisher_name).err_into().and_then_sync(
+                    move |maybe_msg| {
+                        let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
+                            panic!("Captured node is not a field leaf node: {:?}", self_clone);
+                        };
+
+                        maybe_msg.map_or_else(
+                            || Ok(NodeValue::None),
+                            |msg| NodeValue::extract_value(msg, fields),
+                        )
+                    },
+                )
             }
-            Node::Combination { operator, left, right } => {
+            Node::Combination { left, .. } => {
                 // evaluate left branch recursively
+                let context_clone = Arc::clone(context);
+                let self_clone = Arc::clone(self);
                 left
                     .as_ref()
                     .expect(
@@ -149,12 +158,17 @@ impl Node {
                         a node without left child",
                     )
                     .evaluate(context)
-                    .and_then(move |left| {
+                    .and_then(move |left_value| {
+                        let Node::Combination { operator, right, .. } = self_clone.as_ref() else {
+                            panic!("Captured node is not a combination node: {:?}", self_clone);
+                        };
+
                         // If unary operator, then operate on self.
                         // If binary operator, then [left] <operator> [right]
                         // The function short-circuits if possible. The closure provides right operand.
-                        left.operate(operator, || {
-                            right.as_ref()
+                        let right_clone = right.clone();
+                        left_value.operate(operator, move || {
+                            right_clone.as_ref()
                                 .unwrap_or_else(|| {
                                     if operator.is_unary_operator() {
                                         panic!(
@@ -169,7 +183,7 @@ impl Node {
                                         );
                                     }
                                 })
-                                .evaluate(context)
+                                .evaluate(&context_clone)
                         })
                     })
             }
@@ -277,7 +291,7 @@ mod tests {
             NodeValue::Bool(false), // true ^ (true || false) = false
         ];
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             // action + assertion
@@ -346,7 +360,7 @@ mod tests {
             NodeValue::Double(62.5),  // index 6 = |-62.5|= 62.5
         ];
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
@@ -390,7 +404,7 @@ mod tests {
             NodeValue::Bool(true),                  // true == true
         ];
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
@@ -415,7 +429,7 @@ mod tests {
             NodeValue::Int64(3),                    // Pi rounded to the nearest int
         ];
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
@@ -467,7 +481,7 @@ mod tests {
             NodeValue::Bool(true), // True && True = True
         ];
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
@@ -516,7 +530,7 @@ mod tests {
             NodeValue::Bool(true),   // 50 < 80 = true
         ];
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
@@ -534,7 +548,7 @@ mod tests {
             right: Some(true_node),
         });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         // expr is "0 < True"
         let err = lt_node.evaluate(&context).unwrap_sync().unwrap_err();
 
@@ -550,10 +564,13 @@ mod tests {
     fn evaluate_message_provider_invalid_publisher_name_fails() {
         let message_provider = Arc::new(MockMessageProvider::new());
         message_provider.set_next_sync_result(Err(MessageProviderError::InvalidPublisherName));
-        let node =
-            Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
+        let node = Arc::new(Node::FieldLeaf {
+            publisher_name: String::default(),
+            fields: vec![],
+            message_provider,
+        });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let err = node.evaluate(&context).unwrap_sync().unwrap_err();
 
         assert!(
@@ -567,10 +584,13 @@ mod tests {
     fn evaluate_no_provided_message_returns_none() {
         let message_provider = Arc::new(MockMessageProvider::new());
         message_provider.set_next_sync_result(Ok(None));
-        let node =
-            Node::FieldLeaf { publisher_name: String::default(), fields: vec![], message_provider };
+        let node = Arc::new(Node::FieldLeaf {
+            publisher_name: String::default(),
+            fields: vec![],
+            message_provider,
+        });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let res = node.evaluate(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
@@ -582,7 +602,7 @@ mod tests {
             function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
         });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let res = timestamp_node.evaluate(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::Int64(context.unix_timestamp.0));
@@ -594,7 +614,7 @@ mod tests {
             function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
         });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let expected_timestamp = i64::try_from(
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros(),
         )
@@ -615,7 +635,7 @@ mod tests {
             },
         });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let res = timestamp_node.evaluate(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::Int64(context.monotonic_time_since_boot.0));
@@ -633,13 +653,13 @@ mod tests {
             message_provider,
         });
         let constant_node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
-        let combination_node = Node::Combination {
+        let combination_node = Arc::new(Node::Combination {
             operator: OperatorProto::RelationalOperator(RelationalOperator::LT.into()),
             left: Some(field_node),
             right: Some(constant_node),
-        };
+        });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let err = combination_node.evaluate(&context).unwrap_async().await.unwrap_err();
 
         assert!(
@@ -661,13 +681,13 @@ mod tests {
             message_provider,
         });
         let constant_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) });
-        let combination_node = Node::Combination {
+        let combination_node = Arc::new(Node::Combination {
             operator: OperatorProto::RelationalOperator(RelationalOperator::LT.into()),
             left: Some(constant_node),
             right: Some(field_node),
-        };
+        });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let err = combination_node.evaluate(&context).unwrap_async().await.unwrap_err();
 
         assert!(
@@ -697,13 +717,13 @@ mod tests {
             fields: vec![INT_FIELD_NAME.to_owned()],
             message_provider: right_message_provider,
         });
-        let combination_node = Node::Combination {
+        let combination_node = Arc::new(Node::Combination {
             operator: OperatorProto::RelationalOperator(RelationalOperator::GT.into()),
             left: Some(left_field_node),
             right: Some(right_field_node),
-        };
+        });
 
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
         let res = combination_node.evaluate(&context).unwrap_async().await.unwrap();
 
         assert_eq!(&res, &NodeValue::Bool(true));

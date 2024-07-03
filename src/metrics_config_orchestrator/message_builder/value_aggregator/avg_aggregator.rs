@@ -1,17 +1,11 @@
 // Copyright 2024 Google LLC
 
-use sdv_telemetry_utils::operation_result::OperationResult;
-use std::sync::Arc;
-
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::node::{Node, NodeEvaluationContext};
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric average is calculated.
 pub struct AvgAggregator {
-    // Produces the latest value.
-    node: Arc<Node>,
     // Stores the running average.
     current_avg: NodeValue,
     // Stores the number of samples.
@@ -19,24 +13,20 @@ pub struct AvgAggregator {
 }
 
 impl AvgAggregator {
-    pub fn new(node: &Arc<Node>) -> Self {
-        Self { node: Arc::clone(node), current_avg: NodeValue::Double(0.0), n: 0 }
+    pub fn new() -> Self {
+        Self { current_avg: NodeValue::Double(0.0), n: 0 }
     }
 }
 
 impl ValueAggregator for AvgAggregator {
-    fn compute<'a>(
-        &'a mut self,
-        context: &'a NodeEvaluationContext,
-    ) -> OperationResult<NodeValue, AggregationError> {
-        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
-            if latest_value.is_none() {
-                return Ok(NodeValue::None);
-            }
-            self.current_avg.update_running_average(self.n, &latest_value)?;
-            self.n += 1;
-            Ok(self.current_avg.clone())
-        })
+    fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
+        let node_value = node_value.expect("Aggregator should be provided with a value");
+        if node_value.is_none() {
+            return Ok(NodeValue::None);
+        }
+        self.current_avg.update_running_average(self.n, &node_value)?;
+        self.n += 1;
+        Ok(self.current_avg.clone())
     }
 }
 
@@ -49,24 +39,17 @@ mod tests {
         NodeValue: std::convert::From<T>,
         T: Copy,
     {
-        let mut aggregator =
-            AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
-        let mut result = Vec::new();
-
-        let context = NodeEvaluationContext::new();
-        for i in 0..node_outputs.len() - 1 {
-            result.push(aggregator.compute(&context).unwrap_sync().unwrap());
-
-            // update the next exrp eval result, so we can test correctness of compute()
-            aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
-        }
-        result
+        let mut aggregator = AvgAggregator::new();
+        node_outputs
+            .iter()
+            .map(|value| aggregator.compute(Some((*value).into())).unwrap())
+            .collect()
     }
 
     #[test]
     fn avg_aggregator_compute_with_int_ok() {
         let node_outputs: &[i32] = &[-2, 0, 2, 4, 6, 8, -32, 0];
-        let expected_avg: &[f64] = &[-2.0, -1.0, 0.0, 1.0, 2.0, 3.0, -2.0];
+        let expected_avg: &[f64] = &[-2.0, -1.0, 0.0, 1.0, 2.0, 3.0, -2.0, -1.75];
 
         let res = get_computed_values_from_aggregator(node_outputs);
 
@@ -76,7 +59,7 @@ mod tests {
     #[test]
     fn avg_aggregator_compute_with_float_ok() {
         let node_outputs: &[f32] = &[-1.5, 3.0, 9.0, 6.5, 0.0];
-        let expected_avg: &[f64] = &[-1.5, 0.75, 3.5, 4.25];
+        let expected_avg: &[f64] = &[-1.5, 0.75, 3.5, 4.25, 3.4];
 
         let res = get_computed_values_from_aggregator(node_outputs);
 
@@ -85,27 +68,28 @@ mod tests {
 
     #[test]
     fn avg_aggregator_compute_with_none_value_ok() {
-        let mut aggregator =
-            AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
-
-        let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap_sync().unwrap();
+        let mut aggregator = AvgAggregator::new();
+        let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
 
     #[test]
     fn avg_aggregator_compute_with_non_numeric_value_fails() {
-        let mut bad_avg =
-            AvgAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
-
-        let context = NodeEvaluationContext::new();
-        let err = bad_avg.compute(&context).unwrap_sync().unwrap_err();
+        let mut aggregator = AvgAggregator::new();
+        let err = aggregator.compute(Some(NodeValue::Bool(true))).unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
             "Unexpected error: {:?}",
             err
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn avg_aggregator_compute_without_node_value_panics() {
+        let mut aggregator = AvgAggregator::new();
+        aggregator.compute(None).unwrap();
     }
 }

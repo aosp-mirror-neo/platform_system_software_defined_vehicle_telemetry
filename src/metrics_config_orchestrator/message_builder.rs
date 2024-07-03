@@ -5,11 +5,12 @@ pub(super) mod value_aggregator_factory;
 
 use log::trace;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node::{Node, NodeEvaluationContext};
 use crate::expr::node_error::NodeError;
 use crate::expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
     ReflectRepeatedMutExt, ToReflectValueBox,
@@ -20,20 +21,21 @@ use value_aggregator::{AggregationError, ValueAggregator};
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.
     fn build(
-        &self,
-        context: &NodeEvaluationContext,
-    ) -> Result<Box<dyn MessageDyn>, MessageBuilderError>;
+        self: Arc<Self>,
+        context: &Arc<NodeEvaluationContext>,
+    ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>;
 }
 
 pub(crate) struct MessageBuilderImpl {
-    /// Maps field_name to the node whose evaluation output is the field value.
-    field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
-
+    /// Pairs of a field name and the aggregator that is used to populate the new value of the field.
+    field_assignments: Mutex<Vec<(String, Box<dyn ValueAggregator>)>>,
     /// Descriptor of the protocol buffer message that this builder is creating.
     message_descriptor: MessageDescriptor,
-
     /// The name of the owner for tracing purposes.
     owner_name: String,
+    /// Pairs of a field name and a node that provides data that is used for field aggregation.
+    /// A field may have no matching node if it's not required for aggregation.
+    value_providers: Vec<(String, Arc<Node>)>,
 }
 
 #[derive(Error, Debug)]
@@ -41,48 +43,71 @@ pub(crate) struct MessageBuilderImpl {
 pub enum MessageBuilderError {
     #[error("Unable to assign value to field {field_name} because of: {e}")]
     BadAggregation { field_name: String, e: AggregationError },
-    #[error("Failed to assign node value to field because of: {e}")]
-    FailedToAssignValueToField {
-        #[from]
-        e: NodeError,
-    },
+    #[error("Evaluation of expression node for field {field_name} failed: {e}")]
+    ExpressionEvaluationError { field_name: String, e: NodeError },
+    #[error("Failed to assign node value to field {field_name} because of: {e}")]
+    FailedToAssignValueToField { field_name: String, e: NodeError },
 }
 
 impl MessageBuilder for MessageBuilderImpl {
     fn build(
-        &self,
-        context: &NodeEvaluationContext,
-    ) -> Result<Box<dyn MessageDyn>, MessageBuilderError> {
-        let mut msg = self.message_descriptor.new_instance();
-        for (field_name, field_aggregator_mutex) in self.field_assignments.iter() {
-            let to_builder_err =
-                |e| MessageBuilderError::BadAggregation { field_name: field_name.to_string(), e };
-            let field_descriptor = self
-                .message_descriptor
-                .field_by_name(field_name)
-                .expect("All fields should have been validated to exist");
-            let mut field_aggregator = field_aggregator_mutex.lock().unwrap();
-            // TODO(b/349862095): Handle asynchronous OperationResult.
-            let node_value =
-                field_aggregator.compute(context).unwrap_sync().map_err(to_builder_err)?;
-            // if node_value is none, skip populating this field
-            if node_value.is_none() {
-                // TODO: b/307547570 - properly handle absent values
-                continue;
+        self: Arc<Self>,
+        context: &Arc<NodeEvaluationContext>,
+    ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError> {
+        let operation_results = self.value_providers.iter().map(|(field_name, node)| {
+            let name_clone = field_name.to_owned();
+            node.evaluate(context).map(move |res| (name_clone, res))
+        });
+        let self_clone = Arc::clone(&self);
+        ValueHolder::collect_unordered(operation_results).map(move |results| {
+            let mut results_map = results.into_iter().collect::<HashMap<_, _>>();
+            let mut msg = self_clone.message_descriptor.new_instance();
+            for (field_name, field_aggregator) in &mut *self_clone.field_assignments.lock().unwrap()
+            {
+                let input_value = results_map.remove(field_name).transpose().map_err(|e| {
+                    MessageBuilderError::ExpressionEvaluationError {
+                        field_name: field_name.to_owned(),
+                        e,
+                    }
+                })?;
+                let aggregated_value = field_aggregator.compute(input_value).map_err(|e| {
+                    MessageBuilderError::BadAggregation { field_name: field_name.to_owned(), e }
+                })?;
+                // if aggregated_value is none, skip populating this field
+                if aggregated_value.is_none() {
+                    // TODO: b/307547570 - properly handle absent values
+                    continue;
+                }
+
+                let field_descriptor = self
+                    .message_descriptor
+                    .field_by_name(field_name)
+                    .expect("All fields should have been validated to exist");
+                trace!("Assigning value to field {} of {}", field_name, self.owner_name);
+                if field_descriptor.is_singular() {
+                    field_descriptor.set_singular_field(
+                        msg.as_mut(),
+                        aggregated_value
+                            .to_reflect_value_box(&field_descriptor.singular_runtime_type())
+                            .map_err(|e| MessageBuilderError::FailedToAssignValueToField {
+                                field_name: field_name.to_owned(),
+                                e,
+                            })?,
+                    );
+                } else if field_descriptor.is_repeated() {
+                    field_descriptor
+                        .mut_repeated(msg.as_mut())
+                        .push_node_value_content(&aggregated_value)
+                        .map_err(|e| MessageBuilderError::FailedToAssignValueToField {
+                            field_name: field_name.to_owned(),
+                            e,
+                        })?;
+                } else {
+                    panic!("Validation should have ensured map fields are not allowed");
+                }
             }
-            trace!("Assigning value to field {} of {}", field_name, self.owner_name);
-            if field_descriptor.is_singular() {
-                field_descriptor.set_singular_field(
-                    msg.as_mut(),
-                    node_value.to_reflect_value_box(&field_descriptor.singular_runtime_type())?,
-                );
-            } else if field_descriptor.is_repeated() {
-                field_descriptor.mut_repeated(msg.as_mut()).push_node_value_content(&node_value)?;
-            } else {
-                panic!("Validation should have ensured map fields are not allowed");
-            }
-        }
-        Ok(msg)
+            Ok(msg)
+        })
     }
 }
 
@@ -90,9 +115,15 @@ impl MessageBuilderImpl {
     pub fn new(
         owner_name: String,
         message_descriptor: MessageDescriptor,
-        field_assignments: HashMap<String, Mutex<Box<dyn ValueAggregator>>>,
+        field_assignments: Vec<(String, Box<dyn ValueAggregator>)>,
+        value_providers: Vec<(String, Arc<Node>)>,
     ) -> Self {
-        Self { field_assignments, message_descriptor, owner_name }
+        Self {
+            field_assignments: field_assignments.into(),
+            message_descriptor,
+            owner_name,
+            value_providers,
+        }
     }
 }
 
@@ -101,6 +132,7 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use futures::{future, FutureExt};
     use lazy_static::lazy_static;
     use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
@@ -108,6 +140,8 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::expr::mock::{MockMessageProvider, TEST_MESSAGE};
+    use crate::expr::node_error::MessageProviderError;
     use crate::expr::node_value::NodeValue;
     use value_aggregator::mock::MockValueAggregator;
 
@@ -140,22 +174,30 @@ mod tests {
     fn create_message_builder(
         message_descriptor: MessageDescriptor,
         field_name_and_value_pairs: Vec<(&str, NodeValue)>,
-    ) -> MessageBuilderImpl {
-        let field_assignments = field_name_and_value_pairs
+    ) -> Arc<MessageBuilderImpl> {
+        let (field_assignments, value_providers) = field_name_and_value_pairs
             .into_iter()
             .map(|(field, value)| {
-                // the mocked field value aggregator always return the node value
-                // that was used to construct it.
+                // the mocked field value aggregator always returns the node value
+                // that is passed to it.
                 let mock_aggregator: Box<dyn ValueAggregator> =
-                    Box::new(MockValueAggregator::new(value));
-                (field.to_string(), Mutex::new(mock_aggregator))
+                    Box::new(MockValueAggregator::new());
+                (
+                    (field.to_owned(), mock_aggregator),
+                    (field.to_owned(), Arc::new(Node::ConstantLeaf { value })),
+                )
             })
-            .collect();
-        MessageBuilderImpl::new(String::default(), message_descriptor, field_assignments)
+            .unzip();
+        Arc::new(MessageBuilderImpl::new(
+            String::default(),
+            message_descriptor,
+            field_assignments,
+            value_providers,
+        ))
     }
 
     #[test]
-    fn build_singular_fields_ok() -> Result<(), MessageBuilderError> {
+    fn build_singular_fields_ok() {
         let mut expected_message = TestMessage::new();
         expected_message.int_field = 5;
         expected_message.float_field = 0.0;
@@ -172,16 +214,15 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
-    fn build_message_field_ok() -> Result<(), MessageBuilderError> {
+    fn build_message_field_ok() {
         let mut expected_message = TestMessage::new();
         expected_message.any_field = MessageField::some(Any::pack(&*TEST_NESTED_MESSAGE).unwrap());
         expected_message.message_field = MessageField::some(TEST_NESTED_MESSAGE.clone());
@@ -196,16 +237,15 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
-    fn build_repeated_primitive_fields_ok() -> Result<(), MessageBuilderError> {
+    fn build_repeated_primitive_fields_ok() {
         let booleans = vec![true, false, true, false];
         let integers = vec![42, 100, -1];
         let doubles = vec![0.0, 1.0];
@@ -229,16 +269,15 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
-    fn build_repeated_message_field_ok() -> Result<(), MessageBuilderError> {
+    fn build_repeated_message_field_ok() {
         let mut expected_message = TestMessage::new();
         expected_message.int_field = 42;
         expected_message.repeated_messages = vec![TEST_NESTED_MESSAGE.clone(); 2];
@@ -262,16 +301,15 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         // verify the newly-built message does set the fields to the expected values
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
-    fn build_handles_none_value_ok() -> Result<(), MessageBuilderError> {
+    fn build_handles_none_value_ok() {
         let mut expected_message = TestMessage::new();
         expected_message.int_field = 5;
 
@@ -286,16 +324,14 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
-    fn build_zeros_are_not_encoded_in_implicitly_optional_fields() -> Result<(), MessageBuilderError>
-    {
+    fn build_zeros_are_not_encoded_in_implicitly_optional_fields() {
         // expect empty message because zeros are not encoded in implicitly optional fields
         // that means 0 is indistinguishable from field-not-set
         let expected_message = TestMessage::new();
@@ -307,15 +343,14 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
-    fn build_zeros_are_encoded_in_explicitly_optional_fields() -> Result<(), MessageBuilderError> {
+    fn build_zeros_are_encoded_in_explicitly_optional_fields() {
         let mut expected_message = TestMessage::new();
         expected_message.optional_bool_field = Some(false);
         expected_message.optional_int64_field = Some(0);
@@ -330,11 +365,10 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context)?;
+        let context = Arc::new(NodeEvaluationContext::new());
+        let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
-        Ok(())
     }
 
     #[test]
@@ -346,10 +380,14 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context);
+        let context = Arc::new(NodeEvaluationContext::new());
+        let err = builder.build(&context).unwrap_sync().unwrap_err();
 
-        assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
+        assert!(
+            matches!(&err, MessageBuilderError::FailedToAssignValueToField { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -361,10 +399,14 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context);
+        let context = Arc::new(NodeEvaluationContext::new());
+        let err = builder.build(&context).unwrap_sync().unwrap_err();
 
-        assert!(matches!(res.unwrap_err(), MessageBuilderError::FailedToAssignValueToField { .. }));
+        assert!(
+            matches!(&err, MessageBuilderError::FailedToAssignValueToField { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -375,35 +417,105 @@ mod tests {
         );
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context);
+        let context = Arc::new(NodeEvaluationContext::new());
+        let err = builder.build(&context).unwrap_sync().unwrap_err();
 
-        assert!(matches!(
-            res.err().unwrap(),
-            MessageBuilderError::FailedToAssignValueToField { .. }
-        ));
+        assert!(
+            matches!(&err, MessageBuilderError::FailedToAssignValueToField { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
     fn build_aggregated_field_value_compute_error_fails() {
-        let mut mock_aggregated_field_value = MockValueAggregator::new(NodeValue::None);
-        mock_aggregated_field_value.fail_compute();
-        let field_assignments = {
-            let mut map = HashMap::new();
-            let boxed_value: Box<dyn ValueAggregator> = Box::new(mock_aggregated_field_value);
-            map.insert(INT_FIELD_NAME.to_string(), Mutex::new(boxed_value));
-            map
-        };
-        let builder = MessageBuilderImpl::new(
+        let field_assignments = vec![(
+            INT_FIELD_NAME.to_owned(),
+            Box::new(MockValueAggregator::new().fail_compute()) as Box<dyn ValueAggregator>,
+        )];
+        let builder = Arc::new(MessageBuilderImpl::new(
             String::default(),
             TestMessage::descriptor(),
             field_assignments,
-        );
+            vec![],
+        ));
 
         // action
-        let context = NodeEvaluationContext::new();
-        let res = builder.build(&context);
+        let context = Arc::new(NodeEvaluationContext::new());
+        let err = builder.build(&context).unwrap_sync().unwrap_err();
 
-        assert!(matches!(res.unwrap_err(), MessageBuilderError::BadAggregation { .. }));
+        assert!(
+            matches!(&err, MessageBuilderError::BadAggregation { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn build_from_asynchronous_result_propagates_error() {
+        // Setup a field node that always returns an error.
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider.set_next_async_result(
+            future::ready(Err(MessageProviderError::InvalidPublisherName)).boxed(),
+        );
+        let field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: String::default(),
+            fields: vec![],
+            message_provider,
+        });
+
+        // Setup builder to retrieve value from the field node and pass it through aggregator.
+        let builder = Arc::new(MessageBuilderImpl::new(
+            String::default(),
+            TestMessage::descriptor(),
+            vec![(
+                INT_FIELD_NAME.to_owned(),
+                Box::new(MockValueAggregator::new()) as Box<dyn ValueAggregator>,
+            )],
+            vec![(INT_FIELD_NAME.to_owned(), field_node)],
+        ));
+
+        let err = builder
+            .build(&Arc::new(NodeEvaluationContext::new()))
+            .unwrap_async()
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(&err, MessageBuilderError::ExpressionEvaluationError { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[tokio::test]
+    async fn build_from_asynchronous_result_success() {
+        // Setup a field node that returns the value of the test message int field.
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider.set_next_async_result(
+            future::ready(Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>))).boxed(),
+        );
+        let field_node = Arc::new(Node::FieldLeaf {
+            publisher_name: String::default(),
+            fields: vec![INT_FIELD_NAME.to_owned()],
+            message_provider,
+        });
+
+        // Setup builder to retrieve value from the field node and pass it through aggregator.
+        let builder = Arc::new(MessageBuilderImpl::new(
+            String::default(),
+            TestMessage::descriptor(),
+            vec![(
+                INT_FIELD_NAME.to_owned(),
+                Box::new(MockValueAggregator::new()) as Box<dyn ValueAggregator>,
+            )],
+            vec![(INT_FIELD_NAME.to_owned(), field_node)],
+        ));
+
+        let res =
+            builder.build(&Arc::new(NodeEvaluationContext::new())).unwrap_async().await.unwrap();
+
+        let expected_message = TestMessage { int_field: 80, ..Default::default() };
+        assert_eq!(&res, &(Box::new(expected_message) as Box<dyn MessageDyn>));
     }
 }

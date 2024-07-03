@@ -1,55 +1,45 @@
 // Copyright 2024 Google LLC
 
-use sdv_telemetry_utils::operation_result::OperationResult;
-use std::sync::Arc;
-
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::node::{Node, NodeEvaluationContext};
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where aggregation for numeric minimum is performed.
 pub struct MinAggregator {
-    // Produces the latest value.
-    node: Arc<Node>,
     // Stores the minimum so far.
     current_min: Option<NodeValue>,
 }
 
 impl MinAggregator {
-    pub fn new(node: &Arc<Node>) -> Self {
-        Self { node: Arc::clone(node), current_min: None }
+    pub fn new() -> Self {
+        Self { current_min: None }
     }
 }
 
 impl ValueAggregator for MinAggregator {
-    fn compute<'a>(
-        &'a mut self,
-        context: &'a NodeEvaluationContext,
-    ) -> OperationResult<NodeValue, AggregationError> {
-        self.node.evaluate(context).err_into().and_then_sync(|latest_value| {
-            if latest_value.is_none() {
-                return Ok(NodeValue::None);
-            }
+    fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
+        let node_value = node_value.expect("Aggregator should be provided with a value");
+        if node_value.is_none() {
+            return Ok(NodeValue::None);
+        }
 
-            if !latest_value.is_numeric() {
-                return Err(AggregationError::NumericAggregationTypeMismatch {
-                    value: format!("{:?}", latest_value),
-                });
-            }
+        if !node_value.is_numeric() {
+            return Err(AggregationError::NumericAggregationTypeMismatch {
+                value: format!("{:?}", node_value),
+            });
+        }
 
-            if let Some(min) = &self.current_min {
-                if latest_value.clone().less_than(min)? {
-                    self.current_min = Some(latest_value.clone());
-                    Ok(latest_value)
-                } else {
-                    Ok(min.clone())
-                }
+        if let Some(min) = &self.current_min {
+            if node_value.clone().less_than(min)? {
+                self.current_min = Some(node_value.clone());
+                Ok(node_value)
             } else {
-                self.current_min = Some(latest_value.clone());
-                Ok(latest_value)
+                Ok(min.clone())
             }
-        })
+        } else {
+            self.current_min = Some(node_value.clone());
+            Ok(node_value)
+        }
     }
 }
 
@@ -62,23 +52,16 @@ mod tests {
         NodeValue: std::convert::From<T>,
         T: Copy,
     {
-        let mut aggregator =
-            MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: node_outputs[0].into() }));
-        let mut result = Vec::new();
-
-        let context = NodeEvaluationContext::new();
-        for i in 0..node_outputs.len() - 1 {
-            result.push(aggregator.compute(&context).unwrap_sync().unwrap());
-
-            // update the next exrp eval result, so we can test correctness of compute()
-            aggregator.node = Arc::new(Node::ConstantLeaf { value: node_outputs[i + 1].into() });
-        }
-        result
+        let mut aggregator = MinAggregator::new();
+        node_outputs
+            .iter()
+            .map(|value| aggregator.compute(Some((*value).into())).unwrap())
+            .collect()
     }
 
     #[test]
     fn min_aggregator_compute_with_int_ok() {
-        let node_outputs: &[i32] = &[0, 1, 2, 0, -1, -2, -1, 0];
+        let node_outputs: &[i32] = &[0, 1, 2, 0, -1, -2, -1];
         let expected_min: &[i32] = &[0, 0, 0, 0, -1, -2, -2];
 
         let res = get_computed_values_from_aggregator(node_outputs);
@@ -89,7 +72,7 @@ mod tests {
     #[test]
     fn min_aggregator_compute_with_float_ok() {
         let node_outputs: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 1.25, 2.5];
-        let expected_min: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 0.625];
+        let expected_min: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 0.625, 0.625];
 
         let res = get_computed_values_from_aggregator(node_outputs);
 
@@ -98,27 +81,28 @@ mod tests {
 
     #[test]
     fn min_aggregator_compute_with_none_value_ok() {
-        let mut aggregator =
-            MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::None }));
-
-        let context = NodeEvaluationContext::new();
-        let res = aggregator.compute(&context).unwrap_sync().unwrap();
+        let mut aggregator = MinAggregator::new();
+        let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
 
     #[test]
     fn min_aggregator_compute_with_non_numeric_value_fails() {
-        let mut bad_min =
-            MinAggregator::new(&Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) }));
-
-        let context = NodeEvaluationContext::new();
-        let err = bad_min.compute(&context).unwrap_sync().unwrap_err();
+        let mut aggregator = MinAggregator::new();
+        let err = aggregator.compute(Some(NodeValue::Bool(true))).unwrap_err();
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
             "Unexpected error: {:?}",
             err
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn min_aggregator_compute_without_node_value_panics() {
+        let mut aggregator = MinAggregator::new();
+        aggregator.compute(None).unwrap();
     }
 }
