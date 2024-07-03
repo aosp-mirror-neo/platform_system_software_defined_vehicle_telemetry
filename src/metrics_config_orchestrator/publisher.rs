@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
+use sdv_telemetry_utils::{collection_extension::HashMapExtension, value_holder::ValueHolder};
 use std::collections::HashMap;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
@@ -27,7 +27,7 @@ const PUBLISHER_STATE_ACTIVE_SUBSCRIBED: &str = "Active Subscribed";
 
 #[async_trait]
 pub(crate) trait Publisher: Send + Sync {
-    fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>>;
+    fn get_latest_message(&self) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>>;
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError>;
@@ -121,8 +121,8 @@ impl Display for PublisherState {
 
 #[async_trait]
 impl Publisher for PublisherImpl {
-    fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {
-        self.latest_message.lock().unwrap().as_ref().map(Arc::clone)
+    fn get_latest_message(&self) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
+        ValueHolder::Synchronous(self.latest_message.lock().unwrap().as_ref().map(Arc::clone))
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
@@ -656,6 +656,7 @@ mod tests {
         assert_eq!(&rx.await.unwrap(), &expected);
         assert!(publisher
             .get_latest_message()
+            .unwrap_sync()
             .unwrap()
             .reflect_eq_dyn(expected.as_ref(), &ReflectEqMode::default()));
     }
@@ -682,7 +683,8 @@ mod tests {
             .await;
         trigger.fire().await;
 
-        let messages = [rx.await.unwrap().into(), publisher.get_latest_message().unwrap()];
+        let messages =
+            [rx.await.unwrap().into(), publisher.get_latest_message().unwrap_sync().unwrap()];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
@@ -749,7 +751,8 @@ mod tests {
         );
         trigger.fire().await;
 
-        let messages = [rx.await.unwrap().into(), publisher.get_latest_message().unwrap()];
+        let messages =
+            [rx.await.unwrap().into(), publisher.get_latest_message().unwrap_sync().unwrap()];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
