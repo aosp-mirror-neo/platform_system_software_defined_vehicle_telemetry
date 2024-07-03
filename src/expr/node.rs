@@ -681,7 +681,7 @@ mod tests {
     async fn evaluate_asynchronous_provider_result_success() {
         let left_message_provider = Arc::new(MockMessageProvider::new());
         left_message_provider.set_next_async_result(
-            async { Ok(Some(Box::new(TEST_MESSAGE.clone()) as Box<dyn MessageDyn>)) }.boxed(),
+            async { Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>)) }.boxed(),
         );
         let left_field_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
@@ -690,7 +690,7 @@ mod tests {
         });
         let right_message_provider = Arc::new(MockMessageProvider::new());
         right_message_provider.set_next_async_result(
-            async { Ok(Some(Box::new(TEST_MESSAGE.clone()) as Box<dyn MessageDyn>)) }.boxed(),
+            async { Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>)) }.boxed(),
         );
         let right_field_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),

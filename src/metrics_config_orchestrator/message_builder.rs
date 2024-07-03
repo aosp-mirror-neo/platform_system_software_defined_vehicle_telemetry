@@ -105,6 +105,7 @@ mod tests {
     use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+    use std::sync::Arc;
 
     use super::*;
     use crate::expr::node_value::NodeValue;
@@ -189,8 +190,8 @@ mod tests {
         let builder = create_message_builder(
             TestMessage::descriptor(),
             vec![
-                (ANY_FIELD_NAME, NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone()))),
-                (MESSAGE_FIELD_NAME, NodeValue::Message(Box::new(TEST_NESTED_MESSAGE.clone()))),
+                (ANY_FIELD_NAME, NodeValue::Message(Arc::new(TEST_NESTED_MESSAGE.clone()))),
+                (MESSAGE_FIELD_NAME, NodeValue::Message(Arc::new(TEST_NESTED_MESSAGE.clone()))),
             ],
         );
 
@@ -252,8 +253,8 @@ mod tests {
                     REPEATED_MESSAGE_FIELD_NAME,
                     // value to assign to this field = a vector of 2 messages
                     NodeValue::MessageList(vec![
-                        Box::new(TEST_NESTED_MESSAGE.clone())
-                            as Box<dyn MessageDyn>;
+                        Arc::new(TEST_NESTED_MESSAGE.clone())
+                            as Arc<dyn MessageDyn>;
                         2
                     ]),
                 ),
@@ -288,7 +289,6 @@ mod tests {
         let context = NodeEvaluationContext::new();
         let res = builder.build(&context)?;
 
-        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
         Ok(())
     }
@@ -310,7 +310,6 @@ mod tests {
         let context = NodeEvaluationContext::new();
         let res = builder.build(&context)?;
 
-        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
         Ok(())
     }
@@ -334,7 +333,6 @@ mod tests {
         let context = NodeEvaluationContext::new();
         let res = builder.build(&context)?;
 
-        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
         assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
         Ok(())
     }
@@ -373,7 +371,7 @@ mod tests {
     fn build_node_value_incompatible_with_message_field_fails() {
         let builder = create_message_builder(
             TestMessage::descriptor(),
-            vec![(MESSAGE_FIELD_NAME, NodeValue::Message(Box::new(Timestamp::new())))],
+            vec![(MESSAGE_FIELD_NAME, NodeValue::Message(Arc::new(Timestamp::new())))],
         );
 
         // action

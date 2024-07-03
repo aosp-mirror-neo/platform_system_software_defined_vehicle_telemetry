@@ -159,16 +159,16 @@ mod tests {
 
     #[test]
     fn vector_aggregator_compute_with_message_value_ok() {
-        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
         let mut aggregate_message_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(boxed_message.clone()) }),
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(Arc::clone(&message)) }),
             &None,
         );
 
         let context = NodeEvaluationContext::new();
         // compute 5 times to see the vector is building up
         for i in 0..5 {
-            let expected_vec = vec![boxed_message.clone(); i + 1];
+            let expected_vec = vec![Arc::clone(&message); i + 1];
 
             // action
             let res = aggregate_message_value.compute(&context).unwrap_sync().unwrap();
@@ -181,9 +181,9 @@ mod tests {
     #[test]
     fn vector_aggregator_compute_with_message_value_and_limited_length_ok() {
         let max_len: usize = 3;
-        let boxed_message: Box<dyn MessageDyn> = Box::new(TEST_MESSAGE.clone());
+        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
         let mut aggregate_message_value = VectorAggregator::new(
-            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(boxed_message.clone()) }),
+            &Arc::new(Node::ConstantLeaf { value: NodeValue::Message(Arc::clone(&message)) }),
             &Some(max_len as u32),
         );
 
@@ -191,9 +191,9 @@ mod tests {
         // compute 5 times and verify the output never exceeds max_len
         for i in 0..5 {
             let expected_vec = if i < max_len {
-                vec![boxed_message.clone(); i + 1]
+                vec![Arc::clone(&message); i + 1]
             } else {
-                vec![boxed_message.clone(); max_len]
+                vec![Arc::clone(&message); max_len]
             };
 
             // action

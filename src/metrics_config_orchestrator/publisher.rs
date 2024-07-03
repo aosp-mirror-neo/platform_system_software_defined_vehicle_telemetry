@@ -27,7 +27,7 @@ const PUBLISHER_STATE_ACTIVE_SUBSCRIBED: &str = "Active Subscribed";
 
 #[async_trait]
 pub(crate) trait Publisher: Send + Sync {
-    fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>>;
+    fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>>;
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError>;
@@ -59,7 +59,7 @@ pub(crate) struct PublisherImpl {
     pub(super) name: String,
     pub(super) publisher_type: PublisherType,
 
-    latest_message: Mutex<Option<Box<dyn MessageDyn>>>,
+    latest_message: Mutex<Option<Arc<dyn MessageDyn>>>,
     state: AsyncMutex<PublisherState>,
 }
 
@@ -121,8 +121,8 @@ impl Display for PublisherState {
 
 #[async_trait]
 impl Publisher for PublisherImpl {
-    fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
-        self.latest_message.lock().unwrap().clone()
+    fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {
+        self.latest_message.lock().unwrap().as_ref().map(Arc::clone)
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
@@ -341,7 +341,7 @@ impl PublisherImpl {
 
     async fn set_new_message(
         self: &Arc<Self>,
-        message: &dyn MessageDyn,
+        message: &Arc<dyn MessageDyn>,
         context: NodeEvaluationContext,
     ) {
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
@@ -355,12 +355,12 @@ impl PublisherImpl {
         };
 
         // Replace latest message.
-        self.latest_message.lock().unwrap().replace(message.clone_box());
+        self.latest_message.lock().unwrap().replace(Arc::clone(message));
 
         // Notify subscribed data triggers.
         // TODO(b/294129114): Replace callback_map with just a single callback.
         for callback in callback_map.values_mut() {
-            callback(message, context.clone());
+            callback(message.as_ref(), context.clone());
         }
     }
 
@@ -382,16 +382,16 @@ impl PublisherImpl {
 
         let self_clone = Arc::clone(self);
         tokio::spawn(async move {
-            self_clone.set_new_message(msg.as_ref(), context).await;
+            self_clone.set_new_message(&Arc::from(msg), context).await;
         });
     }
 
     fn on_service_publisher_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
         let self_clone = Arc::clone(self);
-        let message_clone = message.clone_box();
+        let message_clone = message.clone_box().into();
         let context = NodeEvaluationContext::new();
         tokio::spawn(async move {
-            self_clone.set_new_message(message_clone.as_ref(), context).await;
+            self_clone.set_new_message(&message_clone, context).await;
         });
     }
 }
@@ -402,6 +402,7 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
+    use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -642,7 +643,10 @@ mod tests {
 
         let expected = Box::new(msg) as Box<dyn MessageDyn>;
         assert_eq!(&rx.await.unwrap(), &expected);
-        assert_eq!(publisher.get_latest_message().as_ref().unwrap(), &expected);
+        assert!(publisher
+            .get_latest_message()
+            .unwrap()
+            .reflect_eq_dyn(expected.as_ref(), &ReflectEqMode::default()));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -667,9 +671,10 @@ mod tests {
             .await;
         trigger.fire().await;
 
-        let messages = [rx.await.unwrap(), publisher.get_latest_message().unwrap()];
+        let messages = [rx.await.unwrap().into(), publisher.get_latest_message().unwrap()];
         for message in messages {
-            let test_message = <dyn MessageDyn>::downcast_box::<TestMessage>(message).unwrap();
+            let test_message =
+                <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
             assert_eq!(test_message.int_field, 1);
         }
     }

@@ -107,7 +107,7 @@ lazy_static! {
 
 pub struct MockMessageProvider {
     pub next_result:
-        Mutex<Option<OperationResult<'static, Option<Box<dyn MessageDyn>>, MessageProviderError>>>,
+        Mutex<Option<OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError>>>,
 }
 
 impl MockMessageProvider {
@@ -117,21 +117,21 @@ impl MockMessageProvider {
 
     pub fn set_next_async_result(
         &self,
-        future: BoxFuture<'static, Result<Option<Box<dyn MessageDyn>>, MessageProviderError>>,
+        future: BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, MessageProviderError>>,
     ) {
         self.set_next_result(OperationResult::Asynchronous(future));
     }
 
     pub fn set_next_sync_result(
         &self,
-        result: Result<Option<Box<dyn MessageDyn>>, MessageProviderError>,
+        result: Result<Option<Arc<dyn MessageDyn>>, MessageProviderError>,
     ) {
         self.set_next_result(OperationResult::Synchronous(result));
     }
 
     fn set_next_result(
         &self,
-        result: OperationResult<'static, Option<Box<dyn MessageDyn>>, MessageProviderError>,
+        result: OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError>,
     ) {
         self.next_result.lock().unwrap().replace(result);
     }
@@ -141,9 +141,9 @@ impl MessageProvider for MockMessageProvider {
     fn get_message(
         &self,
         _publisher_name: &str,
-    ) -> OperationResult<Option<Box<dyn MessageDyn>>, MessageProviderError> {
+    ) -> OperationResult<Option<Arc<dyn MessageDyn>>, MessageProviderError> {
         self.next_result.lock().unwrap().take().unwrap_or_else(|| {
-            OperationResult::Synchronous(Ok(Some(Box::new(TEST_MESSAGE.clone()))))
+            OperationResult::Synchronous(Ok(Some(Arc::new(TEST_MESSAGE.clone()))))
         })
     }
 }

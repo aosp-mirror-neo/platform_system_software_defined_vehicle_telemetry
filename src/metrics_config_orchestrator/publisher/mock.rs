@@ -10,7 +10,7 @@ use crate::metrics_config_orchestrator::NodeEvaluationContext;
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
-    pub latest_message: Option<Box<dyn MessageDyn>>,
+    pub latest_message: Option<Arc<dyn MessageDyn>>,
 
     name: String,
     activate_callback: Option<Box<dyn Fn(&str) -> Option<PublisherActivateError> + Send + Sync>>,
@@ -24,7 +24,7 @@ pub(crate) struct MockPublisher {
 
 #[async_trait]
 impl Publisher for MockPublisher {
-    fn get_latest_message(&self) -> Option<Box<dyn MessageDyn>> {
+    fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {
         self.latest_message.clone()
     }
 

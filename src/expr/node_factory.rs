@@ -57,7 +57,7 @@ pub trait MessageProvider: Send + Sync {
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> OperationResult<Option<Box<dyn MessageDyn>>, MessageProviderError>;
+    ) -> OperationResult<Option<Arc<dyn MessageDyn>>, MessageProviderError>;
 }
 
 /// Provides descriptors for published message types.

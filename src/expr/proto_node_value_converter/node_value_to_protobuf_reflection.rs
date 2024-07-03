@@ -5,6 +5,7 @@
 use protobuf::reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType};
 use protobuf::well_known_types::any::Any;
 use protobuf::{MessageDyn, MessageFull};
+use std::sync::Arc;
 
 use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
@@ -87,7 +88,7 @@ impl ToReflectValueBox for NodeValue {
                 let msg_descriptor = msg.descriptor_dyn();
                 if &msg_descriptor != descriptor {
                     if descriptor == &Any::descriptor() {
-                        Ok(ReflectValueBox::Message(Box::new(Any::pack_dyn(msg).unwrap())))
+                        Ok(ReflectValueBox::Message(Box::new(Any::pack_dyn(msg.as_ref()).unwrap())))
                     } else {
                         Err(err_provider())
                     }
@@ -202,14 +203,16 @@ impl ToReflectValueBox for f64 {
     }
 }
 
-// A Box<dyn MessageDyn> can be converted into a protobuf reflection value.
-impl ToReflectValueBox for Box<dyn MessageDyn> {
+// A Arc<dyn MessageDyn> can be converted into a protobuf reflection value.
+impl ToReflectValueBox for Arc<dyn MessageDyn> {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
-            ProtobufRuntimeType::Message(_) => Ok(ReflectValueBox::Message(self.clone())),
+            ProtobufRuntimeType::Message(_) => {
+                Ok(ReflectValueBox::Message(self.as_ref().clone_box()))
+            }
             _ => Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
