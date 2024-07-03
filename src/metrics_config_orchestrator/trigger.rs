@@ -8,6 +8,7 @@ use sdv_telemetry_proto_rust::{
     expression::combination_node::{Operator, RelationalOperator},
     metrics_configuration::conditional_trigger::ConditionType,
 };
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::fmt;
 use std::marker::{Send, Sync};
@@ -15,6 +16,7 @@ use std::sync::{Arc, Mutex, Weak};
 use tokio::{sync::Mutex as AsyncMutex, time::Duration};
 
 use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node_error::NodeError;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, CallbackFn, SubscriptionManager, SubscriptionManagerImpl,
@@ -368,37 +370,62 @@ impl TriggerImpl {
         self: &Arc<Self>,
         callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
         condition_checker: impl FnOnce(NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>
-            + Send,
+            + Send
+            + 'static,
         context: NodeEvaluationContext,
     ) {
-        let TriggerType::Conditional { maybe_previous_value, selector_expression, .. } =
-            &self.trigger_type
-        else {
+        let TriggerType::Conditional { selector_expression, .. } = &self.trigger_type else {
             panic!("Unexpected trigger type");
         };
 
-        // TODO(b/349862095): Handle asynchronous OperationResult.
-        let res = selector_expression
-            .evaluate(&Arc::new(context.clone()))
-            .map_err(|err| anyhow!(err))
-            .and_then_sync(|node_value| condition_checker(node_value, maybe_previous_value))
-            .unwrap_sync();
+        fn check_evaluation_result(
+            trigger: &Arc<TriggerImpl>,
+            result: Result<NodeValue, NodeError>,
+            condition_checker: impl FnOnce(NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>,
+        ) -> bool {
+            let node_value = match result {
+                Ok(node_value) => node_value,
+                Err(err) => {
+                    error!(
+                        "Error when performing expression evaluation for trigger {}: {}",
+                        trigger.name, err
+                    );
+                    return false;
+                }
+            };
 
-        let check_succeeded = match res {
-            Ok(check_succeeded) => check_succeeded,
-            Err(err) => {
-                error!("Error when checking trigger {}: {:?}", self.name, err);
-                return;
+            let TriggerType::Conditional { maybe_previous_value, .. } = &trigger.trigger_type
+            else {
+                panic!("Unexpected trigger type");
+            };
+            condition_checker(node_value, maybe_previous_value).unwrap_or_else(|err| {
+                panic!("Failed to perform comparison for trigger {}: {}", trigger.name, err)
+            })
+        }
+
+        let result_holder = selector_expression.evaluate(&Arc::new(context.clone()));
+        match result_holder {
+            OperationResult::Asynchronous(future) => {
+                // Spawn a task that awaits the async result, checks it and fires the trigger if it's true.
+                let self_clone = Arc::clone(self);
+                let callback_map_clone = Arc::clone(callback_map);
+                tokio::spawn(async move {
+                    if check_evaluation_result(&self_clone, future.await, condition_checker) {
+                        Self::fire_trigger(&self_clone.name, &callback_map_clone, context).await;
+                    }
+                });
+            }
+            OperationResult::Synchronous(result) => {
+                // Check result in the current thread and spawn a task to fire the trigger if it's true.
+                if check_evaluation_result(self, result, condition_checker) {
+                    let callback_map_clone = Arc::clone(callback_map);
+                    let trigger_name_clone = self.name.clone();
+                    tokio::spawn(async move {
+                        Self::fire_trigger(&trigger_name_clone, &callback_map_clone, context).await;
+                    });
+                }
             }
         };
-
-        if check_succeeded {
-            let trigger_name_clone = self.name.clone();
-            let callback_map_clone = Arc::clone(callback_map);
-            tokio::spawn(async move {
-                Self::fire_trigger(&trigger_name_clone, &callback_map_clone, context).await;
-            });
-        }
     }
 }
 
@@ -407,7 +434,9 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
+    use std::future;
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::sync::{mpsc, oneshot};
 
@@ -1041,6 +1070,21 @@ mod tests {
         callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 2);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn activate_conditional_trigger_handles_async_expression_result() {
+        let (message_provider, parent_trigger, callback_listener) =
+            setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
+
+        let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
+        message_provider
+            .set_next_async_result(future::ready(Ok(Some(msg as Arc<dyn MessageDyn>))).boxed());
+        parent_trigger.fire().await;
+        callback_listener.wait_for_callback_fired().await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
