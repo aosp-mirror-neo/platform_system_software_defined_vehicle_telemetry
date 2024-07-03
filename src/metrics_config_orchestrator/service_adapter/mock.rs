@@ -27,7 +27,9 @@ pub(crate) struct MockServiceAdapter {
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
 }
 
-struct MockServiceMessageProvider {}
+pub(crate) struct MockServiceMessageProvider {
+    message_provider: Option<Box<dyn Fn() -> Box<dyn MessageDyn> + Send + Sync>>,
+}
 
 #[async_trait]
 impl ServiceAdapter for MockServiceAdapter {
@@ -131,8 +133,8 @@ impl MockServiceAdapter {
         self
     }
 
-    pub(crate) fn with_next_message_provider(self) -> Self {
-        self.next_message_provider.lock().unwrap().replace(MockServiceMessageProvider {});
+    pub(crate) fn with_next_message_provider(self, provider: MockServiceMessageProvider) -> Self {
+        self.next_message_provider.lock().unwrap().replace(provider);
         self
     }
 }
@@ -143,6 +145,23 @@ impl ServiceMessageProvider for MockServiceMessageProvider {
         &self,
         _configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
-        Ok(None)
+        if let Some(message_provider) = &self.message_provider {
+            Ok(Some(message_provider()))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+impl MockServiceMessageProvider {
+    pub(crate) fn new() -> Self {
+        Self { message_provider: None }
+    }
+
+    pub(crate) fn set_message_provider(
+        &mut self,
+        message_provider: impl Fn() -> Box<dyn MessageDyn> + Send + Sync + 'static,
+    ) {
+        self.message_provider = Some(Box::new(message_provider));
     }
 }

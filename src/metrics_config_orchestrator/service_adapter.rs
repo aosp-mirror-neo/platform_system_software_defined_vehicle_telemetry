@@ -39,7 +39,6 @@ pub(crate) trait ServiceAdapter {
 
 #[async_trait::async_trait]
 pub(crate) trait ServiceMessageProvider: Send + Sync {
-    #[allow(dead_code)]
     async fn get_latest_message(
         &self,
         configuration: &Option<Any>,

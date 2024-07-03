@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
+use futures::FutureExt;
 use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_utils::{collection_extension::HashMapExtension, value_holder::ValueHolder};
@@ -27,7 +28,7 @@ const PUBLISHER_STATE_ACTIVE_SUBSCRIBED: &str = "Active Subscribed";
 
 #[async_trait]
 pub(crate) trait Publisher: Send + Sync {
-    fn get_latest_message(&self) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>>;
+    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>>;
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError>;
@@ -71,8 +72,7 @@ pub(super) enum PublisherState {
     /// but provides the latest message on demand.
     ActiveGetter {
         // Provider of the latest message.
-        #[allow(dead_code)]
-        message_provider: Box<dyn ServiceMessageProvider>,
+        message_provider: Arc<dyn ServiceMessageProvider>,
     },
     /// The publisher is subscribed to the underlying data source
     /// and maintains the latest message.
@@ -121,8 +121,37 @@ impl Display for PublisherState {
 
 #[async_trait]
 impl Publisher for PublisherImpl {
-    fn get_latest_message(&self) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
-        ValueHolder::Synchronous(self.latest_message.lock().unwrap().as_ref().map(Arc::clone))
+    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
+        if let Some(message) = self.latest_message.lock().unwrap().as_ref() {
+            return ValueHolder::Synchronous(Some(Arc::clone(message)));
+        }
+        ValueHolder::Asynchronous(
+            async move {
+                let configuration = match &self.publisher_type {
+                    PublisherType::Service { configuration, .. } => configuration,
+                    PublisherType::Aggregation { .. } => return None,
+                };
+                let message_provider = match &*self.state.lock().await {
+                    PublisherState::Inactive => panic!(
+                        "Publisher {} is inactive and cannot provide latest message",
+                        self.name
+                    ),
+                    PublisherState::ActiveGetter { message_provider } => {
+                        Arc::clone(message_provider)
+                    }
+                    PublisherState::ActiveSubscribed { .. } => return None,
+                };
+                match message_provider.get_latest_message(configuration).await {
+                    Err(err) => {
+                        // TODO(b/351047443): Propagate error through expression evaluation.
+                        error!("Error when trying to retrieve latest message: {}", err);
+                        None
+                    }
+                    Ok(maybe_msg) => maybe_msg.map(|msg| msg.into()),
+                }
+            }
+            .boxed(),
+        )
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
@@ -174,7 +203,7 @@ impl Publisher for PublisherImpl {
                 if let Some(message_provider) = maybe_message_provider {
                     // Don't subscribe to the service adapter and
                     // store message provider to get the latest message.
-                    PublisherState::ActiveGetter { message_provider }
+                    PublisherState::ActiveGetter { message_provider: message_provider.into() }
                 } else {
                     // Subscribe to the service adapter.
                     let self_clone = Arc::clone(&self);
@@ -415,10 +444,11 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::*;
-    use crate::metrics_config_orchestrator::{
-        message_builder::mock::MockMessageBuilder, service_adapter::mock::MockServiceAdapter,
-        trigger::mock::MockTrigger,
+    use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
+    use crate::metrics_config_orchestrator::service_adapter::mock::{
+        MockServiceAdapter, MockServiceMessageProvider,
     };
+    use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
 
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const ERROR_MESSAGE: &str = "Error 42";
@@ -478,6 +508,15 @@ mod tests {
         (publisher, message_builder)
     }
 
+    async fn create_active_getter_service_publisher(
+        service_adapter: Arc<MockServiceAdapter>,
+    ) -> Arc<PublisherImpl> {
+        let publisher = create_inactive_getter_service_publisher(service_adapter);
+
+        Arc::clone(&publisher).activate().await.unwrap();
+        publisher
+    }
+
     async fn create_active_subscribed_service_publisher(
         service_adapter: Option<Arc<MockServiceAdapter>>,
     ) -> Arc<PublisherImpl> {
@@ -515,7 +554,9 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_service_publisher_success() {
-        let service_adapter = Arc::new(MockServiceAdapter::new().with_next_message_provider());
+        let service_adapter = Arc::new(
+            MockServiceAdapter::new().with_next_message_provider(MockServiceMessageProvider::new()),
+        );
         let publisher = Arc::new(PublisherImpl::new_service_publisher(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
@@ -652,13 +693,34 @@ mod tests {
             .await;
         service_adapter.publish_new_message(&msg).await;
 
-        let expected = Box::new(msg) as Box<dyn MessageDyn>;
-        assert_eq!(&rx.await.unwrap(), &expected);
-        assert!(publisher
-            .get_latest_message()
-            .unwrap_sync()
-            .unwrap()
-            .reflect_eq_dyn(expected.as_ref(), &ReflectEqMode::default()));
+        let received_message = rx.await.unwrap();
+        let latest_message = publisher.get_latest_message().unwrap_sync().unwrap();
+        let expected_message = Box::new(msg) as Box<dyn MessageDyn>;
+        assert_eq!(&received_message, &expected_message);
+        assert!(
+            latest_message.reflect_eq_dyn(expected_message.as_ref(), &ReflectEqMode::default()),
+            "Expected {latest_message:?} to equal {expected_message:?}"
+        );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn service_publisher_get_latest_message_calls_adapter() {
+        let message = Box::new(Int32Value { value: 42, ..Default::default() });
+        let mut message_provider = MockServiceMessageProvider::new();
+        let message_clone = message.clone();
+        message_provider.set_message_provider(move || message_clone.clone());
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_message_provider(message_provider));
+        let publisher = create_active_getter_service_publisher(service_adapter).await;
+
+        let latest_message =
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+
+        assert!(
+            latest_message.reflect_eq_dyn(message.as_ref(), &ReflectEqMode::default()),
+            "Expected {latest_message:?} to equal {message:?}"
+        );
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -683,8 +745,10 @@ mod tests {
             .await;
         trigger.fire().await;
 
-        let messages =
-            [rx.await.unwrap().into(), publisher.get_latest_message().unwrap_sync().unwrap()];
+        let messages = [
+            rx.await.unwrap().into(),
+            Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap(),
+        ];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();

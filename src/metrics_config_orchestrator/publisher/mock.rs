@@ -25,7 +25,7 @@ pub(crate) struct MockPublisher {
 
 #[async_trait]
 impl Publisher for MockPublisher {
-    fn get_latest_message(&self) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
+    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
         ValueHolder::Synchronous(self.latest_message.clone())
     }
 

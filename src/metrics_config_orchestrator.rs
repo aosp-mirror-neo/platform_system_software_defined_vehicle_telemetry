@@ -227,7 +227,7 @@ where
     ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
         self.metrics_config.get().unwrap().publishers.get(publisher_name).map_or_else(
             || Err(MessageProviderError::InvalidPublisherName).into(),
-            |publisher| publisher.get_latest_message().map(Ok),
+            |publisher| Arc::clone(publisher).get_latest_message().map(Ok),
         )
     }
 }
