@@ -47,6 +47,18 @@ impl<'a, T: 'a, E: 'a> OperationResult<'a, T, E> {
         }
     }
 
+    /// Converts operation result into a boxed future that can be awaited.
+    pub fn into_future(self) -> BoxFuture<'a, Result<T, E>>
+    where
+        T: Send,
+        E: Send,
+    {
+        match self {
+            OperationResult::Synchronous(result) => future::ready(result).boxed(),
+            OperationResult::Asynchronous(future) => future,
+        }
+    }
+
     /// Maps operation result's Error to a new error type using the Into trait.
     pub fn err_into<F: 'a>(self) -> OperationResult<'a, T, F>
     where

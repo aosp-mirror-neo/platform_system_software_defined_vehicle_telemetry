@@ -83,7 +83,7 @@ impl MetricsReportGeneratorImpl {
         config_version: u32,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
         triggers: Vec<Arc<dyn Trigger>>,
-        message_builder: Box<dyn MessageBuilder>,
+        message_builder: Arc<dyn MessageBuilder>,
     ) -> Self {
         let subscriber =
             TriggerSubscriber::MetricsReportGenerator { name: metrics_report_config.name.clone() };
@@ -97,7 +97,7 @@ impl MetricsReportGeneratorImpl {
             is_active: false.into(),
             report_number: 1.into(),
             subscriber,
-            message_builder: message_builder.into(),
+            message_builder,
         }
     }
 
@@ -139,6 +139,7 @@ impl MetricsReportGeneratorImpl {
 
 #[cfg(test)]
 mod test {
+    use protobuf::MessageDyn;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::{sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::mpsc;
@@ -162,10 +163,10 @@ mod test {
     }
 
     fn create_default_generator() -> MetricsReportGeneratorImpl {
-        create_generator(Box::new(MockMessageBuilder::new()))
+        create_generator(Arc::new(MockMessageBuilder::new()))
     }
 
-    fn create_generator(message_builder: Box<MockMessageBuilder>) -> MetricsReportGeneratorImpl {
+    fn create_generator(message_builder: Arc<MockMessageBuilder>) -> MetricsReportGeneratorImpl {
         MetricsReportGeneratorImpl::new(
             &create_report_config_proto(),
             CONFIG_UUID.to_owned(),
@@ -216,8 +217,8 @@ mod test {
     async fn on_trigger_fired_creates_reports() {
         let trigger = Arc::new(create_trigger());
 
-        let message_builder = Box::new(MockMessageBuilder::new());
-        let mut generator = create_generator(Box::clone(&message_builder));
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let mut generator = create_generator(Arc::clone(&message_builder));
         let (tx, mut rx) = mpsc::channel(2);
         generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
@@ -263,9 +264,10 @@ mod test {
             Ok(Box::new(TestMessage {
                 repeated_i64s: vec![i64::try_from(context.id()).unwrap()],
                 ..Default::default()
-            }))
+            }) as Box<dyn MessageDyn>)
+            .into()
         });
-        let mut generator = create_generator(Box::new(message_builder));
+        let mut generator = create_generator(Arc::new(message_builder));
         let (tx, mut rx) = mpsc::channel(1);
         generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));

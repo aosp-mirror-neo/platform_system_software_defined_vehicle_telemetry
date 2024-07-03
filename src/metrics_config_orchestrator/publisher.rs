@@ -341,7 +341,7 @@ impl PublisherImpl {
 
     async fn set_new_message(
         self: &Arc<Self>,
-        message: &Arc<dyn MessageDyn>,
+        message: Arc<dyn MessageDyn>,
         context: NodeEvaluationContext,
     ) {
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
@@ -355,7 +355,7 @@ impl PublisherImpl {
         };
 
         // Replace latest message.
-        self.latest_message.lock().unwrap().replace(Arc::clone(message));
+        self.latest_message.lock().unwrap().replace(Arc::clone(&message));
 
         // Notify subscribed data triggers.
         // TODO(b/294129114): Replace callback_map with just a single callback.
@@ -369,22 +369,21 @@ impl PublisherImpl {
             panic!("Publisher {} that is not an Aggregation publisher received Aggregation publisher callback", self.name);
         };
 
-        // TODO(b/349862095): Handle asynchronous OperationResult.
-        let res = Arc::clone(message_builder).build(&Arc::new(context.clone())).unwrap_sync();
-        let msg = match res {
-            Ok(msg) => msg,
-            Err(err) => {
-                error!(
-                    "Error when trying to evaluate expression for publisher {}: {}",
-                    self.name, err
-                );
-                return;
-            }
-        };
-
+        let res = Arc::clone(message_builder).build(&Arc::new(context.clone()));
+        let name_clone = self.name.clone();
         let self_clone = Arc::clone(self);
         tokio::spawn(async move {
-            self_clone.set_new_message(&Arc::from(msg), context).await;
+            let msg = match res.into_future().await {
+                Ok(msg) => msg,
+                Err(err) => {
+                    error!(
+                        "Error when trying to evaluate expression for publisher {}: {}",
+                        name_clone, err
+                    );
+                    return;
+                }
+            };
+            self_clone.set_new_message(msg.into(), context).await;
         });
     }
 
@@ -396,7 +395,7 @@ impl PublisherImpl {
         let self_clone = Arc::clone(self);
         let message_clone = message.clone_box().into();
         tokio::spawn(async move {
-            self_clone.set_new_message(&message_clone, context).await;
+            self_clone.set_new_message(message_clone, context).await;
         });
     }
 }
@@ -407,11 +406,12 @@ pub(crate) mod mock;
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
+    use futures::FutureExt;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use std::sync::Arc;
+    use std::{future, sync::Arc};
     use tokio::sync::oneshot;
 
     use super::*;
@@ -428,14 +428,17 @@ mod tests {
 
     fn create_inactive_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
-        message_builder: Box<dyn MessageBuilder>,
+        message_builder: Arc<dyn MessageBuilder>,
     ) -> Arc<PublisherImpl> {
-        Arc::new(PublisherImpl::new_aggregation_publisher(
-            PUBLISHER_NAME.to_owned(),
-            message_builder,
-            false,
+        let name = PUBLISHER_NAME.to_owned();
+        let trigger_subscriber = TriggerSubscriber::AggregationPublisher { name: name.clone() };
+        let publisher_type = PublisherType::Aggregation {
+            reset_on_get: false,
+            trigger_subscriber,
             triggers,
-        ))
+            message_builder,
+        };
+        Arc::new(PublisherImpl::new(name, publisher_type))
     }
 
     fn create_inactive_getter_service_publisher(
@@ -464,12 +467,15 @@ mod tests {
 
     async fn create_active_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
-    ) -> Arc<PublisherImpl> {
-        let publisher =
-            create_inactive_aggregation_publisher(triggers, Box::new(MockMessageBuilder::new()));
+    ) -> (Arc<PublisherImpl>, Arc<MockMessageBuilder>) {
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let publisher = create_inactive_aggregation_publisher(
+            triggers,
+            Arc::<MockMessageBuilder>::clone(&message_builder),
+        );
 
         Arc::clone(&publisher).activate().await.unwrap();
-        publisher
+        (publisher, message_builder)
     }
 
     async fn create_active_subscribed_service_publisher(
@@ -661,7 +667,7 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
-        let publisher =
+        let (publisher, _) =
             create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
         let (tx, rx) = oneshot::channel();
         let mut maybe_tx = Some(tx);
@@ -691,7 +697,7 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
-        let publisher =
+        let (publisher, _) =
             create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
         let (context_tx, context_rx) = oneshot::channel();
         let mut context_tx = Some(context_tx);
@@ -713,6 +719,42 @@ mod tests {
             trigger_context, context,
             "Node evaluation context should be equal to the trigger context."
         );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn subscribe_aggregation_publisher_handles_async_expression_result() {
+        let trigger = Arc::new(MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
+        ));
+        let (publisher, message_builder) =
+            create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
+        let (tx, rx) = oneshot::channel();
+        let mut maybe_tx = Some(tx);
+        publisher
+            .subscribe(
+                DATA_TRIGGER_NAME,
+                Box::new(move |message, _context| {
+                    maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
+                }),
+            )
+            .await;
+
+        message_builder.set_next_async_result(
+            future::ready(Ok(
+                Box::new(TestMessage { int_field: 2, ..Default::default() }) as Box<dyn MessageDyn>
+            ))
+            .boxed(),
+        );
+        trigger.fire().await;
+
+        let messages = [rx.await.unwrap().into(), publisher.get_latest_message().unwrap()];
+        for message in messages {
+            let test_message =
+                <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
+            assert_eq!(test_message.int_field, 2);
+        }
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
