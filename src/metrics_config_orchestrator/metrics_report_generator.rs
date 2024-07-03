@@ -9,7 +9,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 use std::marker::{Send, Sync};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
-use tokio::{sync::Mutex as AsyncMutex, task};
+use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::node::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
@@ -102,46 +102,45 @@ impl MetricsReportGeneratorImpl {
     }
 
     fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str, context: NodeEvaluationContext) {
-        // TODO(b/349862095): Handle asynchronous OperationResult.
-        let res = Arc::clone(&self.message_builder).build(&Arc::new(context)).unwrap_sync();
-        match res {
-            Ok(report_data) => {
-                let mut report = MetricsReport::new();
-                report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);
-                report.report_timestamp = Some(Timestamp::now()).into();
-                report.report_reason = ReportReason::REGULAR.into();
-                report.metrics_config_uuid.clone_from(&self.config_uuid);
-                report.metrics_config_version = self.config_version;
-                report.report_config_name.clone_from(&self.name);
-                report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+        let res = Arc::clone(&self.message_builder).build(&Arc::new(context));
+        let self_clone = Arc::clone(self);
+        let trigger_name_clone = trigger_name.to_owned();
+        tokio::spawn(async move {
+            match res.into_future().await {
+                Ok(report_data) => {
+                    let mut report = MetricsReport::new();
+                    report.report_number = self_clone.report_number.fetch_add(1, Ordering::SeqCst);
+                    report.report_timestamp = Some(Timestamp::now()).into();
+                    report.report_reason = ReportReason::REGULAR.into();
+                    report.metrics_config_uuid.clone_from(&self_clone.config_uuid);
+                    report.metrics_config_version = self_clone.config_version;
+                    report.report_config_name.clone_from(&self_clone.name);
+                    report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
 
-                debug!(
-                    "Metrics Report {} #{} was generated on trigger {} for metrics config {}",
-                    report.report_config_name,
-                    report.report_number,
-                    trigger_name,
-                    report.metrics_config_uuid
-                );
+                    debug!(
+                        "Metrics Report {} #{} was generated on trigger {} for metrics config {}",
+                        report.report_config_name,
+                        report.report_number,
+                        trigger_name_clone,
+                        report.metrics_config_uuid
+                    );
 
-                let report_ready_callback = Arc::clone(&self.report_ready_callback);
-                task::spawn(async move {
-                    // Send report in a non-blocking task since it's handled outside of orchestrator
-                    // by a function that is not allowed to mutate itself.
-                    (report_ready_callback)(report);
-                });
+                    (self_clone.report_ready_callback)(report);
+                }
+                Err(e) => {
+                    error!("Unable to build report due to error in MessageBuilder: {:?}", e);
+                }
             }
-            Err(e) => {
-                error!("Unable to build report due to error in MessageBuilder: {:?}", e);
-            }
-        }
+        });
     }
 }
 
 #[cfg(test)]
 mod test {
+    use futures::FutureExt;
     use protobuf::MessageDyn;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use std::{sync::atomic::AtomicU32, thread, time::Duration};
+    use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::mpsc;
 
     use super::*;
@@ -284,6 +283,31 @@ mod test {
         // Verify the report.
         let test_message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(test_message.repeated_i64s, vec![i64::try_from(context.id()).unwrap()]);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_creates_reports_from_async_result() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_async_result(
+            future::ready(Ok(
+                Box::new(TestMessage { int_field: 2, ..Default::default() }) as Box<dyn MessageDyn>
+            ))
+            .boxed(),
+        );
+        let mut generator = create_generator(Arc::clone(&message_builder));
+        let (tx, mut rx) = mpsc::channel(1);
+        generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+
+        Arc::new(generator).activate().await;
+        trigger.fire().await;
+        let report = rx.recv().await.unwrap();
+
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 2);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
