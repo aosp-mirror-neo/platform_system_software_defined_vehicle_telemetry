@@ -436,9 +436,13 @@ rust_test {
         "liblog_rust",
         "liblogger",
         "libprotobuf",
+        "librand",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
+        "libsdv_telemetry_test_proto",
         "libsdv_telemetry_utils",
         "libtokio",
         // keep-sorted end

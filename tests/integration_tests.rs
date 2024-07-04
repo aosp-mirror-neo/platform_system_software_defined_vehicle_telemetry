@@ -2,27 +2,42 @@
 
 #![cfg(test)]
 
-/// Telemetry Service device integration tests
 use anyhow::anyhow;
 use log::info;
-use protobuf::{text_format::parse_from_str, Message};
-use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
+use protobuf::reflect::{FileDescriptor, ReflectValueRef};
+use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
+use sdv_telemetry_proto_rust::metrics_configuration::{
+    metrics_report::ReportReason, MetricsConfig,
+};
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_test_proto::test_message;
+use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Once;
 use tokio::sync::mpsc;
 
 const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
 
+fn setup_once() {
+    static SETUP_ONCE: Once = Once::new();
+
+    SETUP_ONCE.call_once(|| {
+        init_logger_for_samples_or_tests(LOG_TAG);
+        binder::ProcessState::start_thread_pool();
+    });
+}
+
 #[sdv_telemetry_test_utils_macros::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_simple_config_end_to_end_test() {
-    init_logger_for_samples_or_tests(LOG_TAG);
-    binder::ProcessState::start_thread_pool();
+    setup_once();
 
     info!("Connecting to service");
     let service = TelemetryServiceHolder::get().unwrap();
@@ -69,6 +84,129 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Successfully finished service");
 }
 
+fn unique_topic_name() -> String {
+    format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
+}
+
+fn create_publisher(
+    topic_name: &str,
+    publisher_metadata: TelemetryPublisherMetadata,
+) -> anyhow::Result<DataTunnelPublisher> {
+    let publisher_metadata = {
+        let mut vec = vec![];
+        publisher_metadata.write_to_vec(&mut vec)?;
+        vec
+    };
+    let publisher = DataTunnelPublisher::register_topic(topic_name, 100, 100, publisher_metadata)?;
+    Ok(publisher)
+}
+
+fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> {
+    let field_descriptor = message.descriptor_dyn().field_by_name(name).unwrap();
+    field_descriptor
+        .get_repeated(message)
+        .into_iter()
+        .map(|value| match value {
+            ReflectValueRef::I32(value) => value,
+            value => panic!("Unexpected value: {value:?}"),
+        })
+        .collect()
+}
+
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_vector_aggregation() {
+    setup_once();
+
+    let topic_name = unique_topic_name();
+    let publisher = create_publisher(
+        &topic_name,
+        TelemetryPublisherMetadata {
+            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    // Publish a few messages _before_ subscribing.
+    for i in -3..=-1 {
+        publisher
+            .publish_length_delimited_proto(&TestMessage { int_field: i, ..Default::default() })
+            .unwrap();
+    }
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    info!("Setting report ready listener");
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status_code, status_msg| {
+                info!("Received status message {status_code}: {status_msg}");
+            },
+            move |config_uuid, report_name, report_number| {
+                report_ready_tx.send((config_uuid, report_name, report_number)).unwrap()
+            },
+        )
+        .await
+        .unwrap();
+
+    info!("Adding metrics config");
+    let config =
+        metrics_config_reader_utils::read(&PathBuf::from("tests/aggregation_config.textproto"))
+            .unwrap();
+    let mut config = MetricsConfig::parse_from_bytes(&config).unwrap();
+    assert!(config.publishers[0].has_service_publisher());
+    assert_eq!(config.publishers[0].service_publisher().service_name, "<placeholder>");
+    config.publishers[0].mut_service_publisher().service_name = topic_name;
+    let serialized_config = config.write_to_bytes().unwrap();
+
+    let config_uuid = service.add_metrics_config(&serialized_config).await.unwrap();
+    info!("Activating metrics config");
+    service.activate_metrics_config(&config_uuid).await.unwrap();
+
+    for i in 1..=70 {
+        publisher
+            .publish_length_delimited_proto(&TestMessage { int_field: i, ..Default::default() })
+            .unwrap();
+    }
+
+    let (report_config_uuid, report_name, report_number) = report_ready_rx.recv().await.unwrap();
+    info!("Received metrics report notification");
+    assert_eq!(config_uuid, report_config_uuid);
+
+    let metrics_report =
+        service.get_metrics_report(report_config_uuid, report_name, report_number).await.unwrap();
+    info!("Received metrics report");
+    eprintln!("{metrics_report:?}");
+
+    info!("Removing metrics config");
+    service.remove_all_metrics_configs().await.unwrap();
+
+    service.finish().unwrap();
+
+    assert_eq!(metrics_report.report_reason, ReportReason::REGULAR.into());
+    assert_eq!(metrics_report.metrics_config_uuid, config_uuid);
+    assert_eq!(metrics_report.metrics_config_version, 1);
+    assert_eq!(metrics_report.report_config_name, "Report");
+    assert_eq!(
+        metrics_report.report_data.type_url,
+        "type.googleapis.com/android.automotive.telemetry.messages.Report"
+    );
+    let file_descriptor =
+        FileDescriptor::new_dynamic(config.descriptor_protos[0].clone(), &[]).unwrap();
+    let report_descriptor = file_descriptor.message_by_package_relative_name("Report").unwrap();
+
+    let report_data = metrics_report.report_data.unpack_dyn(&report_descriptor).unwrap().unwrap();
+    let result = get_int_vector_field_value(&*report_data, "int_vector");
+    eprintln!("{result:?}");
+
+    // TODO(b/343012972): The following assert is currently failing.
+    // assert_eq!(result, (1..=70).collect::<Vec<_>>());
+}
+
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut result = vec![];
     if dir.is_dir() {
@@ -87,6 +225,8 @@ fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
 
 #[test]
 fn check_textprotos_are_valid() -> anyhow::Result<()> {
+    setup_once();
+
     let paths = read_files_recursively(Path::new("."))?
         .into_iter()
         .filter(|path| path.extension() == Some(OsStr::new("textproto")))
@@ -107,6 +247,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/data_tunnel_publisher.textproto",
             "./samples/sample_protos/data_tunnel_publisher_aggregation.textproto",
             "./samples/sample_protos/metric_configJan10.textproto",
+            "./tests/aggregation_config.textproto",
             "./tests/config.textproto"
         ]
     );
