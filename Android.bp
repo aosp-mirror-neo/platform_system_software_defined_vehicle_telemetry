@@ -460,7 +460,8 @@ rust_test {
     ],
     data: [
         // keep-sorted start
-        "**/*.textproto",
+        "samples/**/*.textproto",
+        "tests/**/*.textproto",
         // keep-sorted end
     ],
     auto_gen_config: true,
