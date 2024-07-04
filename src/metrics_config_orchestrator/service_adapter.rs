@@ -1,12 +1,14 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
+use log::error;
 use protobuf::{well_known_types::any::Any, Message, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::select;
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
 
 use crate::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
@@ -84,6 +86,9 @@ pub(crate) struct ServiceAdapterImpl {
             String,
             (
                 Box<dyn ServicePublisherSubscription>,
+                // TODO(b/329515273): Remove this workaround once all
+                // `ServicePublisherSubscription`s correctly drop their callback on unsubscription.
+                oneshot::Sender<()>,
                 Arc<
                     AsyncMutex<
                         HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>,
@@ -160,7 +165,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
                 Entry::Occupied(o) => {
                     // If there's already an active subscription, add callback to its map.
-                    let (_, callback_container) = o.get();
+                    let (_, _, callback_container) = o.get();
                     callback_container.lock().await.insert(subscription_id, new_message_callback);
 
                     Some(ServiceSubscriptionType::new_shared(
@@ -170,26 +175,60 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 }
                 Entry::Vacant(v) => {
                     // If there is no active subscription, create a new one and store it.
-                    let callbacks = HashMap::from([(subscription_id, new_message_callback)]);
-                    let callback_container = Arc::new(AsyncMutex::new(callbacks));
-                    let callback_container_clone = Arc::clone(&callback_container);
+                    let (on_message_tx, mut on_message_rx) = mpsc::unbounded_channel();
+                    let service_name_clone = service_name.to_owned();
                     let create_subscription_outcome = self
                         .service_publisher_accessor
                         .create_subscription(
                             service_name,
                             None,
                             Box::new(move |msg| {
-                                Self::on_new_shared_subscription_message(
-                                    msg,
-                                    &callback_container_clone,
-                                )
+                                if on_message_tx.send(msg).is_err() {
+                                    // This means that `on_message_rx` was dropped - which should
+                                    // never happen, since it is only dropped when unsubscribing.
+                                    error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
+                                }
                             }),
                         )
                         .await?;
 
                     match create_subscription_outcome {
                         CreateSubscriptionOutcome::Subscribed(subscription) => {
-                            v.insert((subscription, callback_container));
+                            let callbacks =
+                                HashMap::from([(subscription_id, new_message_callback)]);
+                            let callback_container = Arc::new(AsyncMutex::new(callbacks));
+                            let callback_container_clone = Arc::clone(&callback_container);
+
+                            // TODO(b/329515273): Remove this workaround once all
+                            // `ServicePublisherSubscription`s correctly drop their callback on
+                            // unsubscription.
+                            let (cancel_reader_tx, mut cancel_reader_rx) = oneshot::channel();
+
+                            tokio::spawn(async move {
+                                // This loop runs until there are no no more messages in the queue
+                                // AND (`on_message_tx` is dropped OR cancellation is signalled by
+                                // `cancel_reader_rx`).
+                                while let Some(message) = select! {
+                                    // Always check for pending messages before cancellation.
+                                    biased;
+                                    // This will stop the loop if `on_message_tx` was dropped.
+                                    m = on_message_rx.recv() => m,
+                                    // Stop the loop if `cancel_reader_rx` receives an event or
+                                    // errors.
+                                    _ = &mut cancel_reader_rx => None,
+                                } {
+                                    let mut subscriptions = callback_container_clone.lock().await;
+
+                                    // Synchronously invoke callbacks. The loop needs to wait before
+                                    // they finish to release the mutex lock when they're done
+                                    // because they're allowed to mutate themselves.
+                                    for subscription in subscriptions.values_mut() {
+                                        subscription(message.as_ref());
+                                    }
+                                }
+                            });
+
+                            v.insert((subscription, cancel_reader_tx, callback_container));
                             Some(ServiceSubscriptionType::new_shared(
                                 service_name.to_owned(),
                                 subscription_id,
@@ -217,7 +256,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             ServiceSubscriptionType::Shared { service_name, subscription_id } => {
                 match self.service_subscriptions.lock().await.entry(service_name) {
                     Entry::Occupied(o) => {
-                        let (_, callback_container) = o.get();
+                        let (_, _, callback_container) = o.get();
                         let is_last_callback = {
                             let mut callbacks = callback_container.lock().await;
                             let _ = callbacks
@@ -229,7 +268,13 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         if is_last_callback {
                             // Remove entry and unsubscribe from the underlying subscription
                             // if the last callback was removed.
-                            let (_, (underlying_subscription, _)) = o.remove_entry();
+                            let (_, (underlying_subscription, cancel_reader_tx, _)) =
+                                o.remove_entry();
+                            // We do not really care whether the reader is still alive or not - just
+                            // tell it to cancel processing messages. We don't even really have to
+                            // send something here, just dropping it would also be enough to tell
+                            // the reader to stop.
+                            let _ = cancel_reader_tx.send(());
                             underlying_subscription.unsubscribe().await?;
                         }
                     }
@@ -251,32 +296,6 @@ impl ServiceAdapterImpl {
             service_publisher_accessor: service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
         }
-    }
-
-    // Handles notification about a new shared subscription message.
-    fn on_new_shared_subscription_message(
-        message: Box<dyn MessageDyn>,
-        subscriptions_container: &Arc<
-            AsyncMutex<HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
-        >,
-    ) {
-        let subscriptions_container_clone = Arc::clone(subscriptions_container);
-        tokio::spawn(async move {
-            // Retrieve subscriptions.
-            let mut subscriptions = subscriptions_container_clone.lock().await;
-
-            // Verify that the map hasn't been cleared.
-            if subscriptions.is_empty() {
-                return;
-            }
-
-            // Synchronously invoke callbacks.
-            // The loop needs to wait before they finish to release the mutex lock when they're
-            // done because they're allowed to mutate themselves.
-            for subscription in subscriptions.values_mut() {
-                subscription(message.as_ref());
-            }
-        });
     }
 }
 
@@ -571,6 +590,44 @@ pub(super) mod tests {
 
         // Verify the number of registry subscribe calls.
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
+    }
+
+    // This test must run on a multi-threaded executor, because only then does the code under test
+    // exhibit the problematic behavior.
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn subscribe_shared_same_service_receives_messages_in_order() {
+        const RANGE: std::ops::RangeInclusive<i32> = 1..=10;
+
+        // Run this multiple times, because the erroneous behavior does not always manifest.
+        for _ in 1..=100 {
+            let accessor = Arc::new(MockServicePublisherAccessor::new());
+            let service_adapter =
+                ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+            let (tx, mut rx) = mpsc::unbounded_channel();
+
+            service_adapter
+                .subscribe(
+                    SERVICE_NAME,
+                    &None,
+                    Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
+                )
+                .await
+                .unwrap();
+
+            for i in RANGE {
+                accessor.notify_subscriber(
+                    SERVICE_NAME,
+                    Box::new(Int32Value { value: i, ..Default::default() }),
+                );
+            }
+            let mut values = vec![];
+            for _ in RANGE {
+                values.push(rx.recv().await.unwrap().downcast_ref::<Int32Value>().unwrap().value);
+            }
+
+            assert_eq!(values, RANGE.collect::<Vec<_>>());
+        }
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
