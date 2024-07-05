@@ -1,3 +1,5 @@
+# Copyright 2024 Google LLC
+
 name: "sample_publisher.proto"
 message_type {
   name: "SampleMessage"
