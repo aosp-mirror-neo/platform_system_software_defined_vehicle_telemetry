@@ -70,7 +70,7 @@ impl<'a, T: 'a> ValueHolder<'a, T> {
 mod test {
     use super::*;
 
-    use futures::future;
+    use std::future;
 
     #[tokio::test]
     async fn collect_unordered_async_success() {

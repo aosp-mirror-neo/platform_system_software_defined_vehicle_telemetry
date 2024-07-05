@@ -106,7 +106,7 @@ lazy_static! {
 }
 
 pub struct MockMessageProvider {
-    pub next_result:
+    next_result:
         Mutex<Option<OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError>>>,
 }
 

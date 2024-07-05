@@ -130,7 +130,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             context.config_proto.version,
             Arc::clone(context.report_ready_callback),
             triggers,
-            message_builder,
+            message_builder.into(),
         )))
     }
 
