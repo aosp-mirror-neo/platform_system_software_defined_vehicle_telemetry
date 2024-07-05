@@ -39,9 +39,9 @@ pub(crate) trait ServiceAdapter {
     async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
 }
 
+#[async_trait::async_trait]
 pub(crate) trait ServiceMessageProvider: Send + Sync {
-    #[allow(dead_code)]
-    fn get_latest_message(
+    async fn get_latest_message(
         &self,
         configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
@@ -299,13 +299,16 @@ impl ServiceAdapterImpl {
     }
 }
 
+#[async_trait::async_trait]
 impl ServiceMessageProvider for ServiceMessageProviderImpl {
-    fn get_latest_message(
+    async fn get_latest_message(
         &self,
         configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         let configuration_bytes = configuration.as_ref().map(serialize_configuration);
-        self.service_publisher_message_provider.get_latest_message(configuration_bytes.as_deref())
+        self.service_publisher_message_provider
+            .get_latest_message(configuration_bytes.as_deref())
+            .await
     }
 }
 
@@ -363,8 +366,8 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
-    #[test]
-    fn get_message_provider_accessor_latest_message_returns_error_fails() {
+    #[tokio::test]
+    async fn get_message_provider_accessor_latest_message_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
@@ -374,14 +377,14 @@ pub(super) mod tests {
             .unwrap()
             .expect("Provider should be available");
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
-        let err = provider.get_latest_message(&None).err().unwrap();
+        let err = provider.get_latest_message(&None).await.err().unwrap();
 
         assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
-    #[test]
-    fn get_message_provider_get_latest_message_success() {
+    #[tokio::test]
+    async fn get_message_provider_get_latest_message_success() {
         let mut message = Box::new(Int32Value::new());
         message.value = 42;
         let accessor =
@@ -396,6 +399,7 @@ pub(super) mod tests {
 
         let latest_message = message_provider
             .get_latest_message(&None)
+            .await
             .unwrap()
             .expect("Message should be available");
         assert_eq!(&latest_message, &(message as Box<dyn MessageDyn>));

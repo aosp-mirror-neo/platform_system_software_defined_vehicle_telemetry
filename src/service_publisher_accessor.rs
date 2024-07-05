@@ -35,9 +35,11 @@ pub trait ServicePublisherAccessor: Send + Sync {
 }
 
 /// Provides messages from a Service Publisher.
+/// Provides messages from a Service Publisher.
+#[async_trait::async_trait]
 pub trait ServicePublisherMessageProvider: Send + Sync {
     /// Returns latest published message with certain configuration, if provided.
-    fn get_latest_message(
+    async fn get_latest_message(
         &self,
         configuration: Option<&[u8]>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
