@@ -2,11 +2,12 @@
 
 //! Defines value holder that can be ether immediately available, or when a future is resolved.
 
-use futures::future::BoxFuture;
 use futures::stream::{self, FuturesUnordered};
-use futures::{FutureExt, StreamExt};
+use futures::{future::BoxFuture, FutureExt, StreamExt};
+use std::future;
 
 /// Holder of a value that can be ether immediately available, or when a future is resolved.
+#[must_use]
 pub enum ValueHolder<'a, T> {
     /// The value is provided by a future.
     Asynchronous(BoxFuture<'a, T>),
@@ -46,6 +47,35 @@ impl<'a, T: 'a> ValueHolder<'a, T> {
         match self {
             ValueHolder::Synchronous(value) => ValueHolder::Synchronous(op(value)),
             ValueHolder::Asynchronous(future) => ValueHolder::Asynchronous(future.map(op).boxed()),
+        }
+    }
+
+    /// Chain a computation to `self`.
+    pub fn then<U: Send + 'a>(
+        self,
+        op: impl FnOnce(T) -> ValueHolder<'a, U> + Send + 'a,
+    ) -> ValueHolder<'a, U> {
+        match self {
+            ValueHolder::Synchronous(t) => op(t),
+            ValueHolder::Asynchronous(future) => ValueHolder::Asynchronous(
+                future
+                    .then(|t| match op(t) {
+                        ValueHolder::Synchronous(result) => future::ready(result).boxed(),
+                        ValueHolder::Asynchronous(future) => future,
+                    })
+                    .boxed(),
+            ),
+        }
+    }
+
+    /// Convert `self` into a future.
+    pub fn into_future(self) -> BoxFuture<'a, T>
+    where
+        T: Send,
+    {
+        match self {
+            ValueHolder::Synchronous(t) => future::ready(t).boxed(),
+            ValueHolder::Asynchronous(future) => future,
         }
     }
 
@@ -108,6 +138,57 @@ mod test {
         let res = ValueHolder::Synchronous(1).map(|x| x + 1).unwrap_sync();
 
         assert_eq!(res, 2);
+    }
+
+    #[test]
+    fn then_sync_sync_success() {
+        let res = ValueHolder::Synchronous(1).then(ValueHolder::Synchronous).unwrap_sync();
+
+        assert_eq!(res, 1);
+    }
+
+    #[tokio::test]
+    async fn then_sync_async_success() {
+        let res = ValueHolder::Synchronous(1)
+            .then(|t| ValueHolder::Asynchronous(future::ready(t).boxed()))
+            .unwrap_async()
+            .await;
+
+        assert_eq!(res, 1);
+    }
+
+    #[tokio::test]
+    async fn then_async_sync_success() {
+        let res = ValueHolder::Asynchronous(future::ready(1).boxed())
+            .then(ValueHolder::Synchronous)
+            .unwrap_async()
+            .await;
+
+        assert_eq!(res, 1);
+    }
+
+    #[tokio::test]
+    async fn then_async_async_success() {
+        let res = ValueHolder::Asynchronous(future::ready(1).boxed())
+            .then(|t| ValueHolder::Asynchronous(future::ready(t).boxed()))
+            .unwrap_async()
+            .await;
+
+        assert_eq!(res, 1);
+    }
+
+    #[tokio::test]
+    async fn sync_into_future_success() {
+        let res = ValueHolder::Synchronous(1).into_future().await;
+
+        assert_eq!(res, 1);
+    }
+
+    #[tokio::test]
+    async fn async_into_future_success() {
+        let res = ValueHolder::Asynchronous(future::ready(1).boxed()).into_future().await;
+
+        assert_eq!(res, 1);
     }
 
     #[tokio::test]
