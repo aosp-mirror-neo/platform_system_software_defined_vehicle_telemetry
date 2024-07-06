@@ -1,12 +1,12 @@
 // Copyright 2024 Google LLC
 
-//! Defines value holder that can be ether immediately available, or when a future is resolved.
+//! Defines value holder that can be either immediately available, or when a future is resolved.
 
 use futures::stream::{self, FuturesUnordered};
 use futures::{future::BoxFuture, FutureExt, StreamExt};
 use std::future;
 
-/// Holder of a value that can be ether immediately available, or when a future is resolved.
+/// Holder of a value that can be either immediately available, or when a future is resolved.
 #[must_use]
 pub enum ValueHolder<'a, T> {
     /// The value is provided by a future.
