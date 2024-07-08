@@ -16,21 +16,15 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
 };
 use crate::metrics_config_orchestrator::publisher::ConnectionType;
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
-use crate::metrics_config_orchestrator::{
-    NodeValueType, Publisher, PublisherImpl, Trigger, TriggerImpl,
-};
+use crate::metrics_config_orchestrator::{NodeValueType, Publisher, PublisherImpl, Trigger};
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) trait PublisherFactory<
-    TPublisher: Publisher = PublisherImpl,
-    TTrigger: Trigger = TriggerImpl,
->
-{
+pub(crate) trait PublisherFactory<TPublisher: Publisher = PublisherImpl> {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
         publisher_proto: &PublisherProto,
-        context: &PublisherFactoryCreateContext<TTrigger>,
+        context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<TPublisher>, PublisherFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a publisher
@@ -43,11 +37,11 @@ pub(crate) trait PublisherFactory<
 }
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) struct PublisherFactoryCreateContext<'a, TTrigger: Trigger = TriggerImpl> {
+pub(crate) struct PublisherFactoryCreateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
-    pub triggers: &'a HashMap<String, Arc<TTrigger>>,
+    pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
 }
 
 pub(crate) struct PublisherFactoryValidateContext<'a> {
@@ -209,7 +203,7 @@ mod tests {
     use crate::metrics_config_orchestrator::service_adapter::{
         ServiceMessageProvider, ServiceSubscription,
     };
-    use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
 
     const INTERVAL: Duration = Duration::from_millis(42);
     const PUBLISHER_NAME: &str = "publisher";
@@ -282,14 +276,13 @@ mod tests {
         publisher
     }
 
-    fn create_valid_aggregation_publisher() -> (PublisherProto, Arc<TriggerImpl>) {
+    fn create_valid_aggregation_publisher() -> (PublisherProto, Arc<dyn Trigger>) {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         let aggregation_proto = publisher.mut_aggregation_publisher();
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger =
-            TriggerImpl::new(TRIGGER_NAME.to_owned(), TriggerType::Periodic { interval: INTERVAL });
+        let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), INTERVAL);
 
         (publisher, trigger)
     }
@@ -309,13 +302,13 @@ mod tests {
         fn create_using_context_with(
             &self,
             publisher_proto: &PublisherProto,
-            triggers: Option<Vec<Arc<TriggerImpl>>>,
+            triggers: Option<Vec<Arc<dyn Trigger>>>,
         ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
             let file_descriptors = vec![];
             let nodes = vec![];
             let node_types = vec![];
-            let triggers = triggers.map_or(HashMap::new(), |val| {
-                val.into_hash_map(|publisher| publisher.name.clone())
+            let triggers = triggers.map_or(HashMap::new(), |triggers| {
+                triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
             });
             let context = PublisherFactoryCreateContext {
                 file_descriptors: &file_descriptors,

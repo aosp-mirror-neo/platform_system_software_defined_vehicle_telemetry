@@ -58,7 +58,7 @@ use publisher_factory::{
     PublisherFactoryValidateContext,
 };
 use service_adapter::ServiceAdapterImpl;
-use trigger::{Trigger, TriggerImpl, TriggerSubscriber};
+use trigger::{Trigger, TriggerSubscriber};
 use trigger_factory::{
     TriggerFactory, TriggerFactoryCreateContext, TriggerFactoryError, TriggerFactoryImpl,
     TriggerFactoryValidateContext,
@@ -141,20 +141,17 @@ pub(super) struct MetricsConfigOrchestratorImpl<
     TNodeFactory = NodeFactoryImpl,
     TPublisher = PublisherImpl,
     TPublisherFactory = PublisherFactoryImpl,
-    TTrigger = TriggerImpl,
     TTriggerFactory = TriggerFactoryImpl,
 > where
     TMetricsReportGenerator: MetricsReportGenerator,
     TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + Send + Sync,
+        MetricsReportGeneratorFactory<TMetricsReportGenerator> + Send + Sync,
     TNodeFactory: NodeFactory + Send + Sync,
     TPublisher: Publisher,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Send + Sync,
-    TTrigger: Trigger,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Send + Sync,
+    TPublisherFactory: PublisherFactory<TPublisher> + Send + Sync,
+    TTriggerFactory: TriggerFactory<TPublisher> + Send + Sync,
 {
-    configs:
-        Mutex<HashMap<String, Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>>,
+    configs: Mutex<HashMap<String, Arc<MetricsConfig<TMetricsReportGenerator, TPublisher>>>>,
     descriptor_provider_factory: Box<dyn DescriptorProviderFactory>,
     metrics_report_generator_factory: TMetricsReportGeneratorFactory,
     node_factory: TNodeFactory,
@@ -178,16 +175,15 @@ pub(super) struct MetricsConfigOrchestratorImpl<
 pub(super) struct MetricsConfig<
     TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
     TPublisher: Publisher = PublisherImpl,
-    TTrigger: Trigger = TriggerImpl,
 > {
     uuid: String,
     state: AsyncMutex<MetricsConfigState>,
     metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
     ordered_publisher_names: Vec<String>,
     publishers: HashMap<String, Arc<TPublisher>>,
-    start_trigger: Option<Arc<TTrigger>>,
-    end_trigger: Option<Arc<TTrigger>>,
-    finish_trigger: Option<Arc<TTrigger>>,
+    start_trigger: Option<Arc<dyn Trigger>>,
+    end_trigger: Option<Arc<dyn Trigger>>,
+    finish_trigger: Option<Arc<dyn Trigger>>,
 }
 
 /// Lifecycle state of the metrics config.
@@ -204,22 +200,20 @@ pub(super) enum MetricsConfigState {
 }
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-struct MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
+struct MessageProviderImpl<TMetricsReportGenerator, TPublisher>
 where
     TMetricsReportGenerator: MetricsReportGenerator,
     TPublisher: Publisher,
-    TTrigger: Trigger,
 {
-    metrics_config: OnceLock<Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>>,
+    metrics_config: OnceLock<Arc<MetricsConfig<TMetricsReportGenerator, TPublisher>>>,
 }
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-impl<TMetricsReportGenerator, TPublisher, TTrigger> MessageProvider
-    for MessageProviderImpl<TMetricsReportGenerator, TPublisher, TTrigger>
+impl<TMetricsReportGenerator, TPublisher> MessageProvider
+    for MessageProviderImpl<TMetricsReportGenerator, TPublisher>
 where
     TMetricsReportGenerator: MetricsReportGenerator,
     TPublisher: Publisher,
-    TTrigger: Trigger,
 {
     fn get_message(
         &self,
@@ -240,7 +234,6 @@ impl<
         TNodeFactory,
         TPublisher,
         TPublisherFactory,
-        TTrigger,
         TTriggerFactory,
     > MetricsConfigOrchestrator
     for MetricsConfigOrchestratorImpl<
@@ -249,18 +242,16 @@ impl<
         TNodeFactory,
         TPublisher,
         TPublisherFactory,
-        TTrigger,
         TTriggerFactory,
     >
 where
     TMetricsReportGenerator: MetricsReportGenerator + 'static,
     TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + Send + Sync + 'static,
+        MetricsReportGeneratorFactory<TMetricsReportGenerator> + Send + Sync + 'static,
     TNodeFactory: NodeFactory + Send + Sync + 'static,
     TPublisher: Publisher + 'static,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Send + Sync + 'static,
-    TTrigger: Trigger + 'static,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Send + Sync + 'static,
+    TPublisherFactory: PublisherFactory<TPublisher> + Send + Sync + 'static,
+    TTriggerFactory: TriggerFactory<TPublisher> + Send + Sync + 'static,
 {
     fn get_active_metrics_config_uuids(&self) -> Vec<String> {
         self.configs.lock().unwrap().keys().cloned().collect()
@@ -285,7 +276,7 @@ where
             &self.service_publisher_manager,
         )?;
         let node_factory_context = NodeFactoryContext {
-            message_provider: Some(Arc::<MessageProviderImpl<_, _, _>>::clone(&message_provider)),
+            message_provider: Some(Arc::<MessageProviderImpl<_, _>>::clone(&message_provider)),
             descriptor_provider,
         };
 
@@ -616,7 +607,6 @@ impl<
         TNodeFactory,
         TPublisher,
         TPublisherFactory,
-        TTrigger,
         TTriggerFactory,
     >
     MetricsConfigOrchestratorImpl<
@@ -625,18 +615,16 @@ impl<
         TNodeFactory,
         TPublisher,
         TPublisherFactory,
-        TTrigger,
         TTriggerFactory,
     >
 where
     TMetricsReportGenerator: MetricsReportGenerator + 'static,
     TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator, TTrigger> + Send + Sync + 'static,
+        MetricsReportGeneratorFactory<TMetricsReportGenerator> + Send + Sync + 'static,
     TNodeFactory: NodeFactory + Send + Sync + 'static,
     TPublisher: Publisher + 'static,
-    TPublisherFactory: PublisherFactory<TPublisher, TTrigger> + Send + Sync + 'static,
-    TTrigger: Trigger + 'static,
-    TTriggerFactory: TriggerFactory<TPublisher, TTrigger> + Send + Sync + 'static,
+    TPublisherFactory: PublisherFactory<TPublisher> + Send + Sync + 'static,
+    TTriggerFactory: TriggerFactory<TPublisher> + Send + Sync + 'static,
 {
     // Private functions.
 
@@ -684,7 +672,7 @@ where
     }
 
     async fn start_data_collection(
-        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher>>,
     ) {
         // Activate metrics report generators.
         for generator in &config.metrics_report_generators {
@@ -693,8 +681,8 @@ where
     }
 
     async fn subscribe_to_start_trigger(
-        start_trigger: &Arc<TTrigger>,
-        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
+        start_trigger: &Arc<dyn Trigger>,
+        config: &Arc<MetricsConfig<TMetricsReportGenerator, TPublisher>>,
     ) {
         let mut config_clone = Some(Arc::clone(config));
         Arc::clone(start_trigger)
@@ -824,9 +812,7 @@ where
 
     // Lifecycle event handlers.
 
-    fn on_start_trigger_fired(
-        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) {
+    fn on_start_trigger_fired(config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher>>) {
         debug!("MetricsConfig {} start trigger fired", config.uuid);
 
         tokio::spawn(async move {
@@ -872,9 +858,7 @@ where
         });
     }
 
-    fn on_end_trigger_fired(
-        config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher, TTrigger>>,
-    ) {
+    fn on_end_trigger_fired(config: Arc<MetricsConfig<TMetricsReportGenerator, TPublisher>>) {
         debug!("MetricsConfig {} end trigger fired", config.uuid);
 
         tokio::spawn(async move {
@@ -961,7 +945,6 @@ mod tests {
         MockNodeFactory,
         MockPublisher,
         MockPublisherFactory,
-        MockTrigger,
         MockTriggerFactory,
     >;
 
@@ -1034,13 +1017,13 @@ mod tests {
         }
     }
 
-    impl MetricsReportGeneratorFactory<MockMetricsReportGenerator, MockTrigger>
+    impl MetricsReportGeneratorFactory<MockMetricsReportGenerator>
         for MockMetricsReportGeneratorFactory
     {
         fn create(
             &self,
             config: &MetricsReportConfig,
-            _context: &MetricsReportGeneratorFactoryCreateContext<MockTrigger>,
+            _context: &MetricsReportGeneratorFactoryCreateContext,
         ) -> Result<Arc<MockMetricsReportGenerator>, MetricsReportGeneratorFactoryError> {
             if let Some(error) = self.error.lock().unwrap().take() {
                 return Err(error);
@@ -1163,11 +1146,11 @@ mod tests {
         }
     }
 
-    impl PublisherFactory<MockPublisher, MockTrigger> for MockPublisherFactory {
+    impl PublisherFactory<MockPublisher> for MockPublisherFactory {
         fn create(
             &self,
             publisher_proto: &PublisherProto,
-            _context: &PublisherFactoryCreateContext<MockTrigger>,
+            _context: &PublisherFactoryCreateContext,
         ) -> Result<Arc<MockPublisher>, PublisherFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(publisher_proto) {
@@ -1233,12 +1216,12 @@ mod tests {
         }
     }
 
-    impl TriggerFactory<MockPublisher, MockTrigger> for MockTriggerFactory {
+    impl TriggerFactory<MockPublisher> for MockTriggerFactory {
         fn create(
             &self,
             trigger_proto: &TriggerProto,
-            _context: &TriggerFactoryCreateContext<MockPublisher, MockTrigger>,
-        ) -> Result<Arc<MockTrigger>, TriggerFactoryError> {
+            _context: &TriggerFactoryCreateContext<MockPublisher>,
+        ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
             if let Some(callback) = &self.create_callback {
                 if let Some(res) = callback(trigger_proto) {
                     return Err(res);

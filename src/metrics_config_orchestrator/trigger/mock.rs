@@ -1,10 +1,15 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::Mutex;
+use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::*;
+use crate::metrics_config_orchestrator::subscription_manager::SubscriptionManager;
 use crate::metrics_config_orchestrator::NodeEvaluationContext;
 
 /// Mock implementation of Trigger trait for unit tests.
@@ -93,5 +98,71 @@ impl MockTrigger {
             TriggerSubscriber::MetricsConfigFinish => matches!(other, TriggerSubscriber::MetricsConfigFinish),
             TriggerSubscriber::MetricsReportGenerator { name } => matches!(other, TriggerSubscriber::MetricsReportGenerator { name: other_name } if name == other_name),
         }), "Subscriber {} wasn't expected", subscriber);
+    }
+}
+
+pub(super) struct MockCallbackListener<T: Send + 'static> {
+    callback_tx: mpsc::UnboundedSender<T>,
+    callback_rx: AsyncMutex<mpsc::UnboundedReceiver<T>>,
+    fired_count: AtomicU32,
+}
+
+impl<T: Send + 'static> MockCallbackListener<T> {
+    pub(super) fn new() -> Self {
+        let (callback_tx, callback_rx) = mpsc::unbounded_channel();
+        MockCallbackListener { callback_tx, callback_rx: callback_rx.into(), fired_count: 0.into() }
+    }
+
+    pub(super) fn get_fired_count(&self) -> u32 {
+        self.fired_count.load(Ordering::Acquire)
+    }
+
+    // Creates a map with a callback that is handled by this listener instance.
+    pub(super) fn create_callback_map(
+        self: &Arc<Self>,
+    ) -> Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn<T>>>> {
+        let self_clone = Arc::clone(self);
+        let callback: CallbackFn<T> = Box::new(move |data| self_clone.on_callback_fired(data));
+        Arc::new(AsyncMutex::new(HashMap::from([(
+            TriggerSubscriber::MetricsConfigStart,
+            callback,
+        )])))
+    }
+
+    /// Increases fired count and triggers the notify.
+    pub(super) fn on_callback_fired(&self, data: T) {
+        self.fired_count.fetch_add(1, Ordering::SeqCst);
+        self.callback_tx.send(data).unwrap();
+    }
+
+    pub(super) async fn wait_for_callback_fired(&self) -> T {
+        self.callback_rx.lock().await.recv().await.unwrap()
+    }
+}
+
+#[derive(Clone)]
+pub(super) struct MockSubscriptionManager {
+    pub(super) key: Arc<Mutex<Option<TriggerSubscriber>>>,
+    pub(super) callback: Arc<Mutex<Option<TriggerCallbackFn>>>,
+}
+
+#[async_trait]
+impl SubscriptionManager<TriggerSubscriber, NodeEvaluationContext> for MockSubscriptionManager {
+    async fn subscribe(&self, key: TriggerSubscriber, callback: TriggerCallbackFn) {
+        self.key.lock().unwrap().replace(key);
+        self.callback.lock().unwrap().replace(callback);
+    }
+
+    async fn unsubscribe(&self, key: &TriggerSubscriber) {
+        self.key.lock().unwrap().replace(key.to_owned());
+    }
+}
+
+impl MockSubscriptionManager {
+    pub(super) fn new() -> MockSubscriptionManager {
+        MockSubscriptionManager {
+            key: Arc::new(Mutex::new(None)),
+            callback: Arc::new(Mutex::new(None)),
+        }
     }
 }

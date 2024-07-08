@@ -14,22 +14,20 @@ use thiserror::Error;
 
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::publisher::{ConnectionType, PublisherType};
-use crate::metrics_config_orchestrator::{
-    trigger::TriggerType, Publisher, PublisherImpl, Trigger, TriggerImpl,
-};
+use crate::metrics_config_orchestrator::{Publisher, PublisherImpl, Trigger};
+
+use super::trigger::conditional::ConditionalTrigger;
+use super::trigger::data::DataTrigger;
+use super::trigger::periodic::PeriodicTrigger;
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) trait TriggerFactory<
-    TPublisher: Publisher = PublisherImpl,
-    TTrigger: Trigger = TriggerImpl,
->
-{
+pub(crate) trait TriggerFactory<TPublisher: Publisher = PublisherImpl> {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryCreateContext<TPublisher, TTrigger>,
-    ) -> Result<Arc<TTrigger>, TriggerFactoryError>;
+        context: &TriggerFactoryCreateContext<TPublisher>,
+    ) -> Result<Arc<dyn Trigger>, TriggerFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a trigger encapsulated object.
     fn validate(
@@ -40,15 +38,11 @@ pub(crate) trait TriggerFactory<
 }
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) struct TriggerFactoryCreateContext<
-    'a,
-    Pub: Publisher = PublisherImpl,
-    Trig: Trigger = TriggerImpl,
-> {
+pub(crate) struct TriggerFactoryCreateContext<'a, Pub: Publisher = PublisherImpl> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub node_types: &'a [Option<NodeValueType>],
     pub publishers: &'a HashMap<String, Arc<Pub>>,
-    pub triggers: &'a HashMap<String, Arc<Trig>>,
+    pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
 }
 
 pub(crate) struct TriggerFactoryValidateContext<'a> {
@@ -92,14 +86,14 @@ impl TriggerFactory for TriggerFactoryImpl {
         &self,
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
-    ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+    ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
         Self::verify_name_set(trigger_proto)?;
         let trigger_name = trigger_proto.name.clone();
         let trigger_type = trigger_proto
             .trigger_type
             .as_ref()
             .ok_or_else(|| TriggerFactoryError::UnspecifiedTriggerType)?;
-        let trigger_type = match trigger_type {
+        Ok(match trigger_type {
             TriggerTypeProto::DataTrigger(data_trigger) => {
                 let publisher = &context.publishers[&data_trigger.publisher_name];
 
@@ -116,10 +110,10 @@ impl TriggerFactory for TriggerFactoryImpl {
                     }
                 }
 
-                TriggerType::Data { publisher: Arc::<PublisherImpl>::clone(publisher) }
+                DataTrigger::new(trigger_name, Arc::<PublisherImpl>::clone(publisher))
             }
             TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
-                TriggerType::Periodic { interval: Self::get_periodic_interval(periodic_trigger)? }
+                PeriodicTrigger::new(trigger_name, Self::get_periodic_interval(periodic_trigger)?)
             }
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
@@ -140,17 +134,15 @@ impl TriggerFactory for TriggerFactoryImpl {
                     .iter()
                     .map(|name| Arc::clone(&context.triggers[name]) as Arc<dyn Trigger>)
                     .collect();
-                return Ok(TriggerImpl::new_conditional_trigger(
+                ConditionalTrigger::new(
                     trigger_name,
                     condition_type,
                     triggers,
                     Arc::clone(selector_expression),
-                ));
+                )
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
-        };
-
-        Ok(TriggerImpl::new(trigger_name, trigger_type))
+        })
     }
 
     fn validate(
@@ -338,17 +330,14 @@ mod tests {
         trigger
     }
 
-    fn create_valid_conditional_trigger() -> (TriggerProto, Option<Vec<Arc<TriggerImpl>>>) {
+    fn create_valid_conditional_trigger() -> (TriggerProto, Option<Vec<Arc<dyn Trigger>>>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
         conditional_trigger.condition_type = ConditionType::ALL_CHANGES.into();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
-        let parent_trigger = TriggerImpl::new(
-            PARENT_TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval: INTERVAL },
-        );
+        let parent_trigger = PeriodicTrigger::new(PARENT_TRIGGER_NAME.to_owned(), INTERVAL);
 
         (trigger, Some(vec![parent_trigger]))
     }
@@ -396,7 +385,7 @@ mod tests {
         fn create_using_default_context(
             &self,
             trigger_proto: &TriggerProto,
-        ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+        ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
             self.create_using_context_with(trigger_proto, None, vec![], None, None)
         }
 
@@ -406,14 +395,15 @@ mod tests {
             nodes: Option<Vec<Arc<Node>>>,
             node_types: Vec<Option<NodeValueType>>,
             publishers: Option<Vec<Arc<PublisherImpl>>>,
-            triggers: Option<Vec<Arc<TriggerImpl>>>,
-        ) -> Result<Arc<TriggerImpl>, TriggerFactoryError> {
+            triggers: Option<Vec<Arc<dyn Trigger>>>,
+        ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
             let expression_nodes = nodes.unwrap_or_default();
-            let publishers = publishers.map_or(HashMap::new(), |val| {
-                val.into_hash_map(|publisher| publisher.name.clone())
+            let publishers = publishers.map_or(HashMap::new(), |publishers| {
+                publishers.into_hash_map(|publisher| publisher.name.clone())
             });
-            let triggers = triggers
-                .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
+            let triggers = triggers.map_or(HashMap::new(), |triggers| {
+                triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
+            });
             let context = TriggerFactoryCreateContext {
                 expression_nodes: &expression_nodes,
                 node_types: &node_types,
@@ -521,11 +511,11 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(res.name, TRIGGER_NAME);
-        let TriggerType::Data { publisher: res_publisher } = &res.trigger_type else {
+        assert_eq!(res.get_name(), TRIGGER_NAME);
+        let Ok(res_trigger) = res.downcast_arc::<DataTrigger>() else {
             panic!("Unexpected trigger type");
         };
-        assert!(Arc::ptr_eq(res_publisher, &(publisher as Arc<dyn Publisher>)));
+        assert!(Arc::ptr_eq(&res_trigger.publisher, &(publisher as Arc<dyn Publisher>)));
     }
 
     #[test]
@@ -535,11 +525,11 @@ mod tests {
 
         let res = factory.create_using_default_context(&trigger).unwrap();
 
-        assert_eq!(res.name, TRIGGER_NAME);
-        let TriggerType::Periodic { interval } = res.trigger_type else {
+        assert_eq!(res.get_name(), TRIGGER_NAME);
+        let Ok(res_trigger) = res.downcast_arc::<PeriodicTrigger>() else {
             panic!("Unexpected trigger type");
         };
-        assert_eq!(interval, INTERVAL);
+        assert_eq!(res_trigger.interval, INTERVAL);
     }
 
     #[test]
@@ -714,19 +704,17 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(res.name, TRIGGER_NAME);
-        let TriggerType::Conditional { condition_type, selector_expression, triggers, .. } =
-            &res.trigger_type
-        else {
+        assert_eq!(res.get_name(), TRIGGER_NAME);
+        let Ok(res_trigger) = res.downcast_arc::<ConditionalTrigger>() else {
             panic!("Unexpected trigger type");
         };
-        assert!(matches!(condition_type, ConditionType::ALL_CHANGES));
+        assert!(matches!(res_trigger.condition_type, ConditionType::ALL_CHANGES));
         // selector_expression should match the node at index 0
-        assert!(Arc::ptr_eq(selector_expression, &node_0));
-        assert!(!Arc::ptr_eq(selector_expression, &node_1));
-        assert_eq!(triggers.len(), 1);
+        assert!(Arc::ptr_eq(&res_trigger.selector_expression, &node_0));
+        assert!(!Arc::ptr_eq(&res_trigger.selector_expression, &node_1));
+        assert_eq!(res_trigger.triggers.len(), 1);
         assert!(Arc::ptr_eq(
-            &triggers[0],
+            &res_trigger.triggers[0],
             &(Arc::clone(&parent_triggers.unwrap()[0]) as Arc<dyn Trigger>)
         ));
     }

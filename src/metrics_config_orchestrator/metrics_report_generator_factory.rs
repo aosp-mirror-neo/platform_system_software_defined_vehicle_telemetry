@@ -14,12 +14,11 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactoryValidateContext,
 };
 use crate::metrics_config_orchestrator::{
-    MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger, TriggerImpl,
+    MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
 };
 
 pub(crate) trait MetricsReportGeneratorFactory<
     TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
-    TTrigger: Trigger = TriggerImpl,
 >
 {
     /// Returns a new metrics report generator based on the metrics report config
@@ -27,7 +26,7 @@ pub(crate) trait MetricsReportGeneratorFactory<
     fn create(
         &self,
         metrics_report_config: &MetricsReportConfig,
-        context: &MetricsReportGeneratorFactoryCreateContext<TTrigger>,
+        context: &MetricsReportGeneratorFactoryCreateContext,
     ) -> Result<Arc<TMetricsReportGenerator>, MetricsReportGeneratorFactoryError>;
 
     /// Verifies that the metrics report config protobuf message is valid and can be used
@@ -39,10 +38,10 @@ pub(crate) trait MetricsReportGeneratorFactory<
     ) -> Result<(), MetricsReportGeneratorFactoryError>;
 }
 
-pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a, TTrigger: Trigger = TriggerImpl> {
+pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
     pub config_proto: &'a MetricsConfigProto,
     pub report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
-    pub triggers: &'a HashMap<String, Arc<TTrigger>>,
+    pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
@@ -202,7 +201,7 @@ mod tests {
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
-    use crate::metrics_config_orchestrator::trigger::TriggerType;
+    use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";
@@ -226,12 +225,13 @@ mod tests {
             report_config: &MetricsReportConfig,
             metrics_config_proto: Option<MetricsConfigProto>,
             report_ready_callback: Option<Arc<dyn Fn(MetricsReport) + Send + Sync>>,
-            triggers: Option<Vec<Arc<TriggerImpl>>>,
+            triggers: Option<Vec<Arc<dyn Trigger>>>,
         ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
             let metrics_config_proto = metrics_config_proto.unwrap_or_default();
             let report_ready_callback = report_ready_callback.unwrap_or_else(|| Arc::new(|_| {}));
-            let triggers = triggers
-                .map_or(HashMap::new(), |val| val.into_hash_map(|trigger| trigger.name.clone()));
+            let triggers = triggers.map_or(HashMap::new(), |triggers| {
+                triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
+            });
             let context = MetricsReportGeneratorFactoryCreateContext {
                 config_proto: &metrics_config_proto,
                 report_ready_callback: &report_ready_callback,
@@ -356,13 +356,15 @@ mod tests {
         message_builder_factory.fail_create();
         let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
         let config = create_valid_config();
-        let trigger = TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval: Duration::ZERO },
-        );
+        let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), Duration::ZERO);
 
         let err = factory
-            .create_using_context(&config, None, None, Some(vec![Arc::clone(&trigger)]))
+            .create_using_context(
+                &config,
+                None,
+                None,
+                Some(vec![Arc::clone(&trigger) as Arc<dyn Trigger>]),
+            )
             .err()
             .unwrap();
 
@@ -380,17 +382,14 @@ mod tests {
         let metrics_config =
             MetricsConfigProto { uuid: UUID.to_owned(), version: VERSION, ..Default::default() };
         let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
-        let trigger = TriggerImpl::new(
-            TRIGGER_NAME.to_owned(),
-            TriggerType::Periodic { interval: Duration::ZERO },
-        );
+        let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), Duration::ZERO);
 
         let res = factory
             .create_using_context(
                 &report_config,
                 Some(metrics_config),
                 Some(Arc::clone(&report_ready_callback)),
-                Some(vec![Arc::clone(&trigger)]),
+                Some(vec![Arc::clone(&trigger) as Arc<dyn Trigger>]),
             )
             .unwrap();
 

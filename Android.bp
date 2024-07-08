@@ -51,6 +51,7 @@ rust_defaults {
         "google.sdv.telemetry-V1-rust",
         "libanyhow",
         "libbinder_rs",
+        "libdowncast_rs",
         "libfutures",
         "liblog_rust",
         "libprotobuf",
