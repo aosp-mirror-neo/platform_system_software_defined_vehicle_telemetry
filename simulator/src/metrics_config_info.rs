@@ -1,7 +1,12 @@
 // Copyright 2024 Google LLC
 
 use protobuf::reflect::MessageDescriptor;
-use std::{collections::HashMap, fmt, fs::File, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    fs::File,
+    path::PathBuf,
+};
 
 use crate::{io, simulator_errors::SimulatorError, ReportInfo};
 
@@ -71,6 +76,7 @@ pub struct MetricsConfigInfo {
     pub status: MetricsConfigStatus,
     pub descriptor_protos: HashMap<String, MessageDescriptor>,
     pub report_configs: HashMap<String, ReportConfigStatus>,
+    pub service_publisher_names: HashSet<String>,
 }
 
 impl MetricsConfigInfo {
@@ -85,6 +91,7 @@ impl MetricsConfigInfo {
             serialized_config,
             descriptor_protos,
             report_configs: HashMap::new(),
+            service_publisher_names: HashSet::new(),
         }
     }
 

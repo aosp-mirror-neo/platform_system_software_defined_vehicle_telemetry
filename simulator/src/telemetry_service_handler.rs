@@ -1,6 +1,5 @@
 // Copyright 2024 Google LLC
 
-use log::info;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use sdv_telemetry_rust_wrapper::{TelemetryServiceHolder, TelemetryServiceStatusCodes};
 use std::{future::Future, time::Duration};
@@ -11,7 +10,7 @@ use tokio::{
 
 use crate::{ReportInfo, SimulatorError};
 
-const DEFAULT_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
+pub const DEFAULT_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
 /// Returns an error if the provided function does not complete within the
 /// specified duration. Only works for non-blocking functions.
@@ -117,12 +116,8 @@ pub async fn activate_metrics_config(
     uuid: &str,
     file_name: &str,
 ) -> Result<(), SimulatorError> {
-    telemetry_service
-        .activate_metrics_config(uuid)
-        .await
-        .map_err(|error| SimulatorError::FailedToActivateMetricsConfig {
-            file_name: file_name.to_owned(),
-            error,
-        })
-        .map(|_| info!("Activated metrics config \"{file_name}\""))
+    telemetry_service.activate_metrics_config(uuid).await.map_err(|error| {
+        SimulatorError::FailedToActivateMetricsConfig { file_name: file_name.to_owned(), error }
+    })?;
+    Ok(())
 }

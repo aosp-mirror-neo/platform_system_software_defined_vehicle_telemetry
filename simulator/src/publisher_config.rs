@@ -1,7 +1,12 @@
 // Copyright 2024 Google LLC
 
-use protobuf::MessageDyn;
-use std::{cmp::min, fmt, time::Duration};
+use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use std::{
+    cmp::min,
+    fmt,
+    hash::{Hash, Hasher},
+    time::Duration,
+};
 
 use crate::util::printable_small_duration;
 
@@ -9,10 +14,27 @@ pub struct PublisherConfig {
     pub service_name: String,
     pub loop_data: bool,
     pub parsed_data: Vec<ParsedDataEntry>,
+    pub message_descriptor: MessageDescriptor,
 }
 
+impl Hash for PublisherConfig {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.service_name.hash(state);
+    }
+}
+
+impl PartialEq for PublisherConfig {
+    fn eq(&self, other: &Self) -> bool {
+        self.service_name == other.service_name
+    }
+}
+
+impl Eq for PublisherConfig {}
+
+#[derive(Clone)]
 pub struct ParsedDataEntry {
     pub message: Box<dyn MessageDyn>,
+    pub message_bytes: Vec<u8>,
     pub delay: Duration,
 }
 
@@ -20,7 +42,7 @@ impl fmt::Display for PublisherConfig {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         writeln!(f, "Configuration for publisher with service name \"{}\"", self.service_name)?;
         if self.loop_data {
-            writeln!(f, "Data will be looped indefinitely.")?;
+            writeln!(f, "Data will be looped until the publisher subscription ends.")?;
         } else {
             writeln!(f, "Data will be replayed once.")?;
         }

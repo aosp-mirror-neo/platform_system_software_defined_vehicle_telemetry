@@ -114,10 +114,16 @@ impl CsvToProtoMessagesParser {
             let mut message: Box<dyn MessageDyn> =
                 self.message_descriptor_tree.root.message_descriptor.new_instance();
             for node in &self.message_descriptor_tree.root.children {
-                self.set_message_field(node, message.as_mut(), &fields, record_num)?;
+                self.set_message_field(node, message.as_mut(), &fields, record_num + 1)?;
             }
 
-            parsed_data.push(ParsedDataEntry { message, delay });
+            let message_bytes =
+                message.write_to_bytes_dyn().map_err(|error| SimulatorError::Error {
+                    error_message: format!(
+                        "Failed to write parsed proto message {message:?} to bytes: {error}"
+                    ),
+                })?;
+            parsed_data.push(ParsedDataEntry { message, message_bytes, delay });
         }
         Ok(parsed_data)
     }
@@ -149,13 +155,12 @@ impl CsvToProtoMessagesParser {
                 internal_node_info.message_descriptor.new_instance();
             let mut any_field_was_set = false;
             for child_node in &internal_node_info.children {
-                any_field_was_set = any_field_was_set
-                    || self.set_message_field(
-                        child_node,
-                        child_message.as_mut(),
-                        fields_map,
-                        record_num,
-                    )?;
+                any_field_was_set = self.set_message_field(
+                    child_node,
+                    child_message.as_mut(),
+                    fields_map,
+                    record_num,
+                )? || any_field_was_set;
             }
             if any_field_was_set {
                 node.field_descriptor

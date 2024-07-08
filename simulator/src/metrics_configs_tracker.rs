@@ -1,9 +1,15 @@
 // Copyright 2024 Google LLC
 
-use protobuf::MessageDyn;
+use protobuf::{text_format::print_to_string_pretty, MessageDyn};
+use sdv_telemetry_proto_rust::metrics_configuration::{
+    publisher::Publisher_type as PublisherTypeProto, service_publisher::ConnectionType,
+};
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
-use std::{collections::HashMap, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+};
 
 use crate::{
     io,
@@ -66,28 +72,83 @@ impl MetricsConfigsTracker {
             );
         }
 
+        for publisher in &config.publishers {
+            if let Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) =
+                &publisher.publisher_type
+            {
+                if service_publisher_proto.connection_type.enum_value().map_err(|_| {
+                    SimulatorError::FailedToParseFile {
+                        file_name: file_name.to_owned(),
+                        error_message: "Invalid connection type for service publisher".to_owned(),
+                    }
+                })? == ConnectionType::GETTER
+                {
+                    return Err(SimulatorError::NotImplemented {
+                        feature: "Connection type \"Getter\" for service publishers".to_owned(),
+                    });
+                }
+                config_info
+                    .service_publisher_names
+                    .insert(service_publisher_proto.service_name.clone());
+            }
+        }
+
         self.metrics_configs.insert(config.uuid, config_info);
         Ok(())
     }
 
-    /// Uses telemetry service to add and activate every metrics config it
-    /// holds. Returns an error if any step fails.
-    pub async fn activate_metrics_configs(
+    pub fn get_metrics_config_uuids(&self) -> HashSet<String> {
+        self.metrics_configs.keys().cloned().collect()
+    }
+
+    pub fn get_service_publisher_names(
+        &self,
+        uuid: &str,
+    ) -> Result<HashSet<String>, SimulatorError> {
+        Ok(self
+            .metrics_configs
+            .get(uuid)
+            .ok_or_else(|| SimulatorError::ProgrammingError {
+                error_message: "Tried to get config info for non-existent metrics config"
+                    .to_owned(),
+            })?
+            .service_publisher_names
+            .clone())
+    }
+
+    pub fn get_file_name(&self, uuid: &str) -> Result<String, SimulatorError> {
+        Ok(self
+            .metrics_configs
+            .get(uuid)
+            .ok_or_else(|| SimulatorError::ProgrammingError {
+                error_message: "Tried to get config info for non-existent metrics config"
+                    .to_owned(),
+            })?
+            .file_name
+            .clone())
+    }
+    /// Uses telemetry service to add and activate the specified metric config.
+    /// Returns an error if any step fails.
+    pub async fn activate_metrics_config(
         &mut self,
         telemetry_service: &TelemetryServiceHolder,
+        uuid: &str,
     ) -> Result<(), SimulatorError> {
-        for (uuid, config_info) in &mut self.metrics_configs {
-            add_metrics_config(
-                telemetry_service,
-                uuid,
-                &config_info.serialized_config,
-                config_info.file_name.clone(),
-            )
-            .await?;
-            config_info.status = MetricsConfigStatus::Added;
-            activate_metrics_config(telemetry_service, uuid, &config_info.file_name).await?;
-            config_info.status = MetricsConfigStatus::Activated;
-        }
+        let config_info =
+            self.metrics_configs.get_mut(uuid).ok_or_else(|| SimulatorError::ProgrammingError {
+                error_message: "Tried to get config info for non-existent metrics config"
+                    .to_owned(),
+            })?;
+        add_metrics_config(
+            telemetry_service,
+            uuid,
+            &config_info.serialized_config,
+            config_info.file_name.clone(),
+        )
+        .await?;
+        config_info.status = MetricsConfigStatus::Added;
+        activate_metrics_config(telemetry_service, uuid, &config_info.file_name).await?;
+        config_info.status = MetricsConfigStatus::Activated;
         Ok(())
     }
 
@@ -137,7 +198,7 @@ fn create_readable_report(
     report_content: Box<dyn MessageDyn>,
 ) -> Result<String, SimulatorError> {
     let reason = report.report_reason.enum_value_or_default();
-    let report_content = report_content.to_string();
+    let report_content = print_to_string_pretty(report_content.as_ref());
     let Some(date_time) = chrono::DateTime::from_timestamp(
         report.report_timestamp.seconds,
         report.report_timestamp.nanos.unsigned_abs(),
