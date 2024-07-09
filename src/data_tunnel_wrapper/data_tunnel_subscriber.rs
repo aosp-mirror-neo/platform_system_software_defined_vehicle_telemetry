@@ -27,10 +27,18 @@ use crate::data_tunnel_api_client::{
 // Notification interval between two consecutive messages received from Data Tunnel.
 const NOTIFICATION_INTERVAL: u32 = 0;
 
+type Callback = Arc<Mutex<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>;
+
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
 pub struct DataTunnelSubscriber {
     /// Hashmap to store topic names and their `MessageDescriptor`s.
     topic_message_descriptors: Mutex<HashMap<String, MessageDescriptor>>,
+    /// Hashmap to store topic names and their `DataTunnelSubscription`s.
+    /// TODO: b/349242614: Remove temporary workaround once unsubscribe is supported
+    topic_subscriptions: Mutex<HashMap<String, Arc<SubscriptionDescriptor>>>,
+    /// Hashmap to store topic names and their callbacks.
+    /// TODO: b/349242614: Remove temporary workaround once unsubscribe is supported
+    topic_callbacks: Arc<Mutex<HashMap<String, Vec<Callback>>>>,
 }
 
 /// Struct for subscription of DT topic.
@@ -113,90 +121,139 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         topic_name: &str,
         _configuration: Option<&[u8]>,
-        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
 
-        cxx::let_cxx_string!(cxx_topic_name = topic_name);
-        let topic_exists = data_tunnel_api_client::topic_exists(&cxx_topic_name)
-            .with_context(|| format!("Failed to check whether topic {topic_name} exists."))?;
-        if !topic_exists {
-            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
-        }
+        match self.topic_subscriptions.lock().unwrap().entry(topic_name.to_owned()) {
+            Entry::Occupied(o) => {
+                let mut callbacks = self.topic_callbacks.lock().unwrap();
 
-        let subscription_descriptor = data_tunnel_api_client::subscribe(&cxx_topic_name)
-            .map(Arc::new)
-            .with_context(|| format!("Failed to subscribe to data tunnel topic {topic_name}"))?;
-
-        let notify = Arc::new(Notify::new());
-        data_tunnel_api_client::set_notification_handler(
-            &subscription_descriptor,
-            Arc::clone(&notify),
-            NOTIFICATION_INTERVAL,
-        )
-        .with_context(|| {
-            format!("Failed to set notification handler for data tunnel topic {topic_name}")
-        })?;
-
-        let sdv_dt::TopicTypedMetadata {
-            message_count_: message_count,
-            message_size_: message_size,
-        } = subscription_descriptor.dt_metadata;
-        let mut buffer = vec![0u8; message_count * message_size];
-
-        // Discard all existing data after subscribing to the topic. We do not want to trigger on
-        // old data (b/344644795).
-        match Self::read(&subscription_descriptor, topic_name, &mut buffer) {
-            Ok(number_of_messages) => {
-                info!("Discarded {number_of_messages} old messages for topic {topic_name}.")
-            }
-            Err(err) => error!("Could not read old messages for topic {topic_name}: {err:?}"),
-        };
-
-        let message_descriptor = self
-            .get_metadata(topic_name)?
-            .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
-            .message_descriptor;
-
-        let topic_name = topic_name.to_owned();
-        let subscription_descriptor_clone = Arc::clone(&subscription_descriptor);
-        // Tokio task for fetching data from data tunnel and pushing it to telemetry service.
-        tokio::spawn(async move {
-            // This loop runs infinitely until the telemetry service stops. In case of an error
-            // while message parsing, the data is lost, as data was retrieved successfully from the
-            // data tunnel. In case of data tunnel errors, data is not lost, and can be fetched in
-            // the next iteration of the loop.
-            //
-            // TODO(b/329515273): Add logic to stop the loop once data tunnel provides support for
-            // unsubscribing.
-            loop {
-                // Wait for the next message(s) to arrive.
-                notify.notified().await;
-
-                let number_of_messages =
-                    match Self::read(&subscription_descriptor_clone, &topic_name, &mut buffer) {
-                        Ok(number_of_messages) => number_of_messages,
-                        Err(err) => {
-                            error!("Could not read messages for topic {topic_name}: {err:?}");
-                            continue;
-                        }
-                    };
-
-                info!("Received {number_of_messages} messages for topic {topic_name}.");
-                for message_bytes in buffer.chunks(message_size).take(number_of_messages) {
-                    match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
-                        Ok(msg) => (callback)(msg),
-                        Err(err) => error!(
-                            "Failed to convert bytes to protobuf for topic {topic_name}: {err:?}"
-                        ),
-                    };
+                match callbacks.entry(topic_name.to_owned()) {
+                    Entry::Occupied(mut entry) => {
+                        let arc_callback = Arc::new(Mutex::new(callback));
+                        entry.get_mut().push(arc_callback);
+                    }
+                    Entry::Vacant(_) => {
+                        panic!("Data Tunnel Callbacks missing for {topic_name}");
+                    }
                 }
-            }
-        });
 
-        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(DataTunnelSubscription {
-            _subscription_descriptor: subscription_descriptor,
-        })))
+                return Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
+                    DataTunnelSubscription { _subscription_descriptor: Arc::clone(o.get()) },
+                )));
+            }
+            Entry::Vacant(v) => {
+                cxx::let_cxx_string!(cxx_topic_name = topic_name);
+                let topic_exists = data_tunnel_api_client::topic_exists(&cxx_topic_name)
+                    .with_context(|| {
+                        format!("Failed to check whether topic {topic_name} exists.")
+                    })?;
+                if !topic_exists {
+                    return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+                }
+
+                let subscription_descriptor =
+                    data_tunnel_api_client::subscribe(&cxx_topic_name).map(Arc::new).with_context(
+                        || format!("Failed to subscribe to data tunnel topic {topic_name}"),
+                    )?;
+
+                let notify = Arc::new(Notify::new());
+                data_tunnel_api_client::set_notification_handler(
+                    &subscription_descriptor,
+                    Arc::clone(&notify),
+                    NOTIFICATION_INTERVAL,
+                )
+                .with_context(|| {
+                    format!("Failed to set notification handler for data tunnel topic {topic_name}")
+                })?;
+
+                let sdv_dt::TopicTypedMetadata {
+                    message_count_: message_count,
+                    message_size_: message_size,
+                } = subscription_descriptor.dt_metadata;
+                let mut buffer = vec![0u8; message_count * message_size];
+
+                // Discard all existing data after subscribing to the topic. We do not want to trigger on
+                // old data (b/344644795).
+                match Self::read(&subscription_descriptor, topic_name, &mut buffer) {
+                    Ok(number_of_messages) => {
+                        info!("Discarded {number_of_messages} old messages for topic {topic_name}.")
+                    }
+                    Err(err) => {
+                        error!("Could not read old messages for topic {topic_name}: {err:?}")
+                    }
+                };
+
+                let message_descriptor = self
+                    .get_metadata(topic_name)?
+                    .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
+                    .message_descriptor;
+
+                {
+                    let callback = Arc::new(Mutex::new(callback));
+                    let mut callbacks = self.topic_callbacks.lock().unwrap();
+                    callbacks.entry(topic_name.to_owned()).or_default().push(callback);
+                }
+
+                let topic_name = topic_name.to_owned();
+                let subscription_descriptor_clone = Arc::clone(&subscription_descriptor);
+                let topic_callbacks_clone = Arc::clone(&self.topic_callbacks);
+                // Tokio task for fetching data from data tunnel and pushing it to telemetry service.
+                tokio::spawn(async move {
+                    // This loop runs infinitely until the telemetry service stops. In case of an error
+                    // while message parsing, the data is lost, as data was retrieved successfully from the
+                    // data tunnel. In case of data tunnel errors, data is not lost, and can be fetched in
+                    // the next iteration of the loop.
+                    //
+                    // TODO(b/329515273): Add logic to stop the loop once data tunnel provides support for
+                    // unsubscribing.
+                    loop {
+                        // Wait for the next message(s) to arrive.
+                        notify.notified().await;
+
+                        let number_of_messages = match Self::read(
+                            &subscription_descriptor_clone,
+                            &topic_name,
+                            &mut buffer,
+                        ) {
+                            Ok(number_of_messages) => number_of_messages,
+                            Err(err) => {
+                                error!("Could not read messages for topic {topic_name}: {err:?}");
+                                continue;
+                            }
+                        };
+
+                        info!("Received {number_of_messages} messages for topic {topic_name}.");
+                        for message_bytes in buffer.chunks(message_size).take(number_of_messages) {
+                            match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
+                                Ok(msg) => {
+                                    let mut callbacks = topic_callbacks_clone.lock().unwrap();
+                                    if let Some(callback_list) = callbacks.get_mut(&topic_name) {
+                                        for callback in callback_list.iter_mut() {
+                                            let mut callback = callback.lock().unwrap();
+                                            (callback)(msg.clone());
+                                        }
+                                    } else {
+                                        error!("No callbacks found for topic: {}", topic_name);
+                                    }
+                                },
+                                Err(err) => error!(
+                                    "Failed to convert bytes to protobuf for topic {topic_name}: {err:?}"
+                                ),
+                            };
+                        }
+                    }
+                });
+
+                v.insert(Arc::clone(&subscription_descriptor));
+                let data_tunnel_subscription = Box::new(DataTunnelSubscription {
+                    _subscription_descriptor: subscription_descriptor,
+                });
+
+                Ok(CreateSubscriptionOutcome::Subscribed(data_tunnel_subscription))
+            }
+        }
     }
 }
 
@@ -204,7 +261,11 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
 impl DataTunnelSubscriber {
     /// Creates a new instance of the data tunnel subscriber.
     pub fn new() -> Self {
-        Self { topic_message_descriptors: HashMap::new().into() }
+        Self {
+            topic_message_descriptors: HashMap::new().into(),
+            topic_subscriptions: HashMap::new().into(),
+            topic_callbacks: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
     /// Read all available messages from the data tunnel and write them to the `buffer`.
@@ -414,7 +475,47 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn create_subscription_read_messages_success() {
+    async fn create_multiple_subscription_success() {
+        let topic_name = unique_dt_topic_name();
+
+        register_topic(
+            &topic_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+                ..Default::default()
+            },
+        );
+
+        let subscriber = DataTunnelSubscriber::new();
+        let outcome1 = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                Box::new(|_| {
+                    unreachable!();
+                }),
+            )
+            .await
+            .unwrap();
+
+        let outcome2 = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                Box::new(|_| {
+                    unreachable!();
+                }),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome1, CreateSubscriptionOutcome::Subscribed(_)));
+        assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn create_repeated_subscriptions_and_read_messages_success() {
         let topic_name = unique_dt_topic_name();
 
         let topic_descriptor = register_topic(
@@ -426,28 +527,38 @@ mod tests {
             },
         );
 
-        // Write a message before the subscription is created, to verify that it will not be
-        // received but ignored - we do not want to trigger on old data (b/344644795).
-        write_message(&topic_descriptor, TestMessage { int_field: 1, ..Default::default() });
-
         let subscriber = DataTunnelSubscriber::new();
-        let (tx, mut rx) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
-        let outcome = subscriber
+
+        let (tx1, mut rx1) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
+        let outcome1 = subscriber
             .create_subscription(
                 &topic_name,
                 None,
-                Box::new(move |message| tx.send(message).unwrap()),
+                Box::new(move |message| tx1.send(message).unwrap()),
             )
             .await
             .unwrap();
-        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
 
+        let (tx2, mut rx2) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
+        let outcome2 = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                Box::new(move |message| tx2.send(message).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        write_message(&topic_descriptor, TestMessage { int_field: 1, ..Default::default() });
         write_message(&topic_descriptor, TestMessage { int_field: 2, ..Default::default() });
-        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 2);
 
-        write_message(&topic_descriptor, TestMessage { int_field: 3, ..Default::default() });
-        write_message(&topic_descriptor, TestMessage { int_field: 4, ..Default::default() });
-        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 3);
-        assert_eq!(get_int_field_value(rx.recv().await.unwrap()), 4);
+        assert!(matches!(outcome1, CreateSubscriptionOutcome::Subscribed(_)));
+        assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
+
+        assert_eq!(get_int_field_value(rx1.recv().await.unwrap()), 1);
+        assert_eq!(get_int_field_value(rx1.recv().await.unwrap()), 2);
+
+        assert_eq!(get_int_field_value(rx2.recv().await.unwrap()), 1);
+        assert_eq!(get_int_field_value(rx2.recv().await.unwrap()), 2);
     }
 }
