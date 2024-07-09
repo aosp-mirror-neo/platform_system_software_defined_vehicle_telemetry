@@ -72,6 +72,10 @@ convert_proto \
       "rawproto:$(pwd)/descriptor.pb" \
       "textproto:$(pwd)/descriptor.textproto"
 
+# Add copyright to generated files
+sed -i '1i # Copyright 2024 Google LLC\n' "$(pwd)/descriptor_set.textproto"
+sed -i '1i # Copyright 2024 Google LLC\n' "$(pwd)/descriptor.textproto"
+
 # Remove colons that are not supported by Rust's textproto implementation.
 txtpbfmt -skip_all_colons $(pwd)/descriptor_set.textproto
 txtpbfmt -skip_all_colons $(pwd)/descriptor.textproto
