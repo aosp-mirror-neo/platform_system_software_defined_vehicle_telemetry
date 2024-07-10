@@ -5,7 +5,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, service_publisher::ConnectionType,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
-use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
+use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -18,7 +18,7 @@ use crate::{
     output_strings::report_log_entry,
     protobuf_parsing::{decode_report, parse_message_descriptors},
     telemetry_service_handler::{activate_metrics_config, add_metrics_config},
-    ReportInfo, SimulatorError,
+    SimulatorError,
 };
 
 pub struct MetricsConfigsTracker {

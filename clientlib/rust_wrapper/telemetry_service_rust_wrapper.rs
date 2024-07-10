@@ -28,6 +28,17 @@ pub struct TelemetryError {
 /// Represents the result of a telemetry service call.
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 
+/// Represents the callback argument of the report ready callback.
+#[derive(Clone, Debug)]
+pub struct ReportInfo {
+    /// The metrics config UUID
+    pub metrics_config_uuid: String,
+    /// The name of the `MetricsReportConfig` that was used to generate the report
+    pub report_config_name: String,
+    /// The report number
+    pub report_number: i32,
+}
+
 /// Struct used to wrap ServiceHolder received from C in a typesafe manner
 #[repr(transparent)]
 pub struct TelemetryServiceHolder(*mut ServiceHolder);
@@ -127,7 +138,7 @@ impl TelemetryServiceHolder {
     pub async fn init(
         &self,
         misc_status_callback: impl Fn(i32, String) + Send + Sync + 'static,
-        report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
     ) -> TelemetryResult<()> {
         info!("Initializing telemetry service");
 
@@ -227,7 +238,7 @@ impl TelemetryServiceHolder {
     /// @return an error code and error message in case of incorrect parameters
     async fn set_report_ready_listener(
         &self,
-        report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
         metrics_report_manager::set_report_ready_listener(self, report_ready_callback).await
     }
@@ -251,17 +262,9 @@ impl TelemetryServiceHolder {
     /// @return MetricsReport in case of success, an error code and error message in case of failure
     pub async fn get_metrics_report(
         &self,
-        metrics_config_uuid: String,
-        report_config_name: String,
-        report_number: i32,
+        report_info: ReportInfo,
     ) -> TelemetryResult<MetricsReport> {
-        metrics_report_manager::get_metrics_report(
-            self,
-            metrics_config_uuid,
-            report_config_name,
-            report_number,
-        )
-        .await
+        metrics_report_manager::get_metrics_report(self, report_info).await
     }
 
     /// Sets a status listener that receives status codes and messages for misc errors (such as file

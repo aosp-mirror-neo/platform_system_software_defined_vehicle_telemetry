@@ -1,14 +1,14 @@
 // Copyright 2024 Google LLC
 
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_rust_wrapper::{TelemetryServiceHolder, TelemetryServiceStatusCodes};
+use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatusCodes};
 use std::{future::Future, time::Duration};
 use tokio::{
     sync::{mpsc, mpsc::UnboundedReceiver},
     time::timeout,
 };
 
-use crate::{ReportInfo, SimulatorError};
+use crate::SimulatorError;
 
 pub const DEFAULT_MAX_TIMEOUT_DURATION: Duration = Duration::from_secs(10);
 
@@ -46,12 +46,8 @@ pub async fn get_telemetry_service_listeners(
         let _ = misc_status_tx.send((status_code, status_msg));
     };
 
-    let report_ready_callback = move |metrics_config_uuid, report_config_name, report_number| {
-        let _ = report_ready_tx.send(ReportInfo::new((
-            metrics_config_uuid,
-            report_config_name,
-            report_number,
-        )));
+    let report_ready_callback = move |report_info| {
+        let _ = report_ready_tx.send(report_info);
     };
 
     run_with_timeout(
@@ -73,17 +69,13 @@ pub async fn get_report(
     report_info: &ReportInfo,
 ) -> Result<MetricsReport, SimulatorError> {
     telemetry_service
-        .get_metrics_report(
-            report_info.metrics_config_uuid.clone(),
-            report_info.report_config_name.clone(),
-            report_info.report_number,
-        )
+        .get_metrics_report(report_info.to_owned())
         .await
         .map_err(|error| SimulatorError::Error {
             error_message: format!(
                 "Failed to read report number {} for report config \"{}\" from telemetry service: \"{error}\"",
                 report_info.report_number,
-                report_info.report_config_name.clone()
+                report_info.report_config_name
             ),
         })
 }

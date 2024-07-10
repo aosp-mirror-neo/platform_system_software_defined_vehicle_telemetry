@@ -49,8 +49,8 @@ async fn telemetry_service_simple_config_end_to_end_test() {
             move |status_code, status_msg| {
                 info!("Received status message {status_code}: {status_msg}");
             },
-            move |config_uuid, report_name, report_number| {
-                report_ready_tx.send((config_uuid, report_name, report_number)).unwrap();
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
             },
         )
         .await
@@ -66,14 +66,13 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     service.activate_metrics_config(&config.uuid).await.unwrap();
 
     info!("Waiting for metrics report ready notification");
-    let (config_uuid, report_name, report_number) = report_ready_rx.recv().await.unwrap();
-    assert_eq!(config_uuid, config.uuid);
+    let report_info = report_ready_rx.recv().await.unwrap();
+    assert_eq!(report_info.metrics_config_uuid, config.uuid);
 
     info!("Retrieving metrics report");
-    let metrics_report =
-        service.get_metrics_report(config_uuid.clone(), report_name, report_number).await.unwrap();
+    let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
     info!("Report received: {metrics_report:?}");
-    assert_eq!(config_uuid, metrics_report.metrics_config_uuid);
+    assert_eq!(report_info.metrics_config_uuid, metrics_report.metrics_config_uuid);
 
     info!("Removing metrics config");
     service.remove_metrics_config(&config.uuid).await.unwrap();
@@ -146,9 +145,7 @@ async fn telemetry_service_vector_aggregation() {
             move |status_code, status_msg| {
                 info!("Received status message {status_code}: {status_msg}");
             },
-            move |config_uuid, report_name, report_number| {
-                report_ready_tx.send((config_uuid, report_name, report_number)).unwrap()
-            },
+            move |report_info| report_ready_tx.send(report_info).unwrap(),
         )
         .await
         .unwrap();
@@ -173,12 +170,11 @@ async fn telemetry_service_vector_aggregation() {
             .unwrap();
     }
 
-    let (report_config_uuid, report_name, report_number) = report_ready_rx.recv().await.unwrap();
+    let report_info = report_ready_rx.recv().await.unwrap();
     info!("Received metrics report notification");
-    assert_eq!(config_uuid, report_config_uuid);
+    assert_eq!(config_uuid, report_info.metrics_config_uuid);
 
-    let metrics_report =
-        service.get_metrics_report(report_config_uuid, report_name, report_number).await.unwrap();
+    let metrics_report = service.get_metrics_report(report_info).await.unwrap();
     info!("Received metrics report");
     eprintln!("{metrics_report:?}");
 

@@ -107,10 +107,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
                     "Data should be received until the application exits and closes the channel",
                 );
             },
-            move |metrics_config_uuid, report_config_name, report_number| {
-                report_ready_tx
-                    .send((metrics_config_uuid, report_config_name, report_number))
-                    .expect(
+            move |report_info| {
+                report_ready_tx.send(report_info).expect(
                     "Data should be received until the application exits and closes the channel",
                 );
             },
@@ -140,12 +138,11 @@ async fn wrapped_main() -> anyhow::Result<()> {
     trace!("Active configs: {active_configs:?}");
 
     while !active_configs.is_empty() {
-        let Some((config_uuid, config_name, report_number)) = report_ready_rx.recv().await else {
+        let Some(report_info) = report_ready_rx.recv().await else {
             error!("Report ready callback dropped while still expecting additional reports.");
             break;
         };
-        let metrics_report =
-            service.get_metrics_report(config_uuid, config_name, report_number).await?;
+        let metrics_report = service.get_metrics_report(report_info).await?;
 
         if let Some(report_directory) = args.out_folder.as_ref() {
             if !report_directory.is_dir() {

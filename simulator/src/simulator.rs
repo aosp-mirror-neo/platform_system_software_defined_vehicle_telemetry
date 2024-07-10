@@ -21,7 +21,7 @@ use binder::BinderFeatures;
 use clap::Parser;
 use protobuf::Message;
 use log::{error, info};
-use sdv_telemetry_rust_wrapper::TelemetryServiceStatusCodes;
+use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
 use sdv_telemetry_utils::logging::validated_log_tag;
 use std::{
     collections::{HashMap, HashSet},
@@ -184,20 +184,6 @@ fn handle_telemetry_service_status_updates(
             info!("Telemetry service sent status update: {status_msg}");
         }
     });
-}
-
-struct ReportInfo {
-    metrics_config_uuid: String,
-    report_config_name: String,
-    report_number: i32,
-}
-
-impl ReportInfo {
-    fn new(
-        (metrics_config_uuid, report_config_name, report_number): (String, String, i32),
-    ) -> Self {
-        Self { metrics_config_uuid, report_config_name, report_number }
-    }
 }
 
 /// Returns when the receiving channel receives a new report.

@@ -5,6 +5,7 @@ use protobuf::{
     MessageDyn,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
+use sdv_telemetry_rust_wrapper::ReportInfo;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -13,7 +14,7 @@ use std::{
 use crate::{
     publisher_config::ParsedDataEntry,
     publisher_config_parser::{FieldNode, MessageDescriptorTree},
-    ReportInfo, SimulatorError,
+    SimulatorError,
 };
 
 pub const DELAY_FIELD_NAME: &str = "_delay_before_publishing";

@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use crate::callbacks::{call_api_with_metrics_report_callback, call_api_with_status_callback};
-use crate::{TelemetryError, TelemetryResult, TelemetryServiceHolder};
+use crate::{ReportInfo, TelemetryError, TelemetryResult, TelemetryServiceHolder};
 
 use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
@@ -44,23 +44,23 @@ unsafe extern "C" fn on_report_ready(
         "Report ready: {metrics_config_uuid:?} {report_config_name:?} report number: {report_number}"
     );
 
-    (listener.callback)(metrics_config_uuid, report_config_name, report_number);
+    (listener.callback)(ReportInfo { metrics_config_uuid, report_config_name, report_number });
 }
 
 /// Struct used to wrap the report ready callback received from the client.
 struct MetricsReportReadyListener {
-    callback: Box<dyn Fn(String, String, i32)>,
+    callback: Box<dyn Fn(ReportInfo)>,
 }
 
 impl MetricsReportReadyListener {
-    fn new(callback: Box<dyn Fn(String, String, i32)>) -> Self {
+    fn new(callback: Box<dyn Fn(ReportInfo)>) -> Self {
         Self { callback }
     }
 }
 
 pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
-    report_ready_callback: impl Fn(String, String, i32) + Send + Sync + 'static,
+    report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
 ) -> TelemetryResult<String> {
     let raw_listener: *mut MetricsReportReadyListener =
         Box::into_raw(Box::new(MetricsReportReadyListener::new(Box::new(report_ready_callback))));
@@ -127,17 +127,17 @@ pub fn clear_report_ready_listener(service: &TelemetryServiceHolder) -> Telemetr
 
 pub async fn get_metrics_report(
     service: &TelemetryServiceHolder,
-    metrics_config_uuid: String,
-    report_config_name: String,
-    report_number: i32,
+    report_info: ReportInfo,
 ) -> TelemetryResult<MetricsReport> {
     info!(
         "Report ready: {:?} {:?} report number: {}",
-        metrics_config_uuid, report_config_name, report_number
+        report_info.metrics_config_uuid, report_info.report_config_name, report_info.report_number
     );
 
-    let metrics_config_uuid = CString::new(metrics_config_uuid).expect("CString::new failed");
-    let report_config_name = CString::new(report_config_name).expect("CString::new failed");
+    let metrics_config_uuid =
+        CString::new(report_info.metrics_config_uuid).expect("CString::new failed");
+    let report_config_name =
+        CString::new(report_info.report_config_name).expect("CString::new failed");
 
     let config_uuid_ref: *const c_char = metrics_config_uuid.as_ptr();
     let config_name_ref: *const c_char = report_config_name.as_ptr();
@@ -150,7 +150,7 @@ pub async fn get_metrics_report(
                 service.0,
                 config_uuid_ref,
                 config_name_ref,
-                report_number,
+                report_info.report_number,
                 callback_data,
                 callback,
             )

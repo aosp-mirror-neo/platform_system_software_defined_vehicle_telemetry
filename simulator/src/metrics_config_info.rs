@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use protobuf::reflect::MessageDescriptor;
+use sdv_telemetry_rust_wrapper::ReportInfo;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -8,7 +9,7 @@ use std::{
     path::PathBuf,
 };
 
-use crate::{io, simulator_errors::SimulatorError, ReportInfo};
+use crate::{io, simulator_errors::SimulatorError};
 
 pub enum MetricsConfigStatus {
     New,
