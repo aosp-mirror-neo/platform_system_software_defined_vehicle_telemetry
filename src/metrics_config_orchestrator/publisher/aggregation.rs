@@ -5,11 +5,7 @@ use log::error;
 use protobuf::MessageDyn;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdv_telemetry_utils::value_holder::ValueHolder;
-use std::{
-    collections::HashMap,
-    fmt::{self, Display, Formatter},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
@@ -23,9 +19,6 @@ use crate::{
     },
 };
 
-const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
-const PUBLISHER_STATE_ACTIVE: &str = "Active";
-
 pub(crate) struct AggregationPublisher {
     base: BasePublisher,
     state: AsyncMutex<AggregationPublisherState>,
@@ -37,6 +30,8 @@ pub(crate) struct AggregationPublisher {
     trigger_subscriber: TriggerSubscriber,
 }
 
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 enum AggregationPublisherState {
     /// The publisher is not subscribed to the underlying data source
     /// and doesn't provide the latest message.
@@ -47,15 +42,6 @@ enum AggregationPublisherState {
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
     },
-}
-
-impl Display for AggregationPublisherState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            AggregationPublisherState::Inactive => PUBLISHER_STATE_INACTIVE,
-            AggregationPublisherState::Active { .. } => PUBLISHER_STATE_ACTIVE,
-        })
-    }
 }
 
 #[async_trait]

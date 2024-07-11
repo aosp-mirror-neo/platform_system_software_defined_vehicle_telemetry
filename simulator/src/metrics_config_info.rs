@@ -11,21 +11,12 @@ use std::{
 
 use crate::{io, simulator_errors::SimulatorError};
 
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 pub enum MetricsConfigStatus {
     New,
     Added,
     Activated,
-}
-
-impl fmt::Display for MetricsConfigStatus {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            MetricsConfigStatus::New => write!(f, "New")?,
-            MetricsConfigStatus::Added => write!(f, "Added")?,
-            MetricsConfigStatus::Activated => write!(f, "Activated")?,
-        };
-        Ok(())
-    }
 }
 
 pub struct ReportConfigStatus {

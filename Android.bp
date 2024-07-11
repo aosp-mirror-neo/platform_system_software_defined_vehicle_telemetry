@@ -58,6 +58,7 @@ rust_defaults {
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_time_wrapper",
         "libsdv_telemetry_utils",
+        "libstrum",
         "libthiserror",
         "libtokio",
         // keep-sorted end
@@ -65,6 +66,7 @@ rust_defaults {
     proc_macros: [
         // keep-sorted start
         "libasync_trait",
+        "libstrum_macros",
         // keep-sorted end
     ],
 }

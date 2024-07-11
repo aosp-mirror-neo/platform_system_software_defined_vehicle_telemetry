@@ -2,7 +2,6 @@
 
 use async_trait::async_trait;
 use downcast_rs::DowncastSync;
-use std::fmt;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
@@ -47,31 +46,22 @@ pub(crate) trait Trigger: Send + Sync + DowncastSync {
 #[cfg(test)]
 impl_downcast!(sync Trigger);
 
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq, strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 pub(crate) enum TriggerSubscriber {
-    AggregationPublisher { name: String },
-    ConditionalTrigger { name: String },
+    #[strum(to_string = "Aggregation Publisher {name}")]
+    AggregationPublisher {
+        name: String,
+    },
+    #[strum(to_string = "Conditional Trigger {name}")]
+    ConditionalTrigger {
+        name: String,
+    },
     MetricsConfigStart,
     MetricsConfigEnd,
     MetricsConfigFinish,
-    MetricsReportGenerator { name: String },
-}
-
-impl fmt::Display for TriggerSubscriber {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            TriggerSubscriber::AggregationPublisher { name } => {
-                write!(f, "Aggregation Publisher {}", name)
-            }
-            TriggerSubscriber::ConditionalTrigger { name } => {
-                write!(f, "Periodic Trigger {}", name)
-            }
-            TriggerSubscriber::MetricsConfigStart => write!(f, "Metrics Config Start"),
-            TriggerSubscriber::MetricsConfigEnd => write!(f, "Metrics Config End"),
-            TriggerSubscriber::MetricsConfigFinish => write!(f, "Metrics Config Finish"),
-            TriggerSubscriber::MetricsReportGenerator { name } => {
-                write!(f, "Metrics Report Generator {}", name)
-            }
-        }
-    }
+    #[strum(to_string = "Metrics Report Generator {name}")]
+    MetricsReportGenerator {
+        name: String,
+    },
 }

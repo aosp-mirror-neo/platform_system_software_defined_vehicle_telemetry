@@ -29,8 +29,14 @@ rust_defaults {
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
+        "libstrum",
         "libthiserror",
         "libtokio",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libstrum_macros",
         // keep-sorted end
     ],
     flags: [
