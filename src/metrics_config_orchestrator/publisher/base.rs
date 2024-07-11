@@ -1,0 +1,49 @@
+// Copyright 2024 Google LLC
+
+use protobuf::MessageDyn;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use super::CallbackFn;
+use crate::expr::node::NodeEvaluationContext;
+
+pub(super) struct BasePublisher {
+    name: String,
+    latest_message: Mutex<Option<Arc<dyn MessageDyn>>>,
+}
+
+impl BasePublisher {
+    pub(super) fn new(name: String) -> Self {
+        Self { name, latest_message: None.into() }
+    }
+
+    pub(super) fn get_name(&self) -> &str {
+        &self.name
+    }
+
+    pub(super) fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {
+        self.latest_message.lock().unwrap().as_ref().map(Arc::clone)
+    }
+
+    pub(super) fn set_new_message(
+        &self,
+        message: Arc<dyn MessageDyn>,
+        context: NodeEvaluationContext,
+        callback_map: &mut HashMap<String, CallbackFn>,
+    ) {
+        // Replace latest message.
+        self.latest_message.lock().unwrap().replace(Arc::clone(&message));
+
+        // Notify subscribed data triggers.
+        // TODO(b/294129114): Replace callback_map with just a single callback.
+        for callback in callback_map.values_mut() {
+            callback(message.as_ref(), context.clone());
+        }
+    }
+
+    pub(super) fn reset_latest_message(&self) {
+        *self.latest_message.lock().unwrap() = None;
+    }
+}
