@@ -130,6 +130,11 @@ rust_defaults {
         "libtokio",
         // keep-sorted end
     ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
     vendor_available: true,
 }
 
