@@ -14,18 +14,19 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,
 };
-use crate::metrics_config_orchestrator::publisher::ConnectionType;
+use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPublisher;
+use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
-use crate::metrics_config_orchestrator::{NodeValueType, Publisher, PublisherImpl, Trigger};
+use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) trait PublisherFactory<TPublisher: Publisher = PublisherImpl> {
+pub(crate) trait PublisherFactory {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
-    ) -> Result<Arc<TPublisher>, PublisherFactoryError>;
+    ) -> Result<Arc<dyn Publisher>, PublisherFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a publisher
     /// encapsulated object.
@@ -75,28 +76,24 @@ impl PublisherFactory for PublisherFactoryImpl {
         &self,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
-    ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
+    ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
         Self::verify_name_set(publisher_proto)?;
         let publisher_name = publisher_proto.name.clone();
-        let publisher = match &publisher_proto.publisher_type {
+        match &publisher_proto.publisher_type {
             Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
-                return Ok(Arc::new(PublisherImpl::new_service_publisher(
+                Ok(Arc::new(ServicePublisher::new(
                     publisher_name,
                     service_publisher.service_name.clone(),
                     service_publisher.configuration.as_ref().cloned(),
                     Self::get_connection_type(service_publisher.connection_type)?,
                     Arc::clone(&self.service_adapter),
-                )));
+                )))
             }
-            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => self
-                .create_aggregation_publisher(
-                    publisher_name,
-                    aggregation_publisher_proto,
-                    context,
-                )?,
-            _ => return Err(PublisherFactoryError::UnknownPublisherType),
-        };
-        Ok(Arc::new(publisher))
+            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
+                .create_aggregation_publisher(publisher_name, aggregation_publisher_proto, context)?
+                .into()),
+            _ => Err(PublisherFactoryError::UnknownPublisherType),
+        }
     }
 
     fn validate(
@@ -138,7 +135,7 @@ impl PublisherFactoryImpl {
         publisher_name: String,
         aggregation_publisher_proto: &AggregationPublisherProto,
         context: &PublisherFactoryCreateContext,
-    ) -> Result<PublisherImpl, PublisherFactoryError> {
+    ) -> Result<Box<dyn Publisher>, PublisherFactoryError> {
         let message_builder = self.message_builder_factory.create(
             format!("Aggregation Publisher {}", publisher_name),
             &aggregation_publisher_proto.message_builder,
@@ -153,13 +150,13 @@ impl PublisherFactoryImpl {
             .iter()
             .map(|trigger_name| Arc::clone(&context.triggers[trigger_name]) as Arc<dyn Trigger>)
             .collect();
-        let publisher = PublisherImpl::new_aggregation_publisher(
+        let publisher = AggregationPublisher::new(
             publisher_name,
-            message_builder,
+            message_builder.into(),
             aggregation_publisher_proto.reset_on_get,
             triggers,
         );
-        Ok(publisher)
+        Ok(Box::new(publisher))
     }
 
     fn get_connection_type(
@@ -199,7 +196,6 @@ mod tests {
 
     use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
-    use crate::metrics_config_orchestrator::publisher::PublisherType;
     use crate::metrics_config_orchestrator::service_adapter::{
         ServiceMessageProvider, ServiceSubscription,
     };
@@ -295,7 +291,7 @@ mod tests {
         fn create_using_default_context(
             &self,
             publisher_proto: &PublisherProto,
-        ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
+        ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
             self.create_using_context_with(publisher_proto, None)
         }
 
@@ -303,7 +299,7 @@ mod tests {
             &self,
             publisher_proto: &PublisherProto,
             triggers: Option<Vec<Arc<dyn Trigger>>>,
-        ) -> Result<Arc<PublisherImpl>, PublisherFactoryError> {
+        ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
             let file_descriptors = vec![];
             let nodes = vec![];
             let node_types = vec![];
@@ -363,10 +359,10 @@ mod tests {
 
         let res = factory.create_using_default_context(&publisher).unwrap();
 
-        let PublisherType::Service { connection_type, .. } = &res.publisher_type else {
+        let Ok(res_publisher) = &res.downcast_arc::<ServicePublisher>() else {
             panic!("Unexpected publisher type");
         };
-        assert!(matches!(connection_type, ConnectionType::Subscription));
+        assert!(matches!(res_publisher.connection_type, ConnectionType::Subscription));
     }
 
     #[test]
@@ -376,24 +372,20 @@ mod tests {
 
         let res = factory.create_using_default_context(&publisher).unwrap();
 
-        assert_eq!(res.name, PUBLISHER_NAME);
-        let PublisherType::Service {
-            configuration,
-            connection_type,
-            service_name,
-            service_adapter: _,
-        } = &res.publisher_type
-        else {
+        assert_eq!(res.get_name(), PUBLISHER_NAME);
+        let Ok(res_publisher) = res.downcast_arc::<ServicePublisher>() else {
             panic!("Unexpected publisher type");
         };
-        let configuration_value = configuration.as_ref().expect("Configuration should be set");
+
+        let configuration_value =
+            res_publisher.configuration.as_ref().expect("Configuration should be set");
         let any_value = configuration_value
             .unpack::<Empty>()
             .unwrap()
             .expect("The value of Any should be an Empty");
         assert_eq!(&any_value, Empty::default_instance());
-        assert!(matches!(connection_type, ConnectionType::Subscription));
-        assert_eq!(service_name, SERVICE_NAME);
+        assert!(matches!(res_publisher.connection_type, ConnectionType::Subscription));
+        assert_eq!(res_publisher.service_name, SERVICE_NAME);
     }
 
     #[test]
@@ -417,15 +409,13 @@ mod tests {
             .create_using_context_with(&publisher, Some(vec![Arc::clone(&trigger)]))
             .unwrap();
 
-        assert_eq!(res.name, PUBLISHER_NAME);
-        let PublisherType::Aggregation { triggers: res_triggers, reset_on_get, .. } =
-            &res.publisher_type
-        else {
+        assert_eq!(res.get_name(), PUBLISHER_NAME);
+        let Ok(res_publisher) = res.downcast_arc::<AggregationPublisher>() else {
             panic!("Unexpected publisher type");
         };
-        assert_eq!(res_triggers.len(), 1);
-        assert!(Arc::ptr_eq(&res_triggers[0], &(trigger as Arc<dyn Trigger>)));
-        assert!(reset_on_get);
+        assert_eq!(res_publisher.triggers.len(), 1);
+        assert!(Arc::ptr_eq(&res_publisher.triggers[0], &(trigger as Arc<dyn Trigger>)));
+        assert!(res_publisher.reset_on_get);
     }
 
     #[test]

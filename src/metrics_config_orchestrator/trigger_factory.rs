@@ -12,21 +12,19 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
-use crate::expr::{node::Node, node_value_type::NodeValueType};
-use crate::metrics_config_orchestrator::publisher::{ConnectionType, PublisherType};
-use crate::metrics_config_orchestrator::{Publisher, PublisherImpl, Trigger};
-
 use super::trigger::conditional::ConditionalTrigger;
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
+use crate::expr::{node::Node, node_value_type::NodeValueType};
+use crate::metrics_config_orchestrator::{Publisher, Trigger};
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) trait TriggerFactory<TPublisher: Publisher = PublisherImpl> {
+pub(crate) trait TriggerFactory {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
         trigger_proto: &TriggerProto,
-        context: &TriggerFactoryCreateContext<TPublisher>,
+        context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<dyn Trigger>, TriggerFactoryError>;
 
     /// Verifies that the protobuf message is valid and can be used to create a trigger encapsulated object.
@@ -38,10 +36,10 @@ pub(crate) trait TriggerFactory<TPublisher: Publisher = PublisherImpl> {
 }
 
 // TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) struct TriggerFactoryCreateContext<'a, Pub: Publisher = PublisherImpl> {
+pub(crate) struct TriggerFactoryCreateContext<'a> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub node_types: &'a [Option<NodeValueType>],
-    pub publishers: &'a HashMap<String, Arc<Pub>>,
+    pub publishers: &'a HashMap<String, Arc<dyn Publisher>>,
     pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
 }
 
@@ -97,20 +95,13 @@ impl TriggerFactory for TriggerFactoryImpl {
             TriggerTypeProto::DataTrigger(data_trigger) => {
                 let publisher = &context.publishers[&data_trigger.publisher_name];
 
-                if let PublisherType::Service { connection_type, .. } = &publisher.publisher_type {
-                    match connection_type {
-                        ConnectionType::Getter => {
-                            return Err(TriggerFactoryError::UnableToListenToGetterPublisher {
-                                publisher_name: publisher.name.clone(),
-                            })
-                        }
-                        ConnectionType::Subscription => {
-                            // Subscription Publishers are allowed.
-                        }
-                    }
+                if !publisher.is_subscribable() {
+                    return Err(TriggerFactoryError::UnableToListenToGetterPublisher {
+                        publisher_name: publisher.get_name().to_owned(),
+                    });
                 }
 
-                DataTrigger::new(trigger_name, Arc::<PublisherImpl>::clone(publisher))
+                DataTrigger::new(trigger_name, Arc::<dyn Publisher>::clone(publisher))
             }
             TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
                 PeriodicTrigger::new(trigger_name, Self::get_periodic_interval(periodic_trigger)?)
@@ -282,7 +273,9 @@ mod tests {
 
     use super::*;
     use crate::expr::node_value::NodeValue;
-    use crate::metrics_config_orchestrator::publisher::ConnectionType;
+    use crate::metrics_config_orchestrator::publisher::service::{
+        ConnectionType, ServicePublisher,
+    };
     use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
@@ -394,12 +387,12 @@ mod tests {
             trigger_proto: &TriggerProto,
             nodes: Option<Vec<Arc<Node>>>,
             node_types: Vec<Option<NodeValueType>>,
-            publishers: Option<Vec<Arc<PublisherImpl>>>,
+            publishers: Option<Vec<Arc<dyn Publisher>>>,
             triggers: Option<Vec<Arc<dyn Trigger>>>,
         ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
             let expression_nodes = nodes.unwrap_or_default();
             let publishers = publishers.map_or(HashMap::new(), |publishers| {
-                publishers.into_hash_map(|publisher| publisher.name.clone())
+                publishers.into_hash_map(|publisher| publisher.get_name().to_owned())
             });
             let triggers = triggers.map_or(HashMap::new(), |triggers| {
                 triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
@@ -463,7 +456,7 @@ mod tests {
     fn create_data_trigger_getter_publisher_fails() {
         let factory = create_factory();
         let trigger = create_valid_data_trigger();
-        let publisher = Arc::new(PublisherImpl::new_service_publisher(
+        let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
@@ -476,7 +469,7 @@ mod tests {
                 &trigger,
                 None,
                 vec![],
-                Some(vec![Arc::clone(&publisher)]),
+                Some(vec![Arc::clone(&publisher) as Arc<dyn Publisher>]),
                 None,
             )
             .err()
@@ -493,7 +486,7 @@ mod tests {
     fn create_data_trigger_success() {
         let factory = create_factory();
         let trigger = create_valid_data_trigger();
-        let publisher = Arc::new(PublisherImpl::new_service_publisher(
+        let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
@@ -506,7 +499,7 @@ mod tests {
                 &trigger,
                 None,
                 vec![],
-                Some(vec![Arc::clone(&publisher)]),
+                Some(vec![Arc::clone(&publisher) as Arc<dyn Publisher>]),
                 None,
             )
             .unwrap();
