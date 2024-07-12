@@ -124,6 +124,7 @@ rust_defaults {
         "liblog_rust",
         "liblogger",
         "libprotobuf",
+        "librand",
         "libtokio",
         // keep-sorted end
     ],

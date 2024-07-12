@@ -298,15 +298,11 @@ mod tests {
     use sdv_dt::TopicTypedMetadata;
     use sdv_telemetry_test_proto::test_message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
     use tokio::sync::mpsc;
 
     use super::*;
     use crate::data_tunnel_api_client::TopicDescriptor;
-
-    // TODO(b/343140446): We should clean up data tunnel topics.
-    fn unique_topic_name() -> String {
-        format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
-    }
 
     fn register_topic(
         topic_name: &str,
@@ -339,7 +335,7 @@ mod tests {
 
     #[test]
     fn get_metadata_topic_not_registered_returns_none() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
 
         let subscriber = DataTunnelSubscriber::new();
         // The topic should not exist yet, therefore metadata should be `None`.
@@ -348,7 +344,7 @@ mod tests {
 
     #[test]
     fn get_metadata_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
 
         register_topic(
             &topic_name,
@@ -372,7 +368,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_when_topic_does_not_exist_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
 
         let subscriber = DataTunnelSubscriber::new();
         let outcome = subscriber
@@ -391,7 +387,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
 
         register_topic(
             &topic_name,
@@ -419,7 +415,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_read_messages_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
 
         let topic_descriptor = register_topic(
             &topic_name,

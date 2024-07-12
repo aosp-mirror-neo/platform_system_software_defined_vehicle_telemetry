@@ -16,6 +16,7 @@ use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_test_proto::test_message;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
+use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -83,10 +84,6 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Successfully finished service");
 }
 
-fn unique_topic_name() -> String {
-    format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
-}
-
 fn create_publisher(
     topic_name: &str,
     publisher_metadata: TelemetryPublisherMetadata,
@@ -117,7 +114,7 @@ fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> 
 async fn telemetry_service_vector_aggregation() {
     setup_once();
 
-    let topic_name = unique_topic_name();
+    let topic_name = unique_dt_topic_name();
     let publisher = create_publisher(
         &topic_name,
         TelemetryPublisherMetadata {

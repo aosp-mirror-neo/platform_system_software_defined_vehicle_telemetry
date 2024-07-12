@@ -282,12 +282,9 @@ mod tests {
 
 #[cfg(all(test, integration_tests))]
 mod tests {
-    use super::*;
+    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
 
-    // TODO(b/343140446): We should clean up data tunnel topics.
-    fn unique_topic_name() -> String {
-        format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
-    }
+    use super::*;
 
     fn create_topic(
         topic_name: &CxxString,
@@ -304,7 +301,7 @@ mod tests {
 
     #[test]
     fn topic_does_not_exist_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
 
         let result = topic_exists(&topic_name);
@@ -314,7 +311,7 @@ mod tests {
 
     #[test]
     fn topic_exists_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let _topic_descriptor = create_topic(&topic_name, 10, 10);
 
@@ -325,7 +322,7 @@ mod tests {
 
     #[test]
     fn get_topic_metadata_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
 
         let result = get_topic_metadata(&topic_name);
@@ -335,7 +332,7 @@ mod tests {
 
     #[test]
     fn get_topic_metadata_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         register_topic_with_metadata(
             &topic_name,
@@ -351,7 +348,7 @@ mod tests {
 
     #[test]
     fn register_topic_with_metadata_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
 
         let topic_descriptor = register_topic_with_metadata(
@@ -368,7 +365,7 @@ mod tests {
 
     #[test]
     fn available_to_write_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 10, 4);
 
@@ -379,7 +376,7 @@ mod tests {
 
     #[test]
     fn write_message_too_short_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 10, 4);
 
@@ -393,7 +390,7 @@ mod tests {
 
     #[test]
     fn write_message_too_long_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 10, 4);
 
@@ -407,7 +404,7 @@ mod tests {
 
     #[test]
     fn write_message_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 10, 4);
 
@@ -418,7 +415,7 @@ mod tests {
 
     #[test]
     fn subscribe_to_topic_that_does_not_exist_fails() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
 
         let result = subscribe(&topic_name);
@@ -429,7 +426,7 @@ mod tests {
 
     #[test]
     fn subscribe_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let _topic_descriptor = create_topic(&topic_name, 10, 4);
 
@@ -442,7 +439,7 @@ mod tests {
 
     #[test]
     fn available_to_read_0_messages_available() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let _topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -454,7 +451,7 @@ mod tests {
 
     #[test]
     fn available_to_read_2_messages_available() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -468,7 +465,7 @@ mod tests {
 
     #[test]
     fn available_to_read_overflow() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -490,7 +487,7 @@ mod tests {
 
     #[test]
     fn read_messages_buffer_too_short_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let _topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -505,7 +502,7 @@ mod tests {
 
     #[test]
     fn read_zero_messages_when_no_messages_available_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let _topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -518,7 +515,7 @@ mod tests {
 
     #[test]
     fn read_one_message_when_no_messages_available_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let _topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -534,7 +531,7 @@ mod tests {
 
     #[test]
     fn read_one_message_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -550,7 +547,7 @@ mod tests {
 
     #[test]
     fn read_two_messages_together_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -567,7 +564,7 @@ mod tests {
 
     #[test]
     fn read_two_messages_separately_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -588,7 +585,7 @@ mod tests {
 
     #[test]
     fn read_messages_subscribe_after_messages_already_written_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
 
@@ -606,7 +603,7 @@ mod tests {
 
     #[test]
     fn read_messages_subscribe_after_overflow_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
 
@@ -642,7 +639,7 @@ mod tests {
 
     #[test]
     fn read_messages_after_overflow_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -678,7 +675,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn set_notification_handler_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();
@@ -698,7 +695,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn set_notification_handler_ingores_overflow() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
         let subscription_descriptor = subscribe(&topic_name).unwrap();

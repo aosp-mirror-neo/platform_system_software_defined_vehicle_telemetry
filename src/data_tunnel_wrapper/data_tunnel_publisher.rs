@@ -93,17 +93,13 @@ impl DataTunnelPublisher {
 mod tests {
     use protobuf::Message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
 
     use super::*;
 
-    // TODO(b/343140446): We should clean up data tunnel topics.
-    fn unique_topic_name() -> String {
-        format!("Telemetry.Test.Topic.{}", rand::random::<u128>())
-    }
-
     #[test]
     fn register_topic_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         let publisher =
             DataTunnelPublisher::register_topic(&topic_name, 10, 100, vec![1, 2, 3]).unwrap();
 
@@ -120,7 +116,7 @@ mod tests {
 
     #[test]
     fn publish_bytes_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         let publisher = DataTunnelPublisher::register_topic(&topic_name, 10, 3, vec![]).unwrap();
 
         cxx::let_cxx_string!(topic_name = topic_name);
@@ -137,7 +133,7 @@ mod tests {
 
     #[test]
     fn publish_bytes_overflow() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         let publisher = DataTunnelPublisher::register_topic(&topic_name, 2, 3, vec![]).unwrap();
 
         cxx::let_cxx_string!(topic_name = topic_name);
@@ -166,7 +162,7 @@ mod tests {
 
     #[test]
     fn publish_length_delimited_proto_success() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         let publisher = DataTunnelPublisher::register_topic(&topic_name, 2, 30, vec![]).unwrap();
 
         cxx::let_cxx_string!(topic_name = topic_name);
@@ -189,7 +185,7 @@ mod tests {
 
     #[test]
     fn publish_length_delimited_proto_too_long_failure() {
-        let topic_name = unique_topic_name();
+        let topic_name = unique_dt_topic_name();
         let publisher = DataTunnelPublisher::register_topic(&topic_name, 2, 30, vec![]).unwrap();
 
         cxx::let_cxx_string!(topic_name = topic_name);
