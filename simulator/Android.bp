@@ -22,6 +22,7 @@ rust_defaults {
         "libcsv",
         "liblog_rust",
         "liblogger",
+        "libparking_lot",
         "libprotobuf",
         "libsdv_log_rust",
         "libsdv_telemetry_proto_rust",

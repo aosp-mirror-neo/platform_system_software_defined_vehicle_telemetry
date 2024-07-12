@@ -411,7 +411,6 @@ mod tests {
         let latest_configuration = service_adapter
             .latest_configuration
             .lock()
-            .unwrap()
             .as_ref()
             .expect("Option should be Some")
             .unpack::<Empty>()

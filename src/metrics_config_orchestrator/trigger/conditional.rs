@@ -3,11 +3,12 @@
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::error;
+use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::marker::Send;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{base::BaseTrigger, Trigger, TriggerCallbackFn, TriggerSubscriber};
@@ -60,8 +61,7 @@ impl ConditionalTrigger {
         operator: &Operator,
     ) -> anyhow::Result<bool> {
         // Extract previous value and save current value.
-        let maybe_previous_value =
-            previous_value_holder.lock().unwrap().replace(current_value.clone());
+        let maybe_previous_value = previous_value_holder.lock().replace(current_value.clone());
 
         // Perform comparison or return false if there's no previous value.
         if let Some(previous_value) = maybe_previous_value {

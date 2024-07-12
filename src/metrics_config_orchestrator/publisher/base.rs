@@ -1,10 +1,8 @@
 // Copyright 2024 Google LLC
 
+use parking_lot::Mutex;
 use protobuf::MessageDyn;
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use super::CallbackFn;
 use crate::expr::node::NodeEvaluationContext;
@@ -24,7 +22,7 @@ impl BasePublisher {
     }
 
     pub(super) fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {
-        self.latest_message.lock().unwrap().as_ref().map(Arc::clone)
+        self.latest_message.lock().as_ref().map(Arc::clone)
     }
 
     pub(super) fn set_new_message(
@@ -34,7 +32,7 @@ impl BasePublisher {
         callback_map: &mut HashMap<String, CallbackFn>,
     ) {
         // Replace latest message.
-        self.latest_message.lock().unwrap().replace(Arc::clone(&message));
+        self.latest_message.lock().replace(Arc::clone(&message));
 
         // Notify subscribed data triggers.
         // TODO(b/294129114): Replace callback_map with just a single callback.
@@ -44,6 +42,6 @@ impl BasePublisher {
     }
 
     pub(super) fn reset_latest_message(&self) {
-        *self.latest_message.lock().unwrap() = None;
+        *self.latest_message.lock() = None;
     }
 }

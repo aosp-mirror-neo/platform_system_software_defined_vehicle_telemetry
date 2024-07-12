@@ -1,9 +1,9 @@
 // Copyright 2024 Google LLC
 
-use binder::{Interface, Result as BinderResult, Strong, Status, ExceptionCode};
+use binder::{Interface, Result as BinderResult, Strong};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisherSubscription::IConfigurablePublisherSubscription};
 use log::debug;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use tokio::task::AbortHandle;
 use protobuf::text_format::print_to_string_pretty;
 
@@ -57,17 +57,7 @@ async fn publish_data_once(data: &Vec<ParsedDataEntry>, subscriber: &Strong<dyn 
 
 impl IConfigurablePublisherSubscription for SimulationPublisherSubscription {
     fn unsubscribe(&self) -> BinderResult<()> {
-        if let Some(handle) = self
-            .data_publishing_handle
-            .lock()
-            .map_err(|_| {
-                Status::new_exception_str(
-                    ExceptionCode::ILLEGAL_STATE,
-                    Some("Poisoned \"abort handle\" mutex guard"),
-                )
-            })?
-            .take()
-        {
+        if let Some(handle) = self.data_publishing_handle.lock().take() {
             if !handle.is_finished() {
                 handle.abort();
             }

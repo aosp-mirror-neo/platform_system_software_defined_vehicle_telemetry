@@ -3,10 +3,10 @@
 use super::*;
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-use std::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -150,12 +150,12 @@ pub(super) struct MockSubscriptionManager {
 #[async_trait]
 impl SubscriptionManager<TriggerSubscriber, NodeEvaluationContext> for MockSubscriptionManager {
     async fn subscribe(&self, key: TriggerSubscriber, callback: TriggerCallbackFn) {
-        self.key.lock().unwrap().replace(key);
-        self.callback.lock().unwrap().replace(callback);
+        self.key.lock().replace(key);
+        self.callback.lock().replace(callback);
     }
 
     async fn unsubscribe(&self, key: &TriggerSubscriber) {
-        self.key.lock().unwrap().replace(key.to_owned());
+        self.key.lock().replace(key.to_owned());
     }
 }
 

@@ -123,14 +123,14 @@ mod tests {
             .await;
 
         // Verify that the key and the callback are set.
-        let subscription_key = subscription_manager.key.lock().unwrap().take().unwrap();
+        let subscription_key = subscription_manager.key.lock().take().unwrap();
         assert!(
             subscription_key == TriggerSubscriber::MetricsConfigStart,
             "{} != {}",
             subscription_key,
             TriggerSubscriber::MetricsConfigStart
         );
-        assert!(subscription_manager.callback.lock().unwrap().is_some());
+        assert!(subscription_manager.callback.lock().is_some());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -141,14 +141,14 @@ mod tests {
         trigger.unsubscribe(&TriggerSubscriber::MetricsConfigStart).await;
 
         // Verify that the key is set and the callback is empty.
-        let subscription_key = subscription_manager.key.lock().unwrap().take().unwrap();
+        let subscription_key = subscription_manager.key.lock().take().unwrap();
         assert!(
             subscription_key == TriggerSubscriber::MetricsConfigStart,
             "{} != {}",
             subscription_key,
             TriggerSubscriber::MetricsConfigStart
         );
-        assert!(subscription_manager.callback.lock().unwrap().is_none());
+        assert!(subscription_manager.callback.lock().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

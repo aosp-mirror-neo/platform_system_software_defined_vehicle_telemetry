@@ -3,10 +3,11 @@
 use super::*;
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 
 pub(crate) struct MockServicePublisherAccessor {
     data: Arc<Mutex<MockServicePublisherAccessorData>>,
@@ -50,7 +51,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock();
         data.num_get_metadata_calls += 1;
         data.check_next_error()?;
 
@@ -64,7 +65,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock();
         data.num_get_message_provider_calls += 1;
         data.check_next_error()?;
 
@@ -82,7 +83,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         configuration: &Option<Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self.data.lock();
         data.last_configuration.clone_from(configuration);
         data.num_subscribe_calls += 1;
         data.check_next_error()?;
@@ -122,51 +123,51 @@ impl MockServicePublisherAccessor {
     }
 
     pub(crate) fn get_num_get_message_provider_calls(&self) -> u32 {
-        self.data.lock().unwrap().num_get_message_provider_calls
+        self.data.lock().num_get_message_provider_calls
     }
 
     pub(crate) fn get_num_get_metadata_calls(&self) -> u32 {
-        self.data.lock().unwrap().num_get_metadata_calls
+        self.data.lock().num_get_metadata_calls
     }
 
     pub(crate) fn get_num_subscribe_calls(&self) -> u32 {
-        self.data.lock().unwrap().num_subscribe_calls
+        self.data.lock().num_subscribe_calls
     }
 
     pub(crate) fn get_num_unsubscribe_calls(&self) -> u32 {
-        self.data.lock().unwrap().num_unsubscribe_calls
+        self.data.lock().num_unsubscribe_calls
     }
 
     pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
-        let mut data_lock = self.data.lock().unwrap();
+        let mut data_lock = self.data.lock();
         data_lock.callbacks.get_mut(service_name).unwrap()(message);
     }
 
     pub(crate) fn set_next_error(&self, error: anyhow::Error) {
-        self.data.lock().unwrap().next_error.replace(error);
+        self.data.lock().next_error.replace(error);
     }
 
     pub(crate) fn take_last_configuration(&self) -> Option<Any> {
-        self.data.lock().unwrap().last_configuration.take()
+        self.data.lock().last_configuration.take()
     }
 
     pub(crate) fn with_latest_message(self, message: Box<dyn MessageDyn>) -> Self {
-        self.data.lock().unwrap().next_latest_message.replace(message);
+        self.data.lock().next_latest_message.replace(message);
         self
     }
 
     pub(crate) fn with_next_descriptor(self, descriptor: MessageDescriptor) -> Self {
-        self.data.lock().unwrap().next_descriptor.replace(descriptor);
+        self.data.lock().next_descriptor.replace(descriptor);
         self
     }
 
     pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
-        self.data.lock().unwrap().next_error.replace(error);
+        self.data.lock().next_error.replace(error);
         self
     }
 
     pub(crate) fn with_next_not_available(self) -> Self {
-        self.data.lock().unwrap().next_not_available = true;
+        self.data.lock().next_not_available = true;
         self
     }
 }
@@ -185,7 +186,7 @@ impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
         _configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         let data_reference = self.data.upgrade().unwrap();
-        let mut data = data_reference.lock().unwrap();
+        let mut data = data_reference.lock();
         data.check_next_error()?;
 
         Ok(data.next_latest_message.take())
@@ -196,7 +197,7 @@ impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
 impl ServicePublisherSubscription for MockServicePublisherSubscription {
     async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
         let data_reference = self.data.upgrade().unwrap();
-        let mut data = data_reference.lock().unwrap();
+        let mut data = data_reference.lock();
         data.num_unsubscribe_calls += 1;
         data.check_next_error()?;
 

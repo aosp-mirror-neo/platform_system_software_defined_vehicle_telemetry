@@ -16,6 +16,7 @@ mod trigger_factory;
 // External dependencies.
 use async_trait::async_trait;
 use log::{debug, error};
+use parking_lot::Mutex;
 use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
@@ -28,7 +29,7 @@ use sdv_telemetry_utils::{
 };
 use std::collections::{HashMap, HashSet};
 use std::marker::{PhantomData, Sync};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -245,7 +246,7 @@ where
     TTriggerFactory: TriggerFactory + Send + Sync + 'static,
 {
     fn get_active_metrics_config_uuids(&self) -> Vec<String> {
-        self.configs.lock().unwrap().keys().cloned().collect()
+        self.configs.lock().keys().cloned().collect()
     }
 
     async fn initialize_config(
@@ -362,7 +363,7 @@ where
 
         // Store MetricsConfig with encapsulated objects.
         {
-            let mut configs = self.configs.lock().unwrap();
+            let mut configs = self.configs.lock();
             match configs.try_insert_value(config_proto.uuid.clone(), Arc::clone(&config)) {
                 Ok(val) => val,
                 Err(_) => {
@@ -423,7 +424,7 @@ where
     }
 
     async fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError> {
-        let config = self.configs.lock().unwrap().remove(config_uuid).ok_or_else(|| {
+        let config = self.configs.lock().remove(config_uuid).ok_or_else(|| {
             MetricsConfigOrchestratorError::InvalidConfigUuid { uuid: config_uuid.to_owned() }
         })?;
 
@@ -480,7 +481,7 @@ where
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
         {
-            let configs = self.configs.lock().unwrap();
+            let configs = self.configs.lock();
             if configs.contains_key(&config_proto.uuid) {
                 return Err(MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid {
                     uuid: config_proto.uuid.clone(),
@@ -894,6 +895,7 @@ mod tests {
 
     use anyhow::anyhow;
     use async_trait::async_trait;
+    use parking_lot::Mutex;
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
     };
@@ -910,7 +912,6 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::Mutex;
     use tokio::sync::oneshot;
 
     use crate::expr::node_value::NodeValue;
@@ -997,7 +998,7 @@ mod tests {
         }
 
         fn add_report_generators(&self, report_generators: Vec<Arc<MockMetricsReportGenerator>>) {
-            self.report_generators.lock().unwrap().extend(
+            self.report_generators.lock().extend(
                 report_generators.into_iter().map(|generator| (generator.name.clone(), generator)),
             );
         }
@@ -1011,12 +1012,12 @@ mod tests {
             config: &MetricsReportConfig,
             _context: &MetricsReportGeneratorFactoryCreateContext,
         ) -> Result<Arc<MockMetricsReportGenerator>, MetricsReportGeneratorFactoryError> {
-            if let Some(error) = self.error.lock().unwrap().take() {
+            if let Some(error) = self.error.lock().take() {
                 return Err(error);
             }
 
             let report_generator =
-                self.report_generators.lock().unwrap().remove(&config.name).unwrap_or_else(|| {
+                self.report_generators.lock().remove(&config.name).unwrap_or_else(|| {
                     Arc::new(MockMetricsReportGenerator::new(config.name.clone()))
                 });
             Ok(report_generator)
@@ -1027,7 +1028,7 @@ mod tests {
             _config: &MetricsReportConfig,
             _context: &MetricsReportGeneratorFactoryValidateContext,
         ) -> Result<(), MetricsReportGeneratorFactoryError> {
-            self.error.lock().unwrap().take().map_or_else(|| Ok(()), Err)
+            self.error.lock().take().map_or_else(|| Ok(()), Err)
         }
     }
 
@@ -1080,10 +1081,9 @@ mod tests {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
 
-            *self.num_nodes.lock().unwrap() = proto_nodes.len();
+            *self.num_nodes.lock() = proto_nodes.len();
             self.message_providers
                 .lock()
-                .unwrap()
                 .push(Arc::clone(context.message_provider.as_ref().unwrap()));
 
             let size = proto_nodes.len();
@@ -1110,7 +1110,7 @@ mod tests {
         }
 
         fn add_publishers(&mut self, publishers: Vec<Arc<MockPublisher>>) {
-            self.publishers.lock().unwrap().extend(
+            self.publishers.lock().extend(
                 publishers
                     .into_iter()
                     .map(|publisher| (publisher.get_name().to_owned(), publisher)),
@@ -1147,7 +1147,6 @@ mod tests {
             let publisher = self
                 .publishers
                 .lock()
-                .unwrap()
                 .remove(publisher_proto.name.as_str())
                 .unwrap_or_else(|| Arc::new(MockPublisher::new(publisher_proto.name.clone())));
             Ok(publisher)
@@ -1182,7 +1181,7 @@ mod tests {
         }
 
         fn add_triggers(&mut self, triggers: Vec<Arc<MockTrigger>>) {
-            self.triggers.lock().unwrap().extend(
+            self.triggers.lock().extend(
                 triggers.into_iter().map(|trigger| (trigger.get_name().to_owned(), trigger)),
             );
         }
@@ -1217,7 +1216,6 @@ mod tests {
             let trigger = self
                 .triggers
                 .lock()
-                .unwrap()
                 .remove(trigger_proto.name.as_str())
                 .unwrap_or_else(|| Arc::new(MockTrigger::new(trigger_proto.name.clone())));
             Ok(trigger)
@@ -1627,7 +1625,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1643,7 +1641,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1659,7 +1657,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1675,7 +1673,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1691,7 +1689,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1707,7 +1705,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1723,7 +1721,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1739,7 +1737,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1756,7 +1754,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
+        assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1775,7 +1773,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1794,7 +1792,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1814,14 +1812,14 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_metrics_report_config_factory_error_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.metrics_report_generator_factory.error.lock().unwrap().replace(
+        orchestrator.metrics_report_generator_factory.error.lock().replace(
             MetricsReportGeneratorFactoryError::InvalidTriggerName {
                 trigger_name: SOME_TRIGGER_NAME.to_owned(),
             },
@@ -1869,11 +1867,11 @@ mod tests {
             Arc::new(aggregation_publisher_mock),
         ]);
         orchestrator.publisher_factory.set_create_callback(move |publisher_proto| {
-            factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
+            factory_calls_clone1.lock().push(publisher_proto.name.clone());
             None
         });
         orchestrator.trigger_factory.set_create_callback(move |trigger_proto| {
-            factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
+            factory_calls_clone2.lock().push(trigger_proto.name.clone());
             None
         });
 
@@ -1887,10 +1885,10 @@ mod tests {
             CONDITIONAL_TRIGGER_NAME,
             AGGREGATION_PUBLISHER_NAME,
         ];
-        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        assert_eq!(*orchestrator.node_factory.num_nodes.lock().unwrap(), 1);
+        assert_eq!(*factory_calls.lock(), expected_calls);
+        assert_eq!(*orchestrator.node_factory.num_nodes.lock(), 1);
         {
-            let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
+            let message_providers = orchestrator.node_factory.message_providers.lock();
             assert_eq!(message_providers.len(), 1);
             let message = message_providers[0]
                 .get_message(SERVICE_PUBLISHER_NAME)
@@ -1912,7 +1910,7 @@ mod tests {
             );
         }
         let config = {
-            let configs = orchestrator.configs.lock().unwrap();
+            let configs = orchestrator.configs.lock();
             assert_eq!(configs.len(), 1);
             Arc::clone(&configs[&config.uuid])
         };
@@ -2037,11 +2035,11 @@ mod tests {
 
         let factory_calls_clone = Arc::clone(&factory_calls);
         let subscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((SUBSCRIBE.to_owned(), name.to_owned()))
         };
         let factory_calls_clone = Arc::clone(&factory_calls);
         let unsubscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((UNSUBSCRIBE.to_owned(), name.to_owned()))
         };
 
         // Create start, end and finish mock triggers that use callbacks.
@@ -2070,7 +2068,7 @@ mod tests {
 
         let factory_calls_clone = Arc::clone(&factory_calls);
         publisher_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()));
+            factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()));
             None
         });
 
@@ -2080,11 +2078,11 @@ mod tests {
 
         let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()))
         });
         let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_deactivate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((DEACTIVATE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((DEACTIVATE.to_owned(), name.to_owned()))
         });
 
         // Create and setup orchestrator.
@@ -2150,8 +2148,8 @@ mod tests {
             (DEACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
-        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        let config = { Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]) };
+        assert_eq!(*factory_calls.lock(), expected_calls);
+        let config = { Arc::clone(&orchestrator.configs.lock()[UUID]) };
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::NotStarted),
@@ -2192,7 +2190,7 @@ mod tests {
 
         // Verify that the report generator was activated.
         assert_eq!(num_calls.load(Ordering::SeqCst), 1);
-        let config = { Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]) };
+        let config = { Arc::clone(&orchestrator.configs.lock()[UUID]) };
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::Running),
@@ -2217,14 +2215,14 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher1_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            activate_calls_clone.lock().push(name.to_owned());
             None
         });
 
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let activate_calls_clone = Arc::clone(&activate_calls);
         service_publisher_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            activate_calls_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2232,7 +2230,7 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME_2.to_owned());
         let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher2_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            activate_calls_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2293,7 +2291,7 @@ mod tests {
             AGGREGATION_PUBLISHER_NAME.to_owned(),
             AGGREGATION_PUBLISHER_NAME_2.to_owned(),
         ];
-        assert_eq!(*activate_calls.lock().unwrap(), expected_activations);
+        assert_eq!(*activate_calls.lock(), expected_activations);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -2316,9 +2314,8 @@ mod tests {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
         let (tx, rx) = oneshot::channel();
         let maybe_tx = Mutex::new(Some(tx));
-        orchestrator.finish_trigger_fired_callback = Arc::new(move |uuid, _context| {
-            maybe_tx.lock().unwrap().take().unwrap().send(uuid).unwrap()
-        });
+        orchestrator.finish_trigger_fired_callback =
+            Arc::new(move |uuid, _context| maybe_tx.lock().take().unwrap().send(uuid).unwrap());
         orchestrator.trigger_factory.add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
 
         // Setup Metrics Config.
@@ -2365,7 +2362,7 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         start_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         let mut end_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2374,7 +2371,7 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         end_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2383,14 +2380,14 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         // Setup mock publishers.
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2398,7 +2395,7 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2451,7 +2448,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Store metrics config Rust object.
-        let metrics_config = Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]);
+        let metrics_config = Arc::clone(&orchestrator.configs.lock()[UUID]);
 
         // Finish config.
         orchestrator.finish_config(UUID).await.unwrap();
@@ -2471,13 +2468,13 @@ mod tests {
 
         // Verify that the config was removed from the map.
         assert!(
-            !orchestrator.configs.lock().unwrap().contains_key(UUID),
+            !orchestrator.configs.lock().contains_key(UUID),
             "Config was not removed from the map"
         );
 
         // Verify the order of calls.
         assert_eq!(
-            *name_container.lock().unwrap(),
+            *name_container.lock(),
             [
                 FINISH_TRIGGER_NAME,
                 START_TRIGGER_NAME,
@@ -2499,7 +2496,7 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         end_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2508,14 +2505,14 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         // Setup mock publishers.
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2523,7 +2520,7 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2531,9 +2528,8 @@ mod tests {
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
-        report_generator_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
-        });
+        report_generator_mock
+            .set_deactivate_callback(move |name| name_container_clone.lock().push(name.to_owned()));
 
         // Setup orchestrator.
         let start_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
@@ -2593,7 +2589,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Store metrics config Rust object.
-        let metrics_config = Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]);
+        let metrics_config = Arc::clone(&orchestrator.configs.lock()[UUID]);
 
         // Fire start trigger. This should start data collection.
         start_trigger_mock.fire().await;
@@ -2620,13 +2616,13 @@ mod tests {
 
         // Verify that the config was removed from the map.
         assert!(
-            !orchestrator.configs.lock().unwrap().contains_key(UUID),
+            !orchestrator.configs.lock().contains_key(UUID),
             "Config was not removed from the map"
         );
 
         // Verify that there was exactly one unsubscribe call.
         assert_eq!(
-            *name_container.lock().unwrap(),
+            *name_container.lock(),
             [
                 FINISH_TRIGGER_NAME,
                 END_TRIGGER_NAME,
@@ -2664,7 +2660,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2679,7 +2675,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2694,7 +2690,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2709,7 +2705,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2724,7 +2720,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2739,7 +2735,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2754,7 +2750,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2769,7 +2765,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -2786,7 +2782,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
+        assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
     #[test]
@@ -2804,7 +2800,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2822,7 +2818,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
@@ -2840,13 +2836,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_metrics_report_config_factory_error_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.metrics_report_generator_factory.error.lock().unwrap().replace(
+        orchestrator.metrics_report_generator_factory.error.lock().replace(
             MetricsReportGeneratorFactoryError::InvalidTriggerName {
                 trigger_name: SOME_TRIGGER_NAME.to_owned(),
             },
@@ -2877,11 +2873,11 @@ mod tests {
         let factory_calls_clone1 = Arc::clone(&factory_calls);
         let factory_calls_clone2 = Arc::clone(&factory_calls);
         orchestrator.publisher_factory.set_validate_callback(move |publisher_proto| {
-            factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
+            factory_calls_clone1.lock().push(publisher_proto.name.clone());
             None
         });
         orchestrator.trigger_factory.set_validate_callback(move |trigger_proto| {
-            factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
+            factory_calls_clone2.lock().push(trigger_proto.name.clone());
             None
         });
         let config = create_valid_config_with_dependencies();
@@ -2894,8 +2890,8 @@ mod tests {
             CONDITIONAL_TRIGGER_NAME,
             AGGREGATION_PUBLISHER_NAME,
         ];
-        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(*factory_calls.lock(), expected_calls);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]

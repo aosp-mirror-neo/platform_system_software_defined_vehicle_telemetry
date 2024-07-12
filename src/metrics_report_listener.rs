@@ -3,11 +3,12 @@
 use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
 use google_sdv_telemetry::binder::Strong;
 use log::warn;
+use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 
 pub(crate) struct MetricsReportListener {
@@ -41,13 +42,9 @@ impl MetricsReportListener {
 
         let report_key = (metrics_config_uuid.clone(), report_config_name.clone(), report_number);
         // Insert the report and panic if report with the same key already exists.
-        self.metrics_report_store
-            .lock()
-            .unwrap()
-            .try_insert_value(report_key, metrics_report)
-            .unwrap();
+        self.metrics_report_store.lock().try_insert_value(report_key, metrics_report).unwrap();
 
-        let listener = self.report_ready_listener.lock().unwrap();
+        let listener = self.report_ready_listener.lock();
         if let Some(listener_ref) = listener.as_ref() {
             if let Err(e) = listener_ref.deref().onReady(
                 &metrics_config_uuid,
@@ -66,7 +63,7 @@ impl MetricsReportListener {
         report_number: i32,
     ) -> Result<MetricsReport, MetricsReportListenerError> {
         let report = {
-            let mut report_container = self.metrics_report_store.lock().unwrap();
+            let mut report_container = self.metrics_report_store.lock();
             report_container.remove(&(
                 metrics_config_uuid.to_owned(),
                 report_config_name.to_owned(),
@@ -84,7 +81,7 @@ impl MetricsReportListener {
         &self,
         listener: &Strong<dyn ITelemetryReportReadyListener>,
     ) -> Result<(), MetricsReportListenerError> {
-        let mut guard = self.report_ready_listener.lock().unwrap();
+        let mut guard = self.report_ready_listener.lock();
         if guard.is_none() {
             *guard = Some(listener.clone());
             Ok(())
@@ -94,7 +91,7 @@ impl MetricsReportListener {
     }
 
     pub(crate) fn clear_report_ready_listener(&self) -> Result<(), MetricsReportListenerError> {
-        let mut listener = self.report_ready_listener.lock().unwrap();
+        let mut listener = self.report_ready_listener.lock();
         *listener = None;
         Ok(())
     }

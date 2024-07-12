@@ -4,10 +4,11 @@ mod value_aggregator;
 pub(super) mod value_aggregator_factory;
 
 use log::trace;
+use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::expr::node::{Node, NodeEvaluationContext};
@@ -62,8 +63,7 @@ impl MessageBuilder for MessageBuilderImpl {
         ValueHolder::collect_unordered(operation_results).map(move |results| {
             let mut results_map = results.into_iter().collect::<HashMap<_, _>>();
             let mut msg = self_clone.message_descriptor.new_instance();
-            for (field_name, field_aggregator) in &mut *self_clone.field_assignments.lock().unwrap()
-            {
+            for (field_name, field_aggregator) in &mut *self_clone.field_assignments.lock() {
                 let input_value = results_map.remove(field_name).transpose().map_err(|e| {
                     MessageBuilderError::ExpressionEvaluationError {
                         field_name: field_name.to_owned(),

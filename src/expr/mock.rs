@@ -2,6 +2,7 @@
 
 use futures::future::BoxFuture;
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -10,7 +11,7 @@ use sdv_telemetry_proto_rust::expression::combination_node::{
 use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::expr::node_error::{DescriptorProviderError, MessageProviderError};
 use crate::expr::node_factory::{DescriptorProvider, MessageProvider};
@@ -133,7 +134,7 @@ impl MockMessageProvider {
         &self,
         result: OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError>,
     ) {
-        self.next_result.lock().unwrap().replace(result);
+        self.next_result.lock().replace(result);
     }
 }
 
@@ -142,7 +143,7 @@ impl MessageProvider for MockMessageProvider {
         &self,
         _publisher_name: &str,
     ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
-        self.next_result.lock().unwrap().take().unwrap_or_else(|| {
+        self.next_result.lock().take().unwrap_or_else(|| {
             OperationResult::Synchronous(Ok(Some(Arc::new(TEST_MESSAGE.clone()))))
         })
     }
