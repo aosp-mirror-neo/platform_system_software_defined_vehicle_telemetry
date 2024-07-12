@@ -5,6 +5,7 @@
 // External dependencies.
 use async_trait::async_trait;
 use protobuf::reflect::MessageDescriptor;
+use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
 use std::marker::{Send, Sync};
 
@@ -29,7 +30,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn create_subscription(
         &self,
         service_name: &str,
-        configuration: Option<&[u8]>,
+        configuration: &Option<Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome>;
 }
@@ -41,7 +42,7 @@ pub trait ServicePublisherMessageProvider: Send + Sync {
     /// Returns latest published message with certain configuration, if provided.
     async fn get_latest_message(
         &self,
-        configuration: Option<&[u8]>,
+        configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
 }
 

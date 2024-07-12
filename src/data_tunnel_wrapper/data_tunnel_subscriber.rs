@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use log::{error, info, trace};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
+use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -120,7 +121,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
     async fn create_subscription(
         &self,
         topic_name: &str,
-        _configuration: Option<&[u8]>,
+        _configuration: &Option<Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
@@ -435,7 +436,7 @@ mod tests {
         let outcome = subscriber
             .create_subscription(
                 &topic_name,
-                None,
+                &None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -463,7 +464,7 @@ mod tests {
         let outcome = subscriber
             .create_subscription(
                 &topic_name,
-                None,
+                &None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -491,7 +492,7 @@ mod tests {
         let outcome1 = subscriber
             .create_subscription(
                 &topic_name,
-                None,
+                &None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -502,7 +503,7 @@ mod tests {
         let outcome2 = subscriber
             .create_subscription(
                 &topic_name,
-                None,
+                &None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -533,7 +534,7 @@ mod tests {
         let outcome1 = subscriber
             .create_subscription(
                 &topic_name,
-                None,
+                &None,
                 Box::new(move |message| tx1.send(message).unwrap()),
             )
             .await
@@ -543,7 +544,7 @@ mod tests {
         let outcome2 = subscriber
             .create_subscription(
                 &topic_name,
-                None,
+                &None,
                 Box::new(move |message| tx2.send(message).unwrap()),
             )
             .await

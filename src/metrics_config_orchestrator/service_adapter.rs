@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use log::error;
-use protobuf::{well_known_types::any::Any, Message, MessageDyn};
+use protobuf::{well_known_types::any::Any, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -103,10 +103,6 @@ struct ServiceMessageProviderImpl {
     service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
 }
 
-fn serialize_configuration(configuration: &Any) -> Vec<u8> {
-    configuration.write_length_delimited_to_bytes().unwrap()
-}
-
 impl ServiceSubscriptionType {
     fn new_configured(
         accessor_subscription: Box<dyn ServicePublisherSubscription>,
@@ -140,14 +136,13 @@ impl ServiceAdapter for ServiceAdapterImpl {
         configuration: &Option<Any>,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> anyhow::Result<ServiceSubscription> {
-        let maybe_subscription_type = if let Some(configuration) = configuration {
+        let maybe_subscription_type = if configuration.is_some() {
             // Subscription has configuration, so it can't be shared.
-            let configuration_bytes = serialize_configuration(configuration);
             let create_subscription_outcome = self
                 .service_publisher_accessor
                 .create_subscription(
                     service_name,
-                    Some(&configuration_bytes),
+                    configuration,
                     Box::new(move |msg| new_message_callback(msg.as_ref())),
                 )
                 .await?;
@@ -181,7 +176,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         .service_publisher_accessor
                         .create_subscription(
                             service_name,
-                            None,
+                            &None,
                             Box::new(move |msg| {
                                 if on_message_tx.send(msg).is_err() {
                                     // This means that `on_message_rx` was dropped - which should
@@ -305,10 +300,7 @@ impl ServiceMessageProvider for ServiceMessageProviderImpl {
         &self,
         configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
-        let configuration_bytes = configuration.as_ref().map(serialize_configuration);
-        self.service_publisher_message_provider
-            .get_latest_message(configuration_bytes.as_deref())
-            .await
+        self.service_publisher_message_provider.get_latest_message(configuration).await
     }
 }
 

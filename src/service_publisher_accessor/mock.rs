@@ -15,6 +15,8 @@ pub(crate) struct MockServicePublisherAccessor {
 struct MockServicePublisherAccessorData {
     /// The map of subscribed callbacks, keyed by service name.
     callbacks: HashMap<String, Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
+    /// The last configuration message that was passed to create_subscription.
+    last_configuration: Option<Any>,
     /// When set, the descriptor will be returned on the next call to get_metadata.
     next_descriptor: Option<MessageDescriptor>,
     /// When set, the error will be returned on the next call to the adapter.
@@ -77,10 +79,11 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn create_subscription(
         &self,
         service_name: &str,
-        _configuration: Option<&[u8]>,
+        configuration: &Option<Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock().unwrap();
+        data.last_configuration.clone_from(configuration);
         data.num_subscribe_calls += 1;
         data.check_next_error()?;
 
@@ -104,6 +107,8 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
 impl MockServicePublisherAccessor {
     pub(crate) fn new() -> Self {
         let data = Arc::new(Mutex::new(MockServicePublisherAccessorData {
+            callbacks: HashMap::new(),
+            last_configuration: None,
             next_descriptor: None,
             next_error: None,
             next_latest_message: None,
@@ -112,7 +117,6 @@ impl MockServicePublisherAccessor {
             num_get_metadata_calls: 0,
             num_subscribe_calls: 0,
             num_unsubscribe_calls: 0,
-            callbacks: HashMap::new(),
         }));
         Self { data }
     }
@@ -140,6 +144,10 @@ impl MockServicePublisherAccessor {
 
     pub(crate) fn set_next_error(&self, error: anyhow::Error) {
         self.data.lock().unwrap().next_error.replace(error);
+    }
+
+    pub(crate) fn take_last_configuration(&self) -> Option<Any> {
+        self.data.lock().unwrap().last_configuration.take()
     }
 
     pub(crate) fn with_latest_message(self, message: Box<dyn MessageDyn>) -> Self {
@@ -174,7 +182,7 @@ impl MockServicePublisherAccessorData {
 impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
     async fn get_latest_message(
         &self,
-        _configuration: Option<&[u8]>,
+        _configuration: &Option<Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         let data_reference = self.data.upgrade().unwrap();
         let mut data = data_reference.lock().unwrap();

@@ -4,7 +4,7 @@
 //! to the underlying implementations.
 
 use async_trait::async_trait;
-use protobuf::MessageDyn;
+use protobuf::{well_known_types::any::Any, MessageDyn};
 use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
@@ -57,7 +57,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn create_subscription(
         &self,
         service_name: &str,
-        configuration: Option<&[u8]>,
+        configuration: &Option<Any>,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
@@ -77,7 +77,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
-    use protobuf::well_known_types::empty::Empty;
+    use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::MessageFull;
     use sdv_telemetry_utils::test_utils::create_empty_fn_box;
     use std::sync::Arc;
@@ -177,17 +177,20 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
+        let configuration_msg =
+            Some(Any::pack(&Int32Value { value: 42, ..Default::default() }).unwrap());
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
         let service_publishers =
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, &configuration_msg, create_empty_fn_box())
             .await
             .unwrap();
 
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
+        assert_eq!(service_publisher.take_last_configuration(), configuration_msg);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -201,7 +204,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME2, &None, create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -219,7 +222,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let res = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME2, &None, create_empty_fn_box())
             .await
             .unwrap();
 
@@ -237,7 +240,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let subscription = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
