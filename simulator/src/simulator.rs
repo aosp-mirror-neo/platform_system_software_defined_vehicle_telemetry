@@ -118,6 +118,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
                 ".{}",
                 simulation_publisher.config.message_descriptor.full_name()
             ),
+            supportsGet: false,
         };
 
         configurable_publisher_registry.registerPublisher(&publisher_info, &binder_publisher)?;

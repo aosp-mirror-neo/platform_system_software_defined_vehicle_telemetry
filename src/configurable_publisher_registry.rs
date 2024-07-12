@@ -57,16 +57,6 @@ pub enum ConfigurablePublisherRegistryRegisterError {
     InvalidMessageTypeName { message_type_name: String },
 }
 
-fn visit_entry<T>(
-    publisher_entries: &Arc<Mutex<HashMap<String, PublisherEntry>>>,
-    service_name: &str,
-    visitor: impl FnOnce(&PublisherEntry) -> T,
-) -> Option<T> {
-    let publisher_entries_lock = publisher_entries.lock().unwrap();
-    let entry = publisher_entries_lock.get(service_name)?;
-    Some(visitor(entry))
-}
-
 impl Default for ConfigurablePublisherRegistry {
     fn default() -> Self {
         Self::new()
@@ -77,7 +67,7 @@ impl Default for ConfigurablePublisherRegistry {
 impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
         let maybe_message_descriptor =
-            visit_entry(&self.publisher_entries, service_name, |entry| {
+            Self::visit_entry(&self.publisher_entries, service_name, |entry| {
                 entry.message_descriptor.clone()
             });
 
@@ -100,7 +90,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         configuration: Option<&[u8]>,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
-        let result = visit_entry(&self.publisher_entries, service_name, |entry| {
+        let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
         });
 
@@ -121,7 +111,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             BinderFeatures::default(),
         );
 
-        let subscription = publisher.create_subscription(&listener_wrapper, configuration)?;
+        let subscription = publisher.createSubscription(&listener_wrapper, configuration)?;
 
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
             ConfigurablePublisherRegistrySubscription {
@@ -184,6 +174,16 @@ impl ConfigurablePublisherRegistry {
 
         Ok(())
     }
+
+    fn visit_entry<T>(
+        publisher_entries: &Arc<Mutex<HashMap<String, PublisherEntry>>>,
+        service_name: &str,
+        visitor: impl FnOnce(&PublisherEntry) -> T,
+    ) -> Option<T> {
+        let publisher_entries_lock = publisher_entries.lock().unwrap();
+        let entry = publisher_entries_lock.get(service_name)?;
+        Some(visitor(entry))
+    }
 }
 
 #[async_trait]
@@ -200,6 +200,7 @@ impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription 
 
 #[cfg(test)]
 mod tests {
+    use binder::{ExceptionCode, Status};
     use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}, ISubscriber::ISubscriber};
     use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
     use protobuf::{Message, MessageFull};
@@ -237,7 +238,7 @@ mod tests {
     }
 
     impl IConfigurablePublisher for MockConfigurablePublisher {
-        fn create_subscription(
+        fn createSubscription(
             &self,
             _subscriber: &Strong<dyn ISubscriber>,
             _config: Option<&[u8]>,
@@ -250,6 +251,10 @@ mod tests {
             );
             self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
             Ok(binder_subscription)
+        }
+
+        fn getLatestMessage(&self, _configuration: Option<&[u8]>) -> BinderResult<Option<Vec<u8>>> {
+            Err(Status::new_exception(ExceptionCode::UNSUPPORTED_OPERATION, None))
         }
     }
 
@@ -283,6 +288,7 @@ mod tests {
             serviceName: SERVICE_NAME.to_string(),
             fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
             messageTypeName: format!(".{}", descriptor.full_name()),
+            supportsGet: false,
         };
 
         let binder_publisher =

@@ -60,6 +60,7 @@ async fn main() -> Result<(), binder::Status> {
         serviceName: "SampleService".to_owned(),
         fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
         messageTypeName: format!(".{}", message_descriptor.full_name()),
+        supportsGet: false,
     };
 
     service.registerPublisher(&publisher_info, &binder_publisher)?;

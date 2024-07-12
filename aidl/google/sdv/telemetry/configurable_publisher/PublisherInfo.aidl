@@ -19,4 +19,7 @@ parcelable PublisherInfo {
     // Name of the type of the root published message. Must be non-null
     // The message must be declared in fileDescriptorProto.
     @utf8InCpp String messageTypeName;
+
+    // Indicates whether the publisher provides latest message without subscribing.
+    boolean supportsGet;
 }

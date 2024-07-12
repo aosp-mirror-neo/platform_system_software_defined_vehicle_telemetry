@@ -22,6 +22,14 @@ interface IConfigurablePublisher {
      * @return IConfigurablePublisherSubscription configurable publishers subscription.
      *
      */
-    IConfigurablePublisherSubscription create_subscription(
+    IConfigurablePublisherSubscription createSubscription(
             in ISubscriber subscriber, in @nullable byte[] configuration);
+
+    /**
+     * Returns latest message for the provided configuration.
+     *
+     * @return Latest message, null if no messages were published,
+     *         or INVALID_OPERATION if operation is not supported.
+     */
+    @nullable byte[] getLatestMessage(in @nullable byte[] configuration);
 }

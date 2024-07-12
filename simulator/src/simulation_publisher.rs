@@ -1,7 +1,7 @@
 // Copyright 2024 Google LLC
 
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}};
-use binder::{BinderFeatures, Interface, Result as BinderResult, Strong};
+use binder::{BinderFeatures, ExceptionCode, Interface, Result as BinderResult, Status, Strong};
 use std::{sync::Arc, hash::Hash};
 
 use crate::{
@@ -16,12 +16,16 @@ pub struct SimulationPublisherWrapper {
 impl Interface for SimulationPublisherWrapper {}
 
 impl IConfigurablePublisher for SimulationPublisherWrapper {
-    fn create_subscription(
+    fn createSubscription(
         &self,
         subscriber: &Strong<dyn ISubscriber>,
         config: Option<&[u8]>,
     ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
         self.publisher.create_subscription(subscriber, config)
+    }
+
+    fn getLatestMessage(&self, _configuration: Option<&[u8]>) -> BinderResult<Option<Vec<u8>>> {
+        Err(Status::new_exception(ExceptionCode::UNSUPPORTED_OPERATION, None))
     }
 }
 

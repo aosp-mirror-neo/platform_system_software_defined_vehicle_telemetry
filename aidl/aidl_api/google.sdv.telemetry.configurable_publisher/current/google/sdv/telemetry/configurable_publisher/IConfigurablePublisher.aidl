@@ -18,9 +18,9 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.configurable_publisher;
-
 interface IConfigurablePublisher {
     google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription
-    create_subscription(in google.sdv.telemetry.configurable_publisher.ISubscriber subscriber,
+    createSubscription(in google.sdv.telemetry.configurable_publisher.ISubscriber subscriber,
             in @nullable byte[] configuration);
+    @nullable byte[] getLatestMessage(in @nullable byte[] configuration);
 }

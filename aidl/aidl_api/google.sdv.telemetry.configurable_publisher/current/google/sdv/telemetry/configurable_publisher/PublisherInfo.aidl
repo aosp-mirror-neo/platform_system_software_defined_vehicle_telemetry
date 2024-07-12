@@ -18,9 +18,9 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.configurable_publisher;
-
 parcelable PublisherInfo {
     @utf8InCpp String serviceName;
     byte[] fileDescriptorProto;
     @utf8InCpp String messageTypeName;
+    boolean supportsGet;
 }
