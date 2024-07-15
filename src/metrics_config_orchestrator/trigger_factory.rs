@@ -3,7 +3,8 @@
 use anyhow::anyhow;
 use protobuf::well_known_types::duration::Duration as DurationProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    conditional_trigger::ConditionType, publisher::Publisher_type as PublisherTypeProto,
+    conditional_trigger::ConditionType as ConditionTypeProto,
+    publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
     PeriodicTrigger as PeriodicTriggerProto, Publisher as PublisherProto, Trigger as TriggerProto,
@@ -12,7 +13,7 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
-use super::trigger::conditional::ConditionalTrigger;
+use super::trigger::conditional::{ConditionType, ConditionalTrigger};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
@@ -56,7 +57,7 @@ pub enum TriggerFactoryError {
     #[error(
         "Condition {condition_type:?} cannot be applied to an expression of type {value_type:?}"
     )]
-    InvalidNodeValueType { condition_type: ConditionType, value_type: NodeValueType },
+    InvalidNodeValueType { condition_type: ConditionTypeProto, value_type: NodeValueType },
     #[error("Required field selector_node_index is not set for conditional trigger")]
     MissingNodeIndex,
     #[error("Trigger name not set")]
@@ -68,11 +69,11 @@ pub enum TriggerFactoryError {
     #[error("Publisher {publisher_name} has getter connection type and cannot be listened to")]
     UnableToListenToGetterPublisher { publisher_name: String },
     #[error("Unknown condition type {condition_type}")]
-    UnknownConditionType { condition_type: i32 },
+    UnknownConditionTypeProto { condition_type: i32 },
     #[error("Unknown trigger type")]
     UnknownTriggerType,
     #[error("Condition type is not specified")]
-    UnspecifiedConditionType,
+    UnspecifiedConditionTypeProto,
     #[error("Trigger type is not specified")]
     UnspecifiedTriggerType,
 }
@@ -198,14 +199,10 @@ impl TriggerFactoryImpl {
         conditional_trigger_proto: &ConditionalTriggerProto,
         value_type: &Option<NodeValueType>,
     ) -> Result<ConditionType, TriggerFactoryError> {
-        let condition_type = conditional_trigger_proto
-            .condition_type
-            .enum_value()
-            .map_err(|value| TriggerFactoryError::UnknownConditionType { condition_type: value })?;
-
-        if matches!(condition_type, ConditionType::CONDITION_TYPE_UNSPECIFIED) {
-            return Err(TriggerFactoryError::UnspecifiedConditionType);
-        }
+        let condition_type =
+            conditional_trigger_proto.condition_type.enum_value().map_err(|value| {
+                TriggerFactoryError::UnknownConditionTypeProto { condition_type: value }
+            })?;
 
         if let Some(value_type) = value_type {
             if !value_type.is_bool() && !value_type.is_numeric() {
@@ -215,6 +212,17 @@ impl TriggerFactoryImpl {
                 });
             }
         }
+
+        let condition_type = match condition_type {
+            ConditionTypeProto::CONDITION_TYPE_UNSPECIFIED => {
+                return Err(TriggerFactoryError::UnspecifiedConditionTypeProto)
+            }
+            ConditionTypeProto::RISING_EDGE => ConditionType::RisingEdge,
+            ConditionTypeProto::FALLING_EDGE => ConditionType::FallingEdge,
+            ConditionTypeProto::ALL_CHANGES => ConditionType::AllChanges,
+            ConditionTypeProto::IS_TRUE => ConditionType::IsTrue,
+            ConditionTypeProto::IS_FALSE => ConditionType::IsFalse,
+        };
 
         Ok(condition_type)
     }
@@ -266,7 +274,8 @@ mod tests {
 
     use protobuf::{EnumOrUnknown, MessageField};
     use sdv_telemetry_proto_rust::metrics_configuration::{
-        conditional_trigger::ConditionType, ServicePublisher as ServicePublisherProto,
+        conditional_trigger::ConditionType as ConditionTypeProto,
+        ServicePublisher as ServicePublisherProto,
     };
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
@@ -327,7 +336,7 @@ mod tests {
     fn create_valid_conditional_trigger() -> (TriggerProto, Option<Vec<Arc<dyn Trigger>>>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
-        conditional_trigger.condition_type = ConditionType::ALL_CHANGES.into();
+        conditional_trigger.condition_type = ConditionTypeProto::ALL_CHANGES.into();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
@@ -356,7 +365,7 @@ mod tests {
     fn create_conditional_trigger_with_unspecified_condition_type() -> TriggerProto {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
-        conditional_trigger.condition_type = ConditionType::CONDITION_TYPE_UNSPECIFIED.into();
+        conditional_trigger.condition_type = ConditionTypeProto::CONDITION_TYPE_UNSPECIFIED.into();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(String::default());
         trigger
@@ -365,7 +374,7 @@ mod tests {
     fn create_conditional_trigger_with_all_changes_condition_type() -> TriggerProto {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
-        conditional_trigger.condition_type = ConditionType::ALL_CHANGES.into();
+        conditional_trigger.condition_type = ConditionTypeProto::ALL_CHANGES.into();
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(String::default());
         trigger
@@ -629,7 +638,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(err, TriggerFactoryError::UnknownConditionType { condition_type: -1 }),
+            matches!(err, TriggerFactoryError::UnknownConditionTypeProto { condition_type: -1 }),
             "Unexpected error: {:?}",
             err
         );
@@ -652,7 +661,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(err, TriggerFactoryError::UnspecifiedConditionType),
+            matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
             "Unexpected error: {:?}",
             err
         );
@@ -702,7 +711,7 @@ mod tests {
         let Ok(res_trigger) = res.downcast_arc::<ConditionalTrigger>() else {
             panic!("Unexpected trigger type");
         };
-        assert!(matches!(res_trigger.condition_type, ConditionType::ALL_CHANGES));
+        assert!(matches!(res_trigger.condition_type, ConditionType::AllChanges));
         // selector_expression should match the node at index 0
         assert!(Arc::ptr_eq(&res_trigger.selector_expression, &node_0));
         assert!(!Arc::ptr_eq(&res_trigger.selector_expression, &node_1));
@@ -880,7 +889,7 @@ mod tests {
         let err = factory.validate_using_context_with(&trigger, vec![None], None).unwrap_err();
 
         assert!(
-            matches!(err, TriggerFactoryError::UnknownConditionType { condition_type: -1 }),
+            matches!(err, TriggerFactoryError::UnknownConditionTypeProto { condition_type: -1 }),
             "Unexpected error: {:?}",
             err
         );
@@ -894,7 +903,7 @@ mod tests {
         let err = factory.validate_using_context_with(&trigger, vec![None], None).unwrap_err();
 
         assert!(
-            matches!(err, TriggerFactoryError::UnspecifiedConditionType),
+            matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
             "Unexpected error: {:?}",
             err
         );
