@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC
 
+use downcast_rs::Downcast;
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
@@ -17,17 +18,17 @@ use crate::metrics_config_orchestrator::{
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
 };
 
-pub(crate) trait MetricsReportGeneratorFactory<
-    TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
->
-{
+#[cfg(test)]
+use downcast_rs::impl_downcast;
+
+pub(crate) trait MetricsReportGeneratorFactory: Send + Sync + Downcast {
     /// Returns a new metrics report generator based on the metrics report config
     /// protobuf message.
     fn create(
         &self,
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext,
-    ) -> Result<Arc<TMetricsReportGenerator>, MetricsReportGeneratorFactoryError>;
+    ) -> Result<Arc<dyn MetricsReportGenerator>, MetricsReportGeneratorFactoryError>;
 
     /// Verifies that the metrics report config protobuf message is valid and can be used
     /// to create a metrics report generator.
@@ -37,6 +38,9 @@ pub(crate) trait MetricsReportGeneratorFactory<
         context: &MetricsReportGeneratorFactoryValidateContext,
     ) -> Result<(), MetricsReportGeneratorFactoryError>;
 }
+
+#[cfg(test)]
+impl_downcast!(MetricsReportGeneratorFactory);
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
     pub config_proto: &'a MetricsConfigProto,
@@ -86,7 +90,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         &self,
         metrics_report_config: &MetricsReportConfig,
         context: &MetricsReportGeneratorFactoryCreateContext,
-    ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
+    ) -> Result<Arc<dyn MetricsReportGenerator>, MetricsReportGeneratorFactoryError> {
         // Verify that the name is set.
         Self::verify_name_set(metrics_report_config)?;
 
@@ -241,7 +245,9 @@ mod tests {
                 nodes: get_test_nodes(),
                 node_types: get_test_node_types(),
             };
-            self.create(report_config, &context)
+            self.create(report_config, &context).map(|generator| {
+                generator.downcast_arc::<MetricsReportGeneratorImpl>().ok().unwrap()
+            })
         }
 
         fn validate_using_empty_context(

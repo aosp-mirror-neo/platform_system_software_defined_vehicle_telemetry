@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use anyhow::anyhow;
+use downcast_rs::Downcast;
 use protobuf::well_known_types::duration::Duration as DurationProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionType as ConditionTypeProto,
@@ -13,14 +14,16 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
+#[cfg(test)]
+use downcast_rs::impl_downcast;
+
 use super::trigger::conditional::{ConditionType, ConditionalTrigger};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::{Publisher, Trigger};
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) trait TriggerFactory {
+pub(crate) trait TriggerFactory: Send + Sync + Downcast {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
@@ -36,7 +39,9 @@ pub(crate) trait TriggerFactory {
     ) -> Result<(), TriggerFactoryError>;
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
+#[cfg(test)]
+impl_downcast!(TriggerFactory);
+
 pub(crate) struct TriggerFactoryCreateContext<'a> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
     pub node_types: &'a [Option<NodeValueType>],
@@ -515,9 +520,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
-        let Ok(res_trigger) = res.downcast_arc::<DataTrigger>() else {
-            panic!("Unexpected trigger type");
-        };
+        let res_trigger = res.downcast_arc::<DataTrigger>().ok().unwrap();
         assert!(Arc::ptr_eq(&res_trigger.publisher, &(publisher as Arc<dyn Publisher>)));
     }
 
@@ -529,9 +532,7 @@ mod tests {
         let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
-        let Ok(res_trigger) = res.downcast_arc::<PeriodicTrigger>() else {
-            panic!("Unexpected trigger type");
-        };
+        let res_trigger = res.downcast_arc::<PeriodicTrigger>().ok().unwrap();
         assert_eq!(res_trigger.interval, INTERVAL);
     }
 
@@ -708,9 +709,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
-        let Ok(res_trigger) = res.downcast_arc::<ConditionalTrigger>() else {
-            panic!("Unexpected trigger type");
-        };
+        let res_trigger = res.downcast_arc::<ConditionalTrigger>().ok().unwrap();
         assert!(matches!(res_trigger.condition_type, ConditionType::AllChanges));
         // selector_expression should match the node at index 0
         assert!(Arc::ptr_eq(&res_trigger.selector_expression, &node_0));

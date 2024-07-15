@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use downcast_rs::Downcast;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::expression::{
     function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
@@ -9,6 +10,9 @@ use sdv_telemetry_proto_rust::expression::{
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
+
+#[cfg(test)]
+use downcast_rs::impl_downcast;
 
 use crate::expr::node::{FunctionType, Node, TimeSource};
 use crate::expr::node_error::{
@@ -21,7 +25,7 @@ use crate::expr::node_value_type::{
 };
 
 /// Creates rust nodes from protobuf expression nodes.
-pub trait NodeFactory {
+pub trait NodeFactory: Send + Sync + Downcast {
     /// Creates rust Nodes from protobuf Nodes,.
     /// Protobuf nodes use indices to represent left and right children.
     /// Rust nodes have a pointer to the actual children instead of an index.
@@ -41,6 +45,9 @@ pub trait NodeFactory {
         context: &NodeFactoryContext, // Copyright 2024 Google LLC
     ) -> Result<Vec<Option<NodeValueType>>, NodeError>;
 }
+
+#[cfg(test)]
+impl_downcast!(NodeFactory);
 
 /// Provides necessary information for node validation and creation.
 pub struct NodeFactoryContext {

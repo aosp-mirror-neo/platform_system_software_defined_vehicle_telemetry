@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
+use downcast_rs::DowncastSync;
 use log::{debug, error};
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
 use sdv_telemetry_proto_rust::metrics_configuration::{
@@ -11,16 +12,22 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
+#[cfg(test)]
+use downcast_rs::impl_downcast;
+
 use crate::expr::node::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
 
 #[async_trait]
-pub(crate) trait MetricsReportGenerator: Send + Sync {
-    async fn activate(self: &Arc<Self>);
+pub(crate) trait MetricsReportGenerator: Send + Sync + DowncastSync {
+    async fn activate(self: Arc<Self>);
     async fn deactivate(&self);
 }
+
+#[cfg(test)]
+impl_downcast!(sync MetricsReportGenerator);
 
 pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) name: String,
@@ -40,14 +47,14 @@ pub(crate) struct MetricsReportGeneratorImpl {
 
 #[async_trait]
 impl MetricsReportGenerator for MetricsReportGeneratorImpl {
-    async fn activate(self: &Arc<Self>) {
+    async fn activate(self: Arc<Self>) {
         let mut is_active = self.is_active.lock().await;
         assert!(!*is_active, "Unable to activate metrics report generator: it's already active");
 
         // Subscribing to triggers one by one. In theory, it should be possible to also spawn
         // subscription tasks in parallel as an optimization.
         for trigger in &self.triggers {
-            let self_clone = Arc::clone(self);
+            let self_clone = Arc::clone(&self);
             let trigger_name_clone = trigger.get_name().to_owned();
             Arc::clone(trigger)
                 .subscribe(
@@ -190,8 +197,8 @@ mod test {
     async fn activate_already_active_panics() {
         let generator = Arc::new(create_default_generator());
 
-        generator.activate().await;
-        generator.activate().await;
+        Arc::clone(&generator).activate().await;
+        Arc::clone(&generator).activate().await;
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -347,7 +354,7 @@ mod test {
         generator.triggers.push(Arc::new(trigger));
         let generator = Arc::new(generator);
 
-        generator.activate().await;
+        Arc::clone(&generator).activate().await;
         generator.deactivate().await;
 
         assert_eq!(num_fired.load(Ordering::SeqCst), 1);
