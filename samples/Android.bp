@@ -49,6 +49,49 @@ rust_protobuf {
     vendor_available: true,
 }
 
+rust_defaults {
+    name: "telemetry_sample_getter_publisher_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "rust/sample_getter_publisher/main.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "libbinder_rs",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libsample_publisher_proto",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        // keep-sorted end
+    ],
+    vendor: true,
+}
+
+rust_binary {
+    name: "telemetry_sample_getter_publisher",
+    defaults: ["telemetry_sample_getter_publisher_defaults"],
+}
+
+rust_test {
+    name: "telemetry_sample_getter_publisher_unit_tests",
+    defaults: ["telemetry_sample_getter_publisher_defaults"],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+}
+
 rust_binary {
     name: "telemetry_sample_publisher",
     defaults: ["sdv_telemetry@rust_defaults"],

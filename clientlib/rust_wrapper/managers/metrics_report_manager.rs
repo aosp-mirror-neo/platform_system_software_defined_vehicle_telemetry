@@ -130,7 +130,7 @@ pub async fn get_metrics_report(
     report_info: ReportInfo,
 ) -> TelemetryResult<MetricsReport> {
     info!(
-        "Report ready: {:?} {:?} report number: {}",
+        "Retrieving report: {:?} {:?} report number: {}",
         report_info.metrics_config_uuid, report_info.report_config_name, report_info.report_number
     );
 
