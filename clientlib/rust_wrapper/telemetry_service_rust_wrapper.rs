@@ -58,6 +58,32 @@ unsafe impl Send for TelemetryServiceHolder {}
 /// data races or undefined behavior.
 unsafe impl Sync for TelemetryServiceHolder {}
 
+/// Wraps a raw pointer and makes it `Send + Sync`.
+#[repr(transparent)]
+struct SendSyncPtr<T: Send + Sync>(*mut T);
+
+/// Safety: Raw pointers are not `Send` and `Sync` by default mostly as more of a lint [1]. However,
+/// in our case, we need to use a raw pointer across an `await` boundary, which requires it to be
+/// `Send + Sync`. This is safe, because `SendSyncPtr` requires `T` to be `Send + Sync`, and because
+/// dereferencing a raw pointer is `unsafe` anyway.
+///
+/// [1]: https://doc.rust-lang.org/nomicon/send-and-sync.html
+unsafe impl<T: Send + Sync> Send for SendSyncPtr<T> {}
+
+/// Safety: Raw pointers are not `Send` and `Sync` by default mostly as more of a lint [1]. However,
+/// in our case, we need to use a raw pointer across an `await` boundary, which requires it to be
+/// `Send + Sync`. This is safe, because `SendSyncPtr` requires `T` to be `Send + Sync`, and because
+/// dereferencing a raw pointer is `unsafe` anyway.
+///
+/// [1]: https://doc.rust-lang.org/nomicon/send-and-sync.html
+unsafe impl<T: Send + Sync> Sync for SendSyncPtr<T> {}
+
+impl<T: Send + Sync> SendSyncPtr<T> {
+    fn as_void_ptr(&self) -> *mut c_void {
+        self.0 as *mut c_void
+    }
+}
+
 /// Callback function that receives status from telemetry service
 ///
 /// # Safety
@@ -280,11 +306,12 @@ impl TelemetryServiceHolder {
         &self,
         misc_status_callback: impl Fn(i32, String) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
-        let raw_listener: *mut MiscStatusListener =
-            Box::into_raw(Box::new(MiscStatusListener::new(Box::new(misc_status_callback))));
-        let mut previous_raw_listener: *mut MiscStatusListener =
-            std::ptr::null_mut::<MiscStatusListener>();
-        call_api_with_status_callback(move |status_callback_data, status_callback| {
+        let raw_listener = SendSyncPtr(Box::into_raw(Box::new(MiscStatusListener::new(Box::new(
+            misc_status_callback,
+        )))));
+        call_api_with_status_callback(|status_callback_data, status_callback| {
+            let mut previous_raw_listener = std::ptr::null_mut::<MiscStatusListener>();
+
             // SAFETY: `self.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
             // `StatusListener` created using `Box::into_raw` and remains a valid reference in case
             // of successful `rust_to_c` API calls. In case of a failed API call, it is released to
@@ -296,7 +323,7 @@ impl TelemetryServiceHolder {
             unsafe {
                 let status_code = rust_to_c::set_misc_status_listener(
                     self.0,
-                    raw_listener as *mut c_void,
+                    raw_listener.as_void_ptr(),
                     Some(on_status),
                     status_callback_data,
                     status_callback,
@@ -313,10 +340,11 @@ impl TelemetryServiceHolder {
         })
         .await
         .inspect_err(|_| {
-            // Releasing memory in case of API call failure
-            // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
-            // raw_listener was created using Box::into_raw above.
-            let _ = unsafe { Box::from_raw(raw_listener) };
+            // Releasing memory in case of API call failure.
+            //
+            //  SAFETY: safe to call since the `raw_listener.0` was created using `Box::into_raw`
+            // above and it is guaranteed to not be used if by the C code if the API call fails.
+            let _ = unsafe { Box::from_raw(raw_listener.0) };
         })
     }
 
@@ -352,5 +380,61 @@ impl TelemetryServiceHolder {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    /// Compile-time check to verify that the passed argument implements `Send + Sync`.
+    const fn assert_send_sync<T: Send + Sync>(t: T) -> T {
+        t
+    }
+
+    /// Compile-time check to verify that all return types of all public functions are `Send +
+    /// Sync`. This is especially important for the `async` public functions, because whether their
+    /// returned `Future`s implement `Send` or `Sync` depends on their implementation (see
+    /// b/353202112).
+    ///
+    /// This function is deliberately not run as part of a test, since its sole purpose is to verify
+    /// the invariant described above.
+    #[allow(unused)]
+    fn check_all_function_results_are_send_sync() {
+        let service = assert_send_sync(TelemetryServiceHolder::get()).unwrap();
+
+        assert_send_sync(service.init(|_, _| {}, |_| {}));
+        assert_send_sync(service.finish());
+
+        assert_send_sync(service.set_report_ready_listener(|_| {}));
+        assert_send_sync(service.clear_report_ready_listener());
+
+        assert_send_sync(service.set_misc_status_listener(|_, _| {}));
+        assert_send_sync(service.clear_misc_status_listener());
+
+        assert_send_sync(service.add_metrics_config(&[]));
+        assert_send_sync(service.remove_metrics_config(""));
+
+        assert_send_sync(service.activate_metrics_config(""));
+        assert_send_sync(service.deactivate_metrics_config(""));
+
+        assert_send_sync(service.remove_all_metrics_configs());
+
+        assert_send_sync(service.get_active_metrics_config_uuids());
+        assert_send_sync(service.get_inactive_metrics_config_uuids());
+
+        assert_send_sync(service.get_metrics_report(ReportInfo {
+            metrics_config_uuid: "".to_owned(),
+            report_config_name: "".to_owned(),
+            report_number: 0,
+        }));
+    }
+
+    #[test]
+    fn placeholder_test() {
+        // TODO: Add actual tests to the Rust client library.
+        //
+        // This placeholder test is here to suppress warnings generated by `atest` about missing
+        // tests.
     }
 }

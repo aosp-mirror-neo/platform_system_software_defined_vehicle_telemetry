@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use crate::callbacks::{call_api_with_metrics_report_callback, call_api_with_status_callback};
-use crate::{ReportInfo, TelemetryError, TelemetryResult, TelemetryServiceHolder};
+use crate::{ReportInfo, SendSyncPtr, TelemetryError, TelemetryResult, TelemetryServiceHolder};
 
 use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
@@ -49,11 +49,11 @@ unsafe extern "C" fn on_report_ready(
 
 /// Struct used to wrap the report ready callback received from the client.
 struct MetricsReportReadyListener {
-    callback: Box<dyn Fn(ReportInfo)>,
+    callback: Box<dyn Fn(ReportInfo) + Send + Sync>,
 }
 
 impl MetricsReportReadyListener {
-    fn new(callback: Box<dyn Fn(ReportInfo)>) -> Self {
+    fn new(callback: Box<dyn Fn(ReportInfo) + Send + Sync>) -> Self {
         Self { callback }
     }
 }
@@ -62,11 +62,12 @@ pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
     report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
 ) -> TelemetryResult<String> {
-    let raw_listener: *mut MetricsReportReadyListener =
-        Box::into_raw(Box::new(MetricsReportReadyListener::new(Box::new(report_ready_callback))));
-    let mut previous_raw_listener: *mut MetricsReportReadyListener =
-        std::ptr::null_mut::<MetricsReportReadyListener>();
-    call_api_with_status_callback(move |status_callback_data, status_callback| {
+    let raw_listener = SendSyncPtr(Box::into_raw(Box::new(MetricsReportReadyListener::new(
+        Box::new(report_ready_callback),
+    ))));
+    call_api_with_status_callback(|status_callback_data, status_callback| {
+        let mut previous_raw_listener = std::ptr::null_mut::<MetricsReportReadyListener>();
+
         // SAFETY: `service.0` points to a valid `ServiceHolder`. `raw_listener` points to a valid
         // `MetricsReportReadyListener` created using `Box::into_raw` and thus will not move in
         // memory, and remain a valid reference in case of successful `rust_to_c` API calls. In case
@@ -78,7 +79,7 @@ pub async fn set_report_ready_listener(
         unsafe {
             let status_code = rust_to_c::set_report_ready_listener(
                 service.0,
-                raw_listener as *mut c_void,
+                raw_listener.as_void_ptr(),
                 Some(on_report_ready),
                 status_callback_data,
                 status_callback,
@@ -93,11 +94,12 @@ pub async fn set_report_ready_listener(
         }
     })
     .await
-    .inspect_err(|_| {
-        // Releasing memory in case of API call failure
-        // SAFETY: safe to call since the caller is responsible managing raw_listener's memory
-        // raw_listener was created using Box::into_raw above.
-        let _ = unsafe { Box::from_raw(raw_listener) };
+    .inspect_err(move |_| {
+        // Releasing memory in case of API call failure.
+        //
+        //  SAFETY: safe to call since the `raw_listener.0` was created using `Box::into_raw` above
+        // and it is guaranteed to not be used if by the C code if the API call fails.
+        let _ = unsafe { Box::from_raw(raw_listener.0) };
     })
 }
 
@@ -139,9 +141,10 @@ pub async fn get_metrics_report(
     let report_config_name =
         CString::new(report_info.report_config_name).expect("CString::new failed");
 
-    let config_uuid_ref: *const c_char = metrics_config_uuid.as_ptr();
-    let config_name_ref: *const c_char = report_config_name.as_ptr();
     call_api_with_metrics_report_callback(move |callback_data, callback| {
+        let config_uuid_ref: *const c_char = metrics_config_uuid.as_ptr();
+        let config_name_ref: *const c_char = report_config_name.as_ptr();
+
         // SAFETY: the caller has provided pointers that are used to safely get the metrics report
         // from the telemetry service. The validity of `callback_data` and `callback` is ensured by
         // `call_api_with_metrics_report_callback`.

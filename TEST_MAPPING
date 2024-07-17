@@ -17,6 +17,9 @@
       "name": "libsdv_telemetry_bindgen_tests"
     },
     {
+      "name": "libsdv_telemetry_rust_wrapper_tests"
+    },
+    {
       "name": "libsdv_telemetry_status_codes_bindgen_tests"
     },
     {
