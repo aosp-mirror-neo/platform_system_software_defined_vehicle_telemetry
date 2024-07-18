@@ -282,9 +282,9 @@ mod tests {
 
 #[cfg(all(test, integration_tests))]
 mod tests {
-    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
-
     use super::*;
+
+    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
 
     fn create_topic(
         topic_name: &CxxString,

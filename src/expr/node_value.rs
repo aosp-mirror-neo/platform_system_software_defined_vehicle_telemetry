@@ -802,13 +802,13 @@ impl From<f64> for NodeValue {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     use protobuf::reflect::ReflectEqMode;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
     use std::sync::Mutex;
 
-    use super::*;
     use crate::expr::mock::*;
 
     fn provide(value: &NodeValue) -> Result<NodeValue, NodeError> {

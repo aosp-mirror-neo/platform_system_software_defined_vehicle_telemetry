@@ -48,9 +48,9 @@ impl SubscriberService {
 
 #[cfg(test)]
 mod tests {
-    use protobuf::{well_known_types::wrappers::Int32Value, Message, MessageFull};
-
     use super::*;
+
+    use protobuf::{well_known_types::wrappers::Int32Value, Message, MessageFull};
 
     // Arbitrarily chosen buffer capacity
     const TOKIO_CHANNEL_CAPACITY: usize = 32;

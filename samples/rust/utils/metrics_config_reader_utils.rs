@@ -37,11 +37,11 @@ pub fn read(path: &PathBuf) -> anyhow::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use protobuf::MessageField;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::time::Duration;
-
-    use super::*;
 
     #[test]
     fn serialized_bytes_match_legacy_textproto_file_contents() {

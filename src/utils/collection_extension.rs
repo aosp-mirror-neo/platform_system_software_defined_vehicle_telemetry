@@ -104,9 +104,9 @@ impl<T> VecExtension<T> for Vec<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use super::*;
+
+    use std::collections::HashMap;
 
     #[test]
     fn simple_into_hash_map() {

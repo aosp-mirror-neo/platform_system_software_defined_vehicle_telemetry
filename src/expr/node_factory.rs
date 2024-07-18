@@ -330,6 +330,8 @@ impl NodeFactory for NodeFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use paste::paste;
     use protobuf::{EnumOrUnknown, MessageFull};
     use sdv_telemetry_proto_rust::expression::combination_node::{
@@ -341,7 +343,6 @@ mod tests {
     };
     use sdv_telemetry_test_proto::test_message::TestMessage;
 
-    use super::*;
     use crate::expr::mock::*;
 
     const BOOL_FIELD_NAME: &str = "bool_field";

@@ -132,6 +132,8 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use futures::{future, FutureExt};
     use lazy_static::lazy_static;
     use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
@@ -139,7 +141,6 @@ mod tests {
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use std::sync::Arc;
 
-    use super::*;
     use crate::expr::mock::{MockMessageProvider, TEST_MESSAGE};
     use crate::expr::node_error::MessageProviderError;
     use crate::expr::node_value::NodeValue;

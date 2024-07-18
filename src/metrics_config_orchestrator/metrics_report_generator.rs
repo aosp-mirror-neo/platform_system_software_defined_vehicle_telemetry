@@ -137,13 +137,14 @@ impl MetricsReportGeneratorImpl {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     use futures::FutureExt;
     use protobuf::MessageDyn;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::mpsc;
 
-    use super::*;
     use crate::metrics_config_orchestrator::message_builder::{
         mock::MockMessageBuilder, MessageBuilderError,
     };

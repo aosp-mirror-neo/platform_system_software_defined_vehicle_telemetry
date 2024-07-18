@@ -91,11 +91,11 @@ impl DataTunnelPublisher {
 
 #[cfg(all(test, integration_tests))]
 mod tests {
+    use super::*;
+
     use protobuf::Message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
-
-    use super::*;
 
     #[test]
     fn register_topic_success() {

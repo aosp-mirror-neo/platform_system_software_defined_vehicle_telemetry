@@ -355,6 +355,8 @@ mod tests {
 
 #[cfg(all(test, integration_tests))]
 mod tests {
+    use super::*;
+
     use protobuf::reflect::ReflectValueRef;
     use protobuf::MessageFull;
     use sdv_dt::TopicTypedMetadata;
@@ -363,7 +365,6 @@ mod tests {
     use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
     use tokio::sync::mpsc;
 
-    use super::*;
     use crate::data_tunnel_api_client::TopicDescriptor;
 
     fn register_topic(

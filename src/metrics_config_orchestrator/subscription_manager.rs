@@ -124,10 +124,10 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Mutex;
-
-    use super::*;
 
     const KEY: &str = "test_key";
     const KEY2: &str = "test_key2";

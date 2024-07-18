@@ -262,6 +262,8 @@ impl TriggerFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use protobuf::{EnumOrUnknown, MessageField};
     use sdv_telemetry_proto_rust::metrics_configuration::{
         conditional_trigger::ConditionType, ServicePublisher as ServicePublisherProto,
@@ -271,7 +273,6 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use super::*;
     use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::publisher::service::{
         ConnectionType, ServicePublisher,

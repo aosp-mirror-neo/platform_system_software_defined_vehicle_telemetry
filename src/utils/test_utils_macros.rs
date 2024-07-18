@@ -102,8 +102,8 @@ impl VisitMut for WrapAwaitWithTimeoutVisitor {
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
+
     use quote::quote;
 
     fn assert_token_stream_eq(a: TokenStream, b: TokenStream) {

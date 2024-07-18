@@ -27,9 +27,9 @@ pub fn get_monotonic_time_since_boot() -> Microseconds {
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
-
     use super::*;
+
+    use std::time::SystemTime;
 
     #[test]
     fn get_unix_timestamp_success() {

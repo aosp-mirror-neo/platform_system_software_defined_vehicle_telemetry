@@ -193,11 +193,12 @@ impl MetricsReportGeneratorFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
 
-    use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };

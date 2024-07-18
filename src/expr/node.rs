@@ -238,6 +238,8 @@ impl fmt::Debug for Node {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use futures::FutureExt;
     use protobuf::MessageDyn;
     use sdv_telemetry_proto_rust::expression::combination_node::{
@@ -245,7 +247,6 @@ mod tests {
     };
     use std::time::SystemTime;
 
-    use super::*;
     use crate::expr::mock::*;
     use crate::expr::node_error::MessageProviderError;
 

@@ -1,5 +1,7 @@
 // Copyright 2023 Google LLC
 
+use super::*;
+
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -8,7 +10,6 @@ use std::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::*;
 use crate::metrics_config_orchestrator::subscription_manager::SubscriptionManager;
 use crate::metrics_config_orchestrator::NodeEvaluationContext;
 

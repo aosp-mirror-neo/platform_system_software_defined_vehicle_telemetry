@@ -1,12 +1,12 @@
 // Copyright 2023 Google LLC
 
+use super::*;
+
 use async_trait::async_trait;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
-
-use super::*;
 
 pub(crate) struct MockServicePublisherAccessor {
     data: Arc<Mutex<MockServicePublisherAccessorData>>,

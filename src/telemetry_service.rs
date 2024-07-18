@@ -479,6 +479,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     use binder::BinderFeatures;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::{
@@ -492,7 +493,6 @@ mod tests {
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 
-    use super::*;
     use crate::metrics_config_manager::mock::MockMetricsConfigManager;
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 

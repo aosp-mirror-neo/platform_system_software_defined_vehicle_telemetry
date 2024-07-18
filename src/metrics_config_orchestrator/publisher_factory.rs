@@ -186,6 +186,8 @@ impl PublisherFactoryImpl {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use async_trait::async_trait;
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
@@ -194,7 +196,6 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use super::*;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::service_adapter::{
         ServiceMessageProvider, ServiceSubscription,

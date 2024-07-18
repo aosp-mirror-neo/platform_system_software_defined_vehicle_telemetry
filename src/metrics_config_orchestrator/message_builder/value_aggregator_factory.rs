@@ -351,6 +351,8 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use protobuf::well_known_types::timestamp::Timestamp;
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::{
@@ -358,7 +360,6 @@ mod tests {
         NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
     };
 
-    use super::*;
     use crate::expr::node_value::NodeValue;
 
     // See all valid field names in src/utils/test_utils/test_message.proto

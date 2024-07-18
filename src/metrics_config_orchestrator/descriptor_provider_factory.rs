@@ -89,6 +89,8 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use anyhow::anyhow;
     use protobuf::reflect::MessageDescriptor;
     use protobuf::MessageFull;
@@ -97,7 +99,6 @@ mod tests {
     };
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
 
-    use super::*;
     use crate::expr::node_error::DescriptorProviderError;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;

@@ -309,6 +309,8 @@ pub(crate) mod mock;
 
 #[cfg(test)]
 pub(super) mod tests {
+    use super::*;
+
     use anyhow::anyhow;
     use lazy_static::lazy_static;
     use protobuf::reflect::FieldDescriptor;
@@ -316,7 +318,6 @@ pub(super) mod tests {
     use protobuf::MessageFull;
     use tokio::sync::mpsc;
 
-    use super::*;
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
     const ERROR_MESSAGE: &str = "Error 42";

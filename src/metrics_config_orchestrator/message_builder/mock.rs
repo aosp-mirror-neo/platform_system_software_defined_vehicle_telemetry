@@ -1,12 +1,13 @@
 // Copyright 2023 Google LLC
 
+use super::*;
+
 use futures::future::BoxFuture;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Mutex};
 
-use super::*;
 use crate::expr::node::NodeEvaluationContext;
 
 /// The builder will build a TestMessage defined in `src/test_utils/test_message.proto`

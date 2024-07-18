@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use super::*;
+
 use crate::expr::mock::MockDescriptorProvider;
 
 pub(crate) struct MockDescriptorProviderFactory {}

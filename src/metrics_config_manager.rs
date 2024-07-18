@@ -515,16 +515,16 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
 }
 #[cfg(test)]
 pub(crate) mod mock;
+
 #[cfg(test)]
 mod tests {
+    use super::*;
 
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
     use protobuf::Message;
     use rand::prelude::SliceRandom;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use tokio::sync::oneshot;
-
-    use super::*;
 
     static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";

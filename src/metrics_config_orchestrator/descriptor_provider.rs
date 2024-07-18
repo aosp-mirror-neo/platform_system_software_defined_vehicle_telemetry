@@ -27,6 +27,7 @@ impl DescriptorProvider for DescriptorProviderImpl {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use protobuf::MessageFull;
     use sdv_telemetry_test_proto::test_message::TestMessage;
 

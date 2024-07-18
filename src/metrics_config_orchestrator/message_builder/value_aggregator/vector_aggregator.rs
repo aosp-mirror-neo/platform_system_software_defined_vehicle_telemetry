@@ -40,10 +40,11 @@ impl ValueAggregator for VectorAggregator {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use protobuf::MessageDyn;
     use std::sync::Arc;
 
-    use super::*;
     use crate::expr::mock::TEST_MESSAGE;
 
     #[test]

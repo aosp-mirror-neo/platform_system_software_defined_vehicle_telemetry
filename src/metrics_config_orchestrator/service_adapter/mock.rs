@@ -1,11 +1,11 @@
 // Copyright 2023 Google LLC
 
+use super::*;
+
 use std::future;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use tokio::sync::Notify;
-
-use super::*;
 
 pub(crate) struct MockServiceAdapter {
     // Block subscribe call to keep publisher in the Subscribing state.

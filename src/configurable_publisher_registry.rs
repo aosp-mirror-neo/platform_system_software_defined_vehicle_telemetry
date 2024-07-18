@@ -244,6 +244,8 @@ impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription 
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use binder::{ExceptionCode, Status};
     use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}, ISubscriber::ISubscriber};
     use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
@@ -255,8 +257,6 @@ mod tests {
     use sdv_telemetry_utils::test_utils::create_empty_fn_box;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
-
-    use super::*;
 
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";

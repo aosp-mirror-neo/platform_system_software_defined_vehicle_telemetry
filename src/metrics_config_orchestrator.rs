@@ -890,6 +890,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use anyhow::anyhow;
     use async_trait::async_trait;
     use protobuf::descriptor::{
@@ -911,7 +913,6 @@ mod tests {
     use std::sync::Mutex;
     use tokio::sync::oneshot;
 
-    use super::*;
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::descriptor_provider_factory::mock::MockDescriptorProviderFactory;
