@@ -23,6 +23,7 @@ rust_proc_macro {
 
 rust_test_host {
     name: "libsdv_telemetry_test_utils_macros_tests",
+    host_cross_supported: false,
     defaults: ["libsdv_telemetry_test_utils_macros_defaults"],
     test_suites: [
         // keep-sorted start
