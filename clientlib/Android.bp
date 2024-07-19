@@ -125,10 +125,9 @@ rust_test {
     require_root: true,
 }
 
-rust_library {
-    name: "libsdv_telemetry_rust_wrapper",
+rust_defaults {
+    name: "libsdv_telemetry_rust_wrapper_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
-    crate_name: "sdv_telemetry_rust_wrapper",
     srcs: ["rust_wrapper/telemetry_service_rust_wrapper.rs"],
     rustlibs: [
         // keep-sorted start
@@ -150,6 +149,29 @@ rust_library {
         "libclap_derive",
         // keep-sorted end
     ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_rust_wrapper",
+    defaults: ["libsdv_telemetry_rust_wrapper_defaults"],
+    crate_name: "sdv_telemetry_rust_wrapper",
     vendor_available: true,
     visibility: ["//visibility:public"],
+}
+
+rust_test {
+    name: "libsdv_telemetry_rust_wrapper_tests",
+    defaults: ["libsdv_telemetry_rust_wrapper_defaults"],
+    crate_name: "sdv_telemetry_rust_wrapper_tests",
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
