@@ -36,7 +36,7 @@ For Core:
 For IVI:
 
 ```bash
-cvd start -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.virt.vmname=instance2 androidboot.virt.address=4"
+cvd start -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.sdv.instance_name=instance2 androidboot.virt.address=4"
 ```
 
 Note: if testing on ivi, telemetry service needs to be started explicity. To do
