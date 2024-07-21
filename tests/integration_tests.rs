@@ -237,6 +237,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
         expected_paths,
         vec![
             "./samples/sample_protos/configurable_publisher.textproto",
+            "./samples/sample_protos/configurable_publisher_getter.textproto",
             "./samples/sample_protos/data_tunnel_publisher.textproto",
             "./samples/sample_protos/data_tunnel_publisher_aggregation.textproto",
             "./samples/sample_protos/metric_configJan10.textproto",
