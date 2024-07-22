@@ -17,16 +17,15 @@ mod simulator_errors;
 mod telemetry_service_handler;
 mod util;
 
+use anyhow::Error;
 use binder::BinderFeatures;
 use clap::Parser;
 use protobuf::Message;
 use log::{error, info};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
-use sdv_telemetry_utils::logging::validated_log_tag;
+use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
 use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-    time::Duration,
+    collections::{HashMap, HashSet}, path::PathBuf, sync::Arc, time::Duration
 };
 use tokio::{
     sync::{mpsc::UnboundedReceiver, oneshot, oneshot::error::TryRecvError},
@@ -47,6 +46,8 @@ use crate::{
     },
 };
 
+type PublisherMap = HashMap<String, Arc<SimulationPublisher>>;
+
 const LOG_TAG: &str = validated_log_tag("SdvTelemetrySimulator");
 
 #[tokio::main]
@@ -61,6 +62,7 @@ async fn main() -> anyhow::Result<()> {
 
 async fn wrapped_main() -> anyhow::Result<()> {
     let cli_args = cli::Args::parse();
+    let has_simulation_publishers = !cli_args.publisher_config_paths.is_empty();
     info!("Running simulator with args:\n{cli_args}");
 
     create_output_directory(!cli_args.no_binary_reports)?;
@@ -72,84 +74,22 @@ async fn wrapped_main() -> anyhow::Result<()> {
     }
 
     binder::ProcessState::start_thread_pool();
-    let configurable_publisher_registry_descriptor = format!(
-        "{}/default",
-        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor()
-    );
-    let configurable_publisher_registry = binder::get_interface::<
-        dyn IConfigurablePublisherRegistry,
-    >(&configurable_publisher_registry_descriptor)?;
-
-    let mut publishers = HashMap::<String, Arc<SimulationPublisher>>::new();
-    for path in &cli_args.publisher_config_paths {
-        let publisher_config = parse_publisher_config(path)?;
-        let service_name = publisher_config.service_name.clone();
-        if publishers.contains_key(&service_name) {
-            return Err(SimulatorError::Error {
-                error_message: format!(
-                    "Found more than one publisher config for the service name {service_name}"
-                ),
-            }
-            .into());
-        }
-
-        let simulation_publisher = Arc::new(SimulationPublisher::new(publisher_config));
-        let simulation_publisher_wrapper =
-            SimulationPublisherWrapper { publisher: Arc::clone(&simulation_publisher) };
-        publishers.insert(service_name.clone(), Arc::clone(&simulation_publisher));
-        let binder_publisher = BnConfigurablePublisher::new_binder(
-            simulation_publisher_wrapper,
-            BinderFeatures::default(),
-        );
-
-        let publisher_info = PublisherInfo {
-            serviceName: service_name.clone(),
-            fileDescriptorProto: simulation_publisher
-                .config
-                .message_descriptor
-                .file_descriptor_proto()
-                .write_to_bytes()
-                .map_err(|error| SimulatorError::Error {
-                    error_message: format!(
-                        "Failed to write file descriptor proto for publisher \"{service_name}\" to bytes: {error}"
-                    ),
-                })?,
-            messageTypeName: format!(
-                ".{}",
-                simulation_publisher.config.message_descriptor.full_name()
-            ),
-            supportsGet: false,
-        };
-
-        configurable_publisher_registry.registerPublisher(&publisher_info, &binder_publisher)?;
-    }
-
     let telemetry_service = get_telemetry_service_instance()?;
     let (mut report_ready_rx, misc_status_rx) =
         get_telemetry_service_listeners(&telemetry_service).await?;
     handle_telemetry_service_status_updates(misc_status_rx);
-
     let metrics_config_uuids = metrics_configs_tracker.get_metrics_config_uuids();
 
+    if has_simulation_publishers {
+        let publishers =
+            parse_and_register_simulation_publishers(&cli_args.publisher_config_paths)?;
+
+        for uuid in &metrics_config_uuids {
+            ensure_all_publishers_exist(uuid, &metrics_configs_tracker, &publishers)?;
+        }
+    }
+
     for uuid in metrics_config_uuids {
-        let publisher_names = metrics_configs_tracker.get_service_publisher_names(&uuid)?;
-        if publisher_names.is_empty() {
-            continue;
-        }
-
-        let missing_publishers = publisher_names
-            .iter()
-            .filter(|name| !publishers.contains_key(*name))
-            .cloned()
-            .collect::<HashSet<String>>();
-        if !missing_publishers.is_empty() {
-            return Err(SimulatorError::MissingSimulationPublishers {
-                missing_publishers,
-                metrics_config_name: metrics_configs_tracker.get_file_name(&uuid)?,
-            }
-            .into());
-        }
-
         metrics_configs_tracker.activate_metrics_config(&telemetry_service, &uuid).await?;
     }
 
@@ -172,8 +112,81 @@ async fn wrapped_main() -> anyhow::Result<()> {
     }
 
     telemetry_service.remove_all_metrics_configs().await?;
-    telemetry_service.finish()?;
     Ok(())
+}
+
+fn ensure_all_publishers_exist(
+    uuid: &str,
+    metrics_configs_tracker: &MetricsConfigsTracker,
+    simulation_publishers: &PublisherMap,
+) -> Result<(), SimulatorError> {
+    let required_publisher_names = metrics_configs_tracker.get_service_publisher_names(uuid)?;
+    let missing_publishers = required_publisher_names
+        .difference(&simulation_publishers.keys().cloned().collect())
+        .cloned()
+        .collect::<HashSet<String>>();
+    if !missing_publishers.is_empty() {
+        return Err(SimulatorError::MissingSimulationPublishers {
+            missing_publishers,
+            metrics_config_name: metrics_configs_tracker.get_file_name(uuid)?,
+        });
+    }
+    Ok(())
+}
+
+fn parse_and_register_simulation_publishers(
+    publisher_config_paths: &Vec<PathBuf>,
+) -> Result<PublisherMap, Error> {
+    let configurable_publisher_registry_descriptor = format!(
+        "{}/default",
+        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor()
+    );
+    let configurable_publisher_registry = binder::get_interface::<
+        dyn IConfigurablePublisherRegistry,
+    >(&configurable_publisher_registry_descriptor)?;
+
+    let mut publishers = HashMap::<String, Arc<SimulationPublisher>>::new();
+    for path in publisher_config_paths {
+        let publisher_config = parse_publisher_config(path)?;
+        let service_name = publisher_config.service_name.clone();
+        let simulation_publisher = Arc::new(SimulationPublisher::new(publisher_config));
+        let simulation_publisher_wrapper =
+            SimulationPublisherWrapper { publisher: Arc::clone(&simulation_publisher) };
+        publishers
+            .try_insert_value(service_name.clone(), Arc::clone(&simulation_publisher))
+            .map_err(|_| SimulatorError::Error {
+                error_message: format!(
+                    "Found more than one publisher config for the service name {service_name}"
+                ),
+            })?;
+
+        let binder_publisher = BnConfigurablePublisher::new_binder(
+            simulation_publisher_wrapper,
+            BinderFeatures::default(),
+        );
+
+        let publisher_info = PublisherInfo {
+        serviceName: service_name.clone(),
+        fileDescriptorProto: simulation_publisher
+            .config
+            .message_descriptor
+            .file_descriptor_proto()
+            .write_to_bytes()
+            .map_err(|error| SimulatorError::Error {
+                error_message: format!(
+                    "Failed to write file descriptor proto for publisher \"{service_name}\" to bytes: {error}"
+                ),
+            })?,
+        messageTypeName: format!(
+            ".{}",
+            simulation_publisher.config.message_descriptor.full_name()
+        ),
+        supportsGet: false,
+    };
+
+        configurable_publisher_registry.registerPublisher(&publisher_info, &binder_publisher)?;
+    }
+    Ok(publishers)
 }
 
 /// Logs miscellaneous telemetry service status updates with info level.
