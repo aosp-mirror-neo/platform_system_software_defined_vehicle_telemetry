@@ -80,3 +80,24 @@ rust_protobuf {
     source_stem: "sdv_telemetry_proto_simulation_publisher_source",
     vendor_available: true,
 }
+
+rust_test {
+    name: "libsdv_telemetry_simulator_unit_tests",
+    defaults: [
+        "telemetry_simulator@rust_defaults",
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    flags: [
+        // keep-sorted start
+        "-A clippy::unwrap_used",
+        // keep-sorted end
+    ],
+}

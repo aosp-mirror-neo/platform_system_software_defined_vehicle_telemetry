@@ -83,3 +83,213 @@ fn convert_duration(
         .to_std()
         .expect("Could not convert chrono Duration to std Duration."))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_args_valid() {
+        let args = Args::try_parse_from(vec![
+            "sdv_telemetry_simulator",
+            "--metrics-configs",
+            "metrics_config_1.textproto",
+            "metrics_config_2.textproto",
+            "--publisher-configs",
+            "publisher_config_1.textproto",
+            "publisher_config_2.textproto",
+            "--max-simulation-time",
+            "seconds:10",
+            "--max-report-count",
+            "5",
+        ]);
+        let args = args.unwrap();
+        assert_eq!(
+            args.metrics_config_paths,
+            vec![
+                PathBuf::from("metrics_config_1.textproto"),
+                PathBuf::from("metrics_config_2.textproto")
+            ]
+        );
+        assert_eq!(
+            args.publisher_config_paths,
+            vec![
+                PathBuf::from("publisher_config_1.textproto"),
+                PathBuf::from("publisher_config_2.textproto")
+            ]
+        );
+        assert_eq!(args.max_simulation_time, Duration::from_secs(10));
+        assert_eq!(args.max_report_count, 5);
+    }
+
+    #[test]
+    fn test_parse_args_no_publishers() {
+        let args = Args::try_parse_from(vec![
+            "telemetry_simulator",
+            "--metrics-configs",
+            "metrics_config_1.textproto",
+            "metrics_config_2.textproto",
+            "--max-simulation-time",
+            "seconds:10",
+            "--max-report-count",
+            "5",
+        ]);
+        assert!(args.unwrap().publisher_config_paths.is_empty());
+    }
+
+    #[test]
+    fn test_parse_args_no_binary_reports() {
+        let args = Args::try_parse_from(vec![
+            "telemetry_simulator",
+            "--metrics-configs",
+            "metrics_config_1.textproto",
+            "metrics_config_2.textproto",
+            "--publisher-configs",
+            "publisher_config_1.textproto",
+            "publisher_config_2.textproto",
+            "--max-simulation-time",
+            "seconds:10",
+            "--max-report-count",
+            "5",
+            "--no-binary-reports",
+        ]);
+        assert!(args.unwrap().no_binary_reports);
+    }
+
+    #[test]
+    fn test_parse_args_missing_metrics_configs() {
+        let args = Args::try_parse_from(vec![
+            "telemetry_simulator",
+            "--publisher-configs",
+            "publisher_config_1.textproto",
+            "publisher_config_2.textproto",
+            "--max-simulation-time",
+            "seconds:10",
+            "--max-report-count",
+            "5",
+        ]);
+        assert_eq!(args.unwrap_err().kind(), ErrorKind::MissingRequiredArgument);
+    }
+
+    #[test]
+    fn test_fmt_args() {
+        let args = Args {
+            metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
+            publisher_config_paths: vec![
+                PathBuf::from("publisher_config_1.textproto"),
+                PathBuf::from("publisher_config_2.textproto"),
+            ],
+            no_binary_reports: true,
+            max_simulation_time: Duration::from_secs(10),
+            max_report_count: 5,
+        };
+
+        let expected_output = r#"Metrics configs: ["metrics_config_1.textproto"]
+Publisher configs: ["publisher_config_1.textproto", "publisher_config_2.textproto"]
+Not writing reports to disk.
+Finish simulator after 00:00:10 or 5 returned reports, whichever comes first.
+"#;
+
+        let actual_output = format!("{args}");
+
+        assert_eq!(actual_output, expected_output);
+    }
+
+    #[test]
+    fn test_fmt_args_no_publishers() {
+        let args = Args {
+            metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
+            publisher_config_paths: vec![],
+            no_binary_reports: false,
+            max_simulation_time: Duration::from_secs(30),
+            max_report_count: 10,
+        };
+
+        let expected_output = r#"Metrics configs: ["metrics_config_1.textproto"]
+Running as simple telemetry client without simulation publishers.
+Finish simulator after 00:00:30 or 10 returned reports, whichever comes first.
+"#;
+
+        let actual_output = format!("{args}");
+
+        assert_eq!(actual_output, expected_output);
+    }
+
+    #[test]
+    fn test_convert_duration_seconds() {
+        let duration = convert_duration(10, ChronoDuration::try_seconds).unwrap();
+        assert_eq!(duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_convert_duration_minutes() {
+        let duration = convert_duration(5, ChronoDuration::try_minutes).unwrap();
+        assert_eq!(duration, Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_convert_duration_hours() {
+        let duration = convert_duration(2, ChronoDuration::try_hours).unwrap();
+        assert_eq!(duration, Duration::from_secs(7200));
+    }
+
+    #[test]
+    fn test_convert_duration_too_large() {
+        let result = convert_duration(u64::MAX, ChronoDuration::try_seconds);
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn test_parse_duration_second() {
+        let duration = parse_duration("second:1").unwrap();
+        assert_eq!(duration, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn test_parse_duration_seconds() {
+        let duration = parse_duration("seconds:10").unwrap();
+        assert_eq!(duration, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_parse_duration_minute() {
+        let duration = parse_duration("minutes:2").unwrap();
+        assert_eq!(duration, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn test_parse_duration_minutes() {
+        let duration = parse_duration("minute:1").unwrap();
+        assert_eq!(duration, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_parse_duration_hour() {
+        let duration = parse_duration("hour:1").unwrap();
+        assert_eq!(duration, Duration::from_secs(3600));
+    }
+
+    #[test]
+    fn test_parse_duration_hours() {
+        let duration = parse_duration("hours:2").unwrap();
+        assert_eq!(duration, Duration::from_secs(7200));
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_unit() {
+        let result = parse_duration("days:1");
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_value() {
+        let result = parse_duration("seconds:abc");
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
+    }
+
+    #[test]
+    fn test_parse_duration_missing_colon() {
+        let result = parse_duration("seconds10");
+        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
+    }
+}
