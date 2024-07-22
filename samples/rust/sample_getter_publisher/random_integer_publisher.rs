@@ -2,8 +2,7 @@
 
 mod subscription;
 
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription};
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::{ISubscriber, ISubscriberAsync};
 use log::{info, error};
 use protobuf::Message;
 use sample_publisher_proto::sample_publisher::SampleMessage;
@@ -16,7 +15,7 @@ use subscription::RandomIntegerPublisherSubscription;
 pub struct RandomIntegerPublisher {
     next_subscription_id: AtomicU32,
     latest_message: Mutex<Option<SampleMessage>>,
-    subscribers: Mutex<HashMap<u32, binder::Strong<dyn ISubscriber>>>,
+    subscribers: Mutex<HashMap<u32, binder::Strong<dyn ISubscriberAsync<binder_tokio::Tokio>>>>,
 }
 
 impl RandomIntegerPublisher {
@@ -37,8 +36,10 @@ impl RandomIntegerPublisher {
                 message.write_to_bytes().expect("Message should be successfully serialized");
             self.latest_message.lock().unwrap().replace(message);
 
-            for subscriber in self.subscribers.lock().unwrap().values() {
-                if let Err(err) = subscriber.sendData(&message_bytes) {
+            let subscribers =
+                self.subscribers.lock().unwrap().values().cloned().collect::<Vec<_>>();
+            for subscriber in subscribers {
+                if let Err(err) = subscriber.sendData(&message_bytes).await {
                     error!("Error while sending message to subscriber: {err:?}");
                 }
             }
@@ -51,15 +52,10 @@ impl RandomIntegerPublisher {
         self: &Arc<Self>,
         subscriber: &binder::Strong<dyn ISubscriber>,
         _config: Option<&[u8]>,
-    ) -> binder::Strong<dyn IConfigurablePublisherSubscription> {
+    ) -> RandomIntegerPublisherSubscription {
         let subscription_id = self.next_subscription_id.fetch_add(1, Ordering::SeqCst);
-        let subscription =
-            RandomIntegerPublisherSubscription::new(Arc::downgrade(self), subscription_id);
-        self.subscribers.lock().unwrap().insert(subscription_id, subscriber.clone());
-        BnConfigurablePublisherSubscription::new_binder(
-            subscription,
-            binder::BinderFeatures::default(),
-        )
+        self.subscribers.lock().unwrap().insert(subscription_id, subscriber.clone().into_async());
+        RandomIntegerPublisherSubscription::new(Arc::downgrade(self), subscription_id)
     }
 
     pub fn get_latest_message(&self) -> Option<Vec<u8>> {
@@ -82,6 +78,7 @@ impl RandomIntegerPublisher {
 mod tests {
     use super::*;
 
+    use binder::BinderFeatures;
     use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::{BnSubscriber, ISubscriber};
     use std::sync::Arc;
     use tokio::sync::mpsc;
@@ -111,7 +108,7 @@ mod tests {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mock_subscriber = MockSubscriber::new(tx);
         let bn_subscriber =
-            BnSubscriber::new_binder(mock_subscriber.clone(), binder::BinderFeatures::default());
+            BnSubscriber::new_binder(mock_subscriber.clone(), BinderFeatures::default());
         let publisher = Arc::new(RandomIntegerPublisher::new());
         let publisher_clone = Arc::clone(&publisher);
 

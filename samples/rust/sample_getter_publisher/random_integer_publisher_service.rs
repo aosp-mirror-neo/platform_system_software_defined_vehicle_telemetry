@@ -1,8 +1,8 @@
 // Copyright 2023 Google LLC
 
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
-    ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher, IConfigurablePublisherSubscription::IConfigurablePublisherSubscription
-};
+use binder::BinderFeatures;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherSubscription::{BnConfigurablePublisherSubscription, IConfigurablePublisherSubscription};
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher};
 use std::sync::Arc;
 
 use crate::random_integer_publisher::RandomIntegerPublisher;
@@ -20,7 +20,8 @@ impl IConfigurablePublisher for RandomIntegerPublisherService {
         subscriber: &binder::Strong<dyn ISubscriber>,
         config: Option<&[u8]>,
     ) -> binder::Result<binder::Strong<dyn IConfigurablePublisherSubscription>> {
-        Ok(self.publisher.create_subscription(subscriber, config))
+        let subscription = self.publisher.create_subscription(subscriber, config);
+        Ok(BnConfigurablePublisherSubscription::new_binder(subscription, BinderFeatures::default()))
     }
 
     #[allow(non_snake_case)]

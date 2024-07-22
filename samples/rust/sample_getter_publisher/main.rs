@@ -5,6 +5,7 @@
 mod random_integer_publisher;
 mod random_integer_publisher_service;
 
+use binder::BinderFeatures;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{IConfigurablePublisherRegistry, BpConfigurablePublisherRegistry};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisher::BnConfigurablePublisher;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::PublisherInfo::PublisherInfo;
@@ -41,7 +42,7 @@ async fn main() -> Result<(), binder::Status> {
     let publisher = Arc::new(RandomIntegerPublisher::new());
     let publisher_wrapper = RandomIntegerPublisherService::new(Arc::clone(&publisher));
     let binder_publisher =
-        BnConfigurablePublisher::new_binder(publisher_wrapper, binder::BinderFeatures::default());
+        BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
 
     info!("Registering publisher");
     let file_descriptor = sample_publisher::file_descriptor();
