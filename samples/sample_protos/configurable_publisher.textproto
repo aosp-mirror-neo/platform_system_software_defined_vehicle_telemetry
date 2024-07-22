@@ -9,11 +9,11 @@ descriptor_protos {
   package: "android.automotive.telemetry.messages"
 
   message_type {
-    name: "VehicleConnectivityReport"
+    name: "SampleReport"
     field {
       label: LABEL_OPTIONAL
       type: TYPE_INT32
-      name: "vector_vehicle_connection_status"
+      name: "sample_data"
 
       number: 1
     }
@@ -35,7 +35,7 @@ expression_nodes {
 }
 
 triggers {
-  name: "start_trigger"
+  name: "StartTrigger"
   periodic_trigger {
     interval {
       seconds: 2
@@ -43,23 +43,23 @@ triggers {
   }
 }
 triggers {
-  name: "period_2s"
-  periodic_trigger {
-    interval {
-      seconds: 2
-    }
+  name: "TestPublisherTrigger"
+  data_trigger {
+    publisher_name: "TestPublisher"
   }
 }
 
-start_trigger_name: "start_trigger"
+start_trigger_name: "StartTrigger"
 metrics_report_configs {
   name: "SampleReport"
-  trigger_names: "period_2s"
+  trigger_names: "TestPublisherTrigger"
   message_builder {
-    message_type: ".android.automotive.telemetry.messages.VehicleConnectivityReport"
+    message_type: ".android.automotive.telemetry.messages.SampleReport"
     field_assignments {
-      field_name: "vector_vehicle_connection_status"
-      count_aggregation {}
+      field_name: "sample_data"
+      no_aggregation {
+        expression_node_index: 0
+      }
     }
   }
 }
