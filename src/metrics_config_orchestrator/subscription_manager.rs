@@ -126,8 +126,8 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
 mod tests {
     use super::*;
 
+    use parking_lot::Mutex;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::Mutex;
 
     const KEY: &str = "test_key";
     const KEY2: &str = "test_key2";
@@ -163,7 +163,7 @@ mod tests {
             callback_map: Arc<AsyncMutex<HashMap<String, CallbackFn<()>>>>,
         ) {
             self.num_activate_calls.fetch_add(1, Ordering::SeqCst);
-            self.callback_map.lock().unwrap().replace(callback_map);
+            self.callback_map.lock().replace(callback_map);
         }
 
         async fn deactivate(&self) {
@@ -214,7 +214,7 @@ mod tests {
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
 
         // Verify that the map contains a callback for the specified key.
-        let callback_map = activatable.callback_map.lock().unwrap().take().unwrap();
+        let callback_map = activatable.callback_map.lock().take().unwrap();
         let callback_map_lock = callback_map.lock().await;
         assert!(callback_map_lock.contains_key(KEY));
     }
@@ -257,7 +257,7 @@ mod tests {
         manager.unsubscribe(&KEY.to_owned()).await;
 
         // Verify that the callback was removed from the map.
-        let callback_map = activatable.callback_map.lock().unwrap().take().unwrap();
+        let callback_map = activatable.callback_map.lock().take().unwrap();
         let callback_map_lock = callback_map.lock().await;
         assert!(!callback_map_lock.contains_key(KEY));
     }

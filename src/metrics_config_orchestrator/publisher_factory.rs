@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC
 
+use downcast_rs::Downcast;
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
@@ -8,6 +9,9 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
+
+#[cfg(test)]
+use downcast_rs::impl_downcast;
 
 use crate::expr::node::Node;
 use crate::metrics_config_orchestrator::message_builder_factory::{
@@ -19,8 +23,7 @@ use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, Ser
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
-pub(crate) trait PublisherFactory {
+pub(crate) trait PublisherFactory: Send + Sync + Downcast {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
@@ -37,7 +40,9 @@ pub(crate) trait PublisherFactory {
     ) -> Result<(), PublisherFactoryError>;
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
+#[cfg(test)]
+impl_downcast!(PublisherFactory);
+
 pub(crate) struct PublisherFactoryCreateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
@@ -360,9 +365,7 @@ mod tests {
 
         let res = factory.create_using_default_context(&publisher).unwrap();
 
-        let Ok(res_publisher) = &res.downcast_arc::<ServicePublisher>() else {
-            panic!("Unexpected publisher type");
-        };
+        let res_publisher = &res.downcast_arc::<ServicePublisher>().ok().unwrap();
         assert!(matches!(res_publisher.connection_type, ConnectionType::Subscription));
     }
 
@@ -374,9 +377,7 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
-        let Ok(res_publisher) = res.downcast_arc::<ServicePublisher>() else {
-            panic!("Unexpected publisher type");
-        };
+        let res_publisher = res.downcast_arc::<ServicePublisher>().ok().unwrap();
 
         let configuration_value =
             res_publisher.configuration.as_ref().expect("Configuration should be set");
@@ -411,9 +412,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
-        let Ok(res_publisher) = res.downcast_arc::<AggregationPublisher>() else {
-            panic!("Unexpected publisher type");
-        };
+        let res_publisher = res.downcast_arc::<AggregationPublisher>().ok().unwrap();
         assert_eq!(res_publisher.triggers.len(), 1);
         assert!(Arc::ptr_eq(&res_publisher.triggers[0], &(trigger as Arc<dyn Trigger>)));
         assert!(res_publisher.reset_on_get);

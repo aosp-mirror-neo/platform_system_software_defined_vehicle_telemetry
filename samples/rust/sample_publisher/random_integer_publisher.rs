@@ -7,9 +7,10 @@ use crate::random_integer_publisher_subscription::RandomIntegerPublisherSubscrip
 use sample_publisher_proto::sample_publisher::SampleMessage;
 
 use log::{error, info};
+use parking_lot::Mutex;
 use protobuf::{Error, Message};
 use rand::Rng;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::{sync::Notify, time::Duration};
 
 pub struct RandomIntegerPublisher {
@@ -27,7 +28,7 @@ impl RandomIntegerPublisher {
         subscriber: &Strong<dyn ISubscriber>,
         _config: Option<&[u8]>,
     ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
-        let mut guard = self.subscriber.lock().unwrap();
+        let mut guard = self.subscriber.lock();
         *guard = Some(subscriber.clone());
         self.notify_subscribed.notify_one();
 
@@ -48,7 +49,7 @@ impl RandomIntegerPublisher {
         let mut rng = rand::thread_rng();
 
         loop {
-            match &*self.subscriber.lock().unwrap() {
+            match &*self.subscriber.lock() {
                 Some(subscriber) => {
                     // Generate random data and send to subscriber.
                     let random_value: i32 = rng.gen();

@@ -6,11 +6,7 @@ use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdv_telemetry_utils::value_holder::ValueHolder;
-use std::{
-    collections::HashMap,
-    fmt::{self, Display, Formatter},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
@@ -22,10 +18,6 @@ use crate::{
         ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
     },
 };
-
-const PUBLISHER_STATE_INACTIVE: &str = "Inactive";
-const PUBLISHER_STATE_ACTIVE_GETTER: &str = "Active Getter";
-const PUBLISHER_STATE_ACTIVE_SUBSCRIBED: &str = "Active Subscribed";
 
 pub(crate) enum ConnectionType {
     Subscription,
@@ -42,6 +34,8 @@ pub(crate) struct ServicePublisher {
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
 }
 
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 enum ServicePublisherState {
     /// The publisher is not subscribed to the underlying data source
     /// and doesn't provide the latest message.
@@ -61,16 +55,6 @@ enum ServicePublisherState {
         // Subscription to ServiceAdapter.
         service_subscription: Option<ServiceSubscription>,
     },
-}
-
-impl Display for ServicePublisherState {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            ServicePublisherState::Inactive => PUBLISHER_STATE_INACTIVE,
-            ServicePublisherState::ActiveGetter { .. } => PUBLISHER_STATE_ACTIVE_GETTER,
-            ServicePublisherState::ActiveSubscribed { .. } => PUBLISHER_STATE_ACTIVE_SUBSCRIBED,
-        })
-    }
 }
 
 #[async_trait]
@@ -427,7 +411,6 @@ mod tests {
         let latest_configuration = service_adapter
             .latest_configuration
             .lock()
-            .unwrap()
             .as_ref()
             .expect("Option should be Some")
             .unpack::<Empty>()

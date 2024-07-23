@@ -4,10 +4,11 @@ mod value_aggregator;
 pub(super) mod value_aggregator_factory;
 
 use log::trace;
+use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 
 use crate::expr::node::{Node, NodeEvaluationContext};
@@ -62,8 +63,7 @@ impl MessageBuilder for MessageBuilderImpl {
         ValueHolder::collect_unordered(operation_results).map(move |results| {
             let mut results_map = results.into_iter().collect::<HashMap<_, _>>();
             let mut msg = self_clone.message_descriptor.new_instance();
-            for (field_name, field_aggregator) in &mut *self_clone.field_assignments.lock().unwrap()
-            {
+            for (field_name, field_aggregator) in &mut *self_clone.field_assignments.lock() {
                 let input_value = results_map.remove(field_name).transpose().map_err(|e| {
                     MessageBuilderError::ExpressionEvaluationError {
                         field_name: field_name.to_owned(),
@@ -452,6 +452,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn build_from_asynchronous_result_propagates_error() {
         // Setup a field node that always returns an error.
@@ -489,6 +490,7 @@ mod tests {
         );
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn build_from_asynchronous_result_success() {
         // Setup a field node that returns the value of the test message int field.

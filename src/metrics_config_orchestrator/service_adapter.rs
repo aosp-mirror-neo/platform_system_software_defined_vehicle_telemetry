@@ -359,6 +359,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_accessor_latest_message_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -376,6 +377,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_get_latest_message_success() {
         let mut message = Box::new(Int32Value::new());

@@ -1,8 +1,9 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use std::collections::HashSet;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::metrics_config_orchestrator::MetricsConfigOrchestratorError as ConfigOrchestratorError;
 use crate::{
@@ -46,14 +47,14 @@ impl MockMetricsConfigManager {
     }
 
     pub(crate) fn populate_active_configs(&self, config_uuids: Vec<String>) {
-        let mut active_configs = self.active_configs.lock().unwrap();
+        let mut active_configs = self.active_configs.lock();
         for uuid in config_uuids {
             active_configs.insert(uuid);
         }
     }
 
     pub(crate) fn populate_inactive_configs(&self, config_uuids: Vec<String>) {
-        let mut inactive_configs = self.inactive_configs.lock().unwrap();
+        let mut inactive_configs = self.inactive_configs.lock();
         for uuid in config_uuids {
             inactive_configs.insert(uuid);
         }
@@ -68,8 +69,8 @@ impl MetricsConfigManager for MockMetricsConfigManager {
     ) -> Result<String, ConfigManagerError> {
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(metrics_config)
             .map_err(|_| ConfigManagerError::ConfigParseError)?;
-        *self.num_add_metrics_config_calls.lock().unwrap() += 1;
-        if self.inactive_configs.lock().unwrap().insert(config.uuid.clone()) {
+        *self.num_add_metrics_config_calls.lock() += 1;
+        if self.inactive_configs.lock().insert(config.uuid.clone()) {
             return Ok(config.uuid);
         }
         Err(ConfigManagerError::ConfigOrchestratorError {
@@ -78,10 +79,10 @@ impl MetricsConfigManager for MockMetricsConfigManager {
     }
 
     async fn activate_metrics_config(&self, config_uuid: &str) -> Result<(), ConfigManagerError> {
-        *self.num_activate_metrics_config_calls.lock().unwrap() += 1;
-        let maybe_uuid = self.inactive_configs.lock().unwrap().take(config_uuid);
+        *self.num_activate_metrics_config_calls.lock() += 1;
+        let maybe_uuid = self.inactive_configs.lock().take(config_uuid);
         if let Some(uuid) = maybe_uuid {
-            self.active_configs.lock().unwrap().insert(uuid);
+            self.active_configs.lock().insert(uuid);
             return Ok(());
         }
 
@@ -89,10 +90,10 @@ impl MetricsConfigManager for MockMetricsConfigManager {
     }
 
     async fn deactivate_metrics_config(&self, config_uuid: &str) -> Result<(), ConfigManagerError> {
-        *self.num_deactivate_metrics_config_calls.lock().unwrap() += 1;
-        let maybe_uuid = self.active_configs.lock().unwrap().take(config_uuid);
+        *self.num_deactivate_metrics_config_calls.lock() += 1;
+        let maybe_uuid = self.active_configs.lock().take(config_uuid);
         if let Some(uuid) = maybe_uuid {
-            self.inactive_configs.lock().unwrap().insert(uuid);
+            self.inactive_configs.lock().insert(uuid);
             return Ok(());
         }
 
@@ -100,12 +101,12 @@ impl MetricsConfigManager for MockMetricsConfigManager {
     }
 
     async fn remove_metrics_config(&self, config_uuid: &str) -> Result<(), ConfigManagerError> {
-        *self.num_remove_config_calls.lock().unwrap() += 1;
-        let maybe_uuid = self.active_configs.lock().unwrap().take(config_uuid);
+        *self.num_remove_config_calls.lock() += 1;
+        let maybe_uuid = self.active_configs.lock().take(config_uuid);
         if maybe_uuid.is_some() {
             return Ok(());
         }
-        let maybe_uuid = self.inactive_configs.lock().unwrap().take(config_uuid);
+        let maybe_uuid = self.inactive_configs.lock().take(config_uuid);
         if maybe_uuid.is_some() {
             return Ok(());
         }
@@ -113,22 +114,22 @@ impl MetricsConfigManager for MockMetricsConfigManager {
     }
 
     async fn remove_all_metrics_configs(&self) -> Result<(), ConfigManagerError> {
-        *self.num_remove_all_config_calls.lock().unwrap() += 1;
+        *self.num_remove_all_config_calls.lock() += 1;
         Ok(())
     }
 
     async fn get_active_metrics_config_uuids(&self) -> Vec<String> {
-        *self.num_get_active_config_calls.lock().unwrap() += 1;
+        *self.num_get_active_config_calls.lock() += 1;
 
-        let config_list = self.active_configs.lock().unwrap().clone().into_iter().collect();
+        let config_list = self.active_configs.lock().clone().into_iter().collect();
 
         config_list
     }
 
     async fn get_inactive_metrics_config_uuids(&self) -> Vec<String> {
-        *self.num_get_inactive_config_calls.lock().unwrap() += 1;
+        *self.num_get_inactive_config_calls.lock() += 1;
 
-        let config_list = self.inactive_configs.lock().unwrap().clone().into_iter().collect();
+        let config_list = self.inactive_configs.lock().clone().into_iter().collect();
 
         config_list
     }

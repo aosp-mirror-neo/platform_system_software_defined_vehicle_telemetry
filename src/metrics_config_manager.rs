@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
 use log::{error, info};
+use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_utils::file_io_utils;
 use std::collections::{HashMap, HashSet};
@@ -11,7 +12,7 @@ use std::marker::{Send, Sync};
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 use thiserror::Error;
 use tokio::io;
 
@@ -208,7 +209,7 @@ impl MetricsConfigManagerImpl {
                         .await
                     {
                         Ok(()) => {
-                            let mut metric_config_map = configs_store.lock().unwrap();
+                            let mut metric_config_map = configs_store.lock();
                             metric_config_map.insert(uuid.clone(), bytes.len());
                             num_active_configs += 1;
                             total_size += bytes.len();
@@ -253,7 +254,7 @@ impl MetricsConfigManagerImpl {
                 // Check if it's a file
                 if metadata.is_file() {
                     let file_name = entry.file_name();
-                    let mut metric_config_map = configs_store.lock().unwrap();
+                    let mut metric_config_map = configs_store.lock();
                     metric_config_map
                         .insert(file_name.into_string().unwrap(), metadata.len() as usize);
                     total_size += metadata.len() as usize;
@@ -333,10 +334,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         // updated during each API call that modifies active metrics configs.
         // Alternate to metric_config_map would be read the file size from memory which constitutes
         // an IO operation and is inefficient.
-        self.metrics_configs_store
-            .lock()
-            .unwrap()
-            .insert(config.uuid.clone(), metrics_config.len());
+        self.metrics_configs_store.lock().insert(config.uuid.clone(), metrics_config.len());
         self.cur_persistent_config_store_size.fetch_add(metrics_config.len(), Ordering::SeqCst);
 
         Ok(config.uuid)
@@ -418,7 +416,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         info!("remove_metrics_config: {}", metrics_config_uuid);
         let uuid = metrics_config_uuid.to_string();
         let config_size = {
-            let mut metric_config_map = self.metrics_configs_store.lock().unwrap();
+            let mut metric_config_map = self.metrics_configs_store.lock();
             metric_config_map.remove(&uuid).ok_or_else(|| {
                 MetricsConfigManagerError::InvalidConfigUuid {
                     uuid: metrics_config_uuid.to_string(),
@@ -475,7 +473,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         }
 
         {
-            let metric_config_map = mem::take(&mut *self.metrics_configs_store.lock().unwrap());
+            let metric_config_map = mem::take(&mut *self.metrics_configs_store.lock());
             for uuid in metric_config_map.keys() {
                 let res = self.metrics_config_orchestrator.finish_config(uuid).await;
                 if let Err(err) = res {
@@ -502,7 +500,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         info!("get_active_metrics_config_uuids");
 
         let active_configs = self.metrics_config_orchestrator.get_active_metrics_config_uuids();
-        let metrics_config_store_lock = self.metrics_configs_store.lock().unwrap();
+        let metrics_config_store_lock = self.metrics_configs_store.lock();
         let all_configs_set = metrics_config_store_lock.keys().collect::<HashSet<_>>();
 
         let inactive_configs = all_configs_set
@@ -559,7 +557,7 @@ mod tests {
         }
 
         pub(crate) fn populate_active_configs(&self, config_uuids: Vec<String>) {
-            *self.configs.lock().unwrap() = config_uuids;
+            *self.configs.lock() = config_uuids;
         }
     }
 
@@ -569,10 +567,10 @@ mod tests {
             &self,
             _: &MetricsConfigProto,
         ) -> Result<(), ConfigOrchestratorError> {
-            let mut num_calls = self.num_initialize_config_calls.lock().unwrap();
+            let mut num_calls = self.num_initialize_config_calls.lock();
             *num_calls += 1;
 
-            if let Some(err) = self.next_error.lock().unwrap().take() {
+            if let Some(err) = self.next_error.lock().take() {
                 return Err(err);
             }
 
@@ -580,10 +578,10 @@ mod tests {
         }
 
         async fn finish_config(&self, _: &str) -> Result<(), ConfigOrchestratorError> {
-            let mut num_calls = self.num_finish_config_calls.lock().unwrap();
+            let mut num_calls = self.num_finish_config_calls.lock();
             *num_calls += 1;
 
-            if let Some(err) = self.next_error.lock().unwrap().take() {
+            if let Some(err) = self.next_error.lock().take() {
                 return Err(err);
             }
 
@@ -591,10 +589,10 @@ mod tests {
         }
 
         fn validate_config(&self, _: &MetricsConfigProto) -> Result<(), ConfigOrchestratorError> {
-            let mut num_calls = self.num_validate_config_calls.lock().unwrap();
+            let mut num_calls = self.num_validate_config_calls.lock();
             *num_calls += 1;
 
-            if let Some(err) = self.next_error.lock().unwrap().take() {
+            if let Some(err) = self.next_error.lock().take() {
                 return Err(err);
             }
 
@@ -602,9 +600,9 @@ mod tests {
         }
 
         fn get_active_metrics_config_uuids(&self) -> Vec<String> {
-            *self.num_get_active_config_calls.lock().unwrap() += 1;
+            *self.num_get_active_config_calls.lock() += 1;
 
-            let active_configs = self.configs.lock().unwrap().clone().into_iter().collect();
+            let active_configs = self.configs.lock().clone().into_iter().collect();
             active_configs
         }
     }
@@ -682,19 +680,19 @@ mod tests {
         }
 
         pub fn get_num_initialize_config_calls(&self) -> i32 {
-            *self.num_initialize_config_calls.lock().unwrap()
+            *self.num_initialize_config_calls.lock()
         }
 
         pub fn get_num_finish_config_calls(&self) -> i32 {
-            *self.num_finish_config_calls.lock().unwrap()
+            *self.num_finish_config_calls.lock()
         }
 
         pub fn get_num_validate_config_calls(&self) -> i32 {
-            *self.num_validate_config_calls.lock().unwrap()
+            *self.num_validate_config_calls.lock()
         }
 
         pub fn get_num_get_active_config_calls(&self) -> i32 {
-            *self.num_get_active_config_calls.lock().unwrap()
+            *self.num_get_active_config_calls.lock()
         }
     }
 
@@ -763,7 +761,7 @@ mod tests {
             Arc::new(MockServicePublisherAccessor::new()),
             |_| {},
             move |status_code, status_msg| {
-                let mut maybe_sender = sender_clone.lock().unwrap();
+                let mut maybe_sender = sender_clone.lock();
                 maybe_sender.take().unwrap().send((status_code, status_msg)).unwrap();
             },
         )
@@ -804,7 +802,7 @@ mod tests {
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
-        test_environment.metrics_config_orchestrator.next_error.lock().unwrap().replace(
+        test_environment.metrics_config_orchestrator.next_error.lock().replace(
             ConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid: UUID.to_string() },
         );
 
@@ -885,7 +883,7 @@ mod tests {
         assert!(old_file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
 
-        test_environment.metrics_config_orchestrator.next_error.lock().unwrap().replace(
+        test_environment.metrics_config_orchestrator.next_error.lock().replace(
             ConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid: UUID.to_string() },
         );
 
@@ -950,7 +948,7 @@ mod tests {
         assert!(new_file_path.is_file());
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
 
-        test_environment.metrics_config_orchestrator.next_error.lock().unwrap().replace(
+        test_environment.metrics_config_orchestrator.next_error.lock().replace(
             ConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid: UUID.to_string() },
         );
 

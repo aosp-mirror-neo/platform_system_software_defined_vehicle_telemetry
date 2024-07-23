@@ -5,12 +5,13 @@
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use log::{error, info, trace};
+use parking_lot::Mutex;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::Notify;
 
 use sdv_telemetry::service_publisher_accessor::{
@@ -59,7 +60,6 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         let message_descriptor = match self
             .topic_message_descriptors
             .lock()
-            .unwrap()
             .entry(topic_name.to_owned())
         {
             Entry::Occupied(o) => o.get().clone(),
@@ -126,9 +126,9 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
 
-        match self.topic_subscriptions.lock().unwrap().entry(topic_name.to_owned()) {
+        match self.topic_subscriptions.lock().entry(topic_name.to_owned()) {
             Entry::Occupied(o) => {
-                let mut callbacks = self.topic_callbacks.lock().unwrap();
+                let mut callbacks = self.topic_callbacks.lock();
 
                 match callbacks.entry(topic_name.to_owned()) {
                     Entry::Occupied(mut entry) => {
@@ -193,7 +193,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
 
                 {
                     let callback = Arc::new(Mutex::new(callback));
-                    let mut callbacks = self.topic_callbacks.lock().unwrap();
+                    let mut callbacks = self.topic_callbacks.lock();
                     callbacks.entry(topic_name.to_owned()).or_default().push(callback);
                 }
 
@@ -229,10 +229,10 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                         for message_bytes in buffer.chunks(message_size).take(number_of_messages) {
                             match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
                                 Ok(msg) => {
-                                    let mut callbacks = topic_callbacks_clone.lock().unwrap();
+                                    let mut callbacks = topic_callbacks_clone.lock();
                                     if let Some(callback_list) = callbacks.get_mut(&topic_name) {
                                         for callback in callback_list.iter_mut() {
-                                            let mut callback = callback.lock().unwrap();
+                                            let mut callback = callback.lock();
                                             (callback)(msg.clone());
                                         }
                                     } else {

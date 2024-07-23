@@ -1,20 +1,29 @@
 // Copyright 2023 Google LLC
 
 // External dependencies.
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::IConfigurablePublisher, ISubscriber::BnSubscriber, PublisherInfo::PublisherInfo, IConfigurablePublisherSubscription::IConfigurablePublisherSubscription};
-use google_sdv_telemetry_configurable_publisher::binder::{Strong, Weak as BinderWeak};
 use async_trait::async_trait;
 use binder::BinderFeatures;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
+    IConfigurablePublisher::IConfigurablePublisher,
+    IConfigurablePublisherSubscription::IConfigurablePublisherSubscription,
+    ISubscriber::BnSubscriber,
+    PublisherInfo::PublisherInfo
+};
+use google_sdv_telemetry_configurable_publisher::binder::{Strong, Weak as BinderWeak};
 use log::info;
+use parking_lot::Mutex;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
-use sdv_telemetry::service_publisher_accessor::{CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{
+    CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
+    ServicePublisherSubscription,
+};
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
-use std::{fmt::Debug, sync::Mutex};
+use std::fmt::Debug;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
@@ -167,7 +176,7 @@ impl ConfigurablePublisherRegistry {
                 message_type_name: publisher_info.messageTypeName.clone(),
             })?;
 
-        match self.publisher_entries.lock().unwrap().entry(publisher_info.serviceName.clone()) {
+        match self.publisher_entries.lock().entry(publisher_info.serviceName.clone()) {
             Entry::Occupied(_) => {
                 return Err(ConfigurablePublisherRegistryRegisterError::ServiceAlreadyRegistered {
                     service_name: publisher_info.serviceName.clone(),
@@ -186,7 +195,7 @@ impl ConfigurablePublisherRegistry {
     }
 
     pub(crate) async fn unregister_publisher(&self, service_name: &str) -> crate::BinderResult<()> {
-        let mut publisher_entries_lock = self.publisher_entries.lock().unwrap();
+        let mut publisher_entries_lock = self.publisher_entries.lock();
 
         match publisher_entries_lock.entry(service_name.to_string()) {
             Entry::Occupied(o) => {
@@ -208,7 +217,7 @@ impl ConfigurablePublisherRegistry {
         service_name: &str,
         visitor: impl FnOnce(&PublisherEntry) -> T,
     ) -> Option<T> {
-        let publisher_entries_lock = publisher_entries.lock().unwrap();
+        let publisher_entries_lock = publisher_entries.lock();
         let entry = publisher_entries_lock.get(service_name)?;
         Some(visitor(entry))
     }
@@ -295,8 +304,7 @@ mod tests {
             _subscriber: &Strong<dyn ISubscriber>,
             configuration: Option<&[u8]>,
         ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
-            *self.last_configuration.lock().unwrap() =
-                configuration.map(|config| config.to_owned());
+            *self.last_configuration.lock() = configuration.map(|config| config.to_owned());
             self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
 
             let binder_subscription = BnConfigurablePublisherSubscription::new_binder(
@@ -309,11 +317,10 @@ mod tests {
         }
 
         fn getLatestMessage(&self, configuration: Option<&[u8]>) -> BinderResult<Option<Vec<u8>>> {
-            *self.last_configuration.lock().unwrap() =
-                configuration.map(|config| config.to_owned());
+            *self.last_configuration.lock() = configuration.map(|config| config.to_owned());
 
             if self.supports_get {
-                Ok(self.next_latest_message.lock().unwrap().take())
+                Ok(self.next_latest_message.lock().take())
             } else {
                 Err(Status::new_exception(ExceptionCode::UNSUPPORTED_OPERATION, None))
             }
@@ -417,11 +424,7 @@ mod tests {
         let config = Int32Value { value: 42, ..Default::default() };
         let msg = SampleMessage { sample_data: 442, ..Default::default() };
         let configurable_publisher = MockConfigurablePublisher::new(true);
-        configurable_publisher
-            .next_latest_message
-            .lock()
-            .unwrap()
-            .replace(msg.write_to_bytes().unwrap());
+        configurable_publisher.next_latest_message.lock().replace(msg.write_to_bytes().unwrap());
         let configurable_publisher_registry =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
@@ -434,7 +437,7 @@ mod tests {
             .unwrap();
 
         let last_config = Any::parse_from_bytes(
-            configurable_publisher.last_configuration.lock().unwrap().as_ref().unwrap(),
+            configurable_publisher.last_configuration.lock().as_ref().unwrap(),
         )
         .unwrap()
         .unpack::<Int32Value>()
@@ -464,7 +467,6 @@ mod tests {
         assert!(configurable_publisher_registry
             .publisher_entries
             .lock()
-            .unwrap()
             .contains_key(SERVICE_NAME));
     }
 
@@ -516,7 +518,6 @@ mod tests {
         assert!(!configurable_publisher_registry
             .publisher_entries
             .lock()
-            .unwrap()
             .contains_key(SERVICE_NAME));
 
         // Unregistering doesn't unsubscribe from the publisher.
@@ -540,7 +541,6 @@ mod tests {
         assert!(configurable_publisher_registry
             .publisher_entries
             .lock()
-            .unwrap()
             .contains_key(SERVICE_NAME));
     }
 }

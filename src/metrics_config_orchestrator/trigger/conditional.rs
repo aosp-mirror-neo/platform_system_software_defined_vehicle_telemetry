@@ -3,14 +3,12 @@
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::error;
-use sdv_telemetry_proto_rust::{
-    expression::combination_node::{Operator, RelationalOperator},
-    metrics_configuration::conditional_trigger::ConditionType,
-};
+use parking_lot::Mutex;
+use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::marker::Send;
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{base::BaseTrigger, Trigger, TriggerCallbackFn, TriggerSubscriber};
@@ -18,6 +16,14 @@ use crate::expr::node::{Node, NodeEvaluationContext};
 use crate::expr::node_error::NodeError;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::subscription_manager::Activatable;
+
+pub(crate) enum ConditionType {
+    RisingEdge,
+    FallingEdge,
+    AllChanges,
+    IsTrue,
+    IsFalse,
+}
 
 pub(crate) struct ConditionalTrigger {
     base: BaseTrigger,
@@ -55,8 +61,7 @@ impl ConditionalTrigger {
         operator: &Operator,
     ) -> anyhow::Result<bool> {
         // Extract previous value and save current value.
-        let maybe_previous_value =
-            previous_value_holder.lock().unwrap().replace(current_value.clone());
+        let maybe_previous_value = previous_value_holder.lock().replace(current_value.clone());
 
         // Perform comparison or return false if there's no previous value.
         if let Some(previous_value) = maybe_previous_value {
@@ -193,32 +198,29 @@ impl Activatable<TriggerSubscriber, NodeEvaluationContext> for ConditionalTrigge
             NodeValue,
             &'a Mutex<Option<NodeValue>>,
         ) -> anyhow::Result<bool> = match self.condition_type {
-            ConditionType::CONDITION_TYPE_UNSPECIFIED => {
-                panic!("Condition type for trigger {} is not specified", self.get_name())
-            }
-            ConditionType::RISING_EDGE => |current_value, previous_value_holder| {
+            ConditionType::RisingEdge => |current_value, previous_value_holder| {
                 Self::compare_with_previous(
                     current_value,
                     previous_value_holder,
                     &Operator::RelationalOperator(RelationalOperator::GT.into()),
                 )
             },
-            ConditionType::FALLING_EDGE => |current_value, previous_value_holder| {
+            ConditionType::FallingEdge => |current_value, previous_value_holder| {
                 Self::compare_with_previous(
                     current_value,
                     previous_value_holder,
                     &Operator::RelationalOperator(RelationalOperator::LT.into()),
                 )
             },
-            ConditionType::ALL_CHANGES => |current_value, previous_value_holder| {
+            ConditionType::AllChanges => |current_value, previous_value_holder| {
                 Self::compare_with_previous(
                     current_value,
                     previous_value_holder,
                     &Operator::RelationalOperator(RelationalOperator::NOT_EQ.into()),
                 )
             },
-            ConditionType::IS_TRUE => |current_value, _| Self::is_true(&current_value),
-            ConditionType::IS_FALSE => |current_value, _| Self::is_false(&current_value),
+            ConditionType::IsTrue => |current_value, _| Self::is_true(&current_value),
+            ConditionType::IsFalse => |current_value, _| Self::is_false(&current_value),
         };
 
         for trigger in &self.triggers {
@@ -251,7 +253,6 @@ mod tests {
     use futures::FutureExt;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
-    use sdv_telemetry_proto_rust::metrics_configuration::conditional_trigger::ConditionType;
     use std::collections::HashMap;
     use std::future;
     use tokio::sync::oneshot;
@@ -325,7 +326,7 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
-            ConditionType::ALL_CHANGES,
+            ConditionType::AllChanges,
             vec![
                 Arc::<MockTrigger>::clone(&parent_trigger1),
                 Arc::<MockTrigger>::clone(&parent_trigger2),
@@ -365,7 +366,7 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
-            ConditionType::IS_TRUE,
+            ConditionType::IsTrue,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
         );
@@ -400,7 +401,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_filters_all_changes() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::ALL_CHANGES).await;
+            setup_active_conditional_trigger(ConditionType::AllChanges).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
         let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
@@ -426,7 +427,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_filters_falling_edge() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::FALLING_EDGE).await;
+            setup_active_conditional_trigger(ConditionType::FallingEdge).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
         let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
@@ -452,7 +453,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_filters_rising_edge() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::RISING_EDGE).await;
+            setup_active_conditional_trigger(ConditionType::RisingEdge).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
         let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
@@ -478,7 +479,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_is_true_filters_true() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
+            setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
         let true_msg = Arc::new(BoolValue { value: true, ..Default::default() });
@@ -506,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_is_false_filters_false() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_FALSE).await;
+            setup_active_conditional_trigger(ConditionType::IsFalse).await;
 
         let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
         let true_msg = Arc::new(BoolValue { value: true, ..Default::default() });
@@ -534,7 +535,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_is_true_filters_non_zero() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
+            setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -561,7 +562,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_is_false_filters_zero() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_FALSE).await;
+            setup_active_conditional_trigger(ConditionType::IsFalse).await;
 
         let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -588,7 +589,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_is_true_filters_none() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
+            setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
 
@@ -613,7 +614,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_is_false_filters_none() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_FALSE).await;
+            setup_active_conditional_trigger(ConditionType::IsFalse).await;
 
         let msg = Arc::new(Int32Value { value: 0, ..Default::default() });
 
@@ -638,7 +639,7 @@ mod tests {
     #[tokio::test]
     async fn activate_conditional_trigger_handles_async_expression_result() {
         let (message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IS_TRUE).await;
+            setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
         message_provider
@@ -661,7 +662,7 @@ mod tests {
         parent_trigger
             .set_unsubscribe_callback(move |_| callback_listener_clone.on_callback_fired(()));
         let (trigger, _, _) = create_valid_conditional_trigger(
-            ConditionType::ALL_CHANGES,
+            ConditionType::AllChanges,
             Some(Arc::new(parent_trigger)),
         );
 

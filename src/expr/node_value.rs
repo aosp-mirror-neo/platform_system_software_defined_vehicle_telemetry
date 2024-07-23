@@ -804,10 +804,10 @@ impl From<f64> for NodeValue {
 mod tests {
     use super::*;
 
+    use parking_lot::Mutex;
     use protobuf::reflect::ReflectEqMode;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
-    use std::sync::Mutex;
 
     use crate::expr::mock::*;
 
@@ -1211,7 +1211,7 @@ mod tests {
         let false_val = NodeValue::Bool(false);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
-            *num_calls.lock().unwrap() += 1;
+            *num_calls.lock() += 1;
             provide(&false_val)
         };
 
@@ -1220,7 +1220,7 @@ mod tests {
         // false && anything = false
         assert_eq!(res, NodeValue::Bool(false));
         // should not compute right operand because of short circuiting
-        assert_eq!(*num_calls.lock().unwrap(), 0);
+        assert_eq!(*num_calls.lock(), 0);
         Ok(())
     }
 
@@ -1229,7 +1229,7 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
-            *num_calls.lock().unwrap() += 1;
+            *num_calls.lock() += 1;
             provide(&true_val)
         };
 
@@ -1238,7 +1238,7 @@ mod tests {
 
         assert_eq!(res, NodeValue::Bool(true));
         // should compute right operand because left operand does not uniquely determine result
-        assert_eq!(*num_calls.lock().unwrap(), 1);
+        assert_eq!(*num_calls.lock(), 1);
         Ok(())
     }
 
@@ -1270,7 +1270,7 @@ mod tests {
         let true_val = NodeValue::Bool(true);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
-            *num_calls.lock().unwrap() += 1;
+            *num_calls.lock() += 1;
             provide(&true_val)
         };
 
@@ -1279,7 +1279,7 @@ mod tests {
         // true || anything = true
         assert_eq!(res, NodeValue::Bool(true));
         // should not compute right operand because of short circuiting
-        assert_eq!(*num_calls.lock().unwrap(), 0);
+        assert_eq!(*num_calls.lock(), 0);
         Ok(())
     }
 
@@ -1288,7 +1288,7 @@ mod tests {
         let false_val = NodeValue::Bool(false);
         let num_calls = Mutex::new(0);
         let right_operand_provider = || {
-            *num_calls.lock().unwrap() += 1;
+            *num_calls.lock() += 1;
             provide(&false_val)
         };
 
@@ -1297,7 +1297,7 @@ mod tests {
 
         assert_eq!(res, NodeValue::Bool(false));
         // should compute right operand because left operand does not uniquely determine result
-        assert_eq!(*num_calls.lock().unwrap(), 1);
+        assert_eq!(*num_calls.lock(), 1);
         Ok(())
     }
 

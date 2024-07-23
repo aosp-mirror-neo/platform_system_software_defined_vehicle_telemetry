@@ -3,10 +3,11 @@
 use super::*;
 
 use futures::future::BoxFuture;
+use parking_lot::Mutex;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_utils::operation_result::OperationResult;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::expr::node::NodeEvaluationContext;
 
@@ -34,13 +35,13 @@ impl MessageBuilder for MockMessageBuilder {
         self: Arc<Self>,
         context: &Arc<NodeEvaluationContext>,
     ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError> {
-        if let Some(error) = self.next_error.lock().unwrap().take() {
+        if let Some(error) = self.next_error.lock().take() {
             return Err(error).into();
         }
 
-        if let Some(async_result) = self.next_async_result.lock().unwrap().take() {
+        if let Some(async_result) = self.next_async_result.lock().take() {
             async_result.into()
-        } else if let Some(result_callback) = self.result_callback.lock().unwrap().as_ref() {
+        } else if let Some(result_callback) = self.result_callback.lock().as_ref() {
             result_callback(context)
         } else {
             OperationResult::Synchronous(Ok(Box::new(TestMessage {
@@ -61,14 +62,14 @@ impl MockMessageBuilder {
     }
 
     pub(crate) fn set_next_error(&self, error: MessageBuilderError) {
-        self.next_error.lock().unwrap().replace(error);
+        self.next_error.lock().replace(error);
     }
 
     pub fn set_next_async_result(
         &self,
         future: BoxFuture<'static, Result<Box<dyn MessageDyn>, MessageBuilderError>>,
     ) {
-        self.next_async_result.lock().unwrap().replace(future);
+        self.next_async_result.lock().replace(future);
     }
 
     pub(crate) fn set_result_callback(
@@ -80,6 +81,6 @@ impl MockMessageBuilder {
             + Sync
             + 'static,
     ) {
-        self.result_callback.lock().unwrap().replace(Box::new(callback));
+        self.result_callback.lock().replace(Box::new(callback));
     }
 }

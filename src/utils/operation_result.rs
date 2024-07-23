@@ -91,6 +91,7 @@ impl<'a, T, E> From<BoxFuture<'a, Result<T, E>>> for OperationResult<'a, T, E> {
 mod test {
     use super::*;
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn and_then_first_async_err_returns_err() {
         let err = OperationResult::Asynchronous(future::ready(Err(1)).boxed())
@@ -112,6 +113,7 @@ mod test {
         assert_eq!(err, 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn and_then_async_sync_success() {
         let res = OperationResult::Asynchronous(future::ready(Ok::<_, String>(1)).boxed())
@@ -123,6 +125,7 @@ mod test {
         assert_eq!(res, 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn and_then_async_async_success() {
         let res = OperationResult::Asynchronous(future::ready(Ok::<_, String>(1)).boxed())
@@ -144,6 +147,7 @@ mod test {
         assert_eq!(res, 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn and_then_sync_first_async_err_returns_err() {
         let err = OperationResult::Asynchronous(future::ready(Err(1)).boxed())
@@ -165,6 +169,7 @@ mod test {
         assert_eq!(err, 1);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn and_then_sync_first_async_success() {
         let res = OperationResult::Asynchronous(future::ready(Ok::<_, String>(1)).boxed())

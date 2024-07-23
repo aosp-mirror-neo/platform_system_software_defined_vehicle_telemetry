@@ -16,6 +16,7 @@ mod trigger_factory;
 // External dependencies.
 use async_trait::async_trait;
 use log::{debug, error};
+use parking_lot::Mutex;
 use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
@@ -27,8 +28,8 @@ use sdv_telemetry_utils::{
     operation_result::OperationResult,
 };
 use std::collections::{HashMap, HashSet};
-use std::marker::{PhantomData, Sync};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::marker::Sync;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -134,27 +135,13 @@ pub enum MetricsConfigOrchestratorError {
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
-// TODO(b/304793694): refactor tests and remove generic parameters.
-pub(super) struct MetricsConfigOrchestratorImpl<
-    TMetricsReportGenerator = MetricsReportGeneratorImpl,
-    TMetricsReportGeneratorFactory = MetricsReportGeneratorFactoryImpl,
-    TNodeFactory = NodeFactoryImpl,
-    TPublisherFactory = PublisherFactoryImpl,
-    TTriggerFactory = TriggerFactoryImpl,
-> where
-    TMetricsReportGenerator: MetricsReportGenerator,
-    TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator> + Send + Sync,
-    TNodeFactory: NodeFactory + Send + Sync,
-    TPublisherFactory: PublisherFactory + Send + Sync,
-    TTriggerFactory: TriggerFactory + Send + Sync,
-{
-    configs: Mutex<HashMap<String, Arc<MetricsConfig<TMetricsReportGenerator>>>>,
+pub(super) struct MetricsConfigOrchestratorImpl {
+    configs: Mutex<HashMap<String, Arc<MetricsConfig>>>,
     descriptor_provider_factory: Box<dyn DescriptorProviderFactory>,
-    metrics_report_generator_factory: TMetricsReportGeneratorFactory,
-    node_factory: TNodeFactory,
-    publisher_factory: TPublisherFactory,
-    trigger_factory: TTriggerFactory,
+    metrics_report_generator_factory: Box<dyn MetricsReportGeneratorFactory>,
+    node_factory: Box<dyn NodeFactory>,
+    publisher_factory: Box<dyn PublisherFactory>,
+    trigger_factory: Box<dyn TriggerFactory>,
 
     /// Used to fetch data from service publishers
     service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
@@ -164,18 +151,12 @@ pub(super) struct MetricsConfigOrchestratorImpl<
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
-
-    /// Phantom field to be able to define bounds for TMetricsReportGenerator.
-    phantom_generator: PhantomData<TMetricsReportGenerator>,
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
-pub(super) struct MetricsConfig<
-    TMetricsReportGenerator: MetricsReportGenerator = MetricsReportGeneratorImpl,
-> {
+pub(super) struct MetricsConfig {
     uuid: String,
     state: AsyncMutex<MetricsConfigState>,
-    metrics_report_generators: Vec<Arc<TMetricsReportGenerator>>,
+    metrics_report_generators: Vec<Arc<dyn MetricsReportGenerator>>,
     ordered_publisher_names: Vec<String>,
     publishers: HashMap<String, Arc<dyn Publisher>>,
     start_trigger: Option<Arc<dyn Trigger>>,
@@ -196,19 +177,11 @@ pub(super) enum MetricsConfigState {
     Finished,
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
-struct MessageProviderImpl<TMetricsReportGenerator>
-where
-    TMetricsReportGenerator: MetricsReportGenerator,
-{
-    metrics_config: OnceLock<Arc<MetricsConfig<TMetricsReportGenerator>>>,
+struct MessageProviderImpl {
+    metrics_config: OnceLock<Arc<MetricsConfig>>,
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
-impl<TMetricsReportGenerator> MessageProvider for MessageProviderImpl<TMetricsReportGenerator>
-where
-    TMetricsReportGenerator: MetricsReportGenerator,
-{
+impl MessageProvider for MessageProviderImpl {
     fn get_message(
         &self,
         publisher_name: &str,
@@ -220,32 +193,10 @@ where
     }
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
 #[async_trait]
-impl<
-        TMetricsReportGenerator,
-        TMetricsReportGeneratorFactory,
-        TNodeFactory,
-        TPublisherFactory,
-        TTriggerFactory,
-    > MetricsConfigOrchestrator
-    for MetricsConfigOrchestratorImpl<
-        TMetricsReportGenerator,
-        TMetricsReportGeneratorFactory,
-        TNodeFactory,
-        TPublisherFactory,
-        TTriggerFactory,
-    >
-where
-    TMetricsReportGenerator: MetricsReportGenerator + 'static,
-    TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator> + Send + Sync + 'static,
-    TNodeFactory: NodeFactory + Send + Sync + 'static,
-    TPublisherFactory: PublisherFactory + Send + Sync + 'static,
-    TTriggerFactory: TriggerFactory + Send + Sync + 'static,
-{
+impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
     fn get_active_metrics_config_uuids(&self) -> Vec<String> {
-        self.configs.lock().unwrap().keys().cloned().collect()
+        self.configs.lock().keys().cloned().collect()
     }
 
     async fn initialize_config(
@@ -267,7 +218,7 @@ where
             &self.service_publisher_manager,
         )?;
         let node_factory_context = NodeFactoryContext {
-            message_provider: Some(Arc::<MessageProviderImpl<_>>::clone(&message_provider)),
+            message_provider: Some(Arc::<MessageProviderImpl>::clone(&message_provider)),
             descriptor_provider,
         };
 
@@ -362,7 +313,7 @@ where
 
         // Store MetricsConfig with encapsulated objects.
         {
-            let mut configs = self.configs.lock().unwrap();
+            let mut configs = self.configs.lock();
             match configs.try_insert_value(config_proto.uuid.clone(), Arc::clone(&config)) {
                 Ok(val) => val,
                 Err(_) => {
@@ -423,7 +374,7 @@ where
     }
 
     async fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError> {
-        let config = self.configs.lock().unwrap().remove(config_uuid).ok_or_else(|| {
+        let config = self.configs.lock().remove(config_uuid).ok_or_else(|| {
             MetricsConfigOrchestratorError::InvalidConfigUuid { uuid: config_uuid.to_owned() }
         })?;
 
@@ -480,7 +431,7 @@ where
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
         {
-            let configs = self.configs.lock().unwrap();
+            let configs = self.configs.lock();
             if configs.contains_key(&config_proto.uuid) {
                 return Err(MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid {
                     uuid: config_proto.uuid.clone(),
@@ -575,45 +526,23 @@ impl MetricsConfigOrchestratorImpl {
         Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
-            metrics_report_generator_factory: MetricsReportGeneratorFactoryImpl::new(Arc::<
-                MessageBuilderFactoryImpl,
-            >::clone(
-                &message_builder_factory,
+            metrics_report_generator_factory: Box::new(MetricsReportGeneratorFactoryImpl::new(
+                Arc::<MessageBuilderFactoryImpl>::clone(&message_builder_factory),
             )),
-            node_factory: NodeFactoryImpl::new(),
-            publisher_factory: PublisherFactoryImpl::new(message_builder_factory, service_adapter),
-            trigger_factory: TriggerFactoryImpl::new(),
+            node_factory: Box::new(NodeFactoryImpl::new()),
+            publisher_factory: Box::new(PublisherFactoryImpl::new(
+                message_builder_factory,
+                service_adapter,
+            )),
+            trigger_factory: Box::new(TriggerFactoryImpl::new()),
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),
             service_publisher_manager,
-            phantom_generator: PhantomData,
         }
     }
 }
 
-// TODO(b/304793694): refactor tests and remove generic parameters.
-impl<
-        TMetricsReportGenerator,
-        TMetricsReportGeneratorFactory,
-        TNodeFactory,
-        TPublisherFactory,
-        TTriggerFactory,
-    >
-    MetricsConfigOrchestratorImpl<
-        TMetricsReportGenerator,
-        TMetricsReportGeneratorFactory,
-        TNodeFactory,
-        TPublisherFactory,
-        TTriggerFactory,
-    >
-where
-    TMetricsReportGenerator: MetricsReportGenerator + 'static,
-    TMetricsReportGeneratorFactory:
-        MetricsReportGeneratorFactory<TMetricsReportGenerator> + Send + Sync + 'static,
-    TNodeFactory: NodeFactory + Send + Sync + 'static,
-    TPublisherFactory: PublisherFactory + Send + Sync + 'static,
-    TTriggerFactory: TriggerFactory + Send + Sync + 'static,
-{
+impl MetricsConfigOrchestratorImpl {
     // Private functions.
 
     fn create_expression_nodes(
@@ -659,16 +588,16 @@ where
         )?))
     }
 
-    async fn start_data_collection(config: &Arc<MetricsConfig<TMetricsReportGenerator>>) {
+    async fn start_data_collection(config: &Arc<MetricsConfig>) {
         // Activate metrics report generators.
         for generator in &config.metrics_report_generators {
-            generator.activate().await;
+            Arc::clone(generator).activate().await;
         }
     }
 
     async fn subscribe_to_start_trigger(
         start_trigger: &Arc<dyn Trigger>,
-        config: &Arc<MetricsConfig<TMetricsReportGenerator>>,
+        config: &Arc<MetricsConfig>,
     ) {
         let mut config_clone = Some(Arc::clone(config));
         Arc::clone(start_trigger)
@@ -798,7 +727,7 @@ where
 
     // Lifecycle event handlers.
 
-    fn on_start_trigger_fired(config: Arc<MetricsConfig<TMetricsReportGenerator>>) {
+    fn on_start_trigger_fired(config: Arc<MetricsConfig>) {
         debug!("MetricsConfig {} start trigger fired", config.uuid);
 
         tokio::spawn(async move {
@@ -844,7 +773,7 @@ where
         });
     }
 
-    fn on_end_trigger_fired(config: Arc<MetricsConfig<TMetricsReportGenerator>>) {
+    fn on_end_trigger_fired(config: Arc<MetricsConfig>) {
         debug!("MetricsConfig {} end trigger fired", config.uuid);
 
         tokio::spawn(async move {
@@ -894,6 +823,7 @@ mod tests {
 
     use anyhow::anyhow;
     use async_trait::async_trait;
+    use parking_lot::Mutex;
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
     };
@@ -910,7 +840,6 @@ mod tests {
     };
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use std::sync::Mutex;
     use tokio::sync::oneshot;
 
     use crate::expr::node_value::NodeValue;
@@ -926,13 +855,7 @@ mod tests {
     use crate::metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
-    type MockedMetricsConfigOrchestratorImpl<'a> = MetricsConfigOrchestratorImpl<
-        MockMetricsReportGenerator,
-        MockMetricsReportGeneratorFactory,
-        MockNodeFactory,
-        MockPublisherFactory,
-        MockTriggerFactory,
-    >;
+    type MockedMetricsConfigOrchestratorImpl = MetricsConfigOrchestratorImpl;
 
     const AGGREGATION_PUBLISHER_NAME: &str = "AggregationPublisher1";
     const CONDITIONAL_TRIGGER_NAME: &str = "ConditionalTrigger1";
@@ -972,7 +895,7 @@ mod tests {
 
     #[async_trait]
     impl MetricsReportGenerator for MockMetricsReportGenerator {
-        async fn activate(self: &Arc<Self>) {
+        async fn activate(self: Arc<Self>) {
             if let Some(callback) = &self.activate_callback {
                 callback(&self.name);
             }
@@ -997,26 +920,24 @@ mod tests {
         }
 
         fn add_report_generators(&self, report_generators: Vec<Arc<MockMetricsReportGenerator>>) {
-            self.report_generators.lock().unwrap().extend(
+            self.report_generators.lock().extend(
                 report_generators.into_iter().map(|generator| (generator.name.clone(), generator)),
             );
         }
     }
 
-    impl MetricsReportGeneratorFactory<MockMetricsReportGenerator>
-        for MockMetricsReportGeneratorFactory
-    {
+    impl MetricsReportGeneratorFactory for MockMetricsReportGeneratorFactory {
         fn create(
             &self,
             config: &MetricsReportConfig,
             _context: &MetricsReportGeneratorFactoryCreateContext,
-        ) -> Result<Arc<MockMetricsReportGenerator>, MetricsReportGeneratorFactoryError> {
-            if let Some(error) = self.error.lock().unwrap().take() {
+        ) -> Result<Arc<dyn MetricsReportGenerator>, MetricsReportGeneratorFactoryError> {
+            if let Some(error) = self.error.lock().take() {
                 return Err(error);
             }
 
             let report_generator =
-                self.report_generators.lock().unwrap().remove(&config.name).unwrap_or_else(|| {
+                self.report_generators.lock().remove(&config.name).unwrap_or_else(|| {
                     Arc::new(MockMetricsReportGenerator::new(config.name.clone()))
                 });
             Ok(report_generator)
@@ -1027,7 +948,7 @@ mod tests {
             _config: &MetricsReportConfig,
             _context: &MetricsReportGeneratorFactoryValidateContext,
         ) -> Result<(), MetricsReportGeneratorFactoryError> {
-            self.error.lock().unwrap().take().map_or_else(|| Ok(()), Err)
+            self.error.lock().take().map_or_else(|| Ok(()), Err)
         }
     }
 
@@ -1080,10 +1001,9 @@ mod tests {
                 return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
             }
 
-            *self.num_nodes.lock().unwrap() = proto_nodes.len();
+            *self.num_nodes.lock() = proto_nodes.len();
             self.message_providers
                 .lock()
-                .unwrap()
                 .push(Arc::clone(context.message_provider.as_ref().unwrap()));
 
             let size = proto_nodes.len();
@@ -1110,7 +1030,7 @@ mod tests {
         }
 
         fn add_publishers(&mut self, publishers: Vec<Arc<MockPublisher>>) {
-            self.publishers.lock().unwrap().extend(
+            self.publishers.lock().extend(
                 publishers
                     .into_iter()
                     .map(|publisher| (publisher.get_name().to_owned(), publisher)),
@@ -1147,7 +1067,6 @@ mod tests {
             let publisher = self
                 .publishers
                 .lock()
-                .unwrap()
                 .remove(publisher_proto.name.as_str())
                 .unwrap_or_else(|| Arc::new(MockPublisher::new(publisher_proto.name.clone())));
             Ok(publisher)
@@ -1182,7 +1101,7 @@ mod tests {
         }
 
         fn add_triggers(&mut self, triggers: Vec<Arc<MockTrigger>>) {
-            self.triggers.lock().unwrap().extend(
+            self.triggers.lock().extend(
                 triggers.into_iter().map(|trigger| (trigger.get_name().to_owned(), trigger)),
             );
         }
@@ -1217,7 +1136,6 @@ mod tests {
             let trigger = self
                 .triggers
                 .lock()
-                .unwrap()
                 .remove(trigger_proto.name.as_str())
                 .unwrap_or_else(|| Arc::new(MockTrigger::new(trigger_proto.name.clone())));
             Ok(trigger)
@@ -1238,22 +1156,40 @@ mod tests {
         }
     }
 
-    impl MockedMetricsConfigOrchestratorImpl<'_> {
-        fn new() -> Self {
+    impl MockedMetricsConfigOrchestratorImpl {
+        fn new_mocked() -> Self {
             Self {
                 configs: Mutex::new(HashMap::new()),
                 descriptor_provider_factory: Box::new(MockDescriptorProviderFactory::new()),
-                metrics_report_generator_factory: MockMetricsReportGeneratorFactory::new(),
-                node_factory: MockNodeFactory::new(),
-                publisher_factory: MockPublisherFactory::new(),
-                trigger_factory: MockTriggerFactory::new(),
+                metrics_report_generator_factory: Box::new(MockMetricsReportGeneratorFactory::new()),
+                node_factory: Box::new(MockNodeFactory::new()),
+                publisher_factory: Box::new(MockPublisherFactory::new()),
+                trigger_factory: Box::new(MockTriggerFactory::new()),
                 finish_trigger_fired_callback: Arc::new(|_, _| {}),
                 report_ready_callback: Arc::new(|_| {}),
                 service_publisher_manager: Arc::new(
                     MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
                 ),
-                phantom_generator: PhantomData,
             }
+        }
+
+        fn metrics_report_generator_factory(&self) -> &MockMetricsReportGeneratorFactory {
+            self.metrics_report_generator_factory
+                .as_ref()
+                .downcast_ref::<MockMetricsReportGeneratorFactory>()
+                .unwrap()
+        }
+
+        fn node_factory(&mut self) -> &mut MockNodeFactory {
+            self.node_factory.as_mut().downcast_mut::<MockNodeFactory>().unwrap()
+        }
+
+        fn publisher_factory(&mut self) -> &mut MockPublisherFactory {
+            self.publisher_factory.as_mut().downcast_mut::<MockPublisherFactory>().unwrap()
+        }
+
+        fn trigger_factory(&mut self) -> &mut MockTriggerFactory {
+            self.trigger_factory.as_mut().downcast_mut::<MockTriggerFactory>().unwrap()
         }
     }
 
@@ -1617,7 +1553,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_publisher_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_name();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1627,13 +1563,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_trigger_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_trigger_name();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1643,13 +1579,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_publisher_trigger_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1659,13 +1595,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_publisher_trigger_cycle_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_publisher_trigger_cycle();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1675,13 +1611,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_aggregation_publisher_invalid_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1691,13 +1627,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_data_trigger_invalid_publisher_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_data_trigger_publisher();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1707,13 +1643,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_conditional_trigger_invalid_parent_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1723,13 +1659,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_metrics_report_config_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_metrics_report_config_name();
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -1739,13 +1675,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_uuid_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).await.unwrap();
 
@@ -1756,14 +1692,14 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
+        assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_expression_nodes_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.node_factory.fail_create_nodes();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.node_factory().fail_create_nodes();
 
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());
@@ -1775,15 +1711,15 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_publisher_factory_error_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
-            .publisher_factory
+            .publisher_factory()
             .set_create_callback(|_| Some(PublisherFactoryError::UnknownPublisherType));
         let config = create_valid_config_with_publisher();
 
@@ -1794,15 +1730,15 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_trigger_factory_error_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
-            .trigger_factory
+            .trigger_factory()
             .set_create_callback(|_| Some(TriggerFactoryError::UnknownTriggerType));
 
         let config = create_valid_config_with_trigger();
@@ -1814,14 +1750,14 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_metrics_report_config_factory_error_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.metrics_report_generator_factory.error.lock().unwrap().replace(
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.metrics_report_generator_factory().error.lock().replace(
             MetricsReportGeneratorFactoryError::InvalidTriggerName {
                 trigger_name: SOME_TRIGGER_NAME.to_owned(),
             },
@@ -1860,20 +1796,20 @@ mod tests {
             .latest_message
             .replace(Arc::clone(&value2) as Arc<dyn MessageDyn>);
 
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
         let factory_calls_clone1 = Arc::clone(&factory_calls);
         let factory_calls_clone2 = Arc::clone(&factory_calls);
-        orchestrator.publisher_factory.add_publishers(vec![
+        orchestrator.publisher_factory().add_publishers(vec![
             Arc::new(service_publisher_mock),
             Arc::new(aggregation_publisher_mock),
         ]);
-        orchestrator.publisher_factory.set_create_callback(move |publisher_proto| {
-            factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
+        orchestrator.publisher_factory().set_create_callback(move |publisher_proto| {
+            factory_calls_clone1.lock().push(publisher_proto.name.clone());
             None
         });
-        orchestrator.trigger_factory.set_create_callback(move |trigger_proto| {
-            factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
+        orchestrator.trigger_factory().set_create_callback(move |trigger_proto| {
+            factory_calls_clone2.lock().push(trigger_proto.name.clone());
             None
         });
 
@@ -1887,10 +1823,10 @@ mod tests {
             CONDITIONAL_TRIGGER_NAME,
             AGGREGATION_PUBLISHER_NAME,
         ];
-        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        assert_eq!(*orchestrator.node_factory.num_nodes.lock().unwrap(), 1);
+        assert_eq!(*factory_calls.lock(), expected_calls);
+        assert_eq!(*orchestrator.node_factory().num_nodes.lock(), 1);
         {
-            let message_providers = orchestrator.node_factory.message_providers.lock().unwrap();
+            let message_providers = orchestrator.node_factory().message_providers.lock();
             assert_eq!(message_providers.len(), 1);
             let message = message_providers[0]
                 .get_message(SERVICE_PUBLISHER_NAME)
@@ -1912,7 +1848,7 @@ mod tests {
             );
         }
         let config = {
-            let configs = orchestrator.configs.lock().unwrap();
+            let configs = orchestrator.configs.lock();
             assert_eq!(configs.len(), 1);
             Arc::clone(&configs[&config.uuid])
         };
@@ -1928,7 +1864,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_start_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
@@ -1946,7 +1882,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_end_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
@@ -1964,7 +1900,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_finish_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
@@ -1988,8 +1924,8 @@ mod tests {
             Some(PublisherActivateError::ServiceAdapterSubscribeError { error: anyhow!("Error") })
         });
 
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.publisher_factory().add_publishers(vec![publisher_mock.into()]);
 
         // Create MetricsConfig proto.
         let mut publisher = PublisherProto::new();
@@ -2011,7 +1947,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_only_end_trigger_set_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let config = create_config_with_end_trigger_only();
 
@@ -2037,11 +1973,11 @@ mod tests {
 
         let factory_calls_clone = Arc::clone(&factory_calls);
         let subscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((SUBSCRIBE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((SUBSCRIBE.to_owned(), name.to_owned()))
         };
         let factory_calls_clone = Arc::clone(&factory_calls);
         let unsubscribe_callback = move |name: &str| {
-            factory_calls_clone.lock().unwrap().push((UNSUBSCRIBE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((UNSUBSCRIBE.to_owned(), name.to_owned()))
         };
 
         // Create start, end and finish mock triggers that use callbacks.
@@ -2070,7 +2006,7 @@ mod tests {
 
         let factory_calls_clone = Arc::clone(&factory_calls);
         publisher_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()));
+            factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()));
             None
         });
 
@@ -2080,22 +2016,22 @@ mod tests {
 
         let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_activate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((ACTIVATE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()))
         });
         let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_deactivate_callback(move |name| {
-            factory_calls_clone.lock().unwrap().push((DEACTIVATE.to_owned(), name.to_owned()))
+            factory_calls_clone.lock().push((DEACTIVATE.to_owned(), name.to_owned()))
         });
 
         // Create and setup orchestrator.
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let start_trigger_mock = Arc::new(start_trigger_mock);
         let end_trigger_mock = Arc::new(end_trigger_mock);
         orchestrator
-            .metrics_report_generator_factory
+            .metrics_report_generator_factory()
             .add_report_generators(vec![report_generator_mock.into()]);
-        orchestrator.publisher_factory.add_publishers(vec![publisher_mock.into()]);
-        orchestrator.trigger_factory.add_triggers(vec![
+        orchestrator.publisher_factory().add_publishers(vec![publisher_mock.into()]);
+        orchestrator.trigger_factory().add_triggers(vec![
             Arc::clone(&start_trigger_mock),
             Arc::clone(&end_trigger_mock),
             finish_trigger_mock.into(),
@@ -2150,8 +2086,8 @@ mod tests {
             (DEACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
         ];
-        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        let config = { Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]) };
+        assert_eq!(*factory_calls.lock(), expected_calls);
+        let config = { Arc::clone(&orchestrator.configs.lock()[UUID]) };
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::NotStarted),
@@ -2174,9 +2110,9 @@ mod tests {
         });
 
         // Create and setup orchestrator.
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
-            .metrics_report_generator_factory
+            .metrics_report_generator_factory()
             .add_report_generators(vec![report_generator_mock.into()]);
 
         // Create metrics config.
@@ -2192,7 +2128,7 @@ mod tests {
 
         // Verify that the report generator was activated.
         assert_eq!(num_calls.load(Ordering::SeqCst), 1);
-        let config = { Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]) };
+        let config = { Arc::clone(&orchestrator.configs.lock()[UUID]) };
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::Running),
@@ -2217,14 +2153,14 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher1_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            activate_calls_clone.lock().push(name.to_owned());
             None
         });
 
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let activate_calls_clone = Arc::clone(&activate_calls);
         service_publisher_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            activate_calls_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2232,12 +2168,12 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME_2.to_owned());
         let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher2_mock.set_activate_callback(move |name| {
-            activate_calls_clone.lock().unwrap().push(name.to_owned());
+            activate_calls_clone.lock().push(name.to_owned());
             None
         });
 
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.publisher_factory.add_publishers(vec![
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.publisher_factory().add_publishers(vec![
             Arc::new(aggregation_publisher1_mock),
             Arc::new(service_publisher_mock),
             Arc::new(aggregation_publisher2_mock),
@@ -2293,13 +2229,13 @@ mod tests {
             AGGREGATION_PUBLISHER_NAME.to_owned(),
             AGGREGATION_PUBLISHER_NAME_2.to_owned(),
         ];
-        assert_eq!(*activate_calls.lock().unwrap(), expected_activations);
+        assert_eq!(*activate_calls.lock(), expected_activations);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn initialize_config_with_known_protobuf_type_success() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_valid_config_with_known_protobuf_type();
 
         orchestrator.initialize_config(&config).await.unwrap();
@@ -2313,13 +2249,12 @@ mod tests {
             FINISH_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsConfigFinish,
         ));
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let (tx, rx) = oneshot::channel();
         let maybe_tx = Mutex::new(Some(tx));
-        orchestrator.finish_trigger_fired_callback = Arc::new(move |uuid, _context| {
-            maybe_tx.lock().unwrap().take().unwrap().send(uuid).unwrap()
-        });
-        orchestrator.trigger_factory.add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
+        orchestrator.finish_trigger_fired_callback =
+            Arc::new(move |uuid, _context| maybe_tx.lock().take().unwrap().send(uuid).unwrap());
+        orchestrator.trigger_factory().add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
 
         // Setup Metrics Config.
         let mut finish_trigger_proto = TriggerProto::new();
@@ -2343,7 +2278,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn finish_config_invalid_config_uuid_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let err = orchestrator.finish_config(UUID).await.unwrap_err();
 
@@ -2365,7 +2300,7 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         start_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         let mut end_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2374,7 +2309,7 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         end_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2383,14 +2318,14 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         // Setup mock publishers.
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2398,20 +2333,20 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
         // Setup orchestrator.
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let start_trigger_mock = Arc::new(start_trigger_mock);
         let end_trigger_mock = Arc::new(end_trigger_mock);
         let finish_trigger_mock = Arc::new(finish_trigger_mock);
-        orchestrator.publisher_factory.add_publishers(vec![
+        orchestrator.publisher_factory().add_publishers(vec![
             Arc::new(service_publisher_mock),
             Arc::new(aggregation_publisher_mock),
         ]);
-        orchestrator.trigger_factory.add_triggers(vec![
+        orchestrator.trigger_factory().add_triggers(vec![
             Arc::clone(&start_trigger_mock),
             Arc::clone(&end_trigger_mock),
             Arc::clone(&finish_trigger_mock),
@@ -2451,7 +2386,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Store metrics config Rust object.
-        let metrics_config = Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]);
+        let metrics_config = Arc::clone(&orchestrator.configs.lock()[UUID]);
 
         // Finish config.
         orchestrator.finish_config(UUID).await.unwrap();
@@ -2471,13 +2406,13 @@ mod tests {
 
         // Verify that the config was removed from the map.
         assert!(
-            !orchestrator.configs.lock().unwrap().contains_key(UUID),
+            !orchestrator.configs.lock().contains_key(UUID),
             "Config was not removed from the map"
         );
 
         // Verify the order of calls.
         assert_eq!(
-            *name_container.lock().unwrap(),
+            *name_container.lock(),
             [
                 FINISH_TRIGGER_NAME,
                 START_TRIGGER_NAME,
@@ -2499,7 +2434,7 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         end_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         let mut finish_trigger_mock = MockTrigger::new_for_subscriber(
@@ -2508,14 +2443,14 @@ mod tests {
         );
         let name_container_clone = Arc::clone(&name_container);
         finish_trigger_mock.set_unsubscribe_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
+            name_container_clone.lock().push(name.to_owned())
         });
 
         // Setup mock publishers.
         let mut service_publisher_mock = MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2523,7 +2458,7 @@ mod tests {
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned());
+            name_container_clone.lock().push(name.to_owned());
             None
         });
 
@@ -2531,9 +2466,8 @@ mod tests {
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
         let name_container_clone = Arc::clone(&name_container);
-        report_generator_mock.set_deactivate_callback(move |name| {
-            name_container_clone.lock().unwrap().push(name.to_owned())
-        });
+        report_generator_mock
+            .set_deactivate_callback(move |name| name_container_clone.lock().push(name.to_owned()));
 
         // Setup orchestrator.
         let start_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
@@ -2542,18 +2476,18 @@ mod tests {
         ));
         let end_trigger_mock = Arc::new(end_trigger_mock);
         let finish_trigger_mock = Arc::new(finish_trigger_mock);
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.publisher_factory.add_publishers(vec![
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.publisher_factory().add_publishers(vec![
             Arc::new(service_publisher_mock),
             Arc::new(aggregation_publisher_mock),
         ]);
-        orchestrator.trigger_factory.add_triggers(vec![
+        orchestrator.trigger_factory().add_triggers(vec![
             Arc::clone(&start_trigger_mock),
             Arc::clone(&end_trigger_mock),
             Arc::clone(&finish_trigger_mock),
         ]);
         orchestrator
-            .metrics_report_generator_factory
+            .metrics_report_generator_factory()
             .add_report_generators(vec![report_generator_mock.into()]);
 
         // Setup Metrics Config.
@@ -2593,7 +2527,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Store metrics config Rust object.
-        let metrics_config = Arc::clone(&orchestrator.configs.lock().unwrap()[UUID]);
+        let metrics_config = Arc::clone(&orchestrator.configs.lock()[UUID]);
 
         // Fire start trigger. This should start data collection.
         start_trigger_mock.fire().await;
@@ -2620,13 +2554,13 @@ mod tests {
 
         // Verify that the config was removed from the map.
         assert!(
-            !orchestrator.configs.lock().unwrap().contains_key(UUID),
+            !orchestrator.configs.lock().contains_key(UUID),
             "Config was not removed from the map"
         );
 
         // Verify that there was exactly one unsubscribe call.
         assert_eq!(
-            *name_container.lock().unwrap(),
+            *name_container.lock(),
             [
                 FINISH_TRIGGER_NAME,
                 END_TRIGGER_NAME,
@@ -2639,8 +2573,8 @@ mod tests {
 
     #[test]
     fn validate_config_with_invalid_expression_nodes_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.node_factory.fail_validate();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.node_factory().fail_validate();
         let config = create_valid_config_with_dependencies();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2654,7 +2588,7 @@ mod tests {
 
     #[test]
     fn validate_config_duplicate_publisher_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_name();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2664,12 +2598,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_duplicate_trigger_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_trigger_name();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2679,12 +2613,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_duplicate_publisher_trigger_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2694,12 +2628,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_publisher_trigger_cycle_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_publisher_trigger_cycle();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2709,12 +2643,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_aggregation_publisher_invalid_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2724,12 +2658,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_data_trigger_invalid_publisher_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_data_trigger_publisher();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2739,12 +2673,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_conditional_trigger_invalid_parent_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2754,12 +2688,12 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_duplicate_metrics_report_config_name_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_metrics_report_config_name();
 
         let err = orchestrator.validate_config(&config).unwrap_err();
@@ -2769,13 +2703,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn validate_config_duplicate_uuid_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).await.unwrap();
 
@@ -2786,13 +2720,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 1);
+        assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
     #[test]
     fn validate_config_invalid_expression_nodes_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.node_factory.fail_validate();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.node_factory().fail_validate();
 
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());
@@ -2804,14 +2738,14 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_publisher_factory_error_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
-            .publisher_factory
+            .publisher_factory()
             .set_validate_callback(|_| Some(PublisherFactoryError::UnknownPublisherType));
         let config = create_valid_config_with_publisher();
 
@@ -2822,14 +2756,14 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_trigger_factory_error_fails() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
-            .trigger_factory
+            .trigger_factory()
             .set_validate_callback(|_| Some(TriggerFactoryError::UnknownTriggerType));
         let config = create_valid_config_with_trigger();
 
@@ -2840,13 +2774,13 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_metrics_report_config_factory_error_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
-        orchestrator.metrics_report_generator_factory.error.lock().unwrap().replace(
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.metrics_report_generator_factory().error.lock().replace(
             MetricsReportGeneratorFactoryError::InvalidTriggerName {
                 trigger_name: SOME_TRIGGER_NAME.to_owned(),
             },
@@ -2872,16 +2806,16 @@ mod tests {
 
     #[test]
     fn validate_config_with_dependencies_success() {
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
         let factory_calls_clone1 = Arc::clone(&factory_calls);
         let factory_calls_clone2 = Arc::clone(&factory_calls);
-        orchestrator.publisher_factory.set_validate_callback(move |publisher_proto| {
-            factory_calls_clone1.lock().unwrap().push(publisher_proto.name.clone());
+        orchestrator.publisher_factory().set_validate_callback(move |publisher_proto| {
+            factory_calls_clone1.lock().push(publisher_proto.name.clone());
             None
         });
-        orchestrator.trigger_factory.set_validate_callback(move |trigger_proto| {
-            factory_calls_clone2.lock().unwrap().push(trigger_proto.name.clone());
+        orchestrator.trigger_factory().set_validate_callback(move |trigger_proto| {
+            factory_calls_clone2.lock().push(trigger_proto.name.clone());
             None
         });
         let config = create_valid_config_with_dependencies();
@@ -2894,13 +2828,13 @@ mod tests {
             CONDITIONAL_TRIGGER_NAME,
             AGGREGATION_PUBLISHER_NAME,
         ];
-        assert_eq!(*factory_calls.lock().unwrap(), expected_calls);
-        assert_eq!(orchestrator.configs.lock().unwrap().len(), 0);
+        assert_eq!(*factory_calls.lock(), expected_calls);
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[test]
     fn validate_config_with_known_protobuf_type_success() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_valid_config_with_known_protobuf_type();
 
         orchestrator.validate_config(&config).unwrap();
@@ -2908,7 +2842,7 @@ mod tests {
 
     #[test]
     fn validate_config_invalid_start_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
@@ -2925,7 +2859,7 @@ mod tests {
 
     #[test]
     fn validate_config_invalid_end_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
@@ -2942,7 +2876,7 @@ mod tests {
 
     #[test]
     fn validate_config_invalid_finish_trigger_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
@@ -2959,7 +2893,7 @@ mod tests {
 
     #[test]
     fn validate_config_only_end_trigger_set_fails() {
-        let orchestrator = MockedMetricsConfigOrchestratorImpl::new();
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let config = create_config_with_end_trigger_only();
 

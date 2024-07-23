@@ -105,6 +105,7 @@ rust_binary {
         "libfutures",
         "liblog_rust",
         "liblogger",
+        "libparking_lot",
         "libprotobuf",
         "librand",
         "libsample_publisher_proto",

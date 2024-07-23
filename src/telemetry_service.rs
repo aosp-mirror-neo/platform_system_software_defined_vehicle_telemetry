@@ -22,10 +22,11 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
 };
 use google_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use log::{error, info, warn};
+use parking_lot::Mutex;
 use protobuf::Message;
 use std::marker::{Send, Sync};
 use std::ops::Deref;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::instrument;
 
 // Child module dependencies.
@@ -149,7 +150,7 @@ impl SdvTelemetryService {
             service_publisher_manager,
             move |report| report_listener.on_report_ready(report),
             move |status_code, status_message| {
-                let mut vec = misc_error_store_clone.lock().unwrap();
+                let mut vec = misc_error_store_clone.lock();
                 vec.push((status_code, status_message))
             },
         )
@@ -180,16 +181,14 @@ impl SdvTelemetryService {
         status_code: StatusCodes,
         status_message: &str,
     ) -> BinderResult<()> {
-        if let Ok(listener) = self.api_status_listener.lock() {
-            if let Some(listener_ref) = listener.as_ref() {
-                if let Err(e) =
-                    listener_ref.deref().sendStatus(api_call_id, status_code, status_message)
-                {
-                    warn!(
-                        "Error when sending status code {:?} for API call {} to the client: {:?}",
-                        status_code, api_call_id, e
-                    );
-                }
+        if let Some(listener_ref) = self.api_status_listener.lock().as_ref() {
+            if let Err(e) =
+                listener_ref.deref().sendStatus(api_call_id, status_code, status_message)
+            {
+                warn!(
+                    "Error when sending status code {:?} for API call {} to the client: {:?}",
+                    status_code, api_call_id, e
+                );
             }
         }
         Ok(())
@@ -202,14 +201,9 @@ impl SdvTelemetryService {
         status_code: StatusCodes,
         status_message: &str,
     ) -> BinderResult<()> {
-        if let Ok(listener) = self.misc_status_listener.lock() {
-            if let Some(listener_ref) = listener.as_ref() {
-                if let Err(e) = listener_ref.deref().sendStatus(status_code, status_message) {
-                    warn!(
-                        "Error when sending status code {:?} to the client: {:?}",
-                        status_code, e
-                    );
-                }
+        if let Some(listener_ref) = self.misc_status_listener.lock().as_ref() {
+            if let Err(e) = listener_ref.deref().sendStatus(status_code, status_message) {
+                warn!("Error when sending status code {:?} to the client: {:?}", status_code, e);
             }
         }
         Ok(())
@@ -386,7 +380,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         listener: &Strong<dyn ITelemetryApiStatusListener>,
     ) -> BinderResult<()> {
-        *self.api_status_listener.lock().unwrap() = Some(listener.clone());
+        *self.api_status_listener.lock() = Some(listener.clone());
         Ok(())
     }
 
@@ -397,7 +391,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         listener: &Strong<dyn ITelemetryMiscStatusListener>,
     ) -> BinderResult<()> {
         let (status_code, status_message) = {
-            let mut guard = self.misc_status_listener.lock().unwrap();
+            let mut guard = self.misc_status_listener.lock();
             if guard.is_none() {
                 *guard = Some(listener.clone());
                 (
@@ -413,7 +407,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         };
         self.send_status(api_call_id, status_code, status_message).unwrap();
 
-        let misc_errors = self.misc_error_store.lock().unwrap();
+        let misc_errors = self.misc_error_store.lock();
 
         for (status_code, status_message) in misc_errors.iter() {
             self.send_misc_status(*status_code, status_message).unwrap();
@@ -465,14 +459,14 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     #[instrument(skip(self))]
     async fn unregisterApiStatusListener(&self) -> BinderResult<()> {
         info!("unregisterApiStatusListener");
-        *self.api_status_listener.lock().unwrap() = None;
+        *self.api_status_listener.lock() = None;
         Ok(())
     }
 
     #[instrument(skip(self))]
     async fn unregisterMiscStatusListener(&self) -> BinderResult<()> {
         info!("unregisterMiscStatusListener");
-        *self.misc_status_listener.lock().unwrap() = None;
+        *self.misc_status_listener.lock() = None;
         Ok(())
     }
 }
@@ -522,15 +516,15 @@ mod tests {
         }
 
         fn get_status_code(&self) -> StatusCodes {
-            *self.status_code.lock().unwrap()
+            *self.status_code.lock()
         }
 
         fn get_num_send_config_calls(&self) -> i32 {
-            *self.num_send_config_calls.lock().unwrap()
+            *self.num_send_config_calls.lock()
         }
 
         fn get_metrics_config_list(&self) -> Vec<String> {
-            self.metrics_config_list.lock().unwrap().clone().unwrap()
+            self.metrics_config_list.lock().clone().unwrap()
         }
     }
 
@@ -541,11 +535,11 @@ mod tests {
             _status_message: &str,
             config_list: &[String],
         ) -> BinderResult<()> {
-            let mut mut_status_code = self.status_code.lock().unwrap();
+            let mut mut_status_code = self.status_code.lock();
             *mut_status_code = status_code;
-            let mut num_send_config_calls = self.num_send_config_calls.lock().unwrap();
+            let mut num_send_config_calls = self.num_send_config_calls.lock();
             *num_send_config_calls += 1;
-            let mut mut_config_list = self.metrics_config_list.lock().unwrap();
+            let mut mut_config_list = self.metrics_config_list.lock();
             *mut_config_list = Some(config_list.to_vec());
 
             Ok(())
@@ -578,23 +572,23 @@ mod tests {
         }
 
         fn get_status_code(&self) -> StatusCodes {
-            *self.status_code.lock().unwrap()
+            *self.status_code.lock()
         }
 
         fn get_status_message(&self) -> String {
-            self.status_message.lock().unwrap().to_string()
+            self.status_message.lock().to_string()
         }
 
         fn get_num_on_result_calls(&self) -> i32 {
-            *self.num_on_result_calls.lock().unwrap()
+            *self.num_on_result_calls.lock()
         }
 
         fn get_report_number(&self) -> i32 {
-            *self.report_number.lock().unwrap()
+            *self.report_number.lock()
         }
 
         fn get_uuid(&self) -> String {
-            self.uuid.lock().unwrap().to_string()
+            self.uuid.lock().to_string()
         }
     }
 
@@ -612,17 +606,17 @@ mod tests {
                     Err(_) => return Err(binder::StatusCode::BAD_VALUE.into()),
                 };
 
-            let mut mut_status_code = self.status_code.lock().unwrap();
+            let mut mut_status_code = self.status_code.lock();
             *mut_status_code = status_code;
-            let mut mut_status_message = self.status_message.lock().unwrap();
+            let mut mut_status_message = self.status_message.lock();
             *mut_status_message = status_message.to_string();
-            let mut num_on_result_calls = self.num_on_result_calls.lock().unwrap();
+            let mut num_on_result_calls = self.num_on_result_calls.lock();
             *num_on_result_calls += 1;
-            let mut report_number = self.report_number.lock().unwrap();
+            let mut report_number = self.report_number.lock();
             *report_number = metrics_report.report_number;
-            let mut uuid = self.uuid.lock().unwrap();
+            let mut uuid = self.uuid.lock();
             *uuid = metrics_report.clone().metrics_config_uuid;
-            let mut report = self.metrics_report.lock().unwrap();
+            let mut report = self.metrics_report.lock();
             *report = Some(metrics_report);
 
             Ok(())
@@ -650,15 +644,15 @@ mod tests {
         }
 
         fn get_num_on_ready_report_calls(&self) -> i32 {
-            *self.num_on_ready_report_calls.lock().unwrap()
+            *self.num_on_ready_report_calls.lock()
         }
 
         fn get_report_number(&self) -> i32 {
-            *self.report_number.lock().unwrap()
+            *self.report_number.lock()
         }
 
         fn get_uuid(&self) -> String {
-            self.uuid.lock().unwrap().to_string()
+            self.uuid.lock().to_string()
         }
     }
 
@@ -669,11 +663,11 @@ mod tests {
             _report_config_name: &str,
             metrics_report_number: i32,
         ) -> BinderResult<()> {
-            let mut num_calls = self.num_on_ready_report_calls.lock().unwrap();
+            let mut num_calls = self.num_on_ready_report_calls.lock();
             *num_calls += 1;
-            let mut report_number = self.report_number.lock().unwrap();
+            let mut report_number = self.report_number.lock();
             *report_number = metrics_report_number;
-            let mut uuid = self.uuid.lock().unwrap();
+            let mut uuid = self.uuid.lock();
             metrics_config_uuid.clone_into(&mut uuid);
             Ok(())
         }
@@ -698,11 +692,11 @@ mod tests {
         }
 
         pub fn get_num_send_status_calls(&self) -> i32 {
-            *self.num_send_status_calls.lock().unwrap()
+            *self.num_send_status_calls.lock()
         }
 
         pub fn get_status_code(&self) -> StatusCodes {
-            *self.status.lock().unwrap()
+            *self.status.lock()
         }
     }
 
@@ -713,10 +707,10 @@ mod tests {
             status_code: StatusCodes,
             _status_msg: &str,
         ) -> BinderResult<()> {
-            let mut num_calls = self.num_send_status_calls.lock().unwrap();
+            let mut num_calls = self.num_send_status_calls.lock();
             *num_calls += 1;
 
-            let mut mut_status = self.status.lock().unwrap();
+            let mut mut_status = self.status.lock();
             *mut_status = status_code;
 
             Ok(())
@@ -744,10 +738,10 @@ mod tests {
 
     impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
         fn sendStatus(&self, status_code: StatusCodes, _status_msg: &str) -> BinderResult<()> {
-            let mut num_calls = self.num_send_status_calls.lock().unwrap();
+            let mut num_calls = self.num_send_status_calls.lock();
             *num_calls += 1;
 
-            let mut mut_status = self.status.lock().unwrap();
+            let mut mut_status = self.status.lock();
             *mut_status = status_code;
 
             Ok(())
@@ -834,31 +828,31 @@ mod tests {
         }
 
         pub fn get_num_add_metrics_config_calls(&self) -> i32 {
-            *self.num_add_metrics_config_calls.lock().unwrap()
+            *self.num_add_metrics_config_calls.lock()
         }
 
         pub fn get_num_activate_metrics_config_calls(&self) -> i32 {
-            *self.num_activate_metrics_config_calls.lock().unwrap()
+            *self.num_activate_metrics_config_calls.lock()
         }
 
         pub fn get_num_deactivate_metrics_config_calls(&self) -> i32 {
-            *self.num_deactivate_metrics_config_calls.lock().unwrap()
+            *self.num_deactivate_metrics_config_calls.lock()
         }
 
         pub fn get_num_remove_config_calls(&self) -> i32 {
-            *self.num_remove_config_calls.lock().unwrap()
+            *self.num_remove_config_calls.lock()
         }
 
         pub fn get_num_remove_all_config_calls(&self) -> i32 {
-            *self.num_remove_all_config_calls.lock().unwrap()
+            *self.num_remove_all_config_calls.lock()
         }
 
         pub fn get_num_get_active_config_calls(&self) -> i32 {
-            *self.num_get_active_config_calls.lock().unwrap()
+            *self.num_get_active_config_calls.lock()
         }
 
         pub fn get_num_get_inactive_config_calls(&self) -> i32 {
-            *self.num_get_inactive_config_calls.lock().unwrap()
+            *self.num_get_inactive_config_calls.lock()
         }
     }
 
@@ -1418,7 +1412,7 @@ mod tests {
 
         let result = test_environment.service.unregisterApiStatusListener().await;
         assert!(result.is_ok());
-        assert!(test_environment.service.api_status_listener.lock().unwrap().is_none());
+        assert!(test_environment.service.api_status_listener.lock().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

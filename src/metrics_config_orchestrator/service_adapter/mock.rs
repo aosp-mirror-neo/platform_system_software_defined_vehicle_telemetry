@@ -2,9 +2,9 @@
 
 use super::*;
 
+use parking_lot::Mutex;
 use std::future;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Mutex;
 use tokio::sync::Notify;
 
 pub(crate) struct MockServiceAdapter {
@@ -39,11 +39,11 @@ impl ServiceAdapter for MockServiceAdapter {
     ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
         self.num_get_message_provider_calls.fetch_add(1, Ordering::Release);
 
-        if let Some(error) = self.next_error.lock().unwrap().take() {
+        if let Some(error) = self.next_error.lock().take() {
             return Err(error);
         }
 
-        if let Some(message_provider) = self.next_message_provider.lock().unwrap().take() {
+        if let Some(message_provider) = self.next_message_provider.lock().take() {
             Ok(Some(Box::new(message_provider)))
         } else {
             Ok(None)
@@ -59,10 +59,10 @@ impl ServiceAdapter for MockServiceAdapter {
         self.num_subscribe_calls.fetch_add(1, Ordering::Release);
         self.new_message_callback.lock().await.replace(new_message_callback);
         if let Some(configuration) = configuration {
-            self.latest_configuration.lock().unwrap().replace(configuration.clone());
+            self.latest_configuration.lock().replace(configuration.clone());
         }
 
-        if let Some(error) = self.next_error.lock().unwrap().take() {
+        if let Some(error) = self.next_error.lock().take() {
             return Err(error);
         }
 
@@ -82,7 +82,7 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::Release);
 
-        if let Some(error) = self.next_error.lock().unwrap().take() {
+        if let Some(error) = self.next_error.lock().take() {
             return Err(error);
         }
 
@@ -129,12 +129,12 @@ impl MockServiceAdapter {
     }
 
     pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
-        self.next_error.lock().unwrap().replace(error);
+        self.next_error.lock().replace(error);
         self
     }
 
     pub(crate) fn with_next_message_provider(self, provider: MockServiceMessageProvider) -> Self {
-        self.next_message_provider.lock().unwrap().replace(provider);
+        self.next_message_provider.lock().replace(provider);
         self
     }
 }
