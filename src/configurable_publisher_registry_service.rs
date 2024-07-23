@@ -6,10 +6,12 @@ mod configurable_publisher_registry;
 mod subscriber_service;
 
 // External dependencies.
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisherRegistry::IConfigurablePublisherRegistryAsyncServer, IConfigurablePublisher::IConfigurablePublisher, PublisherInfo::PublisherInfo};
-use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
+    IConfigurablePublisher::IConfigurablePublisher,
+    IConfigurablePublisherRegistry::IConfigurablePublisherRegistryAsyncServer,
+    PublisherInfo::PublisherInfo,
+};
 use async_trait::async_trait;
-use binder::Status;
 use log::info;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -26,23 +28,24 @@ pub struct ConfigurablePublisherRegistryService {
 /// Convert a Result<T, E> to BinderResult<T> to allow it to be returned from a binder RPC,
 /// preserving the content as far as possible.
 /// Also log the error if there is one.
-fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> BinderResult<T> {
+fn to_binder_result<T, E: Debug>(result: Result<T, E>) -> binder::Result<T> {
     result.map_err(|e| {
         let message = format!("{:?}", e);
         info!("Returning binder error: {}", &message);
-        Status::new_service_specific_error_str(-1, Some(message))
+        binder::Status::new_service_specific_error_str(-1, Some(message))
     })
 }
 
-impl Interface for ConfigurablePublisherRegistryService {}
+impl binder::Interface for ConfigurablePublisherRegistryService {}
 
 #[async_trait]
 impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistryService {
+    #[allow(non_snake_case)]
     async fn registerPublisher(
         &self,
         publisher_info: &PublisherInfo,
-        publisher: &Strong<dyn IConfigurablePublisher>,
-    ) -> BinderResult<()> {
+        publisher: &binder::Strong<dyn IConfigurablePublisher>,
+    ) -> binder::Result<()> {
         info!("Registering publisher with telemetry service name {}", publisher_info.serviceName);
         let res = self
             .configurable_publisher_registry
@@ -52,7 +55,8 @@ impl IConfigurablePublisherRegistryAsyncServer for ConfigurablePublisherRegistry
         to_binder_result(res)
     }
 
-    async fn unregisterPublisher(&self, service_name: &str) -> BinderResult<()> {
+    #[allow(non_snake_case)]
+    async fn unregisterPublisher(&self, service_name: &str) -> binder::Result<()> {
         info!("Unregistering publisher with telemetry service name {}", service_name);
         let res = self.configurable_publisher_registry.unregister_publisher(service_name).await;
 

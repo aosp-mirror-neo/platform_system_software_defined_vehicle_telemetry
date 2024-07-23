@@ -2,14 +2,14 @@
 
 // External dependencies.
 use async_trait::async_trait;
+use binder_tokio::TokioRuntime;
 use binder::BinderFeatures;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::IConfigurablePublisher,
     IConfigurablePublisherSubscription::IConfigurablePublisherSubscription,
     ISubscriber::BnSubscriber,
-    PublisherInfo::PublisherInfo
+    PublisherInfo::PublisherInfo,
 };
-use google_sdv_telemetry_configurable_publisher::binder::{Strong, Weak as BinderWeak};
 use log::info;
 use parking_lot::Mutex;
 use protobuf::descriptor::FileDescriptorProto;
@@ -44,13 +44,13 @@ pub struct ConfigurablePublisherRegistrySubscription {
     /// Handles for the spawned tokio task that reads the data.
     join_handle: tokio::task::JoinHandle<()>,
     /// The underlying configurable publisher subscription.
-    configurable_publisher_subscription: Strong<dyn IConfigurablePublisherSubscription>,
+    configurable_publisher_subscription: binder::Strong<dyn IConfigurablePublisherSubscription>,
 }
 
 /// Publisher registry entry.
 struct PublisherEntry {
     message_descriptor: MessageDescriptor,
-    publisher: Strong<dyn IConfigurablePublisher>,
+    publisher: binder::Strong<dyn IConfigurablePublisher>,
     supports_get: bool,
 }
 
@@ -70,7 +70,7 @@ pub enum ConfigurablePublisherRegistryRegisterError {
 
 struct ServicePublisherMessageProviderImpl {
     message_descriptor: MessageDescriptor,
-    publisher: BinderWeak<dyn IConfigurablePublisher>,
+    publisher: binder::Weak<dyn IConfigurablePublisher>,
 }
 
 fn serialize_configuration(configuration: &Any) -> Vec<u8> {
@@ -102,7 +102,10 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
         let provider = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             if entry.supports_get {
-                Some((entry.message_descriptor.clone(), Strong::downgrade(&entry.publisher)))
+                Some((
+                    entry.message_descriptor.clone(),
+                    binder::Strong::downgrade(&entry.publisher),
+                ))
             } else {
                 None
             }
@@ -137,8 +140,9 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             }
         });
 
-        let listener_wrapper = BnSubscriber::new_binder(
+        let listener_wrapper = BnSubscriber::new_async_binder(
             SubscriberService::new(message_descriptor, tx),
+            TokioRuntime(tokio::runtime::Handle::current()),
             BinderFeatures::default(),
         );
 
@@ -164,7 +168,7 @@ impl ConfigurablePublisherRegistry {
     pub(crate) async fn register_publisher(
         &self,
         publisher_info: &PublisherInfo,
-        publisher: &Strong<dyn IConfigurablePublisher>,
+        publisher: &binder::Strong<dyn IConfigurablePublisher>,
     ) -> Result<(), ConfigurablePublisherRegistryRegisterError> {
         let publisher_info_proto: FileDescriptorProto =
             protobuf::Message::parse_from_bytes(&publisher_info.fileDescriptorProto)?;
@@ -194,7 +198,7 @@ impl ConfigurablePublisherRegistry {
         Ok(())
     }
 
-    pub(crate) async fn unregister_publisher(&self, service_name: &str) -> crate::BinderResult<()> {
+    pub(crate) async fn unregister_publisher(&self, service_name: &str) -> binder::Result<()> {
         let mut publisher_entries_lock = self.publisher_entries.lock();
 
         match publisher_entries_lock.entry(service_name.to_string()) {

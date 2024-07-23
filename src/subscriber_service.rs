@@ -1,9 +1,7 @@
 // Copyright 2023 Google LLC
 
-#![allow(missing_docs)]
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
-use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult};
-use binder::Status;
+use async_trait::async_trait;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriberAsyncServer;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use tokio::sync::mpsc;
 
@@ -13,21 +11,23 @@ pub struct SubscriberService {
     tx: mpsc::Sender<Box<dyn MessageDyn>>,
 }
 
-impl Interface for SubscriberService {}
+impl binder::Interface for SubscriberService {}
 
-impl ISubscriber for SubscriberService {
-    fn sendData(&self, data: &[u8]) -> BinderResult<()> {
+#[async_trait]
+impl ISubscriberAsyncServer for SubscriberService {
+    #[allow(non_snake_case)]
+    async fn sendData(&self, data: &[u8]) -> binder::Result<()> {
         let message = self.message_descriptor.parse_from_bytes(data).map_err(|err| {
-            Status::new_service_specific_error_str(
+            binder::Status::new_service_specific_error_str(
                 -1,
                 Some(format!("Unable to parse message bytes: {:?}", err)),
             )
         })?;
 
-        let res = self.tx.blocking_send(message);
+        let res = self.tx.send(message).await;
 
         if res.is_err() {
-            return Err(Status::new_service_specific_error_str(
+            return Err(binder::Status::new_service_specific_error_str(
                 -1,
                 Some(format!("Unable to send message using tokio channel: {:?}", res)),
             ));
@@ -55,26 +55,28 @@ mod tests {
     // Arbitrarily chosen buffer capacity
     const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
-    #[test]
-    fn subscriber_wrapper_send_data_invalid_message_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn subscriber_wrapper_send_data_invalid_message_fails() {
         let (tx, _) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
         let wrapper = SubscriberService::new(Int32Value::descriptor(), tx);
 
-        assert!(wrapper.sendData(&[0xFF]).err().is_some());
+        assert!(wrapper.sendData(&[0xFF]).await.err().is_some());
     }
 
-    #[test]
-    fn subscriber_wrapper_send_data_success() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn subscriber_wrapper_send_data_success() {
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
         let wrapper = SubscriberService::new(Int32Value::descriptor(), tx);
 
         let val = Int32Value::new().write_to_bytes().unwrap();
-        wrapper.sendData(&val).unwrap();
+        wrapper.sendData(&val).await.unwrap();
 
         let send_val: Box<Int32Value> =
             Int32Value::descriptor().parse_from_bytes(&val).unwrap().downcast_box().unwrap();
 
-        let recv_msg = rx.blocking_recv().unwrap();
+        let recv_msg = rx.recv().await.unwrap();
         let recv_val: Box<Int32Value> = recv_msg.downcast_box().unwrap();
 
         assert_eq!(recv_val, send_val);
