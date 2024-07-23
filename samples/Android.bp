@@ -59,6 +59,7 @@ rust_defaults {
         // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libbinder_rs",
+        "libbinder_tokio_rs",
         "libfutures",
         "liblog_rust",
         "liblogger",
