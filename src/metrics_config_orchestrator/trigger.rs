@@ -1,12 +1,8 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use downcast_rs::DowncastSync;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
-
-#[cfg(test)]
-use downcast_rs::impl_downcast;
 
 use super::subscription_manager::CallbackFn;
 use crate::expr::node::NodeEvaluationContext;
@@ -22,7 +18,8 @@ pub(crate) mod mock;
 type TriggerCallbackFn = CallbackFn<NodeEvaluationContext>;
 
 #[async_trait]
-pub(crate) trait Trigger: Send + Sync + DowncastSync {
+#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+pub(crate) trait Trigger: Send + Sync {
     /// Returns the name of the trigger.
     fn get_name(&self) -> &str;
 
@@ -44,7 +41,7 @@ pub(crate) trait Trigger: Send + Sync + DowncastSync {
 }
 
 #[cfg(test)]
-impl_downcast!(sync Trigger);
+downcast_rs::impl_downcast!(sync Trigger);
 
 #[derive(Clone, Eq, Hash, PartialEq, strum_macros::Display)]
 #[strum(serialize_all = "title_case")]

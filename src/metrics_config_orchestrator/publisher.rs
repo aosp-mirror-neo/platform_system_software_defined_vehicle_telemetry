@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use downcast_rs::DowncastSync;
 use log::error;
 use protobuf::MessageDyn;
 use sdv_telemetry_utils::value_holder::ValueHolder;
@@ -9,9 +8,6 @@ use std::fmt::Debug;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 use thiserror::Error;
-
-#[cfg(test)]
-use downcast_rs::impl_downcast;
 
 use crate::expr::node::NodeEvaluationContext;
 
@@ -26,7 +22,8 @@ pub(crate) mod mock;
 type CallbackFn = Box<dyn FnMut(&dyn MessageDyn, NodeEvaluationContext) + Send + Sync>;
 
 #[async_trait]
-pub(crate) trait Publisher: Send + Sync + DowncastSync {
+#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+pub(crate) trait Publisher: Send + Sync {
     fn get_name(&self) -> &str;
 
     fn is_subscribable(&self) -> bool;
@@ -41,7 +38,7 @@ pub(crate) trait Publisher: Send + Sync + DowncastSync {
 }
 
 #[cfg(test)]
-impl_downcast!(sync Publisher);
+downcast_rs::impl_downcast!(sync Publisher);
 
 #[derive(Error, Debug)]
 pub(crate) enum PublisherActivateError {

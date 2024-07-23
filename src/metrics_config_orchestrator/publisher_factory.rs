@@ -1,6 +1,5 @@
 // Copyright 2023 Google LLC
 
-use downcast_rs::Downcast;
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
@@ -9,9 +8,6 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
-
-#[cfg(test)]
-use downcast_rs::impl_downcast;
 
 use crate::expr::node::Node;
 use crate::metrics_config_orchestrator::message_builder_factory::{
@@ -23,7 +19,8 @@ use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, Ser
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
 
-pub(crate) trait PublisherFactory: Send + Sync + Downcast {
+#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+pub(crate) trait PublisherFactory: Send + Sync {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
@@ -41,7 +38,7 @@ pub(crate) trait PublisherFactory: Send + Sync + Downcast {
 }
 
 #[cfg(test)]
-impl_downcast!(PublisherFactory);
+downcast_rs::impl_downcast!(PublisherFactory);
 
 pub(crate) struct PublisherFactoryCreateContext<'a> {
     pub file_descriptors: &'a [FileDescriptor],

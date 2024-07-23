@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use downcast_rs::DowncastSync;
 use log::{debug, error};
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
 use sdv_telemetry_proto_rust::metrics_configuration::{
@@ -12,22 +11,20 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
-#[cfg(test)]
-use downcast_rs::impl_downcast;
-
 use crate::expr::node::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
 
 #[async_trait]
-pub(crate) trait MetricsReportGenerator: Send + Sync + DowncastSync {
+#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+pub(crate) trait MetricsReportGenerator: Send + Sync {
     async fn activate(self: Arc<Self>);
     async fn deactivate(&self);
 }
 
 #[cfg(test)]
-impl_downcast!(sync MetricsReportGenerator);
+downcast_rs::impl_downcast!(sync MetricsReportGenerator);
 
 pub(crate) struct MetricsReportGeneratorImpl {
     pub(super) name: String,

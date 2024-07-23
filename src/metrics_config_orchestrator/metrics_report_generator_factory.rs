@@ -1,6 +1,5 @@
 // Copyright 2023 Google LLC
 
-use downcast_rs::Downcast;
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
@@ -18,10 +17,8 @@ use crate::metrics_config_orchestrator::{
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
 };
 
-#[cfg(test)]
-use downcast_rs::impl_downcast;
-
-pub(crate) trait MetricsReportGeneratorFactory: Send + Sync + Downcast {
+#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+pub(crate) trait MetricsReportGeneratorFactory: Send + Sync {
     /// Returns a new metrics report generator based on the metrics report config
     /// protobuf message.
     fn create(
@@ -40,7 +37,7 @@ pub(crate) trait MetricsReportGeneratorFactory: Send + Sync + Downcast {
 }
 
 #[cfg(test)]
-impl_downcast!(MetricsReportGeneratorFactory);
+downcast_rs::impl_downcast!(MetricsReportGeneratorFactory);
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
     pub config_proto: &'a MetricsConfigProto,

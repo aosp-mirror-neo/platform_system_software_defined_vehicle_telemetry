@@ -67,6 +67,7 @@ rust_defaults {
     proc_macros: [
         // keep-sorted start
         "libasync_trait",
+        "libsdv_telemetry_utils_macros",
         "libstrum_macros",
         // keep-sorted end
     ],

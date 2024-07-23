@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC
 
 use anyhow::anyhow;
-use downcast_rs::Downcast;
 use protobuf::well_known_types::duration::Duration as DurationProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionType as ConditionTypeProto,
@@ -14,16 +13,14 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
-#[cfg(test)]
-use downcast_rs::impl_downcast;
-
 use super::trigger::conditional::{ConditionType, ConditionalTrigger};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::{Publisher, Trigger};
 
-pub(crate) trait TriggerFactory: Send + Sync + Downcast {
+#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+pub(crate) trait TriggerFactory: Send + Sync {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
@@ -40,7 +37,7 @@ pub(crate) trait TriggerFactory: Send + Sync + Downcast {
 }
 
 #[cfg(test)]
-impl_downcast!(TriggerFactory);
+downcast_rs::impl_downcast!(TriggerFactory);
 
 pub(crate) struct TriggerFactoryCreateContext<'a> {
     pub expression_nodes: &'a Vec<Arc<Node>>,
