@@ -2,32 +2,26 @@
 
 //! Binary for testing configurable publishers
 
-#![allow(missing_docs)]
-
 mod random_integer_publisher;
 mod random_integer_publisher_service;
-mod random_integer_publisher_subscription;
 
+use binder::BinderFeatures;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
     PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry
 };
-use google_sdv_telemetry_configurable_publisher::binder::BinderFeatures;
-use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests,
-validated_log_tag};
-use sample_publisher_proto::sample_publisher;
-use sample_publisher_proto::sample_publisher::SampleMessage;
-use crate::random_integer_publisher::RandomIntegerPublisher;
-use crate::random_integer_publisher_service::RandomIntegerPublisherService;
-
 use log::info;
 use protobuf::{Message, MessageFull};
+use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
+use sample_publisher_proto::sample_publisher::{self, SampleMessage};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Notify;
+
+use random_integer_publisher::RandomIntegerPublisher;
+use random_integer_publisher_service::RandomIntegerPublisherService;
 
 const LOG_TAG: &str = validated_log_tag("TelemetrySamplConfigPub");
 
+/// Connects to the Telemetry Configurable Publisher Registry.
 pub fn connect() -> Result<binder::Strong<dyn IConfigurablePublisherRegistry>, binder::StatusCode> {
     let configurable_publisher_registry_descriptor = format!(
         "{}/default",
@@ -46,8 +40,7 @@ async fn main() -> Result<(), binder::Status> {
     let service = connect().expect("Failed to connect to IConfigurablePublisherRegistry");
 
     info!("Creating publisher");
-    let notify_subscribed = Arc::new(Notify::new());
-    let publisher = Arc::new(RandomIntegerPublisher::new(Arc::clone(&notify_subscribed)));
+    let publisher = Arc::new(RandomIntegerPublisher {});
     let publisher_wrapper = RandomIntegerPublisherService { publisher: Arc::clone(&publisher) };
     let binder_publisher =
         BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
@@ -65,16 +58,8 @@ async fn main() -> Result<(), binder::Status> {
 
     service.registerPublisher(&publisher_info, &binder_publisher)?;
 
-    loop {
-        info!("Waiting for subscription");
-        notify_subscribed.notified().await;
+    info!("Waiting for subscription");
+    tokio::task::block_in_place(binder::ProcessState::join_thread_pool);
 
-        info!("Publishing data");
-        publisher
-            .publish_data_randomly(Duration::from_secs(1), Duration::from_secs(1))
-            .await
-            .expect("Failed to publish data");
-
-        info!("Stopped publishing data");
-    }
+    Ok(())
 }

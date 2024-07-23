@@ -1,10 +1,9 @@
 // Copyright 2023 Google LLC
 
-use binder::{ExceptionCode, Status};
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
-    ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher, IConfigurablePublisherSubscription::IConfigurablePublisherSubscription
-};
-use google_sdv_telemetry_configurable_publisher::binder::{Interface, Strong, Result as BinderResult};
+use binder::BinderFeatures;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription};
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher};
+
 use std::sync::Arc;
 
 use crate::random_integer_publisher::RandomIntegerPublisher;
@@ -13,18 +12,21 @@ pub struct RandomIntegerPublisherService {
     pub publisher: Arc<RandomIntegerPublisher>,
 }
 
-impl Interface for RandomIntegerPublisherService {}
+impl binder::Interface for RandomIntegerPublisherService {}
 
 impl IConfigurablePublisher for RandomIntegerPublisherService {
+    #[allow(non_snake_case)]
     fn createSubscription(
         &self,
-        subscriber: &Strong<dyn ISubscriber>,
+        subscriber: &binder::Strong<dyn ISubscriber>,
         config: Option<&[u8]>,
-    ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
-        self.publisher.create_subscription(subscriber, config)
+    ) -> binder::Result<binder::Strong<dyn IConfigurablePublisherSubscription>> {
+        let subscription = self.publisher.create_subscription(subscriber, config);
+        Ok(BnConfigurablePublisherSubscription::new_binder(subscription, BinderFeatures::default()))
     }
 
-    fn getLatestMessage(&self, _configuration: Option<&[u8]>) -> BinderResult<Option<Vec<u8>>> {
-        Err(Status::new_exception(ExceptionCode::UNSUPPORTED_OPERATION, None))
+    #[allow(non_snake_case)]
+    fn getLatestMessage(&self, _configuration: Option<&[u8]>) -> binder::Result<Option<Vec<u8>>> {
+        Err(binder::Status::new_exception(binder::ExceptionCode::UNSUPPORTED_OPERATION, None))
     }
 }

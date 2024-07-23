@@ -93,8 +93,8 @@ rust_test {
     },
 }
 
-rust_binary {
-    name: "telemetry_sample_publisher",
+rust_defaults {
+    name: "telemetry_sample_publisher_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: [
         "rust/sample_publisher/main.rs",
@@ -103,6 +103,7 @@ rust_binary {
         // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libbinder_rs",
+        "libbinder_tokio_rs",
         "libfutures",
         "liblog_rust",
         "liblogger",
@@ -115,6 +116,26 @@ rust_binary {
         // keep-sorted end
     ],
     vendor: true,
+}
+
+rust_binary {
+    name: "telemetry_sample_publisher",
+    defaults: ["telemetry_sample_publisher_defaults"],
+}
+
+rust_test {
+    name: "telemetry_sample_publisher_unit_tests",
+    defaults: ["telemetry_sample_publisher_defaults"],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
 }
 
 rust_binary {
