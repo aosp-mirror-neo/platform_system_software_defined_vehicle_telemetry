@@ -337,7 +337,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         config_list_listener: &Strong<dyn ITelemetryConfigListListener>,
     ) -> BinderResult<()> {
-        info!("getActiveMetricsConfigUuids");
+        info!("getInactiveMetricsConfigUuids");
         let config_list = self.metrics_config_manager.get_inactive_metrics_config_uuids().await;
         if let Err(e) = config_list_listener.deref().sendConfigList(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
