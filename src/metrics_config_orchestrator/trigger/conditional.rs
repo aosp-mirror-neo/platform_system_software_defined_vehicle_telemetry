@@ -128,6 +128,11 @@ impl ConditionalTrigger {
                 }
             };
 
+            if node_value.is_none() {
+                // TODO: b/307547570 - properly handle absent values
+                return false;
+            }
+
             condition_checker(node_value, &trigger.maybe_previous_value).unwrap_or_else(|err| {
                 panic!("Failed to perform comparison for trigger {}: {}", trigger.get_name(), err)
             })
@@ -395,6 +400,31 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
         assert_eq!(parent_context, child_context1);
         assert_eq!(parent_context, child_context2);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn activate_conditional_trigger_filters_none() {
+        let (message_provider, parent_trigger, callback_listener) =
+            setup_active_conditional_trigger(ConditionType::AllChanges).await;
+
+        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
+        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
+
+        // Fire parent trigger three times.
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_sync_result(Ok(None));
+        parent_trigger.fire().await;
+
+        message_provider.set_next_sync_result(Ok(Some(msg2)));
+        parent_trigger.fire().await;
+
+        // Wait for trigger to fire once.
+        callback_listener.wait_for_callback_fired().await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
