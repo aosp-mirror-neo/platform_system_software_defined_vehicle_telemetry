@@ -3,7 +3,7 @@
 // External dependencies.
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
-use binder::{BinderFeatures, IBinder};
+use binder::BinderFeatures;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::IConfigurablePublisher,
     IConfigurablePublisherSubscription::IConfigurablePublisherSubscription,
@@ -24,7 +24,7 @@ use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::fmt::Debug;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -49,7 +49,6 @@ pub struct ConfigurablePublisherRegistrySubscription {
 
 /// Publisher registry entry.
 struct PublisherEntry {
-    _death_recipient: binder::DeathRecipient,
     message_descriptor: MessageDescriptor,
     publisher: binder::Strong<dyn IConfigurablePublisher>,
     supports_get: bool,
@@ -58,11 +57,8 @@ struct PublisherEntry {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ConfigurablePublisherRegistryRegisterError {
-    #[error("Error when making a call to Binder: {error:?}")]
-    BinderError {
-        #[from]
-        error: binder::StatusCode,
-    },
+    #[error("Service with name {service_name} is already registered")]
+    ServiceAlreadyRegistered { service_name: String },
     #[error("Unable to parse publisher file descriptor proto: {error}")]
     FileDescriptorProtoParseError {
         #[from]
@@ -70,8 +66,6 @@ pub enum ConfigurablePublisherRegistryRegisterError {
     },
     #[error("Message type {message_type_name} is not defined in the file descriptor")]
     InvalidMessageTypeName { message_type_name: String },
-    #[error("Service with name {service_name} is already registered")]
-    ServiceAlreadyRegistered { service_name: String },
 }
 
 struct ServicePublisherMessageProviderImpl {
@@ -193,14 +187,7 @@ impl ConfigurablePublisherRegistry {
                 });
             }
             Entry::Vacant(v) => {
-                let publisher_entries_reference = Arc::downgrade(&self.publisher_entries);
-                let service_name_clone = v.key().clone();
-                let mut death_recipient = binder::DeathRecipient::new(move || {
-                    Self::on_publisher_death(&publisher_entries_reference, &service_name_clone)
-                });
-                publisher.as_binder().link_to_death(&mut death_recipient)?;
                 v.insert(PublisherEntry {
-                    _death_recipient: death_recipient,
                     message_descriptor,
                     publisher: publisher.clone(),
                     supports_get: publisher_info.supportsGet,
@@ -237,17 +224,6 @@ impl ConfigurablePublisherRegistry {
         let publisher_entries_lock = publisher_entries.lock();
         let entry = publisher_entries_lock.get(service_name)?;
         Some(visitor(entry))
-    }
-
-    fn on_publisher_death(
-        publisher_entries: &Weak<Mutex<HashMap<String, PublisherEntry>>>,
-        service_name: &str,
-    ) {
-        if let Some(publisher_entries) = publisher_entries.upgrade() {
-            if publisher_entries.lock().remove(service_name).is_some() {
-                info!("Unregistered publisher {service_name} due to Binder death notification.");
-            }
-        }
     }
 }
 
