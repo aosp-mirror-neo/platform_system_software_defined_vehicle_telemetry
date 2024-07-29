@@ -117,37 +117,6 @@ rust_library {
 }
 
 rust_defaults {
-    name: "libsdv_telemetry_utils_defaults",
-    defaults: ["sdv_telemetry@rust_defaults"],
-    srcs: [
-        "src/utils/lib.rs",
-    ],
-    rustlibs: [
-        // keep-sorted start
-        "libfutures",
-        "liblazy_static",
-        "liblog_rust",
-        "liblogger",
-        "libprotobuf",
-        "librand",
-        "libtokio",
-        // keep-sorted end
-    ],
-    proc_macros: [
-        // keep-sorted start
-        "libsdv_telemetry_test_utils_macros",
-        // keep-sorted end
-    ],
-    vendor_available: true,
-}
-
-rust_library {
-    name: "libsdv_telemetry_utils",
-    defaults: ["libsdv_telemetry_utils_defaults"],
-    crate_name: "sdv_telemetry_utils",
-}
-
-rust_defaults {
     name: "telemetry_dt_wrapper_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["src/data_tunnel_wrapper/lib.rs"],
@@ -234,6 +203,7 @@ rust_test {
         // keep-sorted start
         "librand",
         "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],
     proc_macros: [
@@ -315,6 +285,7 @@ rust_test {
         "librand",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_utils",
         "libsdv_telemetry_utils",
         // keep-sorted end
     ],
@@ -362,6 +333,7 @@ rust_test {
     rustlibs: [
         // keep-sorted start
         "libsample_publisher_proto",
+        "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],
     proc_macros: [
@@ -382,37 +354,6 @@ rust_test {
                 "libbase",
                 "libbinder",
                 "libbinder_ndk",
-                "libc++",
-                "libcutils",
-                "liblog",
-                "libutils",
-                // keep-sorted end
-            ],
-        },
-    },
-    auto_gen_config: true,
-    test_options: {
-        unit_test: true,
-    },
-    // Requires root so the test can create required directories in
-    // /data/local/tests/
-    require_root: true,
-}
-
-rust_test {
-    name: "libsdv_telemetry_utils_unit_tests",
-    defaults: ["libsdv_telemetry_utils_defaults"],
-    test_suites: [
-        // keep-sorted start
-        "automotive-sdv-tests",
-        "general-tests",
-        // keep-sorted end
-    ],
-    target: {
-        host: {
-            data_libs: [
-                // keep-sorted start
-                "libbase",
                 "libc++",
                 "libcutils",
                 "liblog",
@@ -456,6 +397,7 @@ rust_test {
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_utils",
         "libsdv_telemetry_utils",
         "libtokio",
         // keep-sorted end

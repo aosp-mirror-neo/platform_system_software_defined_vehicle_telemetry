@@ -267,7 +267,7 @@ mod tests {
     use protobuf::{Message, MessageFull};
     use sample_publisher_proto::sample_publisher;
     use sample_publisher_proto::sample_publisher::SampleMessage;
-    use sdv_telemetry_utils::test_utils::create_empty_fn_box;
+    use sdv_telemetry_test_utils::create_empty_fn_box;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
 

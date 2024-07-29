@@ -1,0 +1,47 @@
+// Copyright 2024 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_test_utils_macros_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libproc_macro2",
+        "libquote",
+        "libsyn",
+        // keep-sorted end
+    ],
+}
+
+rust_proc_macro {
+    name: "libsdv_telemetry_test_utils_macros",
+    defaults: ["libsdv_telemetry_test_utils_macros_defaults"],
+    crate_name: "sdv_telemetry_test_utils_macros",
+}
+
+// TODO(b/354010833): Uncomment when aosp/3178079 is available in all branches
+// this test exists in.
+/*
+rust_test_host {
+    name: "libsdv_telemetry_test_utils_macros_tests",
+    host_cross_supported: false,
+    defaults: ["libsdv_telemetry_test_utils_macros_defaults"],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+}
+*/

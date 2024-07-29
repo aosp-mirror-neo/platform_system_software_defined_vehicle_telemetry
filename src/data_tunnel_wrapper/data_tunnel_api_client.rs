@@ -284,7 +284,7 @@ mod tests {
 mod tests {
     use super::*;
 
-    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
+    use sdv_telemetry_test_utils::unique_dt_topic_name;
 
     fn create_topic(
         topic_name: &CxxString,
