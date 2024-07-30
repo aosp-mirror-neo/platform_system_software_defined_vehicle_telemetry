@@ -3,7 +3,7 @@
 // External dependencies.
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
-use binder::BinderFeatures;
+use binder::{BinderFeatures, IBinder};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::IConfigurablePublisher,
     IConfigurablePublisherSubscription::IConfigurablePublisherSubscription,
@@ -24,7 +24,7 @@ use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -36,6 +36,8 @@ const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
 /// ConfigurablePublisherRegistry that maintains the list of configurable publishers in memory.
 pub struct ConfigurablePublisherRegistry {
+    /// Adapter to make calls into Binder library.
+    binder_adapter: Box<dyn BinderAdapter>,
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
     publisher_entries: Arc<Mutex<HashMap<String, PublisherEntry>>>,
 }
@@ -47,18 +49,14 @@ pub struct ConfigurablePublisherRegistrySubscription {
     configurable_publisher_subscription: binder::Strong<dyn IConfigurablePublisherSubscription>,
 }
 
-/// Publisher registry entry.
-struct PublisherEntry {
-    message_descriptor: MessageDescriptor,
-    publisher: binder::Strong<dyn IConfigurablePublisher>,
-    supports_get: bool,
-}
-
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum ConfigurablePublisherRegistryRegisterError {
-    #[error("Service with name {service_name} is already registered")]
-    ServiceAlreadyRegistered { service_name: String },
+    #[error("Error when making a call to Binder: {error:?}")]
+    BinderError {
+        #[from]
+        error: binder::StatusCode,
+    },
     #[error("Unable to parse publisher file descriptor proto: {error}")]
     FileDescriptorProtoParseError {
         #[from]
@@ -66,6 +64,30 @@ pub enum ConfigurablePublisherRegistryRegisterError {
     },
     #[error("Message type {message_type_name} is not defined in the file descriptor")]
     InvalidMessageTypeName { message_type_name: String },
+    #[error("Service with name {service_name} is already registered")]
+    ServiceAlreadyRegistered { service_name: String },
+}
+
+/// Adapter interface in order to fake certain binder API calls that are only implemented
+/// for remote binders in tests, which use local binders.
+trait BinderAdapter: Send + Sync {
+    /// Subscribe to death notifications from the publisher.
+    /// Subscription is removed when the returned death recipient is dropped.
+    fn link_to_death(
+        &self,
+        publisher: &binder::Strong<dyn IConfigurablePublisher>,
+        callback: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<binder::DeathRecipient, binder::StatusCode>;
+}
+
+struct BinderAdapterImpl {}
+
+/// Publisher registry entry.
+struct PublisherEntry {
+    _death_recipient: binder::DeathRecipient,
+    message_descriptor: MessageDescriptor,
+    publisher: binder::Strong<dyn IConfigurablePublisher>,
+    supports_get: bool,
 }
 
 struct ServicePublisherMessageProviderImpl {
@@ -162,7 +184,10 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
 impl ConfigurablePublisherRegistry {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
-        Self { publisher_entries: Mutex::new(HashMap::new()).into() }
+        Self {
+            binder_adapter: Box::new(BinderAdapterImpl {}),
+            publisher_entries: Mutex::new(HashMap::new()).into(),
+        }
     }
 
     pub(crate) async fn register_publisher(
@@ -187,7 +212,17 @@ impl ConfigurablePublisherRegistry {
                 });
             }
             Entry::Vacant(v) => {
+                let publisher_entries_reference = Arc::downgrade(&self.publisher_entries);
+                let service_name_clone = v.key().clone();
+                let death_recipient = self.binder_adapter.link_to_death(
+                    publisher,
+                    Box::new(move || {
+                        Self::on_publisher_death(&publisher_entries_reference, &service_name_clone)
+                    }),
+                )?;
+
                 v.insert(PublisherEntry {
+                    _death_recipient: death_recipient,
                     message_descriptor,
                     publisher: publisher.clone(),
                     supports_get: publisher_info.supportsGet,
@@ -225,6 +260,41 @@ impl ConfigurablePublisherRegistry {
         let entry = publisher_entries_lock.get(service_name)?;
         Some(visitor(entry))
     }
+
+    fn on_publisher_death(
+        publisher_entries: &Weak<Mutex<HashMap<String, PublisherEntry>>>,
+        service_name: &str,
+    ) {
+        if let Some(publisher_entries) = publisher_entries.upgrade() {
+            if publisher_entries.lock().remove(service_name).is_some() {
+                info!("Unregistered publisher {service_name} due to Binder death notification.");
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription {
+    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
+        if !self.join_handle.is_finished() {
+            self.join_handle.abort();
+        }
+
+        self.configurable_publisher_subscription.unsubscribe()?;
+        Ok(())
+    }
+}
+
+impl BinderAdapter for BinderAdapterImpl {
+    fn link_to_death(
+        &self,
+        publisher: &binder::Strong<dyn IConfigurablePublisher>,
+        callback: Box<dyn Fn() + Send + Sync>,
+    ) -> Result<binder::DeathRecipient, binder::StatusCode> {
+        let mut death_recipient = binder::DeathRecipient::new(callback);
+        publisher.as_binder().link_to_death(&mut death_recipient)?;
+        Ok(death_recipient)
+    }
 }
 
 #[async_trait]
@@ -243,25 +313,17 @@ impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
     }
 }
 
-#[async_trait]
-impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription {
-    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
-        if !self.join_handle.is_finished() {
-            self.join_handle.abort();
-        }
-
-        self.configurable_publisher_subscription.unsubscribe()?;
-        Ok(())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use binder::{ExceptionCode, Status};
-    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{IConfigurablePublisher::BnConfigurablePublisher, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}, ISubscriber::ISubscriber};
-    use google_sdv_telemetry_configurable_publisher::binder::{Interface, Result as BinderResult, Strong};
+    use binder::BinderFeatures;
+    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
+    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisher::BnConfigurablePublisher;
+    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherSubscription::{
+        IConfigurablePublisherSubscription,
+        BnConfigurablePublisherSubscription,
+    };
     use protobuf::reflect::ReflectValueRef;
     use protobuf::well_known_types::{any::Any, wrappers::Int32Value};
     use protobuf::{Message, MessageFull};
@@ -288,31 +350,19 @@ mod tests {
         supports_get: bool,
     }
 
-    struct ConfigurablePublisherSubscription {
-        num_unsubscribe_calls: Weak<AtomicU32>,
-    }
-
-    impl Interface for MockConfigurablePublisher {}
-    impl Interface for ConfigurablePublisherSubscription {}
-
-    impl IConfigurablePublisherSubscription for ConfigurablePublisherSubscription {
-        fn unsubscribe(&self) -> BinderResult<()> {
-            self.num_unsubscribe_calls.upgrade().unwrap().fetch_add(1, Ordering::SeqCst);
-            Ok(())
-        }
-    }
+    impl binder::Interface for MockConfigurablePublisher {}
 
     impl IConfigurablePublisher for MockConfigurablePublisher {
         fn createSubscription(
             &self,
-            _subscriber: &Strong<dyn ISubscriber>,
+            _subscriber: &binder::Strong<dyn ISubscriber>,
             configuration: Option<&[u8]>,
-        ) -> BinderResult<Strong<dyn IConfigurablePublisherSubscription>> {
+        ) -> binder::Result<binder::Strong<dyn IConfigurablePublisherSubscription>> {
             *self.last_configuration.lock() = configuration.map(|config| config.to_owned());
             self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
 
             let binder_subscription = BnConfigurablePublisherSubscription::new_binder(
-                ConfigurablePublisherSubscription {
+                MockConfigurablePublisherSubscription {
                     num_unsubscribe_calls: Arc::downgrade(&self.num_unsubscribe_calls),
                 },
                 BinderFeatures::default(),
@@ -320,13 +370,19 @@ mod tests {
             Ok(binder_subscription)
         }
 
-        fn getLatestMessage(&self, configuration: Option<&[u8]>) -> BinderResult<Option<Vec<u8>>> {
+        fn getLatestMessage(
+            &self,
+            configuration: Option<&[u8]>,
+        ) -> binder::Result<Option<Vec<u8>>> {
             *self.last_configuration.lock() = configuration.map(|config| config.to_owned());
 
             if self.supports_get {
                 Ok(self.next_latest_message.lock().take())
             } else {
-                Err(Status::new_exception(ExceptionCode::UNSUPPORTED_OPERATION, None))
+                Err(binder::Status::new_exception(
+                    binder::ExceptionCode::UNSUPPORTED_OPERATION,
+                    None,
+                ))
             }
         }
     }
@@ -351,10 +407,47 @@ mod tests {
         }
     }
 
+    struct MockConfigurablePublisherSubscription {
+        num_unsubscribe_calls: Weak<AtomicU32>,
+    }
+
+    impl binder::Interface for MockConfigurablePublisherSubscription {}
+
+    impl IConfigurablePublisherSubscription for MockConfigurablePublisherSubscription {
+        fn unsubscribe(&self) -> binder::Result<()> {
+            self.num_unsubscribe_calls.upgrade().unwrap().fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[derive(Clone)]
+    struct MockBinderAdapter {
+        callback: Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>,
+    }
+
+    impl BinderAdapter for MockBinderAdapter {
+        fn link_to_death(
+            &self,
+            _publisher: &binder::Strong<dyn IConfigurablePublisher>,
+            callback: Box<dyn Fn() + Send + Sync>,
+        ) -> Result<binder::DeathRecipient, binder::StatusCode> {
+            self.callback.lock().replace(callback);
+            Ok(binder::DeathRecipient::new(|| {}))
+        }
+    }
+
+    impl MockBinderAdapter {
+        fn new() -> Self {
+            Self { callback: Arc::new(Mutex::new(None)) }
+        }
+    }
+
     async fn create_configurable_publisher_registry(
         configurable_publisher: MockConfigurablePublisher,
-    ) -> ConfigurablePublisherRegistry {
-        let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
+    ) -> (ConfigurablePublisherRegistry, MockBinderAdapter) {
+        let mut configurable_publisher_registry = ConfigurablePublisherRegistry::new();
+        let binder_adapter = MockBinderAdapter::new();
+        configurable_publisher_registry.binder_adapter = Box::new(binder_adapter.clone());
 
         let file_descriptor = sample_publisher::file_descriptor();
         let file_descriptor_proto = file_descriptor.proto();
@@ -375,7 +468,7 @@ mod tests {
             .await
             .unwrap();
 
-        configurable_publisher_registry
+        (configurable_publisher_registry, binder_adapter)
     }
 
     #[test]
@@ -391,7 +484,7 @@ mod tests {
     #[tokio::test]
     async fn get_metadata_success() {
         let configurable_publisher = MockConfigurablePublisher::new(true);
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
         let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).unwrap().unwrap();
@@ -414,7 +507,7 @@ mod tests {
     #[tokio::test]
     async fn get_message_provider_get_not_supported_returns_none() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
         let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap();
@@ -429,7 +522,7 @@ mod tests {
         let msg = SampleMessage { sample_data: 442, ..Default::default() };
         let configurable_publisher = MockConfigurablePublisher::new(true);
         configurable_publisher.next_latest_message.lock().replace(msg.write_to_bytes().unwrap());
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         let message_provider =
@@ -457,9 +550,21 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
+    async fn register_publisher_death_notification_removes_entry() {
+        let configurable_publisher = MockConfigurablePublisher::new(false);
+        let (configurable_publisher_registry, binder_adapter) =
+            create_configurable_publisher_registry(configurable_publisher).await;
+
+        binder_adapter.callback.lock().as_ref().unwrap()();
+
+        assert!(configurable_publisher_registry.publisher_entries.lock().is_empty());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
     async fn create_subscription_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
@@ -491,7 +596,7 @@ mod tests {
     #[tokio::test]
     async fn unsubscribe_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         let subscription = configurable_publisher_registry
@@ -509,7 +614,7 @@ mod tests {
     #[tokio::test]
     async fn unregister_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
@@ -532,7 +637,7 @@ mod tests {
     #[tokio::test]
     async fn unregister_incorrect_service_name_gets_ignored() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
-        let configurable_publisher_registry =
+        let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
         configurable_publisher_registry
