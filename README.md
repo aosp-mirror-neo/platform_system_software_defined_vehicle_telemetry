@@ -96,5 +96,3 @@ adb shell sdv_ivi_telemetry_service_agent &
 ```bash
 atest sdv_telemetry_integration_tests
 ```
-
-# Test CL number 1
