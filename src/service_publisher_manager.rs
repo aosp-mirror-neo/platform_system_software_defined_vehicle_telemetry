@@ -81,7 +81,7 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::MessageFull;
-    use sdv_telemetry_utils::test_utils::create_empty_fn_box;
+    use sdv_telemetry_test_utils::create_empty_fn_box;
     use std::sync::Arc;
 
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;

@@ -362,7 +362,7 @@ mod tests {
     use sdv_dt::TopicTypedMetadata;
     use sdv_telemetry_test_proto::test_message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
+    use sdv_telemetry_test_utils::unique_dt_topic_name;
     use tokio::sync::mpsc;
 
     use crate::data_tunnel_api_client::TopicDescriptor;

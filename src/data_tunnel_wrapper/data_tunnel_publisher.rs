@@ -95,7 +95,7 @@ mod tests {
 
     use protobuf::Message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use sdv_telemetry_utils::test_utils::unique_dt_topic_name;
+    use sdv_telemetry_test_utils::unique_dt_topic_name;
 
     #[test]
     fn register_topic_success() {

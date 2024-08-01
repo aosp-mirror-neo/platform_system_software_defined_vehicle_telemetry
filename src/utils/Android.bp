@@ -6,83 +6,62 @@ package {
 }
 
 rust_defaults {
-    name: "libsdv_telemetry_test_utils_macros_defaults",
+    name: "libsdv_telemetry_utils_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: [
-        "test_utils_macros.rs",
+        "lib.rs",
     ],
     rustlibs: [
         // keep-sorted start
-        "libproc_macro2",
-        "libquote",
-        "libsyn",
+        "libfutures",
+        "liblazy_static",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "libtokio",
         // keep-sorted end
     ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
+    vendor_available: true,
 }
 
-rust_proc_macro {
-    name: "libsdv_telemetry_test_utils_macros",
-    defaults: ["libsdv_telemetry_test_utils_macros_defaults"],
-    crate_name: "sdv_telemetry_test_utils_macros",
+rust_library {
+    name: "libsdv_telemetry_utils",
+    defaults: ["libsdv_telemetry_utils_defaults"],
+    crate_name: "sdv_telemetry_utils",
 }
 
-// TODO(b/354010833): Uncomment when aosp/3178079 is available in all branches
-// this test exists in.
-/*
-rust_test_host {
-    name: "libsdv_telemetry_test_utils_macros_tests",
-    host_cross_supported: false,
-    defaults: ["libsdv_telemetry_test_utils_macros_defaults"],
+rust_test {
+    name: "libsdv_telemetry_utils_unit_tests",
+    defaults: ["libsdv_telemetry_utils_defaults"],
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
         "general-tests",
         // keep-sorted end
     ],
+    target: {
+        host: {
+            data_libs: [
+                // keep-sorted start
+                "libbase",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
+            ],
+        },
+    },
     auto_gen_config: true,
     test_options: {
         unit_test: true,
     },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
-*/
-
-rust_defaults {
-    name: "libsdv_telemetry_utils_macros_defaults",
-    defaults: ["sdv_telemetry@rust_defaults"],
-    srcs: [
-        "macros.rs",
-    ],
-    rustlibs: [
-        // keep-sorted start
-        "libproc_macro2",
-        "libquote",
-        "libsyn",
-        // keep-sorted end
-    ],
-}
-
-rust_proc_macro {
-    name: "libsdv_telemetry_utils_macros",
-    defaults: ["libsdv_telemetry_utils_macros_defaults"],
-    crate_name: "sdv_telemetry_utils_macros",
-}
-
-// TODO(b/354010833): Uncomment when aosp/3178079 is available in all branches
-// this test exists in.
-/*
-rust_test_host {
-    name: "libsdv_telemetry_utils_macros_tests",
-    host_cross_supported: false,
-    defaults: ["libsdv_telemetry_utils_macros_defaults"],
-    test_suites: [
-        // keep-sorted start
-        "automotive-sdv-tests",
-        "general-tests",
-        // keep-sorted end
-    ],
-    auto_gen_config: true,
-    test_options: {
-        unit_test: true,
-    },
-}
-*/
