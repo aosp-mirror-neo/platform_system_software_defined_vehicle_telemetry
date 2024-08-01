@@ -333,6 +333,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         // Activate publishers one by one in topologically sorted order.
         for publisher_name in &config.ordered_publisher_names {
             Arc::clone(&config.publishers[publisher_name]).activate().await.map_err(|error| {
+                // TODO(b/356331084): Handle already activated publishers.
+                self.configs.lock().remove(&config_proto.uuid);
                 MetricsConfigOrchestratorError::UnableToActivatePublisher {
                     publisher_name: publisher_name.to_owned(),
                     error,
@@ -340,35 +342,43 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             })?;
         }
 
-        // Activate start trigger or start data collection immediately if start trigger is not set.
-        if let Some(start_trigger) = &config.start_trigger {
-            Self::subscribe_to_start_trigger(start_trigger, &config).await;
-        } else {
-            // Lock state mutex and hold it mutex until transition is complete.
-            let mut config_state = config.state.lock().await;
+        // Once publishers are activated, it's unsafe to return errors without rolling back all state changes,
+        // which in turn may not be safe either. Because of that, the rest of the logic is performed in a block
+        // that returns nothing to enforce the policy not to return any errors.
+        async {
+            // Activate start trigger or start data collection immediately if start trigger is not set.
+            if let Some(start_trigger) = &config.start_trigger {
+                Self::subscribe_to_start_trigger(start_trigger, &config).await;
+            } else {
+                // Lock state mutex and hold it mutex until transition is complete.
+                let mut config_state = config.state.lock().await;
 
-            Self::start_data_collection(&config).await;
+                Self::start_data_collection(&config).await;
 
-            // Change state to Running and release the mutex.
-            *config_state = MetricsConfigState::Running;
+                // Change state to Running and release the mutex.
+                *config_state = MetricsConfigState::Running;
+            }
+
+            // Subscribe to finish trigger if it's set.
+            if let Some(finish_trigger) = &config.finish_trigger {
+                let mut maybe_parameters = Some((
+                    Arc::clone(&self.finish_trigger_fired_callback),
+                    config_proto.uuid.clone(),
+                ));
+                Arc::clone(finish_trigger)
+                    .subscribe(
+                        &TriggerSubscriber::MetricsConfigFinish,
+                        Box::new(move |context| {
+                            if let Some((callback, uuid)) = maybe_parameters.take() {
+                                debug!("MetricsConfig {} finish trigger fired", uuid);
+                                callback(uuid, context);
+                            }
+                        }),
+                    )
+                    .await;
+            }
         }
-
-        // Subscribe to finish trigger if it's set.
-        if let Some(finish_trigger) = &config.finish_trigger {
-            let mut maybe_parameters =
-                Some((Arc::clone(&self.finish_trigger_fired_callback), config_proto.uuid.clone()));
-            Arc::clone(finish_trigger)
-                .subscribe(
-                    &TriggerSubscriber::MetricsConfigFinish,
-                    Box::new(move |context| {
-                        if let Some((callback, uuid)) = maybe_parameters.take() {
-                            debug!("MetricsConfig {} finish trigger fired", uuid);
-                            callback(uuid, context);
-                        }
-                    }),
-                )
-                .await;
-        }
+        .await;
 
         Ok(())
     }
@@ -1942,6 +1952,7 @@ mod tests {
             "Unexpected error: {:?}",
             err
         );
+        assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
