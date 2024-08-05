@@ -26,9 +26,6 @@ rust_proc_macro {
     crate_name: "sdv_telemetry_test_utils_macros",
 }
 
-// TODO(b/354010833): Uncomment when aosp/3178079 is available in all branches
-// this test exists in.
-/*
 rust_test_host {
     name: "libsdv_telemetry_test_utils_macros_tests",
     host_cross_supported: false,
@@ -44,4 +41,3 @@ rust_test_host {
         unit_test: true,
     },
 }
-*/
