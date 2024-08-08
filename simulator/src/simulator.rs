@@ -20,6 +20,7 @@ mod util;
 use anyhow::Error;
 use binder::BinderFeatures;
 use clap::Parser;
+use io::REPORTS_DIR;
 use protobuf::Message;
 use log::{error, info};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
@@ -102,7 +103,10 @@ async fn run_telemetry_client(
     max_report_count: u64,
     max_simulation_time: Duration,
 ) -> anyhow::Result<()> {
-    create_output_directory(!no_binary_reports)?;
+    create_output_directory(
+        io::OUTPUT_DIR.into(),
+        if no_binary_reports { None } else { Some(REPORTS_DIR.into()) },
+    )?;
     let mut metrics_configs_tracker = MetricsConfigsTracker::new(!no_binary_reports);
 
     for path in &metrics_config_paths {
