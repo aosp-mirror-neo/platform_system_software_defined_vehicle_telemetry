@@ -121,7 +121,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
     async fn create_subscription(
         &self,
         topic_name: &str,
-        _configuration: &Option<Any>,
+        _configuration: Option<&Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
@@ -437,7 +437,7 @@ mod tests {
         let outcome = subscriber
             .create_subscription(
                 &topic_name,
-                &None,
+                None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -465,7 +465,7 @@ mod tests {
         let outcome = subscriber
             .create_subscription(
                 &topic_name,
-                &None,
+                None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -493,7 +493,7 @@ mod tests {
         let outcome1 = subscriber
             .create_subscription(
                 &topic_name,
-                &None,
+                None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -504,7 +504,7 @@ mod tests {
         let outcome2 = subscriber
             .create_subscription(
                 &topic_name,
-                &None,
+                None,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -535,7 +535,7 @@ mod tests {
         let outcome1 = subscriber
             .create_subscription(
                 &topic_name,
-                &None,
+                None,
                 Box::new(move |message| tx1.send(message).unwrap()),
             )
             .await
@@ -545,7 +545,7 @@ mod tests {
         let outcome2 = subscriber
             .create_subscription(
                 &topic_name,
-                &None,
+                None,
                 Box::new(move |message| tx2.send(message).unwrap()),
             )
             .await

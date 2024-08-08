@@ -27,7 +27,7 @@ impl ValueAggregator for VectorAggregator {
         }
 
         if let Some(existing_vec) = &mut self.current_vec {
-            existing_vec.push(&node_value, &self.max_length)?;
+            existing_vec.push(&node_value, self.max_length)?;
             Ok(existing_vec.clone())
         } else {
             // convert the single value NodeValue into a list type NodeValue

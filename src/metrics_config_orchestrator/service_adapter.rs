@@ -30,7 +30,7 @@ pub(crate) trait ServiceAdapter {
     async fn subscribe(
         &self,
         service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> anyhow::Result<ServiceSubscription>;
 
@@ -43,7 +43,7 @@ pub(crate) trait ServiceAdapter {
 pub(crate) trait ServiceMessageProvider: Send + Sync {
     async fn get_latest_message(
         &self,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
 }
 
@@ -133,7 +133,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
     async fn subscribe(
         &self,
         service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> anyhow::Result<ServiceSubscription> {
         let maybe_subscription_type = if configuration.is_some() {
@@ -176,7 +176,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         .service_publisher_accessor
                         .create_subscription(
                             service_name,
-                            &None,
+                            None,
                             Box::new(move |msg| {
                                 if on_message_tx.send(msg).is_err() {
                                     // This means that `on_message_rx` was dropped - which should
@@ -298,7 +298,7 @@ impl ServiceAdapterImpl {
 impl ServiceMessageProvider for ServiceMessageProviderImpl {
     async fn get_latest_message(
         &self,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         self.service_publisher_message_provider.get_latest_message(configuration).await
     }
@@ -371,7 +371,7 @@ pub(super) mod tests {
             .unwrap()
             .expect("Provider should be available");
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
-        let err = provider.get_latest_message(&None).await.err().unwrap();
+        let err = provider.get_latest_message(None).await.err().unwrap();
 
         assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
@@ -393,7 +393,7 @@ pub(super) mod tests {
             .expect("Provider should be available");
 
         let latest_message = message_provider
-            .get_latest_message(&None)
+            .get_latest_message(None)
             .await
             .unwrap()
             .expect("Message should be available");
@@ -410,7 +410,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -427,7 +427,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -449,7 +449,7 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                &Some(Any::new()),
+                Some(&Any::new()),
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -475,7 +475,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, &None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -492,7 +492,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, &None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -518,7 +518,7 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                &None,
+                None,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -526,7 +526,7 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME_2,
-                &None,
+                None,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -562,7 +562,7 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                &None,
+                None,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -570,7 +570,7 @@ pub(super) mod tests {
         service_adapter
             .subscribe(
                 SERVICE_NAME,
-                &None,
+                None,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -608,7 +608,7 @@ pub(super) mod tests {
             service_adapter
                 .subscribe(
                     SERVICE_NAME,
-                    &None,
+                    None,
                     Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
                 )
                 .await
@@ -636,7 +636,7 @@ pub(super) mod tests {
         let service_adapter = create_default_service_adapter();
 
         // Create subscription for a different service.
-        service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+        service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
 
         // Try unsubscribing using invalid subscription.
         service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap();
@@ -650,7 +650,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
             .unwrap();
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
@@ -668,7 +668,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, &Some(Any::new()), create_empty_fn_box())
+            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
             .unwrap();
         service_adapter.unsubscribe(subscription).await.unwrap();
@@ -685,7 +685,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
-            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
         let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
 
@@ -701,7 +701,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
-            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
@@ -716,10 +716,10 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
-            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
 
         let _subscription2 =
-            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
 
         service_adapter.unsubscribe(subscription).await.unwrap();
 
@@ -735,10 +735,10 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription =
-            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
 
         let subscription2 =
-            service_adapter.subscribe(SERVICE_NAME, &None, create_empty_fn_box()).await.unwrap();
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
 
         service_adapter.unsubscribe(subscription).await.unwrap();
         service_adapter.unsubscribe(subscription2).await.unwrap();

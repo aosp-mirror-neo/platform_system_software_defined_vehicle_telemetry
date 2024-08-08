@@ -13,8 +13,7 @@ pub trait NodeValueExtension {
 
     // Appends a single value into an existing list.
     // Drops oldest value if vector exceeds max_length.
-    fn push(&mut self, value: &NodeValue, max_length: &Option<u32>)
-        -> Result<(), AggregationError>;
+    fn push(&mut self, value: &NodeValue, max_length: Option<u32>) -> Result<(), AggregationError>;
 
     // Returns true if self is less than other.
     fn less_than(self, other: &NodeValue) -> Result<bool, AggregationError>;
@@ -45,11 +44,7 @@ impl NodeValueExtension for NodeValue {
         })
     }
 
-    fn push(
-        &mut self,
-        value: &NodeValue,
-        max_length: &Option<u32>,
-    ) -> Result<(), AggregationError> {
+    fn push(&mut self, value: &NodeValue, max_length: Option<u32>) -> Result<(), AggregationError> {
         // debug string is created now because a mutable borrow of self occurs later
         let list_debug_string = format!("{:?}", self);
         let err_provider = || AggregationError::VectorAppendTypeMismatch {
@@ -119,9 +114,9 @@ impl NodeValueExtension for NodeValue {
 }
 
 // Ensure the vector has size of at most n by removing from front of the vector.
-fn pop_front_to_size_n<T: std::fmt::Debug>(vec: &mut Vec<T>, n: &Option<u32>) {
+fn pop_front_to_size_n<T: std::fmt::Debug>(vec: &mut Vec<T>, n: Option<u32>) {
     if let Some(max_len) = n {
-        let max_len = *max_len as usize;
+        let max_len = max_len as usize;
         if vec.len() <= max_len {
             // vector size did not exceed the limit, no need to remove anything
         } else if vec.len() == max_len + 1 {

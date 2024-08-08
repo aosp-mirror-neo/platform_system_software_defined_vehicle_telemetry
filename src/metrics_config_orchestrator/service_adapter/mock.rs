@@ -53,7 +53,7 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn subscribe(
         &self,
         _service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> anyhow::Result<ServiceSubscription> {
         self.num_subscribe_calls.fetch_add(1, Ordering::Release);
@@ -143,7 +143,7 @@ impl MockServiceAdapter {
 impl ServiceMessageProvider for MockServiceMessageProvider {
     async fn get_latest_message(
         &self,
-        _configuration: &Option<Any>,
+        _configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         if let Some(message_provider) = &self.message_provider {
             Ok(Some(message_provider()))

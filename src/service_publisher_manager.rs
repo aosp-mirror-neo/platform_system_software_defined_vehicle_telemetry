@@ -57,7 +57,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn create_subscription(
         &self,
         service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
@@ -186,7 +186,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, &configuration_msg, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, configuration_msg.as_ref(), create_empty_fn_box())
             .await
             .unwrap();
 
@@ -205,7 +205,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -223,7 +223,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let res = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
             .await
             .unwrap();
 
@@ -241,7 +241,7 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let subscription = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();

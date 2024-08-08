@@ -121,7 +121,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     })?;
                 let condition_type = Self::get_condition_type(
                     conditional_trigger,
-                    &context.node_types[selector_node_index as usize],
+                    context.node_types[selector_node_index as usize].as_ref(),
                 )?;
                 let triggers = conditional_trigger
                     .trigger_names
@@ -184,7 +184,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                 let value_type = context.node_types.get(selector_node_index as usize).ok_or(
                     TriggerFactoryError::IncorrectNodeIndex { node_index: selector_node_index },
                 )?;
-                Self::get_condition_type(conditional_trigger, value_type)?;
+                Self::get_condition_type(conditional_trigger, value_type.as_ref())?;
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
         };
@@ -199,7 +199,7 @@ impl TriggerFactoryImpl {
 
     fn get_condition_type(
         conditional_trigger_proto: &ConditionalTriggerProto,
-        value_type: &Option<NodeValueType>,
+        value_type: Option<&NodeValueType>,
     ) -> Result<ConditionType, TriggerFactoryError> {
         let condition_type =
             conditional_trigger_proto.condition_type.enum_value().map_err(|value| {

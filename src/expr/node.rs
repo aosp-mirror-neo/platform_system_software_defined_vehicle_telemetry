@@ -213,15 +213,15 @@ impl fmt::Debug for Node {
                 publisher_name, fields
             ),
             Node::Combination { operator, left, right } => {
-                let format_node = |node: &Option<Arc<Node>>| {
+                let format_node = |node: Option<&Arc<Node>>| {
                     node.as_ref().map_or_else(|| EMPTY.to_owned(), |node| format!("{:#?}", node))
                 };
                 write!(
                     f,
                     "Combination Node {{ operator: {:?},  left: {},  right: {} }}",
                     operator,
-                    format_node(left),
-                    format_node(right)
+                    format_node(left.as_ref()),
+                    format_node(right.as_ref())
                 )
             }
             Node::FunctionLeaf { function } => write!(

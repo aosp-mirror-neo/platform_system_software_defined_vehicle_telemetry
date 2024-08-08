@@ -50,7 +50,7 @@ impl NodeValueType {
 
     // returns true if `self` is a list type, and `other` is a singular & compatible
     // type to the list
-    fn can_apply_list_operator(&self, other: &Option<NodeValueType>) -> bool {
+    fn can_apply_list_operator(&self, other: Option<&NodeValueType>) -> bool {
         match self {
             NodeValueType::BoolList => other.is_none_or(|o| o.is_bool()),
             NodeValueType::IntList | NodeValueType::FloatList => {
@@ -172,14 +172,14 @@ pub trait OperatorProtoExtension {
     fn is_unary_operator(&self) -> bool;
 
     /// Helper function to check if operator requires a right child.
-    fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), NodeError>;
+    fn check_right_child(&self, right_index: Option<u32>) -> Result<(), NodeError>;
 
     /// Checks if operands are compatible with operator, and return the node value type
     fn get_node_value_type(
         &self,
         node_value_types: &[Option<NodeValueType>],
         left: usize,
-        right: &Option<u32>,
+        right: Option<u32>,
     ) -> Result<Option<NodeValueType>, NodeError>;
 }
 
@@ -198,7 +198,7 @@ impl OperatorProtoExtension for OperatorProto {
         }
     }
 
-    fn check_right_child(&self, right_index: &Option<u32>) -> Result<(), NodeError> {
+    fn check_right_child(&self, right_index: Option<u32>) -> Result<(), NodeError> {
         let unary_op = self.is_unary_operator();
         let has_right_child = right_index.is_some();
         if unary_op && has_right_child {
@@ -214,12 +214,12 @@ impl OperatorProtoExtension for OperatorProto {
         &self,
         node_value_types: &[Option<NodeValueType>],
         left_idx: usize,
-        right_idx: &Option<u32>,
+        right_idx: Option<u32>,
     ) -> Result<Option<NodeValueType>, NodeError> {
         let left = &node_value_types[left_idx];
         let get_right = || {
             let idx = right_idx.expect("check_right_child should verify right child exists");
-            &node_value_types[idx as usize]
+            node_value_types[idx as usize].as_ref()
         };
 
         match self {

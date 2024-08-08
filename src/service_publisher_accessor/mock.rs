@@ -80,11 +80,11 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn create_subscription(
         &self,
         service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock();
-        data.last_configuration.clone_from(configuration);
+        data.last_configuration = configuration.cloned();
         data.num_subscribe_calls += 1;
         data.check_next_error()?;
 
@@ -183,7 +183,7 @@ impl MockServicePublisherAccessorData {
 impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
     async fn get_latest_message(
         &self,
-        _configuration: &Option<Any>,
+        _configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         let data_reference = self.data.upgrade().unwrap();
         let mut data = data_reference.lock();

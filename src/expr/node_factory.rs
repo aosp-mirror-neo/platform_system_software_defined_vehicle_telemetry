@@ -174,7 +174,7 @@ impl NodeFactoryImpl {
                             .as_ref()
                             .ok_or(NodeError::OperatorNotSet { i: index })?;
                         // before recursion, check if the child node is set up correctly
-                        op.check_right_child(&combination_node.right_index)?;
+                        op.check_right_child(combination_node.right_index)?;
 
                         // visit left child
                         let left_child_index = combination_node
@@ -208,7 +208,7 @@ impl NodeFactoryImpl {
                         node_value_types[index] = op.get_node_value_type(
                             node_value_types,
                             left_child_index,
-                            &combination_node.right_index,
+                            combination_node.right_index,
                         )?;
 
                         // visit self

@@ -86,7 +86,7 @@ impl Publisher for ServicePublisher {
                     }
                     ServicePublisherState::ActiveSubscribed { .. } => return None,
                 };
-                match message_provider.get_latest_message(&self.configuration).await {
+                match message_provider.get_latest_message(self.configuration.as_ref()).await {
                     Err(err) => {
                         // TODO(b/351047443): Propagate error through expression evaluation.
                         error!("Error when trying to retrieve latest message: {}", err);
@@ -129,7 +129,7 @@ impl Publisher for ServicePublisher {
                 .service_adapter
                 .subscribe(
                     &self.service_name,
-                    &self.configuration,
+                    self.configuration.as_ref(),
                     Box::new(move |msg| self_clone.on_new_message(msg)),
                 )
                 .await

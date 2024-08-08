@@ -143,7 +143,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn create_subscription(
         &self,
         service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
@@ -168,7 +168,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             BinderFeatures::default(),
         );
 
-        let configuration_bytes = configuration.as_ref().map(serialize_configuration);
+        let configuration_bytes = configuration.map(serialize_configuration);
         let subscription =
             publisher.createSubscription(&listener_wrapper, configuration_bytes.as_deref())?;
 
@@ -301,10 +301,10 @@ impl BinderAdapter for BinderAdapterImpl {
 impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
     async fn get_latest_message(
         &self,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
         let publisher = self.publisher.upgrade()?;
-        let configuration_bytes = configuration.as_ref().map(serialize_configuration);
+        let configuration_bytes = configuration.map(serialize_configuration);
         let message = publisher
             .getLatestMessage(configuration_bytes.as_deref())?
             .map(|data| self.message_descriptor.parse_from_bytes(&data))
@@ -528,7 +528,7 @@ mod tests {
         let message_provider =
             configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap().unwrap();
         let res = message_provider
-            .get_latest_message(&Some(Any::pack(&config).unwrap()))
+            .get_latest_message(Some(&Any::pack(&config).unwrap()))
             .await
             .unwrap()
             .unwrap();
@@ -568,7 +568,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap();
 
@@ -585,7 +585,7 @@ mod tests {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
         let res = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap();
 
@@ -600,7 +600,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         let subscription = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
@@ -618,7 +618,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();
@@ -641,7 +641,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, &None, create_empty_fn_box())
+            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
             .await
             .unwrap()
             .unwrap();

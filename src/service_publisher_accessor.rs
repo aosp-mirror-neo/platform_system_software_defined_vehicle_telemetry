@@ -30,7 +30,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn create_subscription(
         &self,
         service_name: &str,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome>;
 }
@@ -42,7 +42,7 @@ pub trait ServicePublisherMessageProvider: Send + Sync {
     /// Returns latest published message with certain configuration, if provided.
     async fn get_latest_message(
         &self,
-        configuration: &Option<Any>,
+        configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
 }
 
