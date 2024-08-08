@@ -73,14 +73,18 @@ impl WrapAwaitWithTimeoutVisitor {
         let duration = &self.duration;
         let span = statement.span();
         quote_spanned! {span=>
-            tokio::time::timeout(
-                std::time::Duration::from_millis(#duration)
-                    .checked_sub(__test_utils_macro_timeout_start.elapsed())
-                    .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", #duration)),
-                #statement,
-            )
-                .await
-                .unwrap_or_else(|_| panic!("Test timeout of {}ms reached!", #duration))
+            {
+                let __test_utils_macro_timeout_time_left =
+                    std::time::Duration::from_millis(#duration)
+                        .checked_sub(__test_utils_macro_timeout_start.elapsed())
+                        .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", #duration));
+                tokio::time::timeout(
+                    __test_utils_macro_timeout_time_left,
+                    #statement,
+                )
+                    .await
+                    .unwrap_or_else(|_| panic!("Test timeout of {}ms reached (call stalled for {}ms)!", #duration, __test_utils_macro_timeout_time_left.as_millis()))
+            }
         }
     }
 }
@@ -150,14 +154,18 @@ mod tests {
                 async fn test_case() {
                     let __test_utils_macro_timeout_start = std::time::Instant::now();
                     {
-                        tokio::time::timeout(
+                        {
+                            let __test_utils_macro_timeout_time_left =
                             std::time::Duration::from_millis(1000u64)
                                 .checked_sub(__test_utils_macro_timeout_start.elapsed())
-                                .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 1000u64)),
-                            bar(),
-                        )
-                        .await
-                        .unwrap_or_else(|_| panic!("Test timeout of {}ms reached!", 1000u64));
+                                .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 1000u64));
+                            tokio::time::timeout(
+                                __test_utils_macro_timeout_time_left,
+                                bar(),
+                            )
+                            .await
+                            .unwrap_or_else(|_| panic!("Test timeout of {}ms reached (call stalled for {}ms)!", 1000u64, __test_utils_macro_timeout_time_left.as_millis()))
+                        };
                     }
                 }
             ),
@@ -189,14 +197,18 @@ mod tests {
                 async fn test_case() {
                     let __test_utils_macro_timeout_start = std::time::Instant::now();
                     {
-                        tokio::time::timeout(
-                            std::time::Duration::from_millis(10u64)
-                                .checked_sub(__test_utils_macro_timeout_start.elapsed())
-                                .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64)),
-                            bar(),
-                        )
-                        .await
-                        .unwrap_or_else(|_| panic!("Test timeout of {}ms reached!", 10u64));
+                        {
+                            let __test_utils_macro_timeout_time_left =
+                                std::time::Duration::from_millis(10u64)
+                                    .checked_sub(__test_utils_macro_timeout_start.elapsed())
+                                    .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64));
+                            tokio::time::timeout(
+                                __test_utils_macro_timeout_time_left,
+                                bar(),
+                            )
+                            .await
+                            .unwrap_or_else(|_| panic!("Test timeout of {}ms reached (call stalled for {}ms)!", 10u64, __test_utils_macro_timeout_time_left.as_millis()))
+                        };
                     }
                 }
             ),
@@ -232,34 +244,46 @@ mod tests {
                 async fn test_case() {
                     let __test_utils_macro_timeout_start = std::time::Instant::now();
                     {
-                        tokio::time::timeout(
-                            std::time::Duration::from_millis(10u64)
-                                .checked_sub(__test_utils_macro_timeout_start.elapsed())
-                                .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64)),
-                            foo(),
-                        )
-                        .await
-                        .unwrap_or_else(|_| panic!("Test timeout of {}ms reached!", 10u64))
+                        {
+                            let __test_utils_macro_timeout_time_left =
+                                std::time::Duration::from_millis(10u64)
+                                    .checked_sub(__test_utils_macro_timeout_start.elapsed())
+                                    .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64));
+                            tokio::time::timeout(
+                                __test_utils_macro_timeout_time_left,
+                                foo(),
+                            )
+                            .await
+                            .unwrap_or_else(|_| panic!("Test timeout of {}ms reached (call stalled for {}ms)!", 10u64, __test_utils_macro_timeout_time_left.as_millis()))
+                        }
                         .unwrap();
 
                         {
-                            tokio::time::timeout(
-                                std::time::Duration::from_millis(10u64)
-                                    .checked_sub(__test_utils_macro_timeout_start.elapsed())
-                                    .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64)),
-                                bar(),
-                            )
-                            .await
-                            .unwrap_or_else(|_| panic!("Test timeout of {}ms reached!", 10u64));
+                            {
+                                let __test_utils_macro_timeout_time_left =
+                                    std::time::Duration::from_millis(10u64)
+                                        .checked_sub(__test_utils_macro_timeout_start.elapsed())
+                                        .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64));
+                                tokio::time::timeout(
+                                    __test_utils_macro_timeout_time_left,
+                                    bar(),
+                                )
+                                .await
+                                .unwrap_or_else(|_| panic!("Test timeout of {}ms reached (call stalled for {}ms)!", 10u64, __test_utils_macro_timeout_time_left.as_millis()))
+                            };
 
-                            tokio::time::timeout(
-                                std::time::Duration::from_millis(10u64)
-                                    .checked_sub(__test_utils_macro_timeout_start.elapsed())
-                                    .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64)),
-                                async {},
-                            )
-                            .await
-                            .unwrap_or_else(|_| panic!("Test timeout of {}ms reached!", 10u64))
+                            {
+                                let __test_utils_macro_timeout_time_left =
+                                    std::time::Duration::from_millis(10u64)
+                                        .checked_sub(__test_utils_macro_timeout_start.elapsed())
+                                        .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 10u64));
+                                tokio::time::timeout(
+                                    __test_utils_macro_timeout_time_left,
+                                    async {},
+                                )
+                                .await
+                                .unwrap_or_else(|_| panic!("Test timeout of {}ms reached (call stalled for {}ms)!", 10u64, __test_utils_macro_timeout_time_left.as_millis()))
+                            }
                             .unwrap()
                             .unwrap();
                         }

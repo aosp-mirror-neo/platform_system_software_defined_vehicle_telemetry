@@ -38,3 +38,29 @@ rust_library {
     defaults: ["libsdv_telemetry_test_utils_defaults"],
     crate_name: "sdv_telemetry_test_utils",
 }
+
+rust_test_host {
+    name: "libsdv_telemetry_test_utils_unit_tests",
+    host_cross_supported: false,
+    defaults: ["libsdv_telemetry_test_utils_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libtokio",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+}
