@@ -336,7 +336,6 @@ impl NodeFactory for NodeFactoryImpl {
 mod tests {
     use super::*;
 
-    use paste::paste;
     use protobuf::{EnumOrUnknown, MessageFull};
     use sdv_telemetry_proto_rust::expression::combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -346,6 +345,7 @@ mod tests {
         CombinationNode, ConstantLeafNode, FieldLeafNode, Node as NodeProto,
     };
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::parameterized_test;
 
     use crate::expr::mock::*;
 
@@ -1119,91 +1119,77 @@ mod tests {
         );
     }
 
-    macro_rules! validate_combination_node_relational_operator_success {
-        ($($name:ident: $operator:expr, $is_left_known:expr, $is_right_known:expr, $is_list:expr,)*) => {
-            $(
-                paste! {
-                    #[test]
-                    fn [<validate_combination_node_ $name _success>]() {
-                        let node_factory = NodeFactoryImpl {};
-                        let context = create_factory_context();
-                        let all_proto_nodes = create_combination_node(
-                            OperatorProto::RelationalOperator(RelationalOperator::$operator.into()),
-                            $is_left_known,
-                            { if $is_list { REPEATED_INT_FIELD_NAME } else { INT_FIELD_NAME } },
-                            $is_right_known,
-                            INT_FIELD_NAME);
-
-                        let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
-
-                        assert_eq!(&res[2], &Some(NodeValueType::Bool));
-                    }
-                }
-            )*
-        }
-    }
-
     // Validates relational operators with different operand availability combinations.
-    validate_combination_node_relational_operator_success! {
-        gt_left_unknown_type: GT, false, true, false,
-        gt_right_unknown_type: GT, true, false, false,
-        gt_both_unknown_types: GT, false, false, false,
-        gt_or_eq_left_unknown_type: GT_OR_EQ, false, true, false,
-        gt_or_eq_right_unknown_type: GT_OR_EQ, true, false, false,
-        gt_or_eq_both_unknown_types: GT_OR_EQ, false, false, false,
-        lt_left_unknown_type: LT, false, true, false,
-        lt_right_unknown_type: LT, true, false, false,
-        lt_both_unknown_types: LT, false, false, false,
-        lt_or_eq_left_unknown_type: LT_OR_EQ, false, true, false,
-        lt_or_eq_right_unknown_type: LT_OR_EQ, true, false, false,
-        lt_or_eq_both_unknown_types: LT_OR_EQ, false, false, false,
-        contains_left_unknown_type: CONTAINS, false, true, true,
-        contains_right_unknown_type: CONTAINS, true, false, true,
-        contains_both_unknown_types: CONTAINS, false, false, true,
-        does_not_contain_left_unknown_type: DOES_NOT_CONTAIN, false, true, true,
-        does_not_contain_right_unknown_type: DOES_NOT_CONTAIN, true, false, true,
-        does_not_contain_both_unknown_types: DOES_NOT_CONTAIN, false, false, true,
-        all_eq_left_unknown_type: ALL_EQ, false, true, true,
-        all_eq_right_unknown_type: ALL_EQ, true, false, true,
-        all_eq_both_unknown_types: ALL_EQ, false, false, true,
-    }
+    parameterized_test!(
+        validate_combination_node,
 
-    macro_rules! validate_combination_node_logical_operator_success {
-        ($($name:ident: $operator:expr, $is_left_known:expr, $is_right_known:expr,)*) => {
-            $(
-                paste! {
-                    #[test]
-                    fn [<validate_combination_node_ $name _success>]() {
-                        let node_factory = NodeFactoryImpl {};
-                        let context = create_factory_context();
-                        let all_proto_nodes = create_combination_node(
-                            OperatorProto::LogicalOperator(LogicalOperator::$operator.into()),
-                            $is_left_known,
-                            BOOL_FIELD_NAME,
-                            $is_right_known,
-                            BOOL_FIELD_NAME);
+        |operator: RelationalOperator, is_left_known, is_right_known, is_list| {
+            let node_factory = NodeFactoryImpl {};
+            let context = create_factory_context();
+            let all_proto_nodes = create_combination_node(
+                OperatorProto::RelationalOperator(operator.into()),
+                is_left_known,
+                if is_list { REPEATED_INT_FIELD_NAME } else { INT_FIELD_NAME },
+                is_right_known,
+                INT_FIELD_NAME);
 
-                        let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
+            let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
 
-                        assert_eq!(&res[2], &Some(NodeValueType::Bool));
-                    }
-                }
-            )*
-        }
-    }
+            assert_eq!(&res[2], &Some(NodeValueType::Bool));
+        },
+
+        gt_left_unknown_type_success: (RelationalOperator::GT, false, true, false,),
+        gt_right_unknown_type_success: (RelationalOperator::GT, true, false, false,),
+        gt_both_unknown_types_success: (RelationalOperator::GT, false, false, false,),
+        gt_or_eq_left_unknown_type_success: (RelationalOperator::GT_OR_EQ, false, true, false,),
+        gt_or_eq_right_unknown_type_success: (RelationalOperator::GT_OR_EQ, true, false, false,),
+        gt_or_eq_both_unknown_types_success: (RelationalOperator::GT_OR_EQ, false, false, false,),
+        lt_left_unknown_type_success: (RelationalOperator::LT, false, true, false,),
+        lt_right_unknown_type_success: (RelationalOperator::LT, true, false, false,),
+        lt_both_unknown_types_success: (RelationalOperator::LT, false, false, false,),
+        lt_or_eq_left_unknown_type_success: (RelationalOperator::LT_OR_EQ, false, true, false,),
+        lt_or_eq_right_unknown_type_success: (RelationalOperator::LT_OR_EQ, true, false, false,),
+        lt_or_eq_both_unknown_types_success: (RelationalOperator::LT_OR_EQ, false, false, false,),
+        contains_left_unknown_type_success: (RelationalOperator::CONTAINS, false, true, true,),
+        contains_right_unknown_type_success: (RelationalOperator::CONTAINS, true, false, true,),
+        contains_both_unknown_types_success: (RelationalOperator::CONTAINS, false, false, true,),
+        does_not_contain_left_unknown_type_success: (RelationalOperator::DOES_NOT_CONTAIN, false, true, true,),
+        does_not_contain_right_unknown_type_success: (RelationalOperator::DOES_NOT_CONTAIN, true, false, true,),
+        does_not_contain_both_unknown_types_success: (RelationalOperator::DOES_NOT_CONTAIN, false, false, true,),
+        all_eq_left_unknown_type_success: (RelationalOperator::ALL_EQ, false, true, true,),
+        all_eq_right_unknown_type_success: (RelationalOperator::ALL_EQ, true, false, true,),
+        all_eq_both_unknown_types_success: (RelationalOperator::ALL_EQ, false, false, true,),
+    );
 
     // Validates logical operators with different operand availability combinations.
-    validate_combination_node_logical_operator_success! {
-        and_left_unknown_type: AND, false, true,
-        and_right_unknown_type: AND, true, false,
-        and_both_unknown_types: AND, false, false,
-        or_left_unknown_type: OR, false, true,
-        or_right_unknown_type: OR, true, false,
-        or_both_unknown_types: OR, false, false,
-        xor_left_unknown_type: XOR, false, true,
-        xor_right_unknown_type: XOR, true, false,
-        xor_both_unknown_types: XOR, false, false,
-    }
+    parameterized_test!(
+        validate_combination_node,
+
+        |operator: LogicalOperator, is_left_known, is_right_known| {
+            let node_factory = NodeFactoryImpl {};
+            let context = create_factory_context();
+            let all_proto_nodes = create_combination_node(
+                OperatorProto::LogicalOperator(operator.into()),
+                is_left_known,
+                BOOL_FIELD_NAME,
+                is_right_known,
+                BOOL_FIELD_NAME);
+
+            let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
+
+            assert_eq!(&res[2], &Some(NodeValueType::Bool));
+        },
+
+        and_left_unknown_type_success: (LogicalOperator::AND, false, true,),
+        and_right_unknown_type_success: (LogicalOperator::AND, true, false,),
+        and_both_unknown_types_success: (LogicalOperator::AND, false, false,),
+        or_left_unknown_type_success: (LogicalOperator::OR, false, true,),
+        or_right_unknown_type_success: (LogicalOperator::OR, true, false,),
+        or_both_unknown_types_success: (LogicalOperator::OR, false, false,),
+        xor_left_unknown_type_success: (LogicalOperator::XOR, false, true,),
+        xor_right_unknown_type_success: (LogicalOperator::XOR, true, false,),
+        xor_both_unknown_types_success: (LogicalOperator::XOR, false, false,),
+    );
 
     #[test]
     fn validate_combination_node_not_unknown_type_success() {
@@ -1227,63 +1213,56 @@ mod tests {
         assert_eq!(&res[1], &Some(NodeValueType::Bool));
     }
 
-    macro_rules! validate_combination_node_arithmetic_operator_success {
-        ($($name:ident: $operator:expr, $are_float_operands:expr, $is_left_known:expr, $is_right_known:expr, $expected_result:expr,)*) => {
-            $(
-                paste! {
-                    #[test]
-                    fn [<validate_combination_node_ $name _success>]() {
-                        let node_factory = NodeFactoryImpl {};
-                        let context = create_factory_context();
-                        let all_proto_nodes = create_combination_node(
-                            OperatorProto::ArithmeticOperator(ArithmeticOperator::$operator.into()),
-                            $is_left_known,
-                            { if $are_float_operands { FLOAT_FIELD_NAME } else { INT_FIELD_NAME } },
-                            $is_right_known,
-                            { if $are_float_operands { FLOAT_FIELD_NAME } else { INT_FIELD_NAME } });
-
-                        let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
-
-                        assert_eq!(&res[2], &$expected_result);
-                    }
-                }
-            )*
-        }
-    }
-
     // Validates arithmetic operators with different operand availability combinations.
-    validate_combination_node_arithmetic_operator_success! {
-        add_int_left_unknown_type: ADD, false, false, true, None,
-        add_int_right_unknown_type: ADD, false, true, false, None,
-        add_int_both_unknown_types: ADD, false, false, false, None,
-        add_float_left_unknown_type: ADD, true, false, true, Some(NodeValueType::Float),
-        add_float_right_unknown_type: ADD, true, true, false, Some(NodeValueType::Float),
-        add_float_both_unknown_types: ADD, true, false, false, None,
-        subtract_int_left_unknown_type: SUBTRACT, false, false, true, None,
-        subtract_int_right_unknown_type: SUBTRACT, false, true, false, None,
-        subtract_int_both_unknown_types: SUBTRACT, false, false, false, None,
-        subtract_float_left_unknown_type: SUBTRACT, true, false, true, Some(NodeValueType::Float),
-        subtract_float_right_unknown_type: SUBTRACT, true, true, false, Some(NodeValueType::Float),
-        subtract_float_both_unknown_types: SUBTRACT, true, false, false, None,
-        multiply_int_left_unknown_type: MULTIPLY, false, false, true, None,
-        multiply_int_right_unknown_type: MULTIPLY, false, true, false, None,
-        multiply_int_both_unknown_types: MULTIPLY, false, false, false, None,
-        multiply_float_left_unknown_type: MULTIPLY, true, false, true, Some(NodeValueType::Float),
-        multiply_float_right_unknown_type: MULTIPLY, true, true, false, Some(NodeValueType::Float),
-        multiply_float_both_unknown_types: MULTIPLY, true, false, false, None,
-        power_int_left_unknown_type: POWER, false, false, true, None,
-        power_int_right_unknown_type: POWER, false, true, false, None,
-        power_int_both_unknown_types: POWER, false, false, false, None,
-        power_float_left_unknown_type: POWER, true, false, true, Some(NodeValueType::Float),
-        power_float_right_unknown_type: POWER, true, true, false, Some(NodeValueType::Float),
-        power_float_both_unknown_types: POWER, true, false, false, None,
-        divide_left_unknown_type: DIVIDE, false, false, true, Some(NodeValueType::Float),
-        divide_right_unknown_type: DIVIDE, false, true, false, Some(NodeValueType::Float),
-        divide_both_unknown_types: DIVIDE, false, false, false, Some(NodeValueType::Float),
-        modulo_trunc_left_unknown_type: MODULO_TRUNC, false, false, true, Some(NodeValueType::Int),
-        modulo_trunc_right_unknown_type: MODULO_TRUNC, false, true, false, Some(NodeValueType::Int),
-        modulo_trunc_both_unknown_types: MODULO_TRUNC, false, false, false, Some(NodeValueType::Int),
-    }
+    parameterized_test!(
+        validate_combination_node,
+
+        |operator: ArithmeticOperator, are_float_operands, is_left_known, is_right_known, expected_result| {
+            let node_factory = NodeFactoryImpl {};
+            let context = create_factory_context();
+            let all_proto_nodes = create_combination_node(
+                OperatorProto::ArithmeticOperator(operator.into()),
+                is_left_known,
+                if are_float_operands { FLOAT_FIELD_NAME } else { INT_FIELD_NAME },
+                is_right_known,
+                if are_float_operands { FLOAT_FIELD_NAME } else { INT_FIELD_NAME });
+
+            let res = node_factory.validate(&all_proto_nodes, &context).unwrap();
+
+            assert_eq!(&res[2], &expected_result);
+        },
+
+        add_int_left_unknown_type_success: (ArithmeticOperator::ADD, false, false, true, None,),
+        add_int_right_unknown_type_success: (ArithmeticOperator::ADD, false, true, false, None,),
+        add_int_both_unknown_types_success: (ArithmeticOperator::ADD, false, false, false, None,),
+        add_float_left_unknown_type_success: (ArithmeticOperator::ADD, true, false, true, Some(NodeValueType::Float),),
+        add_float_right_unknown_type_success: (ArithmeticOperator::ADD, true, true, false, Some(NodeValueType::Float),),
+        add_float_both_unknown_types_success: (ArithmeticOperator::ADD, true, false, false, None,),
+        subtract_int_left_unknown_type_success: (ArithmeticOperator::SUBTRACT, false, false, true, None,),
+        subtract_int_right_unknown_type_success: (ArithmeticOperator::SUBTRACT, false, true, false, None,),
+        subtract_int_both_unknown_types_success: (ArithmeticOperator::SUBTRACT, false, false, false, None,),
+        subtract_float_left_unknown_type_success: (ArithmeticOperator::SUBTRACT, true, false, true, Some(NodeValueType::Float),),
+        subtract_float_right_unknown_type_success: (ArithmeticOperator::SUBTRACT, true, true, false, Some(NodeValueType::Float),),
+        subtract_float_both_unknown_types_success: (ArithmeticOperator::SUBTRACT, true, false, false, None,),
+        multiply_int_left_unknown_type_success: (ArithmeticOperator::MULTIPLY, false, false, true, None,),
+        multiply_int_right_unknown_type_success: (ArithmeticOperator::MULTIPLY, false, true, false, None,),
+        multiply_int_both_unknown_types_success: (ArithmeticOperator::MULTIPLY, false, false, false, None,),
+        multiply_float_left_unknown_type_success: (ArithmeticOperator::MULTIPLY, true, false, true, Some(NodeValueType::Float),),
+        multiply_float_right_unknown_type_success: (ArithmeticOperator::MULTIPLY, true, true, false, Some(NodeValueType::Float),),
+        multiply_float_both_unknown_types_success: (ArithmeticOperator::MULTIPLY, true, false, false, None,),
+        power_int_left_unknown_type_success: (ArithmeticOperator::POWER, false, false, true, None,),
+        power_int_right_unknown_type_success: (ArithmeticOperator::POWER, false, true, false, None,),
+        power_int_both_unknown_types_success: (ArithmeticOperator::POWER, false, false, false, None,),
+        power_float_left_unknown_type_success: (ArithmeticOperator::POWER, true, false, true, Some(NodeValueType::Float),),
+        power_float_right_unknown_type_success: (ArithmeticOperator::POWER, true, true, false, Some(NodeValueType::Float),),
+        power_float_both_unknown_types_success: (ArithmeticOperator::POWER, true, false, false, None,),
+        divide_left_unknown_type_success: (ArithmeticOperator::DIVIDE, false, false, true, Some(NodeValueType::Float),),
+        divide_right_unknown_type_success: (ArithmeticOperator::DIVIDE, false, true, false, Some(NodeValueType::Float),),
+        divide_both_unknown_types_success: (ArithmeticOperator::DIVIDE, false, false, false, Some(NodeValueType::Float),),
+        modulo_trunc_left_unknown_type_success: (ArithmeticOperator::MODULO_TRUNC, false, false, true, Some(NodeValueType::Int),),
+        modulo_trunc_right_unknown_type_success: (ArithmeticOperator::MODULO_TRUNC, false, true, false, Some(NodeValueType::Int),),
+        modulo_trunc_both_unknown_types_success: (ArithmeticOperator::MODULO_TRUNC, false, false, false, Some(NodeValueType::Int),),
+    );
 
     #[test]
     fn validate_combination_node_rounding_unknown_type_success() {
