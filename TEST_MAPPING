@@ -38,13 +38,21 @@
       "name": "libsdv_telemetry_test_utils_macros_tests"
     },
     {
+      "name": "libsdv_telemetry_test_utils_unit_tests"
+    },
+    {
       "name": "libsdv_telemetry_time_bindgen_tests"
     },
     {
       "name": "libsdv_telemetry_time_wrapper_tests"
     }
   ],
-  "sdv_telemetry_tests_postsubmit": [],
+  "sdv_telemetry_tests_postsubmit": [
+    // Empty test suites get auto-suspended on go/atp. When adding the first
+    // test here:
+    // 1. Activate this test on go/atp
+    // 2. Remove this comment
+  ],
   "sdv_telemetry_integration_tests_presubmit": [
     {
       "name": "libsdv_telemetry_dt_wrapper_integration_tests"
