@@ -1,3 +1,5 @@
+# Copyright 2024 Google LLC
+
 service_name: "SimulationErrorPublisher"
 data_format_protos {
     message_type {

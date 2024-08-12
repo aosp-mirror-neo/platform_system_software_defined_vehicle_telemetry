@@ -1,3 +1,5 @@
+# Copyright 2024 Google LLC
+#
 # Every 60 seconds, report the average vehicle speed
 
 uuid: "aa27583c-96a5-4a67-adad-d15e00c0f12a"
