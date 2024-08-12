@@ -21,11 +21,6 @@ rust_defaults {
         "libtokio",
         // keep-sorted end
     ],
-    proc_macros: [
-        // keep-sorted start
-        "libsdv_telemetry_test_utils_macros",
-        // keep-sorted end
-    ],
     vendor_available: true,
 }
 
@@ -38,6 +33,17 @@ rust_library {
 rust_test {
     name: "libsdv_telemetry_utils_unit_tests",
     defaults: ["libsdv_telemetry_utils_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libpaste",
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",

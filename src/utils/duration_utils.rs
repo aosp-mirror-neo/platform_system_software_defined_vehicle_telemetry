@@ -30,6 +30,8 @@ pub fn try_into_proto_duration(
 mod tests {
     use super::*;
 
+    use sdv_telemetry_test_utils::parameterized_test;
+
     #[test]
     fn try_into_duration_success() {
         let duration_proto = DurationProto { seconds: 10, nanos: 20, ..Default::default() };
@@ -54,14 +56,21 @@ mod tests {
         );
     }
 
-    #[test]
-    fn try_into_duration_negative_value_failure() {
-        let duration_proto = DurationProto { seconds: -10, nanos: -123, ..Default::default() };
+    parameterized_test!(
+        try_into_duration_negative,
 
-        let result = try_into_duration(&duration_proto);
+        |duration_proto| {
+            let result = try_into_duration(&duration_proto);
 
-        assert!(result.is_err());
-    }
+            assert!(
+                result.is_err(),
+                "try_into_duration({duration_proto:?}) = {result:?}, but wanted error"
+            );
+        },
+
+        seconds_failure: (DurationProto { seconds: -10, nanos: 123, ..Default::default() }, ),
+        nanos_failure: (DurationProto { seconds: 10, nanos: -123, ..Default::default() }, ),
+    );
 
     #[test]
     fn try_into_proto_duration_success() {

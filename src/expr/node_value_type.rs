@@ -16,7 +16,7 @@ use crate::expr::{node_error::NodeError, node_factory::DescriptorProvider};
 
 /// Used for compatibility type checking in expression nodes, such as
 /// operator-operand compatibility and protobuf field assignment compatibility.
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 #[allow(missing_docs)]
 pub enum NodeValueType {
     Bool,
@@ -406,4 +406,170 @@ impl NodeValueTypeExtension for RuntimeType {
             RuntimeType::VecU8 => Ok(NodeValueType::ByteList),
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use protobuf::{
+        well_known_types::wrappers::FloatValue, well_known_types::wrappers::Int32Value, MessageFull,
+    };
+    use sdv_telemetry_test_utils::parameterized_test;
+
+    parameterized_test!(
+        is_bool,
+
+        |expected, value_type: NodeValueType| {
+            assert_eq!(
+                value_type.is_bool(),
+                expected,
+                "{value_type:?}.is_bool() should be {expected:?}"
+            );
+        },
+
+        bool: (true, NodeValueType::Bool,),
+
+        int: (false, NodeValueType::Int,),
+        float: (false, NodeValueType::Float,),
+        string: (false, NodeValueType::String,),
+        float_list: (false, NodeValueType::FloatList,),
+    );
+
+    parameterized_test!(
+        is_numeric,
+
+        |expected, value_type: NodeValueType| {
+            assert_eq!(
+                value_type.is_numeric(),
+                expected,
+                "{value_type:?}.is_numeric() should be {expected:?}"
+            );
+        },
+
+        int: (true, NodeValueType::Int,),
+        float: (true, NodeValueType::Float,),
+
+        bool: (false, NodeValueType::Bool,),
+        int_list: (false, NodeValueType::IntList,),
+        float_list: (false, NodeValueType::FloatList,),
+    );
+
+    parameterized_test!(
+        is_int,
+
+        |expected, value_type: NodeValueType| {
+            assert_eq!(
+                value_type.is_int(),
+                expected,
+                "{value_type:?}.is_int() should be {expected:?}"
+            );
+        },
+
+        int: (true, NodeValueType::Int,),
+
+        bool: (false, NodeValueType::Bool,),
+        float: (false, NodeValueType::Float,),
+        string: (false, NodeValueType::String,),
+        int_list: (false, NodeValueType::IntList,),
+    );
+
+    parameterized_test!(
+        is_float,
+
+        |expected, value_type: NodeValueType| {
+            assert_eq!(
+                value_type.is_float(),
+                expected,
+                "{value_type:?}.is_float() should be {expected:?}"
+            );
+        },
+
+        float: (true, NodeValueType::Float,),
+
+        bool: (false, NodeValueType::Bool,),
+        int: (false, NodeValueType::Int,),
+        string: (false, NodeValueType::String,),
+        float_list: (false, NodeValueType::FloatList,),
+    );
+
+    parameterized_test!(
+        can_apply_list_operator_for_,
+
+        |expected, value_type: NodeValueType, other: Option<&NodeValueType>| {
+            assert_eq!(
+                value_type.can_apply_list_operator(other),
+                expected,
+                "{value_type:?}.can_apply_list_operator({other:?}) should be {expected:?}"
+            );
+        },
+
+        bool_list_on_none: (true, NodeValueType::BoolList, None,),
+        bool_list_on_bool: (true, NodeValueType::BoolList, Some(&NodeValueType::Bool),),
+        bool_list_on_int: (false, NodeValueType::BoolList, Some(&NodeValueType::Int),),
+
+        int_list_on_none: (true, NodeValueType::IntList, None,),
+        int_list_on_int: (true, NodeValueType::IntList, Some(&NodeValueType::Float),),
+        int_list_on_float: (true, NodeValueType::IntList, Some(&NodeValueType::Int),),
+        int_list_on_bool: (false, NodeValueType::IntList, Some(&NodeValueType::Bool),),
+
+        float_list_on_none: (true, NodeValueType::FloatList, None,),
+        float_list_on_int: (true, NodeValueType::FloatList, Some(&NodeValueType::Int),),
+        float_list_on_float: (true, NodeValueType::FloatList, Some(&NodeValueType::Float),),
+        float_list_on_bool: (false, NodeValueType::FloatList, Some(&NodeValueType::Bool),),
+
+        message_list_with_none_descriptor_on_none: (
+            true,
+            NodeValueType::MessageList { descriptor: None },
+            None,
+        ),
+        message_list_with_some_descriptor_on_none: (
+            true,
+            NodeValueType::MessageList { descriptor: Some(Int32Value::descriptor()) },
+            None,
+        ),
+        message_list_with_int_descriptor_on_message_with_int_descriptor: (
+            true,
+            NodeValueType::MessageList { descriptor: Some(Int32Value::descriptor()) },
+            Some(&NodeValueType::Message { descriptor: Some(Int32Value::descriptor()) }),
+        ),
+        message_list_with_int_descriptor_on_message_with_none_descriptor: (
+            true,
+            NodeValueType::MessageList { descriptor: Some(Int32Value::descriptor()) },
+            Some(&NodeValueType::Message { descriptor: None }),
+        ),
+        message_list_with_none_descriptor_on_message_with_int_descriptor: (
+            true,
+            NodeValueType::MessageList { descriptor: None },
+            Some(&NodeValueType::Message { descriptor: Some(Int32Value::descriptor()) }),
+        ),
+        message_list_with_none_descriptor_on_message_with_none_descriptor: (
+            true,
+            NodeValueType::MessageList { descriptor: None },
+            Some(&NodeValueType::Message { descriptor: None }),
+        ),
+        message_list_with_float_descriptor_on_message_with_int_descriptor: (
+            false,
+            NodeValueType::MessageList { descriptor: Some(FloatValue::descriptor()) },
+            Some(&NodeValueType::Message { descriptor: Some(Int32Value::descriptor()) }),
+        ),
+        message_list_on_bool: (
+            false,
+            NodeValueType::MessageList { descriptor: Some(FloatValue::descriptor()) },
+            Some(&NodeValueType::Bool),
+        ),
+        message_list_on_int: (
+            false,
+            NodeValueType::MessageList { descriptor: Some(FloatValue::descriptor()) },
+            Some(&NodeValueType::Int),
+        ),
+
+        bool_on_none: (false, NodeValueType::Bool, None,),
+        int_on_none: (false, NodeValueType::Int, None,),
+        float_on_none: (false, NodeValueType::Float, None,),
+        message_with_none_descriptor_on_none: (false, NodeValueType::Message { descriptor: None }, None,),
+        message_with_some_descriptor_on_none: (false, NodeValueType::Message { descriptor: Some(Int32Value::descriptor()) }, None,),
+        // `ByteList` does not currently support edge processing.
+        byte_list_on_none: (false, NodeValueType::ByteList, None,),
+    );
 }
