@@ -16,7 +16,7 @@ aidl_interface {
     owner: "google",
     backend: {
         java: {
-            enabled: false,
+            enabled: true,
         },
         rust: {
             enabled: true,
@@ -33,10 +33,12 @@ aidl_interface {
         "google/sdv/telemetry/configurable_publisher/*.aidl",
     ],
     vendor_available: true,
+    always_use_unfrozen: true,
+    stability: "vintf",
     owner: "google",
     backend: {
         java: {
-            enabled: false,
+            enabled: true,
         },
         rust: {
             enabled: true,

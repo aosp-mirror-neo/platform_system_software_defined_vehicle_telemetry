@@ -240,6 +240,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/configurable_publisher_getter.textproto",
             "./samples/sample_protos/data_tunnel_publisher.textproto",
             "./samples/sample_protos/data_tunnel_publisher_aggregation.textproto",
+            "./samples/sample_protos/error_publisher.textproto",
             "./samples/sample_protos/metric_configJan10.textproto",
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto"

@@ -7,6 +7,7 @@ package google.sdv.telemetry.configurable_publisher;
  * subscribers to unsubscribe from them.
  */
 
+@VintfStability
 interface IConfigurablePublisherSubscription {
     /**
      * Ends the underlying subscription.
