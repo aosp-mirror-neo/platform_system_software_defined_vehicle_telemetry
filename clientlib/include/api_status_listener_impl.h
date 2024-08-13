@@ -1,10 +1,14 @@
 // Copyright 2023 Google LLC
 
+#pragma once
+
 #include "callback_container.h"
+#include "callback_functions.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryApiStatusListener.h>
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
-#include <utils/Log.h>
+
+#include <string>
 
 using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
 
@@ -12,12 +16,13 @@ namespace google::sdv::telemetry {
 
 class ApiStatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryApiStatusListener {
 public:
-    explicit ApiStatusListenerImpl(StatusCallbackContainer& cb_container);
-    ndk::ScopedAStatus sendStatus(int api_call_id, TelemetryServiceStatusCodes status_code,
-                                  const std::string& message) override;
+    explicit ApiStatusListenerImpl(CallbackContainer<StatusCallbackFunction>& callbackContainer);
+
+    ndk::ScopedAStatus sendStatus(int apiCallId, TelemetryServiceStatusCodes statusCode,
+                                  const std::string& statusMessage) override;
 
 private:
-    StatusCallbackContainer& cb_container_;
+    CallbackContainer<StatusCallbackFunction>& mCallbackContainer;
 };
 
 }  // namespace google::sdv::telemetry

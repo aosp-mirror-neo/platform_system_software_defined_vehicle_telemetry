@@ -96,8 +96,8 @@ ServiceHolder* get_telemetry_service();
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size, void* listener,
-                       StatusCallbackFunction cbFunc);
+int32_t add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t size,
+                           void* listener, StatusCallbackFunction cbFunc);
 
 /**
  * Activates a previously added metrics config or a deactivated metrics config.
@@ -112,8 +112,8 @@ int add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config, size_t si
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int activate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
-                            StatusCallbackFunction cbFunc);
+int32_t activate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
+                                StatusCallbackFunction cbFunc);
 
 /**
  * Deactivates an active metrics config. Client can receive errors related to the
@@ -130,8 +130,8 @@ int activate_metrics_config(ServiceHolder* holder, const char* uuid, void* liste
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int deactivate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
-                              StatusCallbackFunction cbFunc);
+int32_t deactivate_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
+                                  StatusCallbackFunction cbFunc);
 
 /**
  * Retrieves a list of metrics configs currently in the active state from telemetry service
@@ -144,8 +144,8 @@ int deactivate_metrics_config(ServiceHolder* holder, const char* uuid, void* lis
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int get_active_metrics_config_uuids(ServiceHolder* holder, void* listener,
-                                    ConfigListCallbackFunction cbFunc);
+int32_t get_active_metrics_config_uuids(ServiceHolder* holder, void* listener,
+                                        ConfigListCallbackFunction cbFunc);
 
 /**
  * Retrieves a list of metrics configs currently in the inactive state from telemetry service
@@ -159,8 +159,8 @@ int get_active_metrics_config_uuids(ServiceHolder* holder, void* listener,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int get_inactive_metrics_config_uuids(ServiceHolder* holder, void* listener,
-                                      ConfigListCallbackFunction cbFunc);
+int32_t get_inactive_metrics_config_uuids(ServiceHolder* holder, void* listener,
+                                          ConfigListCallbackFunction cbFunc);
 
 /**
  * Removes a previously added metrics config. The config being removed will be
@@ -175,8 +175,8 @@ int get_inactive_metrics_config_uuids(ServiceHolder* holder, void* listener,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int remove_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
-                          StatusCallbackFunction cbFunc);
+int32_t remove_metrics_config(ServiceHolder* holder, const char* uuid, void* listener,
+                              StatusCallbackFunction cbFunc);
 
 /**
  * Removes all previously added metrics config. The configs be deactivated
@@ -193,8 +193,8 @@ int remove_metrics_config(ServiceHolder* holder, const char* uuid, void* listene
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
-                               StatusCallbackFunction cbFunc);
+int32_t remove_all_metrics_configs(ServiceHolder* holder, void* listener,
+                                   StatusCallbackFunction cbFunc);
 
 /**
  * Sets a report ready listener that gets called whenever there is a metrics report
@@ -220,9 +220,10 @@ int remove_all_metrics_configs(ServiceHolder* holder, void* listener,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int set_report_ready_listener(ServiceHolder* holder, void* reportListener,
-                              ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
-                              StatusCallbackFunction apiCbFunc, void** outPreviousReportListener);
+int32_t set_report_ready_listener(ServiceHolder* holder, void* reportListener,
+                                  ReportReadyCallbackFunction reportReadyCbFunc, void* apiListener,
+                                  StatusCallbackFunction apiCbFunc,
+                                  void** outPreviousReportListener);
 
 /**
  * Clears a previously set report ready listener. Client can receive errors related to the
@@ -239,7 +240,7 @@ int set_report_ready_listener(ServiceHolder* holder, void* reportListener,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportListener);
+int32_t clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportListener);
 
 /**
  * Tells the telemetry service to send a metrics report with the given uuid and report number.
@@ -257,9 +258,9 @@ int clear_report_ready_listener(ServiceHolder* holder, void** outPreviousReportL
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
-                       const char* report_config_name, int32_t report_number, void* listener,
-                       GetSerializedDataCallbackFunction cbFunc);
+int32_t get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
+                           const char* report_config_name, int32_t report_number, void* listener,
+                           GetSerializedDataCallbackFunction cbFunc);
 
 /**
  * Sets a status listener that receives status codes and messages for misc errors related
@@ -282,9 +283,10 @@ int get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
-                             StatusCallbackFunction statusCbFunc, void* api_listener,
-                             StatusCallbackFunction apiCbFunc, void** outPreviousStatusListener);
+int32_t set_misc_status_listener(ServiceHolder* holder, void* status_listener,
+                                 StatusCallbackFunction statusCbFunc, void* api_listener,
+                                 StatusCallbackFunction apiCbFunc,
+                                 void** outPreviousStatusListener);
 
 /**
  * Clears a previously set status listener.
@@ -301,7 +303,7 @@ int set_misc_status_listener(ServiceHolder* holder, void* status_listener,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int clear_misc_status_listener(ServiceHolder* holder, void** outPreviousStatusListener);
+int32_t clear_misc_status_listener(ServiceHolder* holder, void** outPreviousStatusListener);
 
 #ifdef __cplusplus
 }

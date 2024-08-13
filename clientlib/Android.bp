@@ -13,14 +13,16 @@ cc_defaults {
     shared_libs: [
         // keep-sorted start
         "libbase",
-        "libbinder",
         "libbinder_ndk",
-        "liblog",
         "libprotobuf-cpp-full",
         "libutils",
         // keep-sorted end
     ],
-    static_libs: ["libgtest"],
+    cflags: [
+        // Make sure that the log tag is 23 characters or less, otherwise it
+        // will be truncated!
+        "-DLOG_TAG=\"TelemetryClientLibC\"",
+    ],
 }
 
 cc_library {
@@ -31,13 +33,12 @@ cc_library {
     srcs: [
         // keep-sorted start
         "src/api_status_listener_impl.cpp",
-        "src/callback_container.cpp",
         "src/config_list_listener_impl.cpp",
         "src/lib.cpp",
         "src/misc_status_listener_impl.cpp",
         "src/report_listener_impl.cpp",
         "src/report_ready_listener_impl.cpp",
-        "src/telemetry_service.cpp",
+        "src/telemetry_service_client.cpp",
         // keep-sorted end
     ],
     local_include_dirs: [

@@ -97,6 +97,11 @@ enum TelemetryServiceStatusCodes {
     GET_CONFIG_LIST_FAILED = 414,
 
     /**
+     * Binder-related errors
+     */
+    API_CALL_FAILED_INTERNAL_ERROR = 415,
+
+    /**
      * Arbitrary Error used as a placeholder for errors not yet defined
      */
     TELEMETRY_SERVICE_UNKNOWN_ERROR = 499,

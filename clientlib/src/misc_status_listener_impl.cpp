@@ -1,24 +1,24 @@
 // Copyright 2023 Google LLC
 
-#define LOG_TAG "MiscStatusListenerImpl"
-
 #include "misc_status_listener_impl.h"
+
+#include <android-base/logging.h>
 
 namespace google::sdv::telemetry {
 
-MiscStatusListenerImpl::MiscStatusListenerImpl(void* cb_object, StatusCallbackFunction cbFunc) :
-      clientCb_(cb_object), cbFunc_(cbFunc) {
-    ALOGI("Created");
+MiscStatusListenerImpl::MiscStatusListenerImpl(Callback<StatusCallbackFunction> callback) :
+      mCallback(std::move(callback)) {
+    LOG(INFO) << "MiscStatusListenerImpl created";
 }
 
-ndk::ScopedAStatus MiscStatusListenerImpl::sendStatus(TelemetryServiceStatusCodes status_code,
-                                                      const std::string& status_message) {
-    int int_status_code =
-            static_cast<std::underlying_type_t<TelemetryServiceStatusCodes>>(status_code);
-    ALOGD("sending misc status back to client. Status: %s, Message: %s",
-          ::aidl::google::sdv::telemetry::toString(status_code).c_str(), status_message.c_str());
+ndk::ScopedAStatus MiscStatusListenerImpl::sendStatus(TelemetryServiceStatusCodes statusCode,
+                                                      const std::string& statusMessage) {
+    LOG(DEBUG) << "Sending misc status back to client. Status: "
+               << ::aidl::google::sdv::telemetry::toString(statusCode)
+               << ", Message: " << statusMessage;
 
-    cbFunc_(clientCb_, int_status_code, status_message.c_str());
+    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str());
     return ndk::ScopedAStatus::ok();
 }
+
 }  // namespace google::sdv::telemetry

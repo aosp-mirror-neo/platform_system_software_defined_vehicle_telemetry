@@ -60,7 +60,21 @@ enum class TelemetryServiceStatusCodes : int32_t {
      * Errors with params sent to API calls
      */
     API_CALL_FAILED_LISTENER_NOT_SET = 412,
+
+    /**
+     * No Callback Function sent to telemetry service API Call
+     */
     API_CALL_FAILED_CALLBACK_FUNCTION_NOT_SET = 413,
+
+    /**
+     * Errors specific to get active and inactive configs
+     */
+    GET_CONFIG_LIST_FAILED = 414,
+
+    /**
+     * Binder-related errors
+     */
+    API_CALL_FAILED_INTERNAL_ERROR = 415,
 
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined

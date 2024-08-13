@@ -1,36 +1,54 @@
 // Copyright 2024 Google LLC
 
-#ifndef TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
-#define TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
-
-#include "callback_functions.h"
-
-#include <utils/Log.h>
+#pragma once
 
 #include <stdlib.h>
 
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
+#include <utility>
 
 namespace google::sdv::telemetry {
 
-// Define the struct
-struct CallbackData {
-    void* cb_object;
-    StatusCallbackFunction cb_function;
-};
-
-// Acts as the mediator between the OEM client and the telemetry service.
-class StatusCallbackContainer {
+template <typename T>
+class Callback {
 public:
-    bool insert_callback(int api_call_id, CallbackData);
-    std::optional<CallbackData> extract_callback(int api_call_id);
+    Callback(void* data, T&& callback) : data(data), callback(callback) {}
+
+    template <typename... A>
+    void run(A&&... args) {
+        callback(data, std::forward<A>(args)...);
+    }
+
+    void* data;
 
 private:
-    std::unordered_map<int, CallbackData> cb_map_;
-    std::mutex mutex_;
+    T callback;
 };
-}  // namespace google::sdv::telemetry
 
-#endif  // TELEMETRY_CLIENTLIB_INCLUDE_CALLBACK_CONTAINER_H
+// `CallbackContainer` wraps a map of `Callback`s. All methods are thread-safe.
+template <typename T>
+class CallbackContainer {
+public:
+    [[nodiscard]]
+    bool insert(int apiCallId, Callback<T> callback) {
+        std::lock_guard<std::mutex> lock(mMutex);
+        auto [_, inserted] = mCallbackMap.emplace(apiCallId, callback);
+        return inserted;
+    }
+
+    std::optional<Callback<T>> extract(int apiCallId) {
+        std::lock_guard<std::mutex> lock(mMutex);
+
+        auto nodeHandle = mCallbackMap.extract(apiCallId);
+        return nodeHandle.empty() ? std::nullopt : std::make_optional(nodeHandle.mapped());
+    }
+
+private:
+    std::unordered_map<int, Callback<T>> mCallbackMap;
+    std::mutex mMutex;
+};
+
+}  // namespace google::sdv::telemetry
