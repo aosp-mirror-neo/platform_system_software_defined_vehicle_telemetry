@@ -2,12 +2,12 @@
 
 #include "lib.h"
 
+#include "synchronized.h"
 #include "telemetry_service_client.h"
 
 #include <android-base/logging.h>
 
 #include <memory>
-#include <mutex>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -35,20 +35,20 @@ ServiceHolder* get_telemetry_service() {
     // The current assumption is that the lifecycle of the TelemetryServiceClient is equal
     // to the lifecycle of the client application, hence it is defined as function static
     // here.
-    static std::unique_ptr<google::sdv::telemetry::TelemetryServiceClient> client;
-    static std::mutex mutex;
+    static Synchronized<std::unique_ptr<google::sdv::telemetry::TelemetryServiceClient>> client;
 
-    std::lock_guard<std::mutex> guard(mutex);
-    if (!client) {
-        auto maybeClient = google::sdv::telemetry::TelemetryServiceClient::Create();
-        if (maybeClient.has_value()) {
-            client = std::move(maybeClient.value());
-        } else {
-            LOG(ERROR) << "Failed to create TelemetryServiceClient: " << maybeClient.error();
+    return client.lock([](auto& client) {
+        if (!client) {
+            auto maybeClient = google::sdv::telemetry::TelemetryServiceClient::Create();
+            if (maybeClient.has_value()) {
+                client = std::move(maybeClient.value());
+            } else {
+                LOG(ERROR) << "Failed to create TelemetryServiceClient: " << maybeClient.error();
+            }
         }
-    }
 
-    return client ? reinterpret_cast<ServiceHolder*>(client.get()) : nullptr;
+        return client ? reinterpret_cast<ServiceHolder*>(client.get()) : nullptr;
+    });
 }
 
 int32_t add_metrics_config(ServiceHolder* holder, uint8_t* metrics_config,

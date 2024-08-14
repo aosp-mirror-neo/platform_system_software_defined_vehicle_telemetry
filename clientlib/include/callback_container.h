@@ -2,10 +2,11 @@
 
 #pragma once
 
+#include "synchronized.h"
+
 #include <stdlib.h>
 
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <unordered_map>
 #include <utility>
@@ -34,21 +35,21 @@ class CallbackContainer {
 public:
     [[nodiscard]]
     bool insert(int apiCallId, Callback<T> callback) {
-        std::lock_guard<std::mutex> lock(mMutex);
-        auto [_, inserted] = mCallbackMap.emplace(apiCallId, callback);
-        return inserted;
+        return mCallbackMap.lock([&](auto& callbackMap) {
+            auto [_, inserted] = callbackMap.emplace(apiCallId, callback);
+            return inserted;
+        });
     }
 
     std::optional<Callback<T>> extract(int apiCallId) {
-        std::lock_guard<std::mutex> lock(mMutex);
-
-        auto nodeHandle = mCallbackMap.extract(apiCallId);
-        return nodeHandle.empty() ? std::nullopt : std::make_optional(nodeHandle.mapped());
+        return mCallbackMap.lock([&](auto& callbackMap) {
+            auto nodeHandle = callbackMap.extract(apiCallId);
+            return nodeHandle.empty() ? std::nullopt : std::make_optional(nodeHandle.mapped());
+        });
     }
 
 private:
-    std::unordered_map<int, Callback<T>> mCallbackMap;
-    std::mutex mMutex;
+    Synchronized<std::unordered_map<int, Callback<T>>> mCallbackMap;
 };
 
 }  // namespace google::sdv::telemetry
