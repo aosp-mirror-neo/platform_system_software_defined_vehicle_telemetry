@@ -61,9 +61,6 @@ pub enum SimulatorError {
     #[error("{file_name}\" is missing the descriptor proto message \"{message_name}\"")]
     MissingDescriptorProto { file_name: String, message_name: String },
 
-    #[error("Missing simulation publisher(s) \"{missing_publishers:?}\" for metrics config \"{metrics_config_name}\"")]
-    MissingSimulationPublishers { missing_publishers: HashSet<String>, metrics_config_name: String },
-
     #[error("Received a report for an unknown metrics configuration with UUID \"{uuid}\"")]
     OrphanReport { uuid: String },
 }

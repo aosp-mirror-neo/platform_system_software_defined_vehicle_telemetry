@@ -25,7 +25,7 @@ use log::{error, info};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
 use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
 use std::{
-    collections::{HashMap, HashSet}, path::PathBuf, sync::Arc, time::Duration
+    collections::HashMap, path::PathBuf, sync::Arc, time::Duration
 };
 use tokio::{
     sync::{mpsc::UnboundedReceiver, oneshot, oneshot::error::TryRecvError},
@@ -36,6 +36,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     IConfigurablePublisher::BnConfigurablePublisher, PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::{IConfigurablePublisherRegistry, BpConfigurablePublisherRegistry}};
 
 use crate::{
+    cli::Commands,
     io::create_output_directory,
     metrics_configs_tracker::MetricsConfigsTracker,
     publisher_config_parser::parse_publisher_config,
@@ -61,42 +62,65 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn wrapped_main() -> anyhow::Result<()> {
-    let cli_args = cli::Args::parse();
-    let has_simulation_publishers = !cli_args.publisher_config_paths.is_empty();
+    let cli_args = cli::CliArgs::parse();
     info!("Running simulator with args:\n{cli_args}");
 
-    create_output_directory(!cli_args.no_binary_reports)?;
+    binder::ProcessState::start_thread_pool();
 
-    let mut metrics_configs_tracker = MetricsConfigsTracker::new(!cli_args.no_binary_reports);
+    match cli_args.command {
+        Commands::TelemetryClient { telemetry_client_args } => {
+            run_telemetry_client(
+                telemetry_client_args.metrics_config_paths,
+                telemetry_client_args.no_binary_reports,
+                telemetry_client_args.max_report_count,
+                cli_args.max_simulation_time,
+            )
+            .await?;
+        }
+        Commands::SimulationPublishers { simulation_publisher_args } => {
+            start_simulation_publishers(simulation_publisher_args.publisher_config_paths)?;
+            let _ = sleep(cli_args.max_simulation_time).await;
+        }
+        Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
+            start_simulation_publishers(simulation_publisher_args.publisher_config_paths)?;
+            run_telemetry_client(
+                telemetry_client_args.metrics_config_paths,
+                telemetry_client_args.no_binary_reports,
+                telemetry_client_args.max_report_count,
+                cli_args.max_simulation_time,
+            )
+            .await?;
+        }
+    }
 
-    for path in &cli_args.metrics_config_paths {
+    Ok(())
+}
+
+async fn run_telemetry_client(
+    metrics_config_paths: Vec<PathBuf>,
+    no_binary_reports: bool,
+    max_report_count: u64,
+    max_simulation_time: Duration,
+) -> anyhow::Result<()> {
+    create_output_directory(!no_binary_reports)?;
+    let mut metrics_configs_tracker = MetricsConfigsTracker::new(!no_binary_reports);
+
+    for path in &metrics_config_paths {
         metrics_configs_tracker.parse_metrics_config(path)?;
     }
 
-    binder::ProcessState::start_thread_pool();
     let telemetry_service = get_telemetry_service_instance()?;
     let (mut report_ready_rx, misc_status_rx) =
         get_telemetry_service_listeners(&telemetry_service).await?;
     handle_telemetry_service_status_updates(misc_status_rx);
     let metrics_config_uuids = metrics_configs_tracker.get_metrics_config_uuids();
 
-    if has_simulation_publishers {
-        let publishers =
-            parse_and_register_simulation_publishers(&cli_args.publisher_config_paths)?;
-
-        for uuid in &metrics_config_uuids {
-            ensure_all_publishers_exist(uuid, &metrics_configs_tracker, &publishers)?;
-        }
-    }
-
     for uuid in metrics_config_uuids {
         metrics_configs_tracker.activate_metrics_config(&telemetry_service, &uuid).await?;
     }
 
     let mut num_reports = 0;
-    let mut simulator_is_done =
-        get_finish_condition(cli_args.max_simulation_time, cli_args.max_report_count)?;
-
+    let mut simulator_is_done = get_finish_condition(max_simulation_time, max_report_count)?;
     while !simulator_is_done(num_reports) {
         tokio::select! {
             report_info = await_next_report(&mut report_ready_rx) => {
@@ -105,7 +129,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
                 metrics_configs_tracker.process_new_report(&report_info, report)?;
                 num_reports += 1;
             }
-            _ = sleep(cli_args.max_simulation_time) => {
+            _ = sleep(max_simulation_time) => {
                 info!{"Simulator time limit reached before any reports were returned by the telemetry service."}
             }
         }
@@ -115,22 +139,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn ensure_all_publishers_exist(
-    uuid: &str,
-    metrics_configs_tracker: &MetricsConfigsTracker,
-    simulation_publishers: &PublisherMap,
-) -> Result<(), SimulatorError> {
-    let required_publisher_names = metrics_configs_tracker.get_service_publisher_names(uuid)?;
-    let missing_publishers = required_publisher_names
-        .difference(&simulation_publishers.keys().cloned().collect())
-        .cloned()
-        .collect::<HashSet<String>>();
-    if !missing_publishers.is_empty() {
-        return Err(SimulatorError::MissingSimulationPublishers {
-            missing_publishers,
-            metrics_config_name: metrics_configs_tracker.get_file_name(uuid)?,
-        });
-    }
+fn start_simulation_publishers(publisher_config_paths: Vec<PathBuf>) -> anyhow::Result<()> {
+    let _publishers = parse_and_register_simulation_publishers(&publisher_config_paths)?;
     Ok(())
 }
 

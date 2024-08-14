@@ -101,32 +101,6 @@ impl MetricsConfigsTracker {
         self.metrics_configs.keys().cloned().collect()
     }
 
-    pub fn get_service_publisher_names(
-        &self,
-        uuid: &str,
-    ) -> Result<HashSet<String>, SimulatorError> {
-        Ok(self
-            .metrics_configs
-            .get(uuid)
-            .ok_or_else(|| SimulatorError::ProgrammingError {
-                error_message: "Tried to get config info for non-existent metrics config"
-                    .to_owned(),
-            })?
-            .service_publisher_names
-            .clone())
-    }
-
-    pub fn get_file_name(&self, uuid: &str) -> Result<String, SimulatorError> {
-        Ok(self
-            .metrics_configs
-            .get(uuid)
-            .ok_or_else(|| SimulatorError::ProgrammingError {
-                error_message: "Tried to get config info for non-existent metrics config"
-                    .to_owned(),
-            })?
-            .file_name
-            .clone())
-    }
     /// Uses telemetry service to add and activate the specified metric config.
     /// Returns an error if any step fails.
     pub async fn activate_metrics_config(
