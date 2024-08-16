@@ -340,7 +340,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_getter_service_publisher_propagates_adapter_error() {
+    async fn activate_getter_propagates_adapter_error() {
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
         let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
@@ -356,7 +356,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_getter_service_publisher_success() {
+    async fn activate_getter_success() {
         let service_adapter = Arc::new(
             MockServiceAdapter::new().with_next_message_provider(MockServiceMessageProvider::new()),
         );
@@ -376,7 +376,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_getter_service_publisher_falls_back_to_subscription() {
+    async fn activate_getter_falls_back_to_subscription() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
@@ -394,7 +394,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_subscription_service_publisher_passes_configuration() {
+    async fn activate_subscription_passes_configuration() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
@@ -446,7 +446,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn deactivate_subscribed_service_publisher_calls_unsubscribe() {
+    async fn deactivate_subscribed_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher =
             create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
@@ -476,7 +476,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn subscribe_service_publisher_new_message_notifies_subscriber() {
+    async fn subscribe_new_message_notifies_subscriber() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher =
             create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
@@ -507,7 +507,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn service_publisher_get_latest_message_calls_adapter() {
+    async fn get_latest_message_calls_adapter() {
         let message = Box::new(Int32Value { value: 42, ..Default::default() });
         let mut message_provider = MockServiceMessageProvider::new();
         let message_clone = message.clone();
@@ -527,7 +527,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn service_publisher_get_latest_message_propagates_provider_error() {
+    async fn get_latest_message_propagates_provider_error() {
         const ERROR_STRING: &str = "Error 42";
         let message_provider =
             MockServiceMessageProvider::new().with_next_error(anyhow!(ERROR_STRING));

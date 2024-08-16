@@ -239,32 +239,84 @@ mod tests {
 
     fn create_inactive_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
-        message_builder: Arc<dyn MessageBuilder>,
-    ) -> Arc<dyn Publisher> {
-        Arc::new(AggregationPublisher::new(
+    ) -> (Arc<dyn Publisher>, Arc<MockMessageBuilder>) {
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
-            message_builder,
+            Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
             false,
             triggers,
-        ))
+        ));
+        (publisher, message_builder)
     }
 
     async fn create_active_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
     ) -> (Arc<dyn Publisher>, Arc<MockMessageBuilder>) {
-        let message_builder = Arc::new(MockMessageBuilder::new());
-        let publisher = create_inactive_aggregation_publisher(
-            triggers,
-            Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
-        );
+        let (publisher, message_builder) = create_inactive_aggregation_publisher(triggers);
 
         Arc::clone(&publisher).activate().await.unwrap();
+
         (publisher, message_builder)
+    }
+
+    async fn create_aggregation_publisher_with_subscription(
+        triggers: Vec<Arc<dyn Trigger>>,
+    ) -> Arc<dyn Publisher> {
+        let (publisher, _) = create_active_aggregation_publisher(triggers).await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
+        publisher
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn subscribe_aggregation_publisher_triggered_notifies_subscriber() {
+    #[should_panic]
+    async fn activate_when_active_panics() {
+        let (publisher, _) = create_active_aggregation_publisher(vec![]).await;
+
+        let _ = publisher.activate().await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn deactivate_when_inactive_panics() {
+        let (publisher, _) = create_inactive_aggregation_publisher(vec![]);
+
+        let _ = publisher.deactivate().await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn deactivate_with_subscriptions_panics() {
+        let publisher = create_aggregation_publisher_with_subscription(vec![]).await;
+
+        let _ = publisher.deactivate().await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn subscribe_when_inactive_panics() {
+        let (publisher, _) = create_inactive_aggregation_publisher(vec![]);
+
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn subscribe_already_subscribed_panics() {
+        let publisher = create_aggregation_publisher_with_subscription(vec![]).await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn subscribe_notifies_subscriber_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
@@ -297,7 +349,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn aggregation_publisher_notifies_all_subscriber_with_trigger_context() {
+    async fn subscribe_passes_trigger_context_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
@@ -328,7 +380,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn subscribe_aggregation_publisher_handles_async_expression_result() {
+    async fn subscribe_handles_async_expression_result() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
@@ -363,5 +415,31 @@ mod tests {
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
             assert_eq!(test_message.int_field, 2);
         }
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn unsubscribe_when_inactive_panics() {
+        let (publisher, _) = create_inactive_aggregation_publisher(vec![]);
+
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn unsubscribe_not_subscribed_panics() {
+        let (publisher, _) = create_active_aggregation_publisher(vec![]).await;
+
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn unsubscribe_success() {
+        let publisher = create_aggregation_publisher_with_subscription(vec![]).await;
+
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 }
