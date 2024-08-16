@@ -29,6 +29,7 @@ pub(crate) struct MockServiceAdapter {
 
 pub(crate) struct MockServiceMessageProvider {
     message_provider: Option<Box<dyn Fn() -> Box<dyn MessageDyn> + Send + Sync>>,
+    next_error: Mutex<Option<anyhow::Error>>,
 }
 
 #[async_trait]
@@ -145,7 +146,9 @@ impl ServiceMessageProvider for MockServiceMessageProvider {
         &self,
         _configuration: Option<&Any>,
     ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
-        if let Some(message_provider) = &self.message_provider {
+        if let Some(err) = self.next_error.lock().take() {
+            Err(err)
+        } else if let Some(message_provider) = &self.message_provider {
             Ok(Some(message_provider()))
         } else {
             Ok(None)
@@ -155,7 +158,7 @@ impl ServiceMessageProvider for MockServiceMessageProvider {
 
 impl MockServiceMessageProvider {
     pub(crate) fn new() -> Self {
-        Self { message_provider: None }
+        Self { message_provider: None, next_error: None.into() }
     }
 
     pub(crate) fn set_message_provider(
@@ -163,5 +166,10 @@ impl MockServiceMessageProvider {
         message_provider: impl Fn() -> Box<dyn MessageDyn> + Send + Sync + 'static,
     ) {
         self.message_provider = Some(Box::new(message_provider));
+    }
+
+    pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
+        self.next_error.lock().replace(error);
+        self
     }
 }

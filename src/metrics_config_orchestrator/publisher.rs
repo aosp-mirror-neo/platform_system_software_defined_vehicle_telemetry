@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::MessageDyn;
-use sdv_telemetry_utils::value_holder::ValueHolder;
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::fmt::Debug;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
@@ -28,7 +28,9 @@ pub(crate) trait Publisher: Send + Sync {
 
     fn is_subscribable(&self) -> bool;
 
-    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>>;
+    fn get_latest_message(
+        self: Arc<Self>,
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error>;
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
     async fn deactivate(&self) -> Result<(), PublisherDeactivateError>;

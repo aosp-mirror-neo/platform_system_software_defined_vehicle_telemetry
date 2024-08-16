@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
-use sdv_telemetry_utils::value_holder::ValueHolder;
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -33,8 +33,10 @@ impl Publisher for MockPublisher {
         true
     }
 
-    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
-        ValueHolder::Synchronous(self.latest_message.clone())
+    fn get_latest_message(
+        self: Arc<Self>,
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
+        Ok(self.latest_message.clone()).into()
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
