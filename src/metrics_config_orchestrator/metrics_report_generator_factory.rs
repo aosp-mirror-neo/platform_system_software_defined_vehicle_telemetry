@@ -56,7 +56,7 @@ pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum MetricsReportGeneratorFactoryError {
+pub(crate) enum MetricsReportGeneratorFactoryError {
     #[error("MetricsReportConfig doesn't have a name")]
     NameNotSet,
     #[error("Trigger name {trigger_name} is invalid")]
@@ -77,7 +77,7 @@ pub(crate) struct MetricsReportGeneratorFactoryImpl {
 }
 
 impl MetricsReportGeneratorFactoryImpl {
-    pub fn new(message_builder_factory: Arc<dyn MessageBuilderFactory>) -> Self {
+    pub(crate) fn new(message_builder_factory: Arc<dyn MessageBuilderFactory>) -> Self {
         Self { message_builder_factory }
     }
 }

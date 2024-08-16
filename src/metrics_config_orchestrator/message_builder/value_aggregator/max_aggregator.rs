@@ -5,13 +5,13 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where aggregation for numeric maximum is performed.
-pub struct MaxAggregator {
+pub(crate) struct MaxAggregator {
     // Stores the maximum so far.
     current_max: Option<NodeValue>,
 }
 
 impl MaxAggregator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { current_max: None }
     }
 }

@@ -29,7 +29,7 @@ pub(crate) trait SubscriptionManager<TKey: Display + Eq + Hash + Send + Sync, TC
 
 /// Trait of an object that can be activated.
 #[async_trait]
-pub trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
+pub(crate) trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
     /// Activates the object.
     /// The function will only be called for an inactive object
     /// that is not going through state transition.
@@ -45,7 +45,7 @@ pub trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
 }
 
 /// Manages subscriptions to a specific type of event.
-pub struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> {
+pub(crate) struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> {
     /// Reference to the underlying activatable object.
     activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>,
 
@@ -117,7 +117,7 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
 {
     /// Creates a new instance of the callback manager that activates the specified activatable
     /// on first subscription and deactivates it on last unsubscription.
-    pub fn new(activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>) -> Self {
+    pub(crate) fn new(activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>) -> Self {
         SubscriptionManagerImpl { activatable_reference, maybe_callback_map: None.into() }
     }
 }

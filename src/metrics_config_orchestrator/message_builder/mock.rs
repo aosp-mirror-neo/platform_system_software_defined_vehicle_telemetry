@@ -65,7 +65,7 @@ impl MockMessageBuilder {
         self.next_error.lock().replace(error);
     }
 
-    pub fn set_next_async_result(
+    pub(crate) fn set_next_async_result(
         &self,
         future: BoxFuture<'static, Result<Box<dyn MessageDyn>, MessageBuilderError>>,
     ) {

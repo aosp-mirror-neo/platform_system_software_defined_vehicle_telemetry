@@ -41,15 +41,15 @@ impl ValueAggregatorFactory for MockValueAggregatorFactory {
 }
 
 impl MockValueAggregatorFactory {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { fail_create: false, fail_validate: false }
     }
 
-    pub fn fail_create(&mut self) {
+    pub(crate) fn fail_create(&mut self) {
         self.fail_create = true;
     }
 
-    pub fn fail_validate(&mut self) {
+    pub(crate) fn fail_validate(&mut self) {
         self.fail_validate = true;
     }
 }

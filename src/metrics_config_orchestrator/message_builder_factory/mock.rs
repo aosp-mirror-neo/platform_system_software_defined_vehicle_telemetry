@@ -32,17 +32,17 @@ pub(crate) struct MockMessageBuilderFactory {
 }
 
 impl MockMessageBuilderFactory {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { fail_validate: false, fail_create: false }
     }
 
     /// Intercepts the mock factory's validate() call and make it return an error.
-    pub fn fail_validate(&mut self) {
+    pub(crate) fn fail_validate(&mut self) {
         self.fail_validate = true;
     }
 
     /// Intercepts the mock factory's create() call and make it return an error.
-    pub fn fail_create(&mut self) {
+    pub(crate) fn fail_create(&mut self) {
         self.fail_create = true;
     }
 }

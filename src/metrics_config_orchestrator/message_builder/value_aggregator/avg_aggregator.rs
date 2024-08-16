@@ -5,7 +5,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric average is calculated.
-pub struct AvgAggregator {
+pub(crate) struct AvgAggregator {
     // Stores the running average.
     current_avg: NodeValue,
     // Stores the number of samples.
@@ -13,7 +13,7 @@ pub struct AvgAggregator {
 }
 
 impl AvgAggregator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { current_avg: NodeValue::Double(0.0), n: 0 }
     }
 }

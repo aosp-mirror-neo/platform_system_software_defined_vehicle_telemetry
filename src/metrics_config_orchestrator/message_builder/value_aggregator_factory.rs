@@ -19,7 +19,7 @@ use crate::metrics_config_orchestrator::message_builder::ValueAggregator;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum ValueAggregatorFactoryError {
+pub(crate) enum ValueAggregatorFactoryError {
     #[error(
         "Cannot assign values to unsupported protobuf field types, such as strings, bytes, maps"
     )]
@@ -41,7 +41,7 @@ pub enum ValueAggregatorFactoryError {
     InvalidMaxLengthForVectorAggregation,
 }
 
-pub trait ValueAggregatorFactory: Send + Sync {
+pub(crate) trait ValueAggregatorFactory: Send + Sync {
     fn create(
         &self,
         aggregated_field_value: &AggregatedFieldValueProto,
@@ -55,18 +55,18 @@ pub trait ValueAggregatorFactory: Send + Sync {
     ) -> Result<(), ValueAggregatorFactoryError>;
 }
 
-pub struct ValueAggregatorFactoryCreateContext<'a> {
+pub(crate) struct ValueAggregatorFactoryCreateContext<'a> {
     pub field_descriptor: &'a FieldDescriptor,
     pub node_types: &'a [Option<NodeValueType>],
     pub nodes: &'a [Arc<Node>],
 }
 
-pub struct ValueAggregatorFactoryValidateContext<'a> {
+pub(crate) struct ValueAggregatorFactoryValidateContext<'a> {
     pub field_descriptor: &'a FieldDescriptor,
     pub node_types: &'a [Option<NodeValueType>],
 }
 
-pub struct ValueAggregatorFactoryImpl {}
+pub(crate) struct ValueAggregatorFactoryImpl {}
 
 impl ValueAggregatorFactory for ValueAggregatorFactoryImpl {
     fn create(

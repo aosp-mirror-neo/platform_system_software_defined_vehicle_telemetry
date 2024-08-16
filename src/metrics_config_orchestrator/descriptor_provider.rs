@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 use crate::expr::{node_error::DescriptorProviderError, node_factory::DescriptorProvider};
 
-pub struct DescriptorProviderImpl {
+pub(crate) struct DescriptorProviderImpl {
     // key = publisher name, value = MessageDescriptor for the data it publishes
     // value may be None if runtime type information for the publisher is not available yet.
     pub(super) publisher_message_descriptor: HashMap<String, Option<MessageDescriptor>>,

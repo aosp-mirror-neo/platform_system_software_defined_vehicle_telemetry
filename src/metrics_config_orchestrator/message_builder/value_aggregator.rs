@@ -17,7 +17,7 @@ use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum AggregationError {
+pub(crate) enum AggregationError {
     #[error("Evaluation of expression node failed: {e}")]
     ExpressionEvaluationError {
         #[from]
@@ -33,7 +33,7 @@ pub enum AggregationError {
 
 /// Aggregation types should implement this trait and perform the corresponding
 /// aggregation at `compute()`.
-pub trait ValueAggregator: Send + Sync {
+pub(crate) trait ValueAggregator: Send + Sync {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError>;
 }
 

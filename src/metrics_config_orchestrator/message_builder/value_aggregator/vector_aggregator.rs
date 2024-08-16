@@ -5,7 +5,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where vector(concatenation) aggregation is performed.
-pub struct VectorAggregator {
+pub(crate) struct VectorAggregator {
     // Stores the existing vector. New values to be appended to the existing vector.
     current_vec: Option<NodeValue>,
     // Maximum length of the vector. If the vector is too long, the oldest value will be dropped.
@@ -14,7 +14,7 @@ pub struct VectorAggregator {
 }
 
 impl VectorAggregator {
-    pub fn new(max_length: Option<u32>) -> Self {
+    pub(crate) fn new(max_length: Option<u32>) -> Self {
         Self { current_vec: None, max_length }
     }
 }

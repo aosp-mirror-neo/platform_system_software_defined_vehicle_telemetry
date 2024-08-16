@@ -53,7 +53,7 @@ pub(crate) struct TriggerFactoryValidateContext<'a> {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum TriggerFactoryError {
+pub(crate) enum TriggerFactoryError {
     #[error("Incorrect conditional trigger node index {node_index}")]
     IncorrectNodeIndex { node_index: u32 },
     #[error(

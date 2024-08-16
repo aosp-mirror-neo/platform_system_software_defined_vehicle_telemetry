@@ -4,12 +4,12 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where count aggregation is performed.
-pub struct CountAggregator {
+pub(crate) struct CountAggregator {
     count: i32,
 }
 
 impl CountAggregator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { count: 0 }
     }
 }

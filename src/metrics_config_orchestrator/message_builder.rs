@@ -41,7 +41,7 @@ pub(crate) struct MessageBuilderImpl {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum MessageBuilderError {
+pub(crate) enum MessageBuilderError {
     #[error("Unable to assign value to field {field_name} because of: {e}")]
     BadAggregation { field_name: String, e: AggregationError },
     #[error("Evaluation of expression node for field {field_name} failed: {e}")]
@@ -112,7 +112,7 @@ impl MessageBuilder for MessageBuilderImpl {
 }
 
 impl MessageBuilderImpl {
-    pub fn new(
+    pub(crate) fn new(
         owner_name: String,
         message_descriptor: MessageDescriptor,
         field_assignments: Vec<(String, Box<dyn ValueAggregator>)>,

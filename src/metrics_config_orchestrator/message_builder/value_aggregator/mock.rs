@@ -23,11 +23,11 @@ impl ValueAggregator for MockValueAggregator {
 }
 
 impl MockValueAggregator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { fail_compute: false }
     }
 
-    pub fn fail_compute(mut self) -> Self {
+    pub(crate) fn fail_compute(mut self) -> Self {
         self.fail_compute = true;
         self
     }

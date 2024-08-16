@@ -47,7 +47,7 @@ pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
-pub enum MessageBuilderFactoryError {
+pub(crate) enum MessageBuilderFactoryError {
     #[error("Message {message_type} is not found in the provided file descriptor protos")]
     MessageNotFound { message_type: String },
     #[error("Field {field_name} not found in message {message_type}")]
@@ -171,7 +171,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
 }
 
 impl MessageBuilderFactoryImpl {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { value_aggregator_factory: Box::new(ValueAggregatorFactoryImpl {}) }
     }
 

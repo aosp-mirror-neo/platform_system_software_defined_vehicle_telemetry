@@ -7,7 +7,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::AggregationError;
 
 /// Trait that defines helper functions for aggregating values.
-pub trait NodeValueExtension {
+pub(crate) trait NodeValueExtension {
     // Converts NodeValue of single value into NodeValue containing a list of 1 element.
     fn to_list(&self) -> Result<NodeValue, AggregationError>;
 

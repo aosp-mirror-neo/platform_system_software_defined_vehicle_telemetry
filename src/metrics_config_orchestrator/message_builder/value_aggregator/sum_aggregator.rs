@@ -6,13 +6,13 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric sum is calculated.
-pub struct SumAggregator {
+pub(crate) struct SumAggregator {
     // Stores the sum of values so far.
     current_sum: NodeValue,
 }
 
 impl SumAggregator {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self { current_sum: NodeValue::Int32(0) }
     }
 }
