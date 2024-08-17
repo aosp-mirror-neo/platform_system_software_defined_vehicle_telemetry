@@ -55,7 +55,7 @@ impl ServiceAdapter for MockServiceAdapter {
         _service_name: &str,
         configuration: Option<&Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> anyhow::Result<ServiceSubscription> {
+    ) -> anyhow::Result<Option<ServiceSubscription>> {
         self.num_subscribe_calls.fetch_add(1, Ordering::Release);
         self.new_message_callback.lock().await.replace(new_message_callback);
         if let Some(configuration) = configuration {
@@ -71,12 +71,12 @@ impl ServiceAdapter for MockServiceAdapter {
             future::pending::<()>().await;
         }
 
-        Ok(ServiceSubscription {
+        Ok(Some(ServiceSubscription {
             subscription_type: ServiceSubscriptionType::Shared {
                 service_name: String::default(),
                 subscription_id: u32::MAX,
             },
-        })
+        }))
     }
 
     async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {

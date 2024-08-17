@@ -32,7 +32,7 @@ pub(crate) trait ServiceAdapter {
         service_name: &str,
         configuration: Option<&Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> anyhow::Result<ServiceSubscription>;
+    ) -> anyhow::Result<Option<ServiceSubscription>>;
 
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
@@ -135,7 +135,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         service_name: &str,
         configuration: Option<&Any>,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
-    ) -> anyhow::Result<ServiceSubscription> {
+    ) -> anyhow::Result<Option<ServiceSubscription>> {
         let maybe_subscription_type = if configuration.is_some() {
             // Subscription has configuration, so it can't be shared.
             let create_subscription_outcome = self
@@ -235,12 +235,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
             }
         };
 
-        if let Some(subscription_type) = maybe_subscription_type {
-            Ok(ServiceSubscription { subscription_type })
-        } else {
-            // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
-            Err(anyhow::anyhow!("Service with name {} is not available", service_name))
-        }
+        Ok(maybe_subscription_type
+            .map(|subscription_type| ServiceSubscription { subscription_type }))
     }
 
     async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()> {
@@ -421,19 +417,17 @@ pub(super) mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn subscribe_configured_accessor_returns_not_available_fails() {
+    async fn subscribe_configured_accessor_returns_not_available_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let err = service_adapter
+        let res = service_adapter
             .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
-            .err()
             .unwrap();
 
-        assert!(err.to_string().contains("is not available"), "Unexpected error: {:?}", err);
-        assert_eq!(accessor.get_num_subscribe_calls(), 1);
+        assert!(res.is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -486,18 +480,15 @@ pub(super) mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn subscribe_shared_accessor_returns_not_available_fails() {
+    async fn subscribe_shared_accessor_returns_not_available_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let err = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
-            .await
-            .err()
-            .unwrap();
+        let res =
+            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
 
-        assert!(err.to_string().contains("is not available"), "Unexpected error: {:?}", err);
+        assert!(res.is_none());
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -652,7 +643,8 @@ pub(super) mod tests {
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("Subscription should be available");
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
         let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
 
@@ -670,7 +662,8 @@ pub(super) mod tests {
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
             .await
-            .unwrap();
+            .unwrap()
+            .expect("Subscription should be available");
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
@@ -684,8 +677,11 @@ pub(super) mod tests {
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let subscription =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .await
+            .unwrap()
+            .expect("Subscription should be available");
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
         let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
 
@@ -700,8 +696,11 @@ pub(super) mod tests {
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let subscription =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .await
+            .unwrap()
+            .expect("Subscription should be available");
         service_adapter.unsubscribe(subscription).await.unwrap();
 
         // Verify the number of registry unsubscribe calls.
@@ -715,11 +714,17 @@ pub(super) mod tests {
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let subscription =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .await
+            .unwrap()
+            .expect("Subscription should be available");
 
-        let _subscription2 =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let _subscription2 = service_adapter
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .await
+            .unwrap()
+            .expect("Subscription should be available");
 
         service_adapter.unsubscribe(subscription).await.unwrap();
 
@@ -734,11 +739,17 @@ pub(super) mod tests {
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let subscription =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let subscription = service_adapter
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .await
+            .unwrap()
+            .expect("Subscription should be available");
 
-        let subscription2 =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let subscription2 = service_adapter
+            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .await
+            .unwrap()
+            .expect("Subscription should be available");
 
         service_adapter.unsubscribe(subscription).await.unwrap();
         service_adapter.unsubscribe(subscription2).await.unwrap();
