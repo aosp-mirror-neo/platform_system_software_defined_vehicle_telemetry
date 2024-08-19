@@ -5,7 +5,7 @@ use super::*;
 use parking_lot::Mutex;
 use std::future;
 use std::sync::atomic::{AtomicU32, Ordering};
-use tokio::sync::Notify;
+use tokio::sync::{oneshot, Notify};
 
 pub(crate) struct MockServiceAdapter {
     // Block subscribe call to keep publisher in the Subscribing state.
@@ -18,6 +18,7 @@ pub(crate) struct MockServiceAdapter {
     pub(crate) notify_subscribing: Arc<Notify>,
     // Notify that's triggered when unsubscribe is blocked.
     pub(crate) notify_unsubscribing: Arc<Notify>,
+    message_provider_returned_sender: Mutex<Option<oneshot::Sender<()>>>,
     next_error: Mutex<Option<anyhow::Error>>,
     next_message_provider: Mutex<Option<MockServiceMessageProvider>>,
     num_get_message_provider_calls: AtomicU32,
@@ -25,6 +26,7 @@ pub(crate) struct MockServiceAdapter {
     num_unsubscribe_calls: AtomicU32,
     new_message_callback:
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
+    successful_subscribe_sender: Mutex<Option<oneshot::Sender<()>>>,
 }
 
 pub(crate) struct MockServiceMessageProvider {
@@ -45,6 +47,11 @@ impl ServiceAdapter for MockServiceAdapter {
         }
 
         if let Some(message_provider) = self.next_message_provider.lock().take() {
+            let sender = self.message_provider_returned_sender.lock().take();
+            if let Some(sender) = sender {
+                let _ = sender.send(());
+            }
+
             Ok(Some(Box::new(message_provider)))
         } else {
             Ok(None)
@@ -58,7 +65,7 @@ impl ServiceAdapter for MockServiceAdapter {
         new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
         self.num_subscribe_calls.fetch_add(1, Ordering::Release);
-        self.new_message_callback.lock().await.replace(new_message_callback);
+
         if let Some(configuration) = configuration {
             self.latest_configuration.lock().replace(configuration.clone());
         }
@@ -72,12 +79,19 @@ impl ServiceAdapter for MockServiceAdapter {
             future::pending::<()>().await;
         }
 
-        Ok(Some(ServiceSubscription {
-            subscription_type: ServiceSubscriptionType::Shared {
-                service_name: String::default(),
-                subscription_id: u32::MAX,
-            },
-        }))
+        let maybe_sender = self.successful_subscribe_sender.lock().take();
+        if let Some(sender) = maybe_sender {
+            self.new_message_callback.lock().await.replace(new_message_callback);
+            let _ = sender.send(());
+            Ok(Some(ServiceSubscription {
+                subscription_type: ServiceSubscriptionType::Shared {
+                    service_name: String::default(),
+                    subscription_id: u32::MAX,
+                },
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
@@ -101,7 +115,9 @@ impl MockServiceAdapter {
         Self {
             block_subscribe: false,
             block_unsubscribe: false,
+            successful_subscribe_sender: None.into(),
             latest_configuration: None.into(),
+            message_provider_returned_sender: None.into(),
             next_error: None.into(),
             next_message_provider: None.into(),
             new_message_callback: None.into(),
@@ -125,17 +141,28 @@ impl MockServiceAdapter {
         self.num_unsubscribe_calls.load(Ordering::Acquire)
     }
 
+    pub(crate) fn set_next_message_provider(
+        &self,
+        provider: MockServiceMessageProvider,
+    ) -> oneshot::Receiver<()> {
+        self.next_message_provider.lock().replace(provider);
+        let (tx, rx) = oneshot::channel();
+        self.message_provider_returned_sender.lock().replace(tx);
+        rx
+    }
+
+    pub(crate) fn set_next_subscribe_successful(&self) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.successful_subscribe_sender.lock().replace(tx);
+        rx
+    }
+
     pub(crate) async fn publish_new_message(&self, message: &dyn MessageDyn) {
         self.new_message_callback.lock().await.as_mut().unwrap()(message);
     }
 
     pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
         self.next_error.lock().replace(error);
-        self
-    }
-
-    pub(crate) fn with_next_message_provider(self, provider: MockServiceMessageProvider) -> Self {
-        self.next_message_provider.lock().replace(provider);
         self
     }
 }

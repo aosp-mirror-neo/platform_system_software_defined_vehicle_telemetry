@@ -62,6 +62,7 @@ rust_defaults {
         "libstrum",
         "libthiserror",
         "libtokio",
+        "libtokio_util",
         // keep-sorted end
     ],
     proc_macros: [
