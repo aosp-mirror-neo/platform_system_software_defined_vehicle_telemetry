@@ -3,8 +3,9 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::MessageDyn;
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use sdv_telemetry_utils::value_holder::ValueHolder;
+use sdv_telemetry_utils::{
+    collection_extension::HashMapExtension, operation_result::OperationResult,
+};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -54,8 +55,10 @@ impl Publisher for AggregationPublisher {
         true
     }
 
-    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
-        ValueHolder::Synchronous(self.base.get_latest_message())
+    fn get_latest_message(
+        self: Arc<Self>,
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
+        Ok(self.base.get_latest_message()).into()
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
@@ -283,7 +286,7 @@ mod tests {
 
         let messages = [
             rx.await.unwrap().into(),
-            Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap(),
+            Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap(),
         ];
         for message in messages {
             let test_message =
@@ -351,8 +354,10 @@ mod tests {
         );
         trigger.fire().await;
 
-        let messages =
-            [rx.await.unwrap().into(), publisher.get_latest_message().unwrap_sync().unwrap()];
+        let messages = [
+            rx.await.unwrap().into(),
+            publisher.get_latest_message().unwrap_sync().unwrap().unwrap(),
+        ];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();

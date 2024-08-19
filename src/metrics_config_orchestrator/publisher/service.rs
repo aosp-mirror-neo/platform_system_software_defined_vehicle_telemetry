@@ -2,10 +2,10 @@
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use sdv_telemetry_utils::value_holder::ValueHolder;
+use sdv_telemetry_utils::{
+    collection_extension::HashMapExtension, operation_result::OperationResult,
+};
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -70,33 +70,31 @@ impl Publisher for ServicePublisher {
         }
     }
 
-    fn get_latest_message(self: Arc<Self>) -> ValueHolder<'static, Option<Arc<dyn MessageDyn>>> {
+    fn get_latest_message(
+        self: Arc<Self>,
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
         if let Some(message) = self.base.get_latest_message() {
-            return ValueHolder::Synchronous(Some(message));
+            return Ok(Some(message)).into();
         }
-        ValueHolder::Asynchronous(
-            async move {
-                let message_provider = match &*self.state.lock().await {
-                    ServicePublisherState::Inactive => panic!(
-                        "Publisher {} is inactive and cannot provide latest message",
-                        self.get_name()
-                    ),
-                    ServicePublisherState::ActiveGetter { message_provider } => {
-                        Arc::clone(message_provider)
-                    }
-                    ServicePublisherState::ActiveSubscribed { .. } => return None,
-                };
-                match message_provider.get_latest_message(self.configuration.as_ref()).await {
-                    Err(err) => {
-                        // TODO(b/351047443): Propagate error through expression evaluation.
-                        error!("Error when trying to retrieve latest message: {}", err);
-                        None
-                    }
-                    Ok(maybe_msg) => maybe_msg.map(|msg| msg.into()),
+
+        async move {
+            let message_provider = match &*self.state.lock().await {
+                ServicePublisherState::Inactive => panic!(
+                    "Publisher {} is inactive and cannot provide latest message",
+                    self.get_name()
+                ),
+                ServicePublisherState::ActiveGetter { message_provider } => {
+                    Arc::clone(message_provider)
                 }
-            }
-            .boxed(),
-        )
+                ServicePublisherState::ActiveSubscribed { .. } => return Ok(None),
+            };
+            Ok(message_provider
+                .get_latest_message(self.configuration.as_ref())
+                .await?
+                .map(|msg| msg.into()))
+        }
+        .boxed()
+        .into()
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
@@ -498,7 +496,7 @@ mod tests {
         service_adapter.publish_new_message(&msg).await;
 
         let received_message = rx.await.unwrap();
-        let latest_message = publisher.get_latest_message().unwrap_sync().unwrap();
+        let latest_message = publisher.get_latest_message().unwrap_sync().unwrap().unwrap();
         let expected_message = Box::new(msg) as Box<dyn MessageDyn>;
         assert_eq!(&received_message, &expected_message);
         assert!(
@@ -519,12 +517,27 @@ mod tests {
         let publisher = create_active_getter_service_publisher(service_adapter).await;
 
         let latest_message =
-            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap().unwrap();
 
         assert!(
             latest_message.reflect_eq_dyn(message.as_ref(), &ReflectEqMode::default()),
             "Expected {latest_message:?} to equal {message:?}"
         );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn service_publisher_get_latest_message_propagates_provider_error() {
+        const ERROR_STRING: &str = "Error 42";
+        let message_provider =
+            MockServiceMessageProvider::new().with_next_error(anyhow!(ERROR_STRING));
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_message_provider(message_provider));
+        let publisher = create_active_getter_service_publisher(service_adapter).await;
+
+        let err = publisher.get_latest_message().unwrap_async().await.unwrap_err();
+
+        assert!(err.to_string().contains(ERROR_STRING), "Unexpected error: {:?}", err);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

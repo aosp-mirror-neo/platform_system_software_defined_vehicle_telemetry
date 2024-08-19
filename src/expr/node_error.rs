@@ -101,6 +101,11 @@ pub enum MessageProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
+    #[error("Error when trying to retrieve latest message: {e:?}")]
+    MessageRetrievalError {
+        #[from]
+        e: anyhow::Error,
+    },
 }
 
 /// Error returned by DescriptorProvider
