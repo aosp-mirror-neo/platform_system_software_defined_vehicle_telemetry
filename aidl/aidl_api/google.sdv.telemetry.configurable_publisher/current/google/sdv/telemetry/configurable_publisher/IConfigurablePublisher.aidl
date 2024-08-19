@@ -18,8 +18,6 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.configurable_publisher;
-
-@VintfStability
 interface IConfigurablePublisher {
     google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription
     createSubscription(in google.sdv.telemetry.configurable_publisher.ISubscriber subscriber,

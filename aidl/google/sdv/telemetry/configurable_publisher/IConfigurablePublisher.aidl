@@ -11,7 +11,6 @@ import google.sdv.telemetry.configurable_publisher.ISubscriber;
  * The configuration format is opaque to the telemetry service.
  */
 
-@VintfStability
 interface IConfigurablePublisher {
     /**
      * Subscribes to a registered publisher.
