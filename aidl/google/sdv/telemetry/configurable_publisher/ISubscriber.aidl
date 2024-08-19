@@ -9,7 +9,6 @@ package google.sdv.telemetry.configurable_publisher;
  * telemetry service.
  */
 
-@VintfStability
 interface ISubscriber {
     /**
      * Sends data to the subscriber. The data format is already known by the subscriber.
