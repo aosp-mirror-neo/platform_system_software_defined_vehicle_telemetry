@@ -21,13 +21,12 @@ use crate::{
 };
 
 pub(crate) struct AggregationPublisher {
-    base: BasePublisher,
-    state: AsyncMutex<AggregationPublisherState>,
-
-    #[allow(dead_code)]
     pub(crate) reset_on_get: bool,
     pub(crate) triggers: Vec<Arc<dyn Trigger>>,
+
+    base: BasePublisher,
     message_builder: Arc<dyn MessageBuilder>,
+    state: AsyncMutex<AggregationPublisherState>,
     trigger_subscriber: TriggerSubscriber,
 }
 
@@ -58,7 +57,11 @@ impl Publisher for AggregationPublisher {
     fn get_latest_message(
         self: Arc<Self>,
     ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
-        Ok(self.base.get_latest_message()).into()
+        let latest_message = self.base.get_latest_message();
+        if self.reset_on_get {
+            self.base.reset_latest_message();
+        }
+        Ok(latest_message).into()
     }
 
     async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
@@ -267,6 +270,36 @@ mod tests {
 
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
         publisher
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn get_latest_message_resets_latest_message() {
+        let trigger = Arc::new(MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
+        ));
+        let publisher = Arc::new(AggregationPublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            Arc::new(MockMessageBuilder::new()),
+            true,
+            vec![Arc::<MockTrigger>::clone(&trigger)],
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+        trigger.fire().await;
+        let msg1 = Arc::clone(&publisher)
+            .get_latest_message()
+            .unwrap_sync()
+            .expect("Message retrieval should be successful");
+        let msg2 = publisher
+            .get_latest_message()
+            .unwrap_sync()
+            .expect("Message retrieval should be successful");
+
+        assert!(msg1.is_some());
+        assert!(msg2.is_none(), "Unexpected message: {:?}", msg2.unwrap());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
