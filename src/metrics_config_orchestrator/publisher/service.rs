@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use anyhow::anyhow;
 use async_trait::async_trait;
 use futures::FutureExt;
 use protobuf::{well_known_types::any::Any, MessageDyn};
@@ -123,7 +124,7 @@ impl Publisher for ServicePublisher {
         } else {
             // Subscribe to the service adapter.
             let self_clone = Arc::clone(&self);
-            let subscription = self
+            let maybe_subscription = self
                 .service_adapter
                 .subscribe(
                     &self.service_name,
@@ -132,6 +133,13 @@ impl Publisher for ServicePublisher {
                 )
                 .await
                 .map_err(|error| PublisherActivateError::ServiceAdapterSubscribeError { error })?;
+
+            let Some(subscription) = maybe_subscription else {
+                // TODO(b/333138446): Don't fail MetricsConfig activation if publisher is not available.
+                return Err(PublisherActivateError::ServiceAdapterSubscribeError {
+                    error: anyhow!("Service with name {} is not available", self.service_name),
+                });
+            };
 
             ServicePublisherState::ActiveSubscribed {
                 callback_map: HashMap::new(),
