@@ -1,0 +1,211 @@
+# Copyright 2024 Google LLC
+
+uuid: "f26924b9-4cf7-4787-b4c1-fa8193f70172"
+version: 1
+
+# ------------------------ DESCRIPTOR PROTOS -----------------------------------
+
+descriptor_protos {
+    message_type {
+        name: "Report"
+        field {
+          type: TYPE_DOUBLE
+          name: "average_speed"
+          number: 1
+        }
+        field {
+          type: TYPE_INT32
+          name: "max_speed"
+          number: 2
+        }
+        field {
+          type: TYPE_INT32
+          name: "num_software_crashes"
+          number: 3
+        }
+      }
+
+      message_type {
+        name: "MaxSpeed"
+        field {
+        type: TYPE_INT32
+          name: "max_speed"
+          number: 1
+        }
+      }
+
+      message_type {
+        name: "AvgSpeed"
+        field {
+        type: TYPE_DOUBLE
+          name: "avg_speed"
+          number: 1
+        }
+      }
+
+      message_type {
+        name: "ErrorCount"
+        field {
+        type: TYPE_INT32
+          name: "error_count"
+          number: 1
+        }
+      }
+}
+
+# ----------------------------- TRIGGERS ---------------------------------------
+
+triggers {
+    name: "new_speed_data"
+    data_trigger {
+        publisher_name: "speed_publisher"
+    }
+}
+
+triggers {
+    name: "new_error_report_publisher_data"
+    data_trigger {
+        publisher_name: "error_report_publisher"
+    }
+}
+
+triggers {
+    name: "every_minute"
+    periodic_trigger {
+        interval {
+            seconds: 60
+            nanos: 0
+        }
+    }
+}
+
+# ----------------------------- PUBLISHERS -------------------------------------
+
+publishers {
+    name: "speed_publisher"
+    service_publisher {
+        service_name: "DataTunnelSpeedSamplePublisher"
+    }
+}
+
+publishers {
+    name: "error_report_publisher"
+    service_publisher {
+        service_name: "DataTunnelErrorReportSamplePublisher"
+    }
+}
+
+publishers {
+    name: "max_speed_publisher"
+    aggregation_publisher {
+        trigger_names: "new_speed_data"
+        reset_on_get: false
+        message_builder {
+            message_type: ".MaxSpeed"
+            field_assignments {
+                field_name: "max_speed"
+                max_aggregation {
+                    expression_node_index: 0
+                 }
+            }
+        }
+    }
+}
+
+publishers {
+    name: "avg_speed_publisher"
+    aggregation_publisher {
+        trigger_names: "new_speed_data"
+        reset_on_get: false
+        message_builder {
+            message_type: ".AvgSpeed"
+            field_assignments {
+                field_name: "avg_speed"
+                avg_aggregation {
+                    expression_node_index: 0
+                 }
+            }
+        }
+    }
+}
+
+publishers {
+    name: "error_count_publisher"
+    aggregation_publisher {
+        trigger_names: "new_error_report_publisher_data"
+        reset_on_get: false
+        message_builder {
+            message_type: ".ErrorCount"
+            field_assignments {
+                field_name: "error_count"
+                count_aggregation {}
+            }
+        }
+    }
+}
+
+# -------------------------- EXPRESSION NODES ----------------------------------
+
+
+# index 0
+expression_nodes {
+    field_leaf_node {
+        publisher_name: "speed_publisher"
+        field_names: "speed"
+      }
+}
+
+# index 1
+expression_nodes {
+    field_leaf_node {
+        publisher_name: "max_speed_publisher"
+        field_names: "max_speed"
+      }
+}
+
+# index 2
+expression_nodes {
+    field_leaf_node {
+        publisher_name: "avg_speed_publisher"
+        field_names: "avg_speed"
+      }
+}
+
+# index 3
+expression_nodes {
+    field_leaf_node {
+        publisher_name: "error_count_publisher"
+        field_names: "error_count"
+      }
+}
+# ------------------------ METRIC REPORT CONFIGS -------------------------------
+
+
+
+metrics_report_configs {
+    name: "journey_summary"
+    trigger_names: "every_minute"
+    report_incomplete: true
+
+    message_builder {
+        message_type: ".Report"
+        field_assignments {
+            field_name: "num_software_crashes"
+            no_aggregation {
+                expression_node_index: 3
+            }
+        }
+        field_assignments {
+            field_name: "average_speed"
+            no_aggregation {
+                expression_node_index: 2
+            }
+        }
+        field_assignments {
+            field_name: "max_speed"
+            no_aggregation {
+                expression_node_index: 1
+            }
+        }
+    }
+}
