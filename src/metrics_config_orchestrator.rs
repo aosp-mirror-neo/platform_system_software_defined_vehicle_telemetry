@@ -19,9 +19,9 @@ use log::{debug, error};
 use parking_lot::Mutex;
 use protobuf::{reflect::FileDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    publisher::Publisher_type as PublisherTypeProto, trigger::Trigger_type as TriggerTypeProto,
-    MetricsConfig as MetricsConfigProto, MetricsReport, Publisher as PublisherProto,
-    Trigger as TriggerProto,
+    metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
+    trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
+    Publisher as PublisherProto, Trigger as TriggerProto,
 };
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
@@ -412,7 +412,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
                 // Deactivate metrics report generators.
                 for generator in &config.metrics_report_generators {
-                    generator.deactivate().await;
+                    Arc::clone(generator).deactivate(ReportReason::INCOMPLETE_FINISHED).await;
                 }
             }
             state => {
@@ -808,7 +808,7 @@ impl MetricsConfigOrchestratorImpl {
 
             // Deactivate metrics report generators.
             for generator in &config.metrics_report_generators {
-                generator.deactivate().await;
+                Arc::clone(generator).deactivate(ReportReason::INCOMPLETE_END).await;
             }
 
             // Subscribe to start trigger.
@@ -885,13 +885,15 @@ mod tests {
 
     struct MockMetricsReportGenerator {
         name: String,
+        expected_reason: Option<ReportReason>,
+
         activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
         deactivate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     }
 
     impl MockMetricsReportGenerator {
         fn new(name: String) -> Self {
-            Self { name, activate_callback: None, deactivate_callback: None }
+            Self { name, expected_reason: None, activate_callback: None, deactivate_callback: None }
         }
 
         fn set_activate_callback(&mut self, callback: impl Fn(&str) + Send + Sync + 'static) {
@@ -911,7 +913,11 @@ mod tests {
             }
         }
 
-        async fn deactivate(&self) {
+        async fn deactivate(self: Arc<Self>, reason: ReportReason) {
+            if let Some(expected_reason) = &self.expected_reason {
+                assert_eq!(&reason, expected_reason);
+            }
+
             if let Some(callback) = &self.deactivate_callback {
                 callback(&self.name);
             }
@@ -2024,7 +2030,7 @@ mod tests {
         // Create and setup mock report generator.
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
-
+        report_generator_mock.expected_reason = Some(ReportReason::INCOMPLETE_END);
         let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_activate_callback(move |name| {
             factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()))
@@ -2476,6 +2482,7 @@ mod tests {
         // Setup mock report generator.
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
+        report_generator_mock.expected_reason = Some(ReportReason::INCOMPLETE_FINISHED);
         let name_container_clone = Arc::clone(&name_container);
         report_generator_mock
             .set_deactivate_callback(move |name| name_container_clone.lock().push(name.to_owned()));
