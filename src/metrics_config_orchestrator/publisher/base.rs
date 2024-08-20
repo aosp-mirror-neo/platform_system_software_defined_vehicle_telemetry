@@ -28,7 +28,7 @@ impl BasePublisher {
     pub(super) fn set_new_message(
         &self,
         message: Arc<dyn MessageDyn>,
-        context: NodeEvaluationContext,
+        context: &Arc<NodeEvaluationContext>,
         callback_map: &mut HashMap<String, CallbackFn>,
     ) {
         // Replace latest message.
@@ -37,7 +37,7 @@ impl BasePublisher {
         // Notify subscribed data triggers.
         // TODO(b/294129114): Replace callback_map with just a single callback.
         for callback in callback_map.values_mut() {
-            callback(message.as_ref(), context.clone());
+            callback(message.as_ref(), Arc::clone(context));
         }
     }
 

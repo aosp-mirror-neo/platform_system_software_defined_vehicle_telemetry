@@ -15,7 +15,9 @@ pub(crate) mod periodic;
 #[cfg(test)]
 pub(crate) mod mock;
 
-type TriggerCallbackFn = CallbackFn<NodeEvaluationContext>;
+// This cannot be CallbackFn<&Arc<NodeEvaluationContext>> due to a known issue in async_trait:
+// https://github.com/dtolnay/async-trait/issues/8.
+type TriggerCallbackFn = CallbackFn<Arc<NodeEvaluationContext>>;
 
 #[async_trait]
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]

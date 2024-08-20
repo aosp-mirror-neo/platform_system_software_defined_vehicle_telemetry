@@ -69,10 +69,10 @@ impl MockTrigger {
     }
 
     pub(crate) async fn fire(&self) {
-        self.fire_with_context(NodeEvaluationContext::new()).await;
+        self.fire_with_context(Arc::new(NodeEvaluationContext::new())).await;
     }
 
-    pub(crate) async fn fire_with_context(&self, context: NodeEvaluationContext) {
+    pub(crate) async fn fire_with_context(&self, context: Arc<NodeEvaluationContext>) {
         self.on_fired_callback.lock().await.as_mut().unwrap()(context);
     }
 
@@ -148,7 +148,9 @@ pub(super) struct MockSubscriptionManager {
 }
 
 #[async_trait]
-impl SubscriptionManager<TriggerSubscriber, NodeEvaluationContext> for MockSubscriptionManager {
+impl SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>
+    for MockSubscriptionManager
+{
     async fn subscribe(&self, key: TriggerSubscriber, callback: TriggerCallbackFn) {
         self.key.lock().replace(key);
         self.callback.lock().replace(callback);

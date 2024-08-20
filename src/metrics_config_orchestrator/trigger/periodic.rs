@@ -46,8 +46,8 @@ impl PeriodicTrigger {
             timer.tick().await;
 
             // Fire trigger.
-            let context = NodeEvaluationContext::new();
-            BaseTrigger::fire_trigger(trigger_name, &callback_map, context).await;
+            let context = Arc::new(NodeEvaluationContext::new());
+            BaseTrigger::fire_trigger(trigger_name, &callback_map, &context).await;
         }
     }
 }
@@ -72,7 +72,7 @@ impl Trigger for PeriodicTrigger {
 }
 
 #[async_trait]
-impl Activatable<TriggerSubscriber, NodeEvaluationContext> for PeriodicTrigger {
+impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrigger {
     async fn activate(
         self: Arc<Self>,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,

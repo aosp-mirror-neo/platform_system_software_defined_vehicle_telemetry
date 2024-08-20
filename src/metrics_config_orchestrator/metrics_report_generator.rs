@@ -58,7 +58,7 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
                 .subscribe(
                     &self.subscriber,
                     Box::new(move |context| {
-                        self_clone.on_trigger_fired(&trigger_name_clone, context)
+                        self_clone.on_trigger_fired(&trigger_name_clone, &context)
                     }),
                 )
                 .await;
@@ -149,8 +149,12 @@ impl MetricsReportGeneratorImpl {
         }
     }
 
-    fn on_trigger_fired(self: &Arc<Self>, trigger_name: &str, context: NodeEvaluationContext) {
-        let res = Arc::clone(&self.message_builder).build(&Arc::new(context));
+    fn on_trigger_fired(
+        self: &Arc<Self>,
+        trigger_name: &str,
+        context: &Arc<NodeEvaluationContext>,
+    ) {
+        let res = Arc::clone(&self.message_builder).build(context);
         let self_clone = Arc::clone(self);
         let trigger_name_clone = trigger_name.to_owned();
         tokio::spawn(async move {
@@ -304,8 +308,8 @@ mod test {
         // Activate the generator.
         Arc::new(generator).activate().await;
 
-        let context = NodeEvaluationContext::new();
-        trigger.fire_with_context(context.clone()).await;
+        let context = Arc::new(NodeEvaluationContext::new());
+        trigger.fire_with_context(Arc::clone(&context)).await;
 
         // Wait for the report to be delivered.
         let report = rx.await.unwrap();

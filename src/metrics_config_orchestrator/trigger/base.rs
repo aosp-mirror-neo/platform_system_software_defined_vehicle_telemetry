@@ -17,13 +17,13 @@ pub(super) struct BaseTrigger {
     // Manages trigger subscriptions. The first subscription activates the trigger, passing a
     // reference to the callback map. The last unsubscription deactivates the trigger.
     pub(super) subscription_manager:
-        Box<dyn SubscriptionManager<TriggerSubscriber, NodeEvaluationContext>>,
+        Box<dyn SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>>,
 }
 
 impl BaseTrigger {
     pub(super) fn new(
         name: String,
-        trigger: Weak<dyn Activatable<TriggerSubscriber, NodeEvaluationContext>>,
+        trigger: Weak<dyn Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>>>,
     ) -> Self {
         BaseTrigger { name, subscription_manager: Box::new(SubscriptionManagerImpl::new(trigger)) }
     }
@@ -37,7 +37,7 @@ impl BaseTrigger {
     pub(super) async fn fire_trigger(
         trigger_name: &str,
         callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-        context: NodeEvaluationContext,
+        context: &Arc<NodeEvaluationContext>,
     ) {
         // Retrieve callbacks.
         let mut callbacks = callback_map.lock().await;
@@ -53,7 +53,7 @@ impl BaseTrigger {
         // The loop needs to wait before they finish to release the mutex lock when they're
         // done because they're allowed to mutate themselves.
         for callback in callbacks.values_mut() {
-            callback(context.clone());
+            callback(Arc::clone(context));
         }
     }
 }
