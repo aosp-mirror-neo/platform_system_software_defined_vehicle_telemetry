@@ -1,32 +1,33 @@
 // Copyright 2023 Google LLC
 
-#include <cstddef>
-#define LOG_TAG "ConfigListListenerImpl"
-
 #include "config_list_listener_impl.h"
+
+#include <android-base/logging.h>
+
+#include <cstddef>
 
 using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 
-ConfigListListenerImpl::ConfigListListenerImpl(void* cb, ConfigListCallbackFunction cbFunc) :
-      clientConfigListListener_(cb), cbFuncPtr_(cbFunc) {
-    ALOGI("Created");
+ConfigListListenerImpl::ConfigListListenerImpl(Callback<ConfigListCallbackFunction> callback) :
+      mCallback(std::move(callback)) {
+    LOG(INFO) << "ConfigListListenerImpl created";
 }
 
-ndk::ScopedAStatus ConfigListListenerImpl::sendConfigList(
-        TelemetryServiceStatusCodes status_code, const std::string& status_message,
-        const std::vector<std::string>& config_list) {
+ndk::ScopedAStatus ConfigListListenerImpl::sendConfigList(TelemetryServiceStatusCodes statusCode,
+                                                          const std::string& statusMessage,
+                                                          const std::vector<std::string>& uuids) {
     std::vector<const char*> c_strings;
 
-    for (const auto& uuid : config_list) {
+    for (const auto& uuid : uuids) {
         c_strings.push_back(uuid.c_str());
     }
 
-    cbFuncPtr_(clientConfigListListener_,
-               static_cast<std::underlying_type_t<TelemetryServiceStatusCodes>>(status_code),
-               status_message.c_str(), c_strings.data(), c_strings.size());
+    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str(), c_strings.data(),
+                  c_strings.size());
 
     return ndk::ScopedAStatus::ok();
 }
+
 }  // namespace google::sdv::telemetry

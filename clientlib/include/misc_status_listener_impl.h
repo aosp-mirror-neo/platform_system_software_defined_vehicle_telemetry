@@ -1,24 +1,28 @@
 // Copyright 2024 Google LLC
 
+#pragma once
+
+#include "callback_container.h"
 #include "callback_functions.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryMiscStatusListener.h>
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
-#include <utils/Log.h>
 
 using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+
 namespace google::sdv::telemetry {
 
 class MiscStatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryMiscStatusListener {
 public:
-    explicit MiscStatusListenerImpl(void* cb_object, StatusCallbackFunction cbFunc);
-    ndk::ScopedAStatus sendStatus(TelemetryServiceStatusCodes status_code,
-                                  const std::string& message) override;
-    void* getClientCb() { return clientCb_; }
+    explicit MiscStatusListenerImpl(Callback<StatusCallbackFunction> callback);
+
+    ndk::ScopedAStatus sendStatus(TelemetryServiceStatusCodes statusCode,
+                                  const std::string& statusMessage) override;
+
+    void* getData() { return mCallback.data; }
 
 private:
-    void* clientCb_;
-    StatusCallbackFunction cbFunc_;
+    Callback<StatusCallbackFunction> mCallback;
 };
 
 }  // namespace google::sdv::telemetry
