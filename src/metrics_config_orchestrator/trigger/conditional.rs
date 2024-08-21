@@ -398,8 +398,8 @@ mod tests {
         let child_context2 = callback_listener.wait_for_callback_fired().await;
 
         assert_eq!(callback_listener.get_fired_count(), 1);
-        assert_eq!(parent_context, child_context1);
-        assert_eq!(parent_context, child_context2);
+        assert!(Arc::ptr_eq(&parent_context, &child_context1));
+        assert!(Arc::ptr_eq(&parent_context, &child_context2));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

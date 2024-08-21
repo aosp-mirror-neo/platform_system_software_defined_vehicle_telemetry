@@ -100,24 +100,6 @@ impl NodeEvaluationContext {
     }
 }
 
-/// Equality checks of the context really only make sense in tests.
-#[cfg(test)]
-impl PartialEq for NodeEvaluationContext {
-    fn eq(&self, other: &NodeEvaluationContext) -> bool {
-        let result = self.id.eq(&other.id);
-        if result {
-            // These asserts should never fail, because each `NodeEvaluationContext::id` is only
-            // used once.
-            debug_assert_eq!(self.unix_timestamp, other.unix_timestamp);
-            debug_assert_eq!(self.monotonic_time_since_boot, other.monotonic_time_since_boot);
-        }
-        result
-    }
-}
-
-#[cfg(test)]
-impl Eq for NodeEvaluationContext {}
-
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
     pub fn evaluate(

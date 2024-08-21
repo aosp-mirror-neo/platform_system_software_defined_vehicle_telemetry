@@ -169,8 +169,8 @@ mod tests {
         let context2 = callback_listener.wait_for_callback_fired().await;
         trigger.deactivate().await;
 
-        assert_eq!(
-            context1, context2,
+        assert!(
+            Arc::ptr_eq(&context1, &context2),
             "All contexts of a single firing of a periodic trigger should be equal."
         );
     }
