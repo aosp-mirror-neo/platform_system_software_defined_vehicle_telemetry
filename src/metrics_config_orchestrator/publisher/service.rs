@@ -182,7 +182,9 @@ impl Publisher for ServicePublisher {
     async fn subscribe(
         &self,
         data_trigger_name: &str,
-        callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn, NodeEvaluationContext) + Send + Sync>,
+        callback: Box<
+            dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync,
+        >,
     ) {
         if !self.is_subscribable() {
             panic!("Unable to subscribe to publisher {}: it's not subscribable", self.get_name());
@@ -376,7 +378,7 @@ impl ServicePublisher {
     fn on_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
         // Create context outside of the task, so that the date/time is set as fast as possible,
         // and not just at the moment when this async task should start running.
-        let context = NodeEvaluationContext::new();
+        let context = Arc::new(NodeEvaluationContext::new());
 
         let self_clone = Arc::clone(self);
         let message_clone = message.clone_box().into();
@@ -393,7 +395,7 @@ impl ServicePublisher {
                 );
             };
 
-            self_clone.base.set_new_message(message_clone, context, callback_map);
+            self_clone.base.set_new_message(message_clone, &context, callback_map);
         });
     }
 }

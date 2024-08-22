@@ -71,7 +71,6 @@ pub enum TimeSource {
 #[cfg(test)]
 static NEXT_NODE_EVALUATION_CONTEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Clone)]
 #[cfg_attr(test, derive(Debug))]
 pub struct NodeEvaluationContext {
     #[cfg(test)]

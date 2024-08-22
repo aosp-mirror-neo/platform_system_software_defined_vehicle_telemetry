@@ -109,7 +109,7 @@ impl ConditionalTrigger {
         condition_checker: impl FnOnce(NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>
             + Send
             + 'static,
-        context: NodeEvaluationContext,
+        context: Arc<NodeEvaluationContext>,
     ) {
         fn check_evaluation_result(
             trigger: &Arc<ConditionalTrigger>,
@@ -138,7 +138,7 @@ impl ConditionalTrigger {
             })
         }
 
-        let result_holder = self.selector_expression.evaluate(&Arc::new(context.clone()));
+        let result_holder = self.selector_expression.evaluate(&context);
         match result_holder {
             OperationResult::Asynchronous(future) => {
                 // Spawn a task that awaits the async result, checks it and fires the trigger if it's true.
@@ -149,7 +149,7 @@ impl ConditionalTrigger {
                         BaseTrigger::fire_trigger(
                             self_clone.get_name(),
                             &callback_map_clone,
-                            context,
+                            &context,
                         )
                         .await;
                     }
@@ -164,7 +164,7 @@ impl ConditionalTrigger {
                         BaseTrigger::fire_trigger(
                             &trigger_name_clone,
                             &callback_map_clone,
-                            context,
+                            &context,
                         )
                         .await;
                     });
@@ -194,7 +194,7 @@ impl Trigger for ConditionalTrigger {
 }
 
 #[async_trait]
-impl Activatable<TriggerSubscriber, NodeEvaluationContext> for ConditionalTrigger {
+impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalTrigger {
     async fn activate(
         self: Arc<Self>,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
@@ -306,7 +306,7 @@ mod tests {
     ) -> (
         Arc<MockMessageProvider>,
         Arc<MockTrigger>,
-        Arc<MockCallbackListener<NodeEvaluationContext>>,
+        Arc<MockCallbackListener<Arc<NodeEvaluationContext>>>,
     ) {
         let (trigger, message_provider, parent_trigger) =
             create_valid_conditional_trigger(condition_type, None);
@@ -367,7 +367,7 @@ mod tests {
             PARENT_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
-        let parent_context = NodeEvaluationContext::new();
+        let parent_context = Arc::new(NodeEvaluationContext::new());
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
@@ -392,7 +392,7 @@ mod tests {
             value: 1,
             ..Default::default()
         }))));
-        parent_trigger.fire_with_context(parent_context.clone()).await;
+        parent_trigger.fire_with_context(Arc::clone(&parent_context)).await;
 
         let child_context1 = child_context1_rx.await.unwrap();
         let child_context2 = callback_listener.wait_for_callback_fired().await;

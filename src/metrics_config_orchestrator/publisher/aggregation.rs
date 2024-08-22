@@ -137,7 +137,9 @@ impl Publisher for AggregationPublisher {
     async fn subscribe(
         &self,
         data_trigger_name: &str,
-        callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn, NodeEvaluationContext) + Send + Sync>,
+        callback: Box<
+            dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync,
+        >,
     ) {
         // Lock state mutex and hold it until operation is complete.
         let mut state_lock = self.state.lock().await;
@@ -193,8 +195,8 @@ impl AggregationPublisher {
         }
     }
 
-    fn on_trigger_fired(self: &Arc<Self>, context: NodeEvaluationContext) {
-        let res = Arc::clone(&self.message_builder).build(&Arc::new(context.clone()));
+    fn on_trigger_fired(self: &Arc<Self>, context: Arc<NodeEvaluationContext>) {
+        let res = Arc::clone(&self.message_builder).build(&context);
         let self_clone = Arc::clone(self);
         tokio::spawn(async move {
             // Lock state mutex and hold it to make sure the publisher is not deactivated.
@@ -220,7 +222,7 @@ impl AggregationPublisher {
                 }
             };
 
-            self_clone.base.set_new_message(msg.into(), context, callback_map);
+            self_clone.base.set_new_message(msg.into(), &context, callback_map);
         });
     }
 }
@@ -400,8 +402,8 @@ mod tests {
                 }),
             )
             .await;
-        let trigger_context = NodeEvaluationContext::new();
-        trigger.fire_with_context(trigger_context.clone()).await;
+        let trigger_context = Arc::new(NodeEvaluationContext::new());
+        trigger.fire_with_context(Arc::clone(&trigger_context)).await;
 
         let context = context_rx.await.unwrap();
 

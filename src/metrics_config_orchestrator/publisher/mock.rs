@@ -18,7 +18,9 @@ pub(crate) struct MockPublisher {
     deactivate_callback:
         Option<Box<dyn Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync>>,
     new_message_callback: AsyncMutex<
-        Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn, NodeEvaluationContext) + Send + Sync>>,
+        Option<
+            Box<dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync>,
+        >,
     >,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
@@ -63,7 +65,7 @@ impl Publisher for MockPublisher {
         &self,
         data_trigger_name: &str,
         new_message_callback: Box<
-            dyn for<'a> FnMut(&'a dyn MessageDyn, NodeEvaluationContext) + Send + Sync,
+            dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync,
         >,
     ) {
         assert!(self.expected_trigger_names.contains(data_trigger_name));
@@ -99,7 +101,7 @@ impl MockPublisher {
     pub(crate) async fn fire_new_message(
         &self,
         message: &dyn MessageDyn,
-        context: NodeEvaluationContext,
+        context: Arc<NodeEvaluationContext>,
     ) {
         self.new_message_callback.lock().await.as_mut().unwrap()(message, context);
     }

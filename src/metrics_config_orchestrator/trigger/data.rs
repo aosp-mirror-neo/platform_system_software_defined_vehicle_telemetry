@@ -32,10 +32,10 @@ impl DataTrigger {
         trigger_name: String,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
         _message: &dyn MessageDyn,
-        context: NodeEvaluationContext,
+        context: Arc<NodeEvaluationContext>,
     ) {
         tokio::spawn(async move {
-            BaseTrigger::fire_trigger(&trigger_name, &callback_map, context).await;
+            BaseTrigger::fire_trigger(&trigger_name, &callback_map, &context).await;
         });
     }
 }
@@ -60,7 +60,7 @@ impl Trigger for DataTrigger {
 }
 
 #[async_trait]
-impl Activatable<TriggerSubscriber, NodeEvaluationContext> for DataTrigger {
+impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for DataTrigger {
     async fn activate(
         self: Arc<Self>,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
@@ -131,7 +131,9 @@ mod tests {
         trigger.activate(callback_listener.create_callback_map()).await;
 
         // Fire publisher message. This should notify subscribed trigger.
-        publisher.fire_new_message(&Int32Value::new(), NodeEvaluationContext::new()).await;
+        publisher
+            .fire_new_message(&Int32Value::new(), Arc::new(NodeEvaluationContext::new()))
+            .await;
 
         // Wait for notification.
         callback_listener.wait_for_callback_fired().await;
@@ -158,7 +160,9 @@ mod tests {
         // Subscribe to trigger.
         Arc::clone(&trigger).activate(callback_map).await;
 
-        publisher.fire_new_message(&Int32Value::new(), NodeEvaluationContext::new()).await;
+        publisher
+            .fire_new_message(&Int32Value::new(), Arc::new(NodeEvaluationContext::new()))
+            .await;
 
         // Wait for trigger to fire and both callbacks to run.
         let context1 = context1_rx.await.unwrap();

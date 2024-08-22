@@ -147,7 +147,7 @@ pub(super) struct MetricsConfigOrchestratorImpl {
     service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
 
     /// The function that is called when finish trigger of a Metrics Config is fired.
-    finish_trigger_fired_callback: Arc<dyn Fn(String, NodeEvaluationContext) + Send + Sync>,
+    finish_trigger_fired_callback: Arc<dyn Fn(String, Arc<NodeEvaluationContext>) + Send + Sync>,
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
@@ -527,7 +527,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
-        finish_trigger_fired_callback: impl Fn(String, NodeEvaluationContext) + Send + Sync + 'static,
+        finish_trigger_fired_callback: impl Fn(String, Arc<NodeEvaluationContext>)
+            + Send
+            + Sync
+            + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
