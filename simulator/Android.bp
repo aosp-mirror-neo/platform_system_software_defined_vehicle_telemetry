@@ -97,6 +97,7 @@ rust_test {
     },
     flags: [
         // keep-sorted start
+        "-A clippy::panic",
         "-A clippy::unwrap_used",
         // keep-sorted end
     ],
