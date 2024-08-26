@@ -224,7 +224,7 @@ mod tests {
             &self,
             _service_name: &str,
             _configuration: Option<&Any>,
-            _new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+            _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         ) -> anyhow::Result<Option<ServiceSubscription>> {
             unreachable!()
         }
