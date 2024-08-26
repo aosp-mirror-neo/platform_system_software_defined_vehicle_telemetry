@@ -13,7 +13,7 @@ use sdv_telemetry_proto_rust::expression::combination_node::{
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
 use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodeProto;
 use sdv_telemetry_utils::operation_result::OperationResult;
-use std::{convert::From, error::Error, sync::Arc};
+use std::{borrow::Cow, convert::From, error::Error, sync::Arc};
 
 use crate::expr::{
     node_error::NodeError,
@@ -260,15 +260,15 @@ impl NodeValue {
 
     /// Gets a NodeValue from a protobuf message and its fields.
     pub(super) fn extract_value(
-        msg: Arc<dyn MessageDyn>,
+        msg: Cow<Arc<dyn MessageDyn>>,
         fields: &[String],
     ) -> Result<NodeValue, NodeError> {
         // if no field names, return the message itself as the NodeValue
         if fields.is_empty() {
-            return Ok(NodeValue::Message(msg));
+            return Ok(NodeValue::Message(msg.into_owned()));
         }
         // recursively gets the field value from field names
-        Self::extract_field_value(msg.as_ref(), fields)
+        Self::extract_field_value(msg.as_ref().as_ref(), fields)
     }
 
     /// Performs operation using the operator and right operand provider.
@@ -860,14 +860,14 @@ mod tests {
     #[test]
     fn extract_value_no_field_names_ok() -> Result<(), NodeError> {
         // setup
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
 
         // action
-        let node_value = NodeValue::extract_value(Arc::new(msg.clone()), &[])?;
+        let node_value = NodeValue::extract_value(Cow::Borrowed(&msg), &[])?;
 
         // assert
         if let NodeValue::Message(node_msg) = node_value {
-            assert!(node_msg.reflect_eq_dyn(&msg, &ReflectEqMode::default()));
+            assert!(node_msg.reflect_eq_dyn(msg.as_ref(), &ReflectEqMode::default()));
         } else {
             panic!("Expect Message variant of NodeValue, got {:?}", node_value);
         }
@@ -876,18 +876,14 @@ mod tests {
 
     #[test]
     fn extract_value_explicitly_optional_field_not_set_returns_none() -> Result<(), NodeError> {
+        let msg = Arc::new(EMPTY_TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["optional_bool_field".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["optional_bool_field".to_string()])?,
             NodeValue::None
         );
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["optional_int64_field".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Owned(msg), &["optional_int64_field".to_string()])?,
             NodeValue::None
         );
         Ok(())
@@ -895,25 +891,18 @@ mod tests {
 
     #[test]
     fn extract_value_primitive_field_not_set_uses_default_values() -> Result<(), NodeError> {
+        let msg = Arc::new(EMPTY_TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["int_field".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["int_field".to_string()])?,
             NodeValue::Int32(0)
         );
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["float_field".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["float_field".to_string()])?,
             NodeValue::Float(0.0)
         );
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["enum_field".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Owned(msg), &["enum_field".to_string()])?,
             NodeValue::Int32(0)
         );
         Ok(())
@@ -921,11 +910,10 @@ mod tests {
 
     #[test]
     fn extract_value_message_field_not_set_returns_none() -> Result<(), NodeError> {
+        let msg = Arc::new(EMPTY_TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["message_field".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Owned(msg), &["message_field".to_string()])?,
             NodeValue::None
         );
         Ok(())
@@ -933,11 +921,10 @@ mod tests {
 
     #[test]
     fn extract_value_repeated_field_not_set_returns_empty_list() -> Result<(), NodeError> {
+        let msg = Arc::new(EMPTY_TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+
         assert_eq!(
-            NodeValue::extract_value(
-                Arc::new(EMPTY_TEST_MESSAGE.clone()),
-                &["repeated_bools".to_string()]
-            )?,
+            NodeValue::extract_value(Cow::Owned(msg), &["repeated_bools".to_string()])?,
             NodeValue::BoolList(vec![])
         );
         Ok(())
@@ -945,21 +932,20 @@ mod tests {
 
     #[test]
     fn extract_value_int_field_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["int_field".to_string()];
 
-        assert_eq!(
-            NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names)?,
-            NodeValue::Int32(80)
-        );
+        assert_eq!(NodeValue::extract_value(Cow::Owned(msg), &field_names)?, NodeValue::Int32(80));
         Ok(())
     }
 
     #[test]
     fn extract_value_float_field_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["float_field".to_string()];
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::Float(100.0)
         );
         Ok(())
@@ -967,23 +953,22 @@ mod tests {
 
     #[test]
     fn extract_value_enum_field_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["enum_field".to_string()];
 
-        assert_eq!(
-            NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names)?,
-            NodeValue::Int32(1)
-        );
+        assert_eq!(NodeValue::extract_value(Cow::Owned(msg), &field_names)?, NodeValue::Int32(1));
         Ok(())
     }
 
     #[test]
     fn extract_value_message_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["message_field".to_string()];
-        let expected_value = NodeValue::Message(Arc::new(msg.message_field.clone().unwrap()));
+        let expected_value =
+            NodeValue::Message(Arc::new(TEST_MESSAGE.message_field.clone().unwrap()));
 
         // action
-        let node_value = NodeValue::extract_value(Arc::new(msg), &field_names)?;
+        let node_value = NodeValue::extract_value(Cow::Owned(msg), &field_names)?;
 
         // assert
         assert_eq!(node_value, expected_value);
@@ -992,16 +977,22 @@ mod tests {
 
     #[test]
     fn extract_value_string_field_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["string_field".to_string()];
-        let extracted = NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names)?;
+
+        let extracted = NodeValue::extract_value(Cow::Owned(msg), &field_names)?;
+
         assert_eq!(extracted, NodeValue::String("Hello world".to_string()));
         Ok(())
     }
 
     #[test]
     fn extract_value_bytes_field_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["bytes_field".to_string()];
-        let extracted = NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names)?;
+
+        let extracted = NodeValue::extract_value(Cow::Owned(msg), &field_names)?;
+
         assert_eq!(extracted, NodeValue::ByteList("Hello world".as_bytes().to_vec()));
         Ok(())
     }
@@ -1013,29 +1004,30 @@ mod tests {
         msg.float_field = 0.0;
         msg.enum_field = TestEnum::NONE.into(); // this enum is equal to int 0
         msg.optional_bool_field = Some(false);
+        let msg = Arc::new(msg) as Arc<dyn MessageDyn>;
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg.clone()), &["int_field".to_string()])?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["int_field".to_string()])?,
             NodeValue::Int32(0)
         );
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg.clone()), &["float_field".to_string()])?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["float_field".to_string()])?,
             NodeValue::Float(0.0)
         );
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg.clone()), &["enum_field".to_string()])?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["enum_field".to_string()])?,
             NodeValue::Int32(0)
         );
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg.clone()), &["optional_bool_field".to_string()])?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["optional_bool_field".to_string()])?,
             NodeValue::Bool(false)
         );
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg.clone()), &["string_field".to_string()])?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["string_field".to_string()])?,
             NodeValue::String(String::default())
         );
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg.clone()), &["bytes_field".to_string()])?,
+            NodeValue::extract_value(Cow::Borrowed(&msg), &["bytes_field".to_string()])?,
             NodeValue::ByteList(vec![])
         );
         Ok(())
@@ -1043,34 +1035,30 @@ mod tests {
 
     #[test]
     fn extract_value_nested_field_not_set_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(EMPTY_TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["message_field".to_string(), "int_field".to_string()];
 
-        assert_eq!(
-            NodeValue::extract_value(Arc::new(EMPTY_TEST_MESSAGE.clone()), &field_names)?,
-            NodeValue::None
-        );
+        assert_eq!(NodeValue::extract_value(Cow::Owned(msg), &field_names)?, NodeValue::None);
         Ok(())
     }
 
     #[test]
     fn extract_value_nested_singular_field_ok() -> Result<(), NodeError> {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["message_field".to_string(), "bool_field".to_string()];
 
-        assert_eq!(
-            NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names)?,
-            NodeValue::Bool(true)
-        );
+        assert_eq!(NodeValue::extract_value(Cow::Owned(msg), &field_names)?, NodeValue::Bool(true));
         Ok(())
     }
 
     #[test]
     fn extract_value_repeated_bool_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["repeated_bools".to_string()];
-        let repeated_bools = msg.repeated_bools.clone();
+        let repeated_bools = TEST_MESSAGE.repeated_bools.clone();
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::BoolList(repeated_bools)
         );
         Ok(())
@@ -1078,12 +1066,12 @@ mod tests {
 
     #[test]
     fn extract_value_repeated_int_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["repeated_i64s".to_string()];
-        let repeated_i64s = msg.repeated_i64s.clone();
+        let repeated_i64s = TEST_MESSAGE.repeated_i64s.clone();
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::Int64List(repeated_i64s)
         );
         Ok(())
@@ -1091,12 +1079,12 @@ mod tests {
 
     #[test]
     fn extract_value_repeated_double_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["repeated_doubles".to_string()];
-        let repeated_doubles = msg.repeated_doubles.clone();
+        let repeated_doubles = TEST_MESSAGE.repeated_doubles.clone();
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::DoubleList(repeated_doubles)
         );
         Ok(())
@@ -1104,12 +1092,12 @@ mod tests {
 
     #[test]
     fn extract_value_repeated_enum_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["repeated_enums".to_string()];
-        let repeated_i32s = msg.repeated_enums.iter().map(|x| x.value()).collect();
+        let repeated_i32s = TEST_MESSAGE.repeated_enums.iter().map(|x| x.value()).collect();
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::Int32List(repeated_i32s)
         );
         Ok(())
@@ -1117,16 +1105,16 @@ mod tests {
 
     #[test]
     fn extract_value_repeated_message_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["repeated_messages".to_string()];
-        let repeated_msgs = msg
+        let repeated_msgs = TEST_MESSAGE
             .repeated_messages
             .iter()
             .map(|x| Arc::new(x.clone()) as Arc<dyn MessageDyn>)
             .collect::<Vec<_>>();
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::MessageList(repeated_msgs)
         );
         Ok(())
@@ -1134,12 +1122,12 @@ mod tests {
 
     #[test]
     fn extract_value_nested_repeated_field_ok() -> Result<(), NodeError> {
-        let msg = TEST_MESSAGE.clone();
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["message_field".to_string(), "repeated_i32s".to_string()];
-        let repeated_i32s = msg.message_field.repeated_i32s.clone();
+        let repeated_i32s = TEST_MESSAGE.message_field.repeated_i32s.clone();
 
         assert_eq!(
-            NodeValue::extract_value(Arc::new(msg), &field_names)?,
+            NodeValue::extract_value(Cow::Owned(msg), &field_names)?,
             NodeValue::Int32List(repeated_i32s)
         );
         Ok(())
@@ -1147,20 +1135,22 @@ mod tests {
 
     #[test]
     fn extract_value_repeated_message_as_intermediate_field_name_should_err() {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["repeated_messages".to_string(), "bool_field".to_string()];
 
         assert!(matches!(
-            NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names).unwrap_err(),
+            NodeValue::extract_value(Cow::Owned(msg), &field_names).unwrap_err(),
             NodeError::WrongNestedFieldType { .. }
         ));
     }
 
     #[test]
     fn extract_value_nonexistent_field_should_err() {
+        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let field_names = ["foo".to_string()];
 
         assert!(matches!(
-            NodeValue::extract_value(Arc::new(TEST_MESSAGE.clone()), &field_names).unwrap_err(),
+            NodeValue::extract_value(Cow::Owned(msg), &field_names).unwrap_err(),
             NodeError::FieldNotFound { .. }
         ));
     }

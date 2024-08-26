@@ -6,6 +6,7 @@ use sdv_telemetry_time_wrapper::Microseconds;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
@@ -119,7 +120,6 @@ impl NodeEvaluationContext {
         self.root_id
     }
 
-    #[cfg(test)]
     pub(crate) fn get_message(&self, publisher_name: &str) -> Option<&Arc<dyn MessageDyn>> {
         self.messages.get(publisher_name)
     }
@@ -155,8 +155,12 @@ impl Node {
                 // Base case of recursion: node is a leaf node, return value
                 Ok(value.clone()).into()
             }
-            Node::FieldLeaf { message_provider, publisher_name, .. } => {
+            Node::FieldLeaf { fields, message_provider, publisher_name, .. } => {
                 // Base case of recursion: node is a leaf node, return value
+                if let Some(msg) = context.get_message(publisher_name) {
+                    return NodeValue::extract_value(Cow::Borrowed(msg), fields).into();
+                }
+
                 let self_clone = Arc::clone(self);
                 message_provider.get_message(publisher_name).err_into().and_then_sync(
                     move |maybe_msg| {
@@ -166,7 +170,7 @@ impl Node {
 
                         maybe_msg.map_or_else(
                             || Ok(NodeValue::None),
-                            |msg| NodeValue::extract_value(msg, fields),
+                            |msg| NodeValue::extract_value(Cow::Owned(msg), fields),
                         )
                     },
                 )
@@ -266,6 +270,7 @@ mod tests {
     use super::*;
 
     use futures::FutureExt;
+    use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageDyn;
     use sdv_telemetry_proto_rust::expression::combination_node::{
         Operator as OperatorProto, RelationalOperator,
@@ -620,6 +625,24 @@ mod tests {
         let res = node.evaluate(&context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
+    }
+
+    #[test]
+    fn evaluate_uses_message_from_context() {
+        let node = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![],
+            message_provider: Arc::new(MockMessageProvider::new()),
+        });
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+        let context = Arc::new(NodeEvaluationContext::with_publisher_message(
+            KNOWN_PUBLISHER_NAME.to_owned(),
+            Arc::<Int32Value>::clone(&msg),
+        ));
+
+        let res = node.evaluate(&context).unwrap_sync().unwrap();
+        let NodeValue::Message(res_msg) = res else { panic!("Unexpected result: {res:?}") };
+        assert!(Arc::ptr_eq(&res_msg, &(msg as Arc<dyn MessageDyn>)));
     }
 
     #[test]
