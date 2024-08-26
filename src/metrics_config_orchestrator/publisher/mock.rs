@@ -7,7 +7,7 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{Publisher, PublisherActivateError, PublisherDeactivateError};
-use crate::metrics_config_orchestrator::NodeEvaluationContext;
+use crate::metrics_config_orchestrator::{publisher::CallbackFn, NodeEvaluationContext};
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
@@ -17,11 +17,7 @@ pub(crate) struct MockPublisher {
     activate_callback: Option<Box<dyn Fn(&str) -> Option<PublisherActivateError> + Send + Sync>>,
     deactivate_callback:
         Option<Box<dyn Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync>>,
-    new_message_callback: AsyncMutex<
-        Option<
-            Box<dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync>,
-        >,
-    >,
+    new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
@@ -61,13 +57,7 @@ impl Publisher for MockPublisher {
         Ok(())
     }
 
-    async fn subscribe(
-        &self,
-        data_trigger_name: &str,
-        new_message_callback: Box<
-            dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync,
-        >,
-    ) {
+    async fn subscribe(&self, data_trigger_name: &str, new_message_callback: CallbackFn) {
         assert!(self.expected_trigger_names.contains(data_trigger_name));
         self.new_message_callback.lock().await.replace(new_message_callback);
     }
@@ -98,12 +88,8 @@ impl MockPublisher {
         &self.name
     }
 
-    pub(crate) async fn fire_new_message(
-        &self,
-        message: &dyn MessageDyn,
-        context: Arc<NodeEvaluationContext>,
-    ) {
-        self.new_message_callback.lock().await.as_mut().unwrap()(message, context);
+    pub(crate) async fn fire_new_message(&self, context: Arc<NodeEvaluationContext>) {
+        self.new_message_callback.lock().await.as_mut().unwrap()(context);
     }
 
     pub(crate) fn set_activate_callback(

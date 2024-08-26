@@ -21,7 +21,7 @@ pub(crate) mod mock;
 
 // This cannot be CallbackFn<&Arc<NodeEvaluationContext>> due to a known issue in async_trait:
 // https://github.com/dtolnay/async-trait/issues/8.
-type CallbackFn = Box<dyn FnMut(&dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync>;
+type CallbackFn = Box<dyn FnMut(Arc<NodeEvaluationContext>) + Send + Sync>;
 
 #[async_trait]
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]

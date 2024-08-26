@@ -32,12 +32,12 @@ impl BasePublisher {
         callback_map: &mut HashMap<String, CallbackFn>,
     ) {
         // Replace latest message.
-        self.latest_message.lock().replace(Arc::clone(&message));
+        self.latest_message.lock().replace(message);
 
         // Notify subscribed data triggers.
         // TODO(b/294129114): Replace callback_map with just a single callback.
         for callback in callback_map.values_mut() {
-            callback(message.as_ref(), Arc::clone(context));
+            callback(Arc::clone(context));
         }
     }
 

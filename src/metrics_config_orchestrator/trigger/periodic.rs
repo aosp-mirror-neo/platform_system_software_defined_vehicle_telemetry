@@ -169,7 +169,7 @@ mod tests {
 
         // Verify that the trigger fired twice.
         assert_eq!(callback_listener.get_fired_count(), 2);
-        assert!(context1.id() < context2.id());
+        assert!(context1.root_id() < context2.root_id());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

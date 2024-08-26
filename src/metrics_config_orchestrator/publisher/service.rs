@@ -179,13 +179,7 @@ impl Publisher for ServicePublisher {
         Ok(())
     }
 
-    async fn subscribe(
-        &self,
-        data_trigger_name: &str,
-        callback: Box<
-            dyn for<'a> FnMut(&'a dyn MessageDyn, Arc<NodeEvaluationContext>) + Send + Sync,
-        >,
-    ) {
+    async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn) {
         if !self.is_subscribable() {
             panic!("Unable to subscribe to publisher {}: it's not subscribable", self.get_name());
         }
@@ -378,10 +372,12 @@ impl ServicePublisher {
     fn on_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
         // Create context outside of the task, so that the date/time is set as fast as possible,
         // and not just at the moment when this async task should start running.
-        let context = Arc::new(NodeEvaluationContext::new());
-
+        let msg = message.clone_box().into();
+        let context = Arc::new(NodeEvaluationContext::with_publisher_message(
+            self.get_name().to_owned(),
+            Arc::clone(&msg),
+        ));
         let self_clone = Arc::clone(self);
-        let message_clone = message.clone_box().into();
         tokio::spawn(async move {
             // Lock state mutex and hold it to make sure the publisher is not deactivated.
             let mut state_lock = self_clone.state.lock().await;
@@ -395,7 +391,7 @@ impl ServicePublisher {
                 );
             };
 
-            self_clone.base.set_new_message(message_clone, &context, callback_map);
+            self_clone.base.set_new_message(msg, &context, callback_map);
         });
     }
 }
@@ -471,8 +467,13 @@ mod tests {
     ) -> Arc<ServicePublisher> {
         let publisher = create_active_subscribed_service_publisher(service_adapter).await;
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
         publisher
+    }
+
+    /// Creates a Box with a callback that accepts context and does nothing.
+    pub fn create_empty_fn_box() -> CallbackFn {
+        Box::new(|_| {})
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -645,8 +646,11 @@ mod tests {
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
-                Box::new(move |message, _context| {
-                    maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
+                Box::new(move |context| {
+                    let msg = context
+                        .get_message(PUBLISHER_NAME)
+                        .expect("Publisher message should be present in the context");
+                    maybe_tx.take().unwrap().send(Arc::clone(msg)).unwrap()
                 }),
             )
             .await;
@@ -655,7 +659,10 @@ mod tests {
         service_adapter.publish_new_message(&msg).await;
         let received_message = rx.await.unwrap();
 
-        assert_eq!(&received_message, &(Box::new(msg) as Box<dyn MessageDyn>));
+        assert!(
+            received_message.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
+            "Expected {received_message:?} to equal {msg:?}"
+        );
         let state = publisher.state.lock().await;
         assert!(
             matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
@@ -732,7 +739,7 @@ mod tests {
     async fn subscribe_when_inactive_panics() {
         let publisher = create_inactive_subscription_service_publisher(None);
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -741,7 +748,7 @@ mod tests {
     async fn subscribe_already_subscribed_panics() {
         let publisher = create_service_publisher_with_subscription(None).await;
 
-        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(|_, _| {})).await;
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -758,8 +765,11 @@ mod tests {
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
-                Box::new(move |message, _context| {
-                    maybe_tx.take().unwrap().send(message.clone_box()).unwrap()
+                Box::new(move |context| {
+                    let msg = context
+                        .get_message(PUBLISHER_NAME)
+                        .expect("Publisher message should be present in the context");
+                    maybe_tx.take().unwrap().send(Arc::new(Arc::clone(msg))).unwrap()
                 }),
             )
             .await;
@@ -767,11 +777,13 @@ mod tests {
 
         let received_message = rx.await.unwrap();
         let latest_message = publisher.get_latest_message().unwrap_sync().unwrap().unwrap();
-        let expected_message = Box::new(msg) as Box<dyn MessageDyn>;
-        assert_eq!(&received_message, &expected_message);
         assert!(
-            latest_message.reflect_eq_dyn(expected_message.as_ref(), &ReflectEqMode::default()),
-            "Expected {latest_message:?} to equal {expected_message:?}"
+            received_message.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
+            "Expected {received_message:?} to equal {msg:?}"
+        );
+        assert!(
+            latest_message.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
+            "Expected {latest_message:?} to equal {msg:?}"
         );
     }
 

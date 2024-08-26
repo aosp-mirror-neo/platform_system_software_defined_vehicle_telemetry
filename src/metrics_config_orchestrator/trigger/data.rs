@@ -1,7 +1,6 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
-use protobuf::MessageDyn;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
@@ -31,7 +30,6 @@ impl DataTrigger {
     fn on_new_message(
         trigger_name: String,
         callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-        _message: &dyn MessageDyn,
         context: Arc<NodeEvaluationContext>,
     ) {
         tokio::spawn(async move {
@@ -69,13 +67,8 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for DataTrigger 
         self.publisher
             .subscribe(
                 self.get_name(),
-                Box::new(move |message, context| {
-                    Self::on_new_message(
-                        trigger_name.clone(),
-                        Arc::clone(&callback_map),
-                        message,
-                        context,
-                    )
+                Box::new(move |context| {
+                    Self::on_new_message(trigger_name.clone(), Arc::clone(&callback_map), context)
                 }),
             )
             .await;
@@ -88,7 +81,6 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for DataTrigger 
 
 #[cfg(test)]
 mod tests {
-    use protobuf::well_known_types::wrappers::Int32Value;
     use std::collections::HashMap;
     use tokio::sync::oneshot;
     use tokio::sync::Mutex as AsyncMutex;
@@ -131,9 +123,7 @@ mod tests {
         trigger.activate(callback_listener.create_callback_map()).await;
 
         // Fire publisher message. This should notify subscribed trigger.
-        publisher
-            .fire_new_message(&Int32Value::new(), Arc::new(NodeEvaluationContext::new()))
-            .await;
+        publisher.fire_new_message(Arc::new(NodeEvaluationContext::new())).await;
 
         // Wait for notification.
         callback_listener.wait_for_callback_fired().await;
@@ -160,9 +150,7 @@ mod tests {
         // Subscribe to trigger.
         Arc::clone(&trigger).activate(callback_map).await;
 
-        publisher
-            .fire_new_message(&Int32Value::new(), Arc::new(NodeEvaluationContext::new()))
-            .await;
+        publisher.fire_new_message(Arc::new(NodeEvaluationContext::new())).await;
 
         // Wait for trigger to fire and both callbacks to run.
         let context1 = context1_rx.await.unwrap();

@@ -292,7 +292,7 @@ mod test {
         let message_builder = MockMessageBuilder::new();
         message_builder.set_result_callback(|context| {
             Ok(Box::new(TestMessage {
-                repeated_i64s: vec![i64::try_from(context.id()).unwrap()],
+                repeated_i64s: vec![i64::try_from(context.root_id()).unwrap()],
                 ..Default::default()
             }) as Box<dyn MessageDyn>)
             .into()
@@ -316,7 +316,7 @@ mod test {
 
         // Verify the report.
         let test_message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
-        assert_eq!(test_message.repeated_i64s, vec![i64::try_from(context.id()).unwrap()]);
+        assert_eq!(test_message.repeated_i64s, vec![i64::try_from(context.root_id()).unwrap()]);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
