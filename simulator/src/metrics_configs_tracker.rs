@@ -1,9 +1,7 @@
 // Copyright 2024 Google LLC
 
 use protobuf::{text_format::print_to_string_pretty, MessageDyn};
-use sdv_telemetry_proto_rust::metrics_configuration::{
-    publisher::Publisher_type as PublisherTypeProto, service_publisher::ConnectionType,
-};
+use sdv_telemetry_proto_rust::metrics_configuration::publisher::Publisher_type as PublisherTypeProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder};
 use std::{
@@ -59,8 +57,11 @@ impl MetricsConfigsTracker {
             MetricsConfigInfo::new(&file_name, serialized_config, message_descriptors);
 
         for report_config in &config.metrics_report_configs {
-            let report_log_path = PathBuf::from(io::OUTPUT_DIR)
-                .join(format!("all_reports_for_{}.txt", report_config.name.to_ascii_lowercase()));
+            let report_log_path = PathBuf::from(io::OUTPUT_DIR).join(format!(
+                "{}_all_reports_for_{}.txt",
+                config.uuid,
+                report_config.name.to_ascii_lowercase()
+            ));
             create_report_log(&report_log_path, &file_name, &config.uuid, &report_config.name)?;
             config_info.report_configs.insert(
                 report_config.name.clone(),
@@ -76,17 +77,6 @@ impl MetricsConfigsTracker {
             if let Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) =
                 &publisher.publisher_type
             {
-                if service_publisher_proto.connection_type.enum_value().map_err(|_| {
-                    SimulatorError::FailedToParseFile {
-                        file_name: file_name.to_owned(),
-                        error_message: "Invalid connection type for service publisher".to_owned(),
-                    }
-                })? == ConnectionType::GETTER
-                {
-                    return Err(SimulatorError::NotImplemented {
-                        feature: "Connection type \"Getter\" for service publishers".to_owned(),
-                    });
-                }
                 config_info
                     .service_publisher_names
                     .insert(service_publisher_proto.service_name.clone());
@@ -150,8 +140,12 @@ impl MetricsConfigsTracker {
             metrics_config.get_report_config_info(report_info)?;
 
         if let Some(report_file_names) = &mut report_config.report_file_names {
-            let output_file_name =
-                format!("{}_{}", report_info.report_config_name, report.report_number);
+            let output_file_name = format!(
+                "{}_{}_{}.pb",
+                report_info.metrics_config_uuid,
+                report_info.report_config_name,
+                report.report_number
+            );
             let output_file_path = PathBuf::from(io::REPORTS_DIR).join(&output_file_name);
             write_report_to_file(&output_file_path, &report)?;
             report_file_names.push(output_file_name);
