@@ -3,9 +3,9 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
+use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
@@ -63,14 +63,14 @@ enum ServiceSubscriptionType {
         /// The name of the service of the shared subscription.
         service_name: String,
         /// Unique service subscription identifier.
-        subscription_id: u32,
+        subscription_id: SequenceNumberType,
     },
 }
 
 /// An implementation of ServiceAdapter that publishes incrementing i32 messages at random interval.
 pub(crate) struct ServiceAdapterImpl {
     // Id that will be used for the next subscription.
-    next_subscription_id: AtomicU32,
+    next_subscription_id: SequenceNumber,
 
     // The registry of available service publishers.
     service_publisher_accessor: Arc<dyn ServicePublisherAccessor>,
@@ -91,7 +91,10 @@ pub(crate) struct ServiceAdapterImpl {
                 oneshot::Sender<()>,
                 Arc<
                     AsyncMutex<
-                        HashMap<u32, Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>,
+                        HashMap<
+                            SequenceNumberType,
+                            Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+                        >,
                     >,
                 >,
             ),
@@ -110,7 +113,10 @@ impl ServiceSubscriptionType {
         ServiceSubscriptionType::Configured { accessor_subscription }
     }
 
-    fn new_shared(service_name: String, subscription_id: u32) -> ServiceSubscriptionType {
+    fn new_shared(
+        service_name: String,
+        subscription_id: SequenceNumberType,
+    ) -> ServiceSubscriptionType {
         ServiceSubscriptionType::Shared { service_name, subscription_id }
     }
 }
@@ -155,7 +161,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             }
         } else {
             // Subscription doesn't have configuration, so it can be shared.
-            let subscription_id = self.next_subscription_id.fetch_add(1, Ordering::SeqCst);
+            let subscription_id = self.next_subscription_id.next();
 
             match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
                 Entry::Occupied(o) => {
@@ -283,7 +289,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
 impl ServiceAdapterImpl {
     pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherAccessor>) -> Self {
         Self {
-            next_subscription_id: AtomicU32::new(1),
+            next_subscription_id: SequenceNumber::new(),
             service_publisher_accessor: service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
         }
@@ -337,7 +343,7 @@ pub(super) mod tests {
         ServiceSubscription {
             subscription_type: ServiceSubscriptionType::Shared {
                 service_name: String::default(),
-                subscription_id: u32::MAX,
+                subscription_id: SequenceNumberType::MAX,
             },
         }
     }

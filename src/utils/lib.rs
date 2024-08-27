@@ -2,6 +2,7 @@
 
 //! This module includes all the utility functions used in telemetry service
 
+pub mod atomic;
 pub mod collection_extension;
 pub mod descriptor_utils;
 pub mod duration_utils;

@@ -6,22 +6,24 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 use log::{info, error};
 use protobuf::Message;
 use sample_publisher_proto::sample_publisher::SampleMessage;
+use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use subscription::RandomIntegerPublisherSubscription;
 
 pub struct RandomIntegerPublisher {
-    next_subscription_id: AtomicU32,
+    next_subscription_id: SequenceNumber,
     latest_message: Mutex<Option<SampleMessage>>,
-    subscribers: Mutex<HashMap<u32, binder::Strong<dyn ISubscriberAsync<binder_tokio::Tokio>>>>,
+    subscribers: Mutex<
+        HashMap<SequenceNumberType, binder::Strong<dyn ISubscriberAsync<binder_tokio::Tokio>>>,
+    >,
 }
 
 impl RandomIntegerPublisher {
     pub fn new() -> Self {
         Self {
-            next_subscription_id: AtomicU32::new(1),
+            next_subscription_id: SequenceNumber::new(),
             latest_message: None.into(),
             subscribers: HashMap::new().into(),
         }
@@ -53,7 +55,7 @@ impl RandomIntegerPublisher {
         subscriber: &binder::Strong<dyn ISubscriber>,
         _config: Option<&[u8]>,
     ) -> RandomIntegerPublisherSubscription {
-        let subscription_id = self.next_subscription_id.fetch_add(1, Ordering::SeqCst);
+        let subscription_id = self.next_subscription_id.next();
         self.subscribers.lock().unwrap().insert(subscription_id, subscriber.clone().into_async());
         RandomIntegerPublisherSubscription::new(Arc::downgrade(self), subscription_id)
     }
@@ -69,7 +71,7 @@ impl RandomIntegerPublisher {
         }
     }
 
-    fn remove_subscription(&self, subscription_id: u32) {
+    fn remove_subscription(&self, subscription_id: SequenceNumberType) {
         self.subscribers.lock().unwrap().remove(&subscription_id);
     }
 }

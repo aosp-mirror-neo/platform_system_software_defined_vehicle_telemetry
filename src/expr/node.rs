@@ -7,7 +7,7 @@ use std::fmt;
 use std::sync::Arc;
 
 #[cfg(test)]
-use std::sync::atomic::{AtomicU64, Ordering};
+use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 
 use crate::expr::node_error::NodeError;
 use crate::expr::node_factory::MessageProvider;
@@ -69,12 +69,12 @@ pub enum TimeSource {
 }
 
 #[cfg(test)]
-static NEXT_NODE_EVALUATION_CONTEXT_ID: AtomicU64 = AtomicU64::new(0);
+static NEXT_NODE_EVALUATION_CONTEXT_ID: SequenceNumber = SequenceNumber::new();
 
 #[cfg_attr(test, derive(Debug))]
 pub struct NodeEvaluationContext {
     #[cfg(test)]
-    id: u64,
+    id: SequenceNumberType,
 
     // By only querying the time once and putting it into the context, we ensure that it remains
     // constant while nodes are being evaluated, even if multiple nodes as part of the same
@@ -87,7 +87,7 @@ impl NodeEvaluationContext {
     pub fn new() -> Self {
         Self {
             #[cfg(test)]
-            id: NEXT_NODE_EVALUATION_CONTEXT_ID.fetch_add(1, Ordering::SeqCst),
+            id: NEXT_NODE_EVALUATION_CONTEXT_ID.next(),
 
             unix_timestamp: sdv_telemetry_time_wrapper::get_unix_timestamp(),
             monotonic_time_since_boot: sdv_telemetry_time_wrapper::get_monotonic_time_since_boot(),
@@ -95,7 +95,7 @@ impl NodeEvaluationContext {
     }
 
     #[cfg(test)]
-    pub fn id(&self) -> u64 {
+    pub fn id(&self) -> SequenceNumberType {
         self.id
     }
 }

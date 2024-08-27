@@ -86,7 +86,7 @@ impl ServiceAdapter for MockServiceAdapter {
             Ok(Some(ServiceSubscription {
                 subscription_type: ServiceSubscriptionType::Shared {
                     service_name: String::default(),
-                    subscription_id: u32::MAX,
+                    subscription_id: SequenceNumberType::MAX,
                 },
             }))
         } else {
