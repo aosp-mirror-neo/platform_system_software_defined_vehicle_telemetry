@@ -26,6 +26,23 @@ cc_library {
     system_ext_specific: true,
 }
 
+python_library_host {
+    name: "libsdv_telemetry_proto_python",
+    version: {
+        py3: {
+            enabled: true,
+        },
+    },
+    srcs: [":sdv_telemetry_proto_srcs"],
+    proto: {
+        canonical_path_from_root: true,
+        include_dirs: [
+            "external/protobuf/src",
+            ".",
+        ],
+    },
+}
+
 rust_protobuf {
     name: "libsdv_telemetry_proto_rust",
     crate_name: "sdv_telemetry_proto_rust",

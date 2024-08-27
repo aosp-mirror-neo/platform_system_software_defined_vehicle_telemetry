@@ -82,6 +82,23 @@ rust_protobuf {
     vendor_available: true,
 }
 
+python_library_host {
+    name: "libsdv_telemetry_proto_simulation_publisher_python",
+    version: {
+        py3: {
+            enabled: true,
+        },
+    },
+    srcs: ["src/simulation_publisher.proto"],
+    proto: {
+        canonical_path_from_root: true,
+        include_dirs: [
+            "external/protobuf/src",
+            ".",
+        ],
+    },
+}
+
 rust_test {
     name: "libsdv_telemetry_simulator_unit_tests",
     defaults: [
