@@ -407,8 +407,8 @@ mod tests {
 
         let context = context_rx.await.unwrap();
 
-        assert_eq!(
-            trigger_context, context,
+        assert!(
+            Arc::ptr_eq(&trigger_context, &context),
             "Node evaluation context should be equal to the trigger context."
         );
     }
