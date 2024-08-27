@@ -10,7 +10,7 @@ use std::{
     fs,
     fs::{File, OpenOptions},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 use crate::{output_strings::report_log_header, SimulatorError};
@@ -20,16 +20,16 @@ pub const REPORTS_DIR: &str = "/data/local/tmp/telemetry_simulator_out/reports/"
 
 /// Reads the metrics config at the provided file path into a byte array.
 pub fn read_metrics_config_from_file(
-    file_path: &PathBuf,
+    file_path: &Path,
 ) -> Result<(String, Vec<u8>), SimulatorError> {
     let Some(file_name_os) = file_path.file_name() else {
-        return Err(SimulatorError::InvalidFilePath { file_path: file_path.clone() });
+        return Err(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() });
     };
     let file_name = file_name_os.to_string_lossy().into_owned().clone();
     Ok((
         file_name,
         metrics_config_reader_utils::read(file_path).map_err(|error| {
-            SimulatorError::FailedToReadFile { file_path: file_path.clone(), error }
+            SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error }
         })?,
     ))
 }
@@ -37,14 +37,14 @@ pub fn read_metrics_config_from_file(
 /// Reads the publisher config at the provided file path into a
 /// PublisherConfigProto message.
 pub fn read_publisher_config_from_file(
-    file_path: &PathBuf,
+    file_path: &Path,
 ) -> Result<(String, PublisherConfigProto), SimulatorError> {
     let Some(file_name_os) = file_path.file_name() else {
-        return Err(SimulatorError::InvalidFilePath { file_path: file_path.clone() });
+        return Err(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() });
     };
     let file_name = file_name_os.to_string_lossy().into_owned().clone();
 
-    if Path::new(&file_path).extension().and_then(|o| o.to_str()) != Some("textproto") {
+    if file_path.extension().and_then(|o| o.to_str()) != Some("textproto") {
         return Err(SimulatorError::FailedToParseFile {
             file_name,
             error_message: "Publisher config files must have file extension .textproto".to_owned(),
@@ -52,7 +52,7 @@ pub fn read_publisher_config_from_file(
     }
 
     let textproto = fs::read_to_string(file_path).map_err(|error| {
-        SimulatorError::FailedToReadFile { file_path: file_path.clone(), error: error.into() }
+        SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error: error.into() }
     })?;
     Ok((
         file_name.clone(),
@@ -138,7 +138,7 @@ fn collect_records(
 /// Creates a new file to collect readable metrics reports and writes a header
 /// including the metrics config file name, UUID and report config name.
 pub fn create_report_log(
-    file_path: &PathBuf,
+    file_path: &Path,
     metrics_config_file_name: &str,
     uuid: &str,
     report_config_name: &str,
@@ -154,7 +154,7 @@ pub fn create_report_log(
     Ok(())
 }
 
-pub fn open_report_log(file_path: &PathBuf) -> Result<File, SimulatorError> {
+pub fn open_report_log(file_path: &Path) -> Result<File, SimulatorError> {
     OpenOptions::new().append(true).open(file_path).map_err(|error| SimulatorError::IOError {
         error_message: format!("Failed to open file \"{}\": {error}", file_path.display()),
     })
@@ -170,7 +170,7 @@ pub fn append_report_log(report_log: &mut File, report: &str) -> Result<(), Simu
 /// Creates a file at the provided file path and writes the metrics report to it
 /// in the binary protobuf format.
 pub fn write_report_to_file(
-    file_path: &PathBuf,
+    file_path: &Path,
     report: &MetricsReport,
 ) -> Result<(), SimulatorError> {
     let mut file = File::create(file_path).map_err(|error| SimulatorError::IOError {
@@ -186,8 +186,8 @@ pub fn write_report_to_file(
 /// and a reports directory at "/data/local/tmp/telemetry_simulator_out/reports"
 /// if create_reports_dir is true.
 pub fn create_output_directory(
-    output_dir: PathBuf,
-    reports_dir: Option<PathBuf>,
+    output_dir: &Path,
+    reports_dir: Option<&Path>,
 ) -> Result<(), SimulatorError> {
     fs::create_dir_all(output_dir).map_err(|error| SimulatorError::IOError {
         error_message: format!("Couldn't create output directory: \"{error}\""),
@@ -210,9 +210,9 @@ mod tests {
 
     #[test]
     fn test_read_metrics_config_from_file_valid() {
-        let file_path = PathBuf::from("test_data/valid_metrics_config.textproto");
+        let file_path = Path::new("test_data/valid_metrics_config.textproto");
 
-        let (file_name, serialized_config) = read_metrics_config_from_file(&file_path).unwrap();
+        let (file_name, serialized_config) = read_metrics_config_from_file(file_path).unwrap();
 
         assert_eq!(file_name, "valid_metrics_config.textproto");
         assert!(!serialized_config.is_empty());
@@ -220,18 +220,18 @@ mod tests {
 
     #[test]
     fn test_read_metrics_config_from_file_invalid_path() {
-        let file_path = PathBuf::from("test_data/invalid_path/metrics_config.textproto");
+        let file_path = Path::new("test_data/invalid_path/metrics_config.textproto");
         assert!(
-            read_metrics_config_from_file(&file_path).is_err(),
+            read_metrics_config_from_file(file_path).is_err(),
             "Should have failed to return content for non-existent file"
         );
     }
 
     #[test]
     fn test_read_publisher_config_from_file_valid() {
-        let file_path = PathBuf::from("test_data/valid_publisher_config.textproto");
+        let file_path = Path::new("test_data/valid_publisher_config.textproto");
         let (file_name, publisher_config_proto) =
-            read_publisher_config_from_file(&file_path).unwrap();
+            read_publisher_config_from_file(file_path).unwrap();
         assert_eq!(file_name, "valid_publisher_config.textproto");
         assert_eq!(publisher_config_proto.service_name, "TestPublisher");
     }
@@ -240,8 +240,8 @@ mod tests {
         test_read_publisher_config_from_file,
 
         |file_path, error_string| {
-            let file_path = PathBuf::from(file_path);
-            assert!(read_publisher_config_from_file(&file_path).is_err(), "{}", error_string);
+            let file_path = Path::new(file_path);
+            assert!(read_publisher_config_from_file(file_path).is_err(), "{}", error_string);
         },
 
         invalid_path: ("test_data/invalid_path/.", "Should have failed to return content for non-existent file",),
@@ -388,7 +388,7 @@ Created reports below
 
     #[test]
     fn test_open_report_log_cannot_open_file() {
-        let open_report_result = open_report_log(&PathBuf::from("non_existent_file"));
+        let open_report_result = open_report_log(Path::new("non_existent_file"));
         assert!(open_report_result.is_err(), "Returned a file handle for a non-existent file");
     }
 
@@ -437,7 +437,7 @@ Created reports below
         let output_dir = tmp_dir.path().join("output");
         let reports_dir = output_dir.join("reports");
 
-        create_output_directory(output_dir.clone(), Some(reports_dir.clone())).unwrap();
+        create_output_directory(&output_dir, Some(&reports_dir)).unwrap();
 
         assert!(Path::new(&output_dir).exists());
         assert!(Path::new(&reports_dir).exists());
@@ -448,7 +448,7 @@ Created reports below
         let tmp_dir = tempdir().unwrap();
         let output_dir = tmp_dir.path().join("output");
 
-        create_output_directory(output_dir.clone(), None).unwrap();
+        create_output_directory(&output_dir, None).unwrap();
 
         assert!(Path::new(&output_dir).exists());
         // Assert output directory is empty i.e. no reports directory was created.

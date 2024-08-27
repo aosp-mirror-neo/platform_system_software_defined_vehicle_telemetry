@@ -6,7 +6,7 @@ use protobuf::{
 };
 use sdv_telemetry_proto_simulation_publisher::simulation_publisher::data_generator::Data_source;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
-use std::{collections::HashSet, path::PathBuf};
+use std::{collections::HashSet, path::Path};
 
 use crate::{
     io::{parse_csv_file, read_publisher_config_from_file},
@@ -15,7 +15,7 @@ use crate::{
     simulator_errors::SimulatorError,
 };
 
-pub fn parse_publisher_config(file_path: &PathBuf) -> Result<PublisherConfig, SimulatorError> {
+pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, SimulatorError> {
     let (file_name, publisher_config_proto) = read_publisher_config_from_file(file_path)?;
 
     let message_descriptor = get_message_descriptor(

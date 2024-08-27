@@ -57,7 +57,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
         .await
         .unwrap();
 
-    let serialized_config = metrics_config_reader_utils::read(&PathBuf::from(CONFIG_PATH)).unwrap();
+    let serialized_config = metrics_config_reader_utils::read(Path::new(CONFIG_PATH)).unwrap();
     let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
 
     info!("Adding config");
@@ -149,8 +149,7 @@ async fn telemetry_service_vector_aggregation() {
 
     info!("Adding metrics config");
     let config =
-        metrics_config_reader_utils::read(&PathBuf::from("tests/aggregation_config.textproto"))
-            .unwrap();
+        metrics_config_reader_utils::read(Path::new("tests/aggregation_config.textproto")).unwrap();
     let mut config = MetricsConfig::parse_from_bytes(&config).unwrap();
     assert!(config.publishers[0].has_service_publisher());
     assert_eq!(config.publishers[0].service_publisher().service_name, "<placeholder>");

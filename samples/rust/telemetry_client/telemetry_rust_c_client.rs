@@ -14,17 +14,14 @@ use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tokio::sync::mpsc;
 use tokio::task;
 
 const LOG_TAG: &str = validated_log_tag("TelemetryRustCClient");
 
-async fn process_config(
-    path: &PathBuf,
-    service: &TelemetryServiceHolder,
-) -> anyhow::Result<String> {
+async fn process_config(path: &Path, service: &TelemetryServiceHolder) -> anyhow::Result<String> {
     if !path.is_file() {
         return Err(anyhow!("Path is not a file or does not exist"));
     }

@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::marker::{Send, Sync};
 use std::mem;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use thiserror::Error;
@@ -233,7 +233,7 @@ impl MetricsConfigManagerImpl {
                 }
             }
         } else {
-            match file_io_utils::create_dir(&active_dir_path.to_path_buf()).await {
+            match file_io_utils::create_dir(active_dir_path).await {
                 Ok(_) => {
                     // Success, directory was created or already exists
                     info!("active config telemetry directory created");
@@ -274,7 +274,7 @@ impl MetricsConfigManagerImpl {
                 }
             }
         } else {
-            match file_io_utils::create_dir(&inactive_dir_path.to_path_buf()).await {
+            match file_io_utils::create_dir(inactive_dir_path).await {
                 Ok(_) => {
                     // Success, directory was created or already exists
                     info!("inactive config telemetry directory created");
@@ -317,7 +317,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         // Validate the metrics config and report any errors to client
         self.metrics_config_orchestrator.validate_config(&config)?;
 
-        let path = PathBuf::from(self.inactive_data_dir.clone() + "/" + &config.uuid);
+        let path = Path::new(&self.inactive_data_dir).join(&config.uuid);
 
         if let Err(e) = file_io_utils::write_to_file(&path, metrics_config).await {
             error!("An error occurred while writing to file: {}", e);
@@ -345,7 +345,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         metrics_config_uuid: &str,
     ) -> Result<(), MetricsConfigManagerError> {
         info!("activate_metrics_config: {:?} \n", metrics_config_uuid);
-        let path = PathBuf::from(self.inactive_data_dir.clone() + "/" + metrics_config_uuid);
+        let path = Path::new(&self.inactive_data_dir).join(metrics_config_uuid);
         if path.is_file() {
             let bytes = file_io_utils::read_from_file(&path)
                 .await
@@ -360,7 +360,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             match Arc::clone(&self.metrics_config_orchestrator).initialize_config(&config).await {
                 Ok(()) => {
                     info!("Metrics config orchestrator successfully initialized {} config", uuid);
-                    let new_path = PathBuf::from(self.active_data_dir.clone() + "/" + uuid);
+                    let new_path = Path::new(&self.active_data_dir).join(uuid);
                     file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
                         error!(
                             "An error occurred in renaming config to {}: {}",
@@ -398,8 +398,8 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             },
         )?;
 
-        let old_path = PathBuf::from(self.active_data_dir.clone() + "/" + metrics_config_uuid);
-        let new_path = PathBuf::from(self.inactive_data_dir.clone() + "/" + metrics_config_uuid);
+        let old_path = Path::new(&self.active_data_dir).join(metrics_config_uuid);
+        let new_path = Path::new(&self.inactive_data_dir).join(metrics_config_uuid);
 
         // TODO: b/299329266: Handle file io errors gracefully
         file_io_utils::rename_file(&old_path, &new_path)
@@ -440,9 +440,9 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
 
         let path = {
             if active_config {
-                PathBuf::from(self.active_data_dir.clone() + "/" + &uuid)
+                Path::new(&self.active_data_dir).join(&uuid)
             } else {
-                PathBuf::from(self.inactive_data_dir.clone() + "/" + &uuid)
+                Path::new(&self.inactive_data_dir).join(&uuid)
             }
         };
 
@@ -701,7 +701,7 @@ mod tests {
     impl Drop for TestEnvironment {
         fn drop(&mut self) {
             // Removing all files created during the test
-            fs::remove_dir_all(PathBuf::from(self.root_path.to_string())).unwrap();
+            fs::remove_dir_all(Path::new(&self.root_path)).unwrap();
         }
     }
 
@@ -734,7 +734,7 @@ mod tests {
         );
 
         let active_dir_path = Path::new(&active_data_dir);
-        match file_io_utils::create_dir(&active_dir_path.to_path_buf()).await {
+        match file_io_utils::create_dir(active_dir_path).await {
             Ok(_) => {
                 info!("active config telemetry directory created");
             }
@@ -743,7 +743,7 @@ mod tests {
             }
         };
 
-        let file_path = PathBuf::from(active_data_dir.clone() + "/" + UUID);
+        let file_path = Path::new(&active_data_dir).join(UUID);
         let corrupt_config = create_corrupt_config(UUID);
 
         file_io_utils::write_to_file(&file_path, &corrupt_config).await.unwrap_or_else(|e| {
@@ -778,8 +778,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
-        let file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
+        let file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
@@ -847,10 +846,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
-        let old_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
-        let new_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID));
+        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
@@ -872,8 +869,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config_fail";
-        let old_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
+        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
@@ -902,10 +898,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
-        let old_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
-        let new_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID));
+        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
@@ -931,10 +925,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config_fail";
-        let old_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
-        let new_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID));
+        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
@@ -969,10 +961,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
-        let old_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
-        let new_file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID));
+        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
 
@@ -1018,18 +1008,13 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_all_metrics_configs";
-        let inactive_dir_path =
-            PathBuf::from(format!("{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR));
-        let active_dir_path = PathBuf::from(format!("{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR));
+        let inactive_dir_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR);
+        let active_dir_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR);
 
-        let old_file_path1 =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID1));
-        let new_file_path1 =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID1));
-        let old_file_path2 =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID2));
-        let new_file_path2 =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID2));
+        let old_file_path1 = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID1);
+        let new_file_path1 = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID1);
+        let old_file_path2 = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID2);
+        let new_file_path2 = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID2);
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
 
@@ -1065,8 +1050,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_active_metrics_configs_success";
-        let file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR, UUID));
+        let file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
@@ -1095,8 +1079,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_inactive_metrics_configs_success";
-        let file_path =
-            PathBuf::from(format!("{}/{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR, UUID));
+        let file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
         let test_environment =
             TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;

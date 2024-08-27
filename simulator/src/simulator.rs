@@ -26,7 +26,7 @@ use log::{error, info};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
 use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
 use std::{
-    collections::HashMap, path::PathBuf, sync::Arc, time::Duration
+    collections::HashMap, path::Path, path::PathBuf, sync::Arc, time::Duration
 };
 use tokio::{
     sync::{mpsc::UnboundedReceiver, oneshot, oneshot::error::TryRecvError},
@@ -71,7 +71,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
     match cli_args.command {
         Commands::TelemetryClient { telemetry_client_args } => {
             run_telemetry_client(
-                telemetry_client_args.metrics_config_paths,
+                &telemetry_client_args.metrics_config_paths,
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
@@ -79,13 +79,13 @@ async fn wrapped_main() -> anyhow::Result<()> {
             .await?;
         }
         Commands::SimulationPublishers { simulation_publisher_args } => {
-            start_simulation_publishers(simulation_publisher_args.publisher_config_paths)?;
+            start_simulation_publishers(&simulation_publisher_args.publisher_config_paths)?;
             let _ = sleep(cli_args.max_simulation_time).await;
         }
         Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
-            start_simulation_publishers(simulation_publisher_args.publisher_config_paths)?;
+            start_simulation_publishers(&simulation_publisher_args.publisher_config_paths)?;
             run_telemetry_client(
-                telemetry_client_args.metrics_config_paths,
+                &telemetry_client_args.metrics_config_paths,
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
@@ -98,18 +98,18 @@ async fn wrapped_main() -> anyhow::Result<()> {
 }
 
 async fn run_telemetry_client(
-    metrics_config_paths: Vec<PathBuf>,
+    metrics_config_paths: &Vec<PathBuf>,
     no_binary_reports: bool,
     max_report_count: u64,
     max_simulation_time: Duration,
 ) -> anyhow::Result<()> {
     create_output_directory(
-        io::OUTPUT_DIR.into(),
-        if no_binary_reports { None } else { Some(REPORTS_DIR.into()) },
+        Path::new(io::OUTPUT_DIR),
+        if no_binary_reports { None } else { Some(Path::new(REPORTS_DIR)) },
     )?;
     let mut metrics_configs_tracker = MetricsConfigsTracker::new(!no_binary_reports);
 
-    for path in &metrics_config_paths {
+    for path in metrics_config_paths {
         metrics_configs_tracker.parse_metrics_config(path)?;
     }
 
@@ -143,8 +143,8 @@ async fn run_telemetry_client(
     Ok(())
 }
 
-fn start_simulation_publishers(publisher_config_paths: Vec<PathBuf>) -> anyhow::Result<()> {
-    let _publishers = parse_and_register_simulation_publishers(&publisher_config_paths)?;
+fn start_simulation_publishers(publisher_config_paths: &Vec<PathBuf>) -> anyhow::Result<()> {
+    let _publishers = parse_and_register_simulation_publishers(publisher_config_paths)?;
     Ok(())
 }
 

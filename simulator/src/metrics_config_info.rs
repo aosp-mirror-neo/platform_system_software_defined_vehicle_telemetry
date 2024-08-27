@@ -6,7 +6,7 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     fs::File,
-    path::PathBuf,
+    path::Path,
 };
 
 use crate::{io, simulator_errors::SimulatorError};
@@ -29,10 +29,10 @@ pub struct ReportConfigStatus {
 impl ReportConfigStatus {
     pub fn new(
         descriptor_proto_name: String,
-        report_log_path: PathBuf,
+        report_log_path: &Path,
         write_report_files: bool,
     ) -> Result<Self, SimulatorError> {
-        let report_log = io::open_report_log(&report_log_path)?;
+        let report_log = io::open_report_log(report_log_path)?;
         let report_file_names = if write_report_files { Some(Vec::new()) } else { None };
 
         Ok(ReportConfigStatus {

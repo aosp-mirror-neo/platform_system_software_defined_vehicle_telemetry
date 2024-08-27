@@ -6,7 +6,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsRepo
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder};
 use std::{
     collections::{HashMap, HashSet},
-    path::PathBuf,
+    path::Path,
 };
 
 use crate::{
@@ -35,7 +35,7 @@ impl MetricsConfigsTracker {
     /// Reads a metrics config from the provided file path, deserializes the
     /// content into a MetricsConfig object. Returns an error if the tracker
     /// already contains a metrics config with the same UUID.
-    pub fn parse_metrics_config(&mut self, file_path: &PathBuf) -> Result<(), SimulatorError> {
+    pub fn parse_metrics_config(&mut self, file_path: &Path) -> Result<(), SimulatorError> {
         let (file_name, serialized_config) = read_metrics_config_from_file(file_path)?;
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(&serialized_config)
             .map_err(|error| SimulatorError::FailedToParseFile {
@@ -57,7 +57,7 @@ impl MetricsConfigsTracker {
             MetricsConfigInfo::new(&file_name, serialized_config, message_descriptors);
 
         for report_config in &config.metrics_report_configs {
-            let report_log_path = PathBuf::from(io::OUTPUT_DIR).join(format!(
+            let report_log_path = Path::new(io::OUTPUT_DIR).join(format!(
                 "{}_all_reports_for_{}.txt",
                 config.uuid,
                 report_config.name.to_ascii_lowercase()
@@ -67,7 +67,7 @@ impl MetricsConfigsTracker {
                 report_config.name.clone(),
                 ReportConfigStatus::new(
                     report_config.message_builder.message_type.clone(),
-                    report_log_path,
+                    &report_log_path,
                     self.write_report_files,
                 )?,
             );
@@ -146,7 +146,7 @@ impl MetricsConfigsTracker {
                 report_info.report_config_name,
                 report.report_number
             );
-            let output_file_path = PathBuf::from(io::REPORTS_DIR).join(&output_file_name);
+            let output_file_path = Path::new(io::REPORTS_DIR).join(&output_file_name);
             write_report_to_file(&output_file_path, &report)?;
             report_file_names.push(output_file_name);
         }

@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 //! This module contains async functions for file read and write operations
-use std::path::PathBuf;
+use std::path::Path;
 use tokio::fs::File;
 use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::{time, time::Duration};
@@ -28,7 +28,7 @@ where
 }
 
 /// async function that creates and writes the contents to a file
-pub async fn write_to_file(file_path: &PathBuf, contents: &[u8]) -> io::Result<()> {
+pub async fn write_to_file(file_path: &Path, contents: &[u8]) -> io::Result<()> {
     run_file_io(|| async {
         let mut file = File::create(file_path).await?;
         file.write_all(contents).await?;
@@ -38,7 +38,7 @@ pub async fn write_to_file(file_path: &PathBuf, contents: &[u8]) -> io::Result<(
 }
 
 /// async function that reads the contents of a file into a binary vector
-pub async fn read_from_file(file_path: &PathBuf) -> io::Result<Vec<u8>> {
+pub async fn read_from_file(file_path: &Path) -> io::Result<Vec<u8>> {
     run_file_io(|| async {
         let mut file = File::open(file_path).await?;
         let mut bytes = Vec::new();
@@ -49,21 +49,21 @@ pub async fn read_from_file(file_path: &PathBuf) -> io::Result<Vec<u8>> {
 }
 
 /// async function that removes a file
-pub async fn remove_file(file_path: &PathBuf) -> io::Result<()> {
+pub async fn remove_file(file_path: &Path) -> io::Result<()> {
     run_file_io(|| tokio::fs::remove_file(file_path)).await
 }
 
 /// async function that renames a file
-pub async fn rename_file(from_path: &PathBuf, to_path: &PathBuf) -> io::Result<()> {
+pub async fn rename_file(from_path: &Path, to_path: &Path) -> io::Result<()> {
     run_file_io(|| tokio::fs::rename(from_path, to_path)).await
 }
 
 /// async function that creates a new directory
-pub async fn create_dir(dir_path: &PathBuf) -> io::Result<()> {
+pub async fn create_dir(dir_path: &Path) -> io::Result<()> {
     run_file_io(|| tokio::fs::create_dir_all(dir_path)).await
 }
 
 /// async function that removes a directory
-pub async fn remove_dir(dir_path: &PathBuf) -> io::Result<()> {
+pub async fn remove_dir(dir_path: &Path) -> io::Result<()> {
     run_file_io(|| tokio::fs::remove_dir_all(dir_path)).await
 }

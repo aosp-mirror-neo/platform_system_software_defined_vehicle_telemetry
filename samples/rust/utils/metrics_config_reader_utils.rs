@@ -1,18 +1,17 @@
 // Copyright 2024 Google LLC
 
 //! This module contains helper functions to read metrics configurations from a file.
-use protobuf::{text_format::parse_from_str, Message};
-use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 
 use anyhow::{anyhow, Context};
+use protobuf::{text_format::parse_from_str, Message};
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 use std::fs;
 use std::path::Path;
-use std::path::PathBuf;
 
 /// Reads the metrics config from either a .bin or legacy formatted .textproto file into a bytes
 /// array.
-pub fn read(path: &PathBuf) -> anyhow::Result<Vec<u8>> {
-    match Path::new(&path).extension().and_then(|o| o.to_str()) {
+pub fn read(path: &Path) -> anyhow::Result<Vec<u8>> {
+    match path.extension().and_then(|o| o.to_str()) {
         Some("bin") => {
             // Read binary into a vector
             fs::read(path)
@@ -46,8 +45,7 @@ mod tests {
     #[test]
     fn serialized_bytes_match_legacy_textproto_file_contents() {
         let serialized_legacy_textproto_config =
-            read(&PathBuf::from("sample_protos/config_without_service_publishers.textproto"))
-                .unwrap();
+            read(Path::new("sample_protos/config_without_service_publishers.textproto")).unwrap();
         let config: MetricsConfig =
             protobuf::Message::parse_from_bytes(&serialized_legacy_textproto_config).unwrap();
 
