@@ -24,6 +24,7 @@ rust_defaults {
         "liblogger",
         "libparking_lot",
         "libprotobuf",
+        "libscopeguard",
         "libsdv_log_rust",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_proto_simulation_publisher",
