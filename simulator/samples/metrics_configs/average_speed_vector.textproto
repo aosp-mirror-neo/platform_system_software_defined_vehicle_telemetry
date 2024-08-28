@@ -4,6 +4,7 @@ uuid: "aa27583c-96a5-4a67-adad-d15e00c0f12b"
 version: 1
 
 descriptor_protos {
+    package: "aaos.sdv.telemetry.adhoc"
     message_type {
         name: "SpeedData"
         field {
@@ -64,7 +65,7 @@ publishers {
         trigger_names: "new_speed_data"
         reset_on_get: true
         message_builder {
-            message_type: ".SpeedData"
+            message_type: ".aaos.sdv.telemetry.adhoc.SpeedData"
             field_assignments {
                 field_name: "average_speed"
                 avg_aggregation {
@@ -81,7 +82,7 @@ publishers {
         trigger_names: "every_second"
         reset_on_get: true
         message_builder {
-            message_type: ".SpeedDataList"
+            message_type: ".aaos.sdv.telemetry.adhoc.SpeedDataList"
             field_assignments {
                 field_name: "average_speed"
                 vector_aggregation {
@@ -122,7 +123,7 @@ metrics_report_configs {
     report_incomplete: true
 
     message_builder {
-        message_type: ".SpeedDataList"
+        message_type: ".aaos.sdv.telemetry.adhoc.SpeedDataList"
         field_assignments {
             field_name: "average_speed"
             no_aggregation {

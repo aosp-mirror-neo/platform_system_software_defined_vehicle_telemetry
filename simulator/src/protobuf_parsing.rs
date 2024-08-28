@@ -38,14 +38,14 @@ pub fn parse_message_descriptors(
         })?;
     for file_descriptor in &file_descriptors {
         for message in file_descriptor.messages() {
-            if message_descriptors.contains_key(message.name()) {
+            if message_descriptors.contains_key(message.full_name()) {
                 return Err(SimulatorError::DuplicateDescriptorProtoMessage {
                     message_name: message.name().to_owned(),
                     file_name: metrics_config_file_name,
                 });
             }
-            if decoding_message_descriptor_names.contains(message.name()) {
-                message_descriptors.insert(message.name().to_owned(), message.clone());
+            if decoding_message_descriptor_names.contains(message.full_name()) {
+                message_descriptors.insert(message.full_name().to_owned(), message.clone());
             }
         }
     }
