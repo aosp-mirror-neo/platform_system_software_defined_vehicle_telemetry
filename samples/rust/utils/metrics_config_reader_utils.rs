@@ -46,7 +46,8 @@ mod tests {
     #[test]
     fn serialized_bytes_match_legacy_textproto_file_contents() {
         let serialized_legacy_textproto_config =
-            read(&PathBuf::from("sample_protos/metric_configJan10.textproto")).unwrap();
+            read(&PathBuf::from("sample_protos/config_without_service_publishers.textproto"))
+                .unwrap();
         let config: MetricsConfig =
             protobuf::Message::parse_from_bytes(&serialized_legacy_textproto_config).unwrap();
 

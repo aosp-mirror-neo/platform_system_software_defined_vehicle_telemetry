@@ -308,7 +308,7 @@ rust_test {
     ],
     data: [
         // keep-sorted start
-        "sample_protos/metric_configJan10.textproto",
+        "sample_protos/config_without_service_publishers.textproto",
         // keep-sorted end
     ],
     auto_gen_config: true,

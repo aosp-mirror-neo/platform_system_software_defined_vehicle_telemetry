@@ -236,11 +236,18 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
     assert_eq!(
         expected_paths,
         vec![
+            "./samples/sample_protos/average_speed.textproto",
+            "./samples/sample_protos/average_speed_vector.textproto",
+            "./samples/sample_protos/config_without_service_publishers.textproto",
             "./samples/sample_protos/configurable_publisher.textproto",
             "./samples/sample_protos/configurable_publisher_getter.textproto",
+            "./samples/sample_protos/crash_reports.textproto",
             "./samples/sample_protos/data_tunnel_publisher.textproto",
             "./samples/sample_protos/data_tunnel_publisher_aggregation.textproto",
-            "./samples/sample_protos/metric_configJan10.textproto",
+            "./samples/sample_protos/frequent_reports.textproto",
+            "./samples/sample_protos/journey_summary.textproto",
+            "./samples/sample_protos/processing_frequent_data.textproto",
+            "./samples/sample_protos/sudden_tire_pressure_drop.textproto",
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto"
         ]
