@@ -92,6 +92,23 @@ rust_test {
         "general-tests",
         // keep-sorted end
     ],
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils",
+        "libtempfile",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libpaste",
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
+    data: [
+        // keep-sorted start
+        "test_data/*",
+        // keep-sorted end
+    ],
     test_options: {
         unit_test: true,
     },
