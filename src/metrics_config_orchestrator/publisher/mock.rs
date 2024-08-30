@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
+use parking_lot::Mutex;
 use protobuf::MessageDyn;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{collections::HashSet, sync::Arc};
@@ -17,6 +18,7 @@ pub(crate) struct MockPublisher {
     activate_callback: Option<Box<dyn Fn(&str) -> Option<PublisherActivateError> + Send + Sync>>,
     deactivate_callback:
         Option<Box<dyn Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync>>,
+    latest_message_error: Mutex<Option<anyhow::Error>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
@@ -34,6 +36,10 @@ impl Publisher for MockPublisher {
     fn get_latest_message(
         self: Arc<Self>,
     ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
+        if let Some(err) = self.latest_message_error.lock().take() {
+            return Err(err).into();
+        }
+
         Ok(self.latest_message.clone()).into()
     }
 
@@ -76,6 +82,7 @@ impl MockPublisher {
         Self {
             expected_trigger_names: HashSet::new(),
             latest_message: None,
+            latest_message_error: None.into(),
             name,
             activate_callback: None,
             deactivate_callback: None,
@@ -104,6 +111,10 @@ impl MockPublisher {
         callback: impl Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync + 'static,
     ) {
         self.deactivate_callback.replace(Box::new(callback));
+    }
+
+    pub(crate) fn set_latest_message_error(&self, error: anyhow::Error) {
+        self.latest_message_error.lock().replace(error);
     }
 
     pub(crate) fn set_unsubscribe_callback(&mut self, callback: impl Fn() + Send + Sync + 'static) {

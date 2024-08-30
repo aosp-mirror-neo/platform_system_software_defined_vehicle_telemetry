@@ -4,6 +4,7 @@ mod descriptor_provider;
 mod descriptor_provider_factory;
 mod message_builder;
 mod message_builder_factory;
+mod message_provider;
 mod metrics_report_generator;
 mod metrics_report_generator_factory;
 mod publisher;
@@ -17,7 +18,7 @@ mod trigger_factory;
 use async_trait::async_trait;
 use log::{debug, error};
 use parking_lot::Mutex;
-use protobuf::{reflect::FileDescriptor, MessageDyn};
+use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
@@ -25,20 +26,17 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
-    operation_result::OperationResult,
 };
 use std::collections::{HashMap, HashSet};
 use std::marker::Sync;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::expr::node::{Node, NodeEvaluationContext};
-use crate::expr::node_error::{MessageProviderError, NodeError};
-use crate::expr::node_factory::{
-    MessageProvider, NodeFactory, NodeFactoryContext, NodeFactoryImpl,
-};
+use crate::expr::node_error::NodeError;
+use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
 
@@ -47,6 +45,7 @@ use descriptor_provider_factory::{
     DescriptorProviderFactory, DescriptorProviderFactoryError, DescriptorProviderFactoryImpl,
 };
 use message_builder_factory::MessageBuilderFactoryImpl;
+use message_provider::MessageProviderImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
 use metrics_report_generator_factory::{
     MetricsReportGeneratorFactory, MetricsReportGeneratorFactoryCreateContext,
@@ -177,22 +176,6 @@ pub(super) enum MetricsConfigState {
     Finished,
 }
 
-struct MessageProviderImpl {
-    metrics_config: OnceLock<Arc<MetricsConfig>>,
-}
-
-impl MessageProvider for MessageProviderImpl {
-    fn get_message(
-        &self,
-        publisher_name: &str,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
-        self.metrics_config.get().unwrap().publishers.get(publisher_name).map_or_else(
-            || Err(MessageProviderError::InvalidPublisherName).into(),
-            |publisher| Arc::clone(publisher).get_latest_message().err_into(),
-        )
-    }
-}
-
 #[async_trait]
 impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
     fn get_active_metrics_config_uuids(&self) -> Vec<String> {
@@ -211,7 +194,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         )?;
 
         // Create expression nodes.
-        let message_provider = Arc::new(MessageProviderImpl { metrics_config: OnceLock::new() });
+        let message_provider = Arc::new(MessageProviderImpl::new());
         let descriptor_provider = self.descriptor_provider_factory.create(
             &file_descriptors,
             &config_proto.publishers,
@@ -326,8 +309,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Set real MetricsConfig in MessageProvider so that Publishers are discoverable by Nodes.
         message_provider
-            .metrics_config
-            .set(Arc::clone(&config))
+            .set_metrics_config(&config)
             .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
         // Activate publishers one by one in topologically sorted order.
@@ -842,6 +824,7 @@ mod tests {
     };
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
+    use protobuf::MessageDyn;
     use protobuf::{well_known_types, MessageFull};
     use sdv_telemetry_proto_rust::expression::Node as NodeProto;
     use sdv_telemetry_proto_rust::metrics_configuration::{
@@ -855,6 +838,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use tokio::sync::oneshot;
 
+    use crate::expr::node_factory::MessageProvider;
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::descriptor_provider_factory::mock::MockDescriptorProviderFactory;
