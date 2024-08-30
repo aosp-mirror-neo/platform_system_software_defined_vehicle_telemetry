@@ -5,7 +5,7 @@ use protobuf::MessageDyn;
 use std::{collections::HashMap, sync::Arc};
 
 use super::CallbackFn;
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 pub(super) struct BasePublisher {
     name: String,

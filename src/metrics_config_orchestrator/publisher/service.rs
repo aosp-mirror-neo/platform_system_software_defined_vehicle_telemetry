@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use super::{
     base::BasePublisher, CallbackFn, Publisher, PublisherActivateError, PublisherDeactivateError,
 };
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };

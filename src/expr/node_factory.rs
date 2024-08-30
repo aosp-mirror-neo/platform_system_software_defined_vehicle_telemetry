@@ -363,7 +363,7 @@ mod tests {
             .descriptors
             .insert(KNOWN_PUBLISHER_NAME.to_owned(), TestMessage::descriptor());
         NodeFactoryContext {
-            message_provider: Some(MOCK_MESSAGE_PROVIDER.clone()),
+            message_provider: Some(Arc::new(MockMessageProvider::new())),
             descriptor_provider: Box::new(descriptor_provider),
         }
     }

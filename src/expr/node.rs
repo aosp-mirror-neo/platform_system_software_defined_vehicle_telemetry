@@ -1,23 +1,24 @@
 // Copyright 2024 Google LLC
 
+use futures::future::{self, BoxFuture};
 use protobuf::MessageDyn;
 use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
-use sdv_telemetry_time_wrapper::Microseconds;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
+    value_holder::ValueHolder,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-#[cfg(test)]
-use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
-
 use crate::expr::node_error::NodeError;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::MessageProvider;
 use crate::expr::node_value::NodeValue;
 use crate::expr::node_value_type::OperatorProtoExtension;
+
+pub(super) type NodeEvaluationResult = (NodeValue, NodeEvaluationState);
 
 const EMPTY: &str = "Empty";
 
@@ -73,74 +74,31 @@ pub enum TimeSource {
     MonotonicTimeSinceBoot,
 }
 
-#[cfg(test)]
-static NEXT_NODE_EVALUATION_CONTEXT_ID: SequenceNumber = SequenceNumber::new();
-
-#[cfg_attr(test, derive(Debug))]
-pub struct NodeEvaluationContext {
-    #[cfg(test)]
-    root_id: SequenceNumberType,
-
-    // Map of messages keyed by publisher name.
-    messages: HashMap<String, Arc<dyn MessageDyn>>,
-
-    // By only querying the time once and putting it into the context, we ensure that it remains
-    // constant while nodes are being evaluated, even if multiple nodes as part of the same
-    // evaluation query the time.
-    unix_timestamp: Microseconds,
-    monotonic_time_since_boot: Microseconds,
+/// Stores expression evaluation state to ensure expression evaluation uses the same message
+/// in different branches.
+///
+/// Since messages from different sources are shared and retrieved differently, they are stored
+/// in different caches, listed according to their priority:
+/// - `context` stores messages from the upstream publishers that triggered expression evaluation;
+/// - `sync_message_cache` caches synchronously retrieved messages.
+/// - `async_message_cache` caches messages that are retrieved through asynchronous getters.
+pub(super) struct NodeEvaluationState {
+    context: Arc<NodeEvaluationContext>,
+    sync_message_cache: HashMap<String, Option<Arc<dyn MessageDyn>>>,
+    #[allow(dead_code)]
+    async_message_cache:
+        HashMap<String, future::Shared<BoxFuture<'static, Option<Arc<dyn MessageDyn>>>>>,
 }
 
-impl NodeEvaluationContext {
-    /// Creates a new instance of context with no messages.
-    pub(crate) fn new() -> Self {
-        Self {
-            #[cfg(test)]
-            root_id: NEXT_NODE_EVALUATION_CONTEXT_ID.next(),
-            messages: HashMap::new(),
-            unix_timestamp: sdv_telemetry_time_wrapper::get_unix_timestamp(),
-            monotonic_time_since_boot: sdv_telemetry_time_wrapper::get_monotonic_time_since_boot(),
-        }
+impl Default for NodeEvaluationState {
+    fn default() -> Self {
+        NodeEvaluationState::new(NodeEvaluationContext::new().into())
     }
+}
 
-    /// Creates a new instance of context with a publisher message.
-    pub(crate) fn with_publisher_message(
-        publisher_name: String,
-        publisher_message: Arc<dyn MessageDyn>,
-    ) -> Self {
-        let mut res = Self::new();
-        res.messages
-            .try_insert_value(publisher_name, publisher_message)
-            .expect("Hashmap should be empty");
-        res
-    }
-
-    #[cfg(test)]
-    pub(crate) fn root_id(&self) -> SequenceNumberType {
-        self.root_id
-    }
-
-    pub(crate) fn get_message(&self, publisher_name: &str) -> Option<&Arc<dyn MessageDyn>> {
-        self.messages.get(publisher_name)
-    }
-
-    /// Creates a child context with a copy of current context messages and a new message.
-    pub(crate) fn to_child_context(
-        &self,
-        publisher_name: String,
-        publisher_message: Arc<dyn MessageDyn>,
-    ) -> Self {
-        let mut messages = self.messages.clone();
-        messages
-            .try_insert_value(publisher_name, publisher_message)
-            .expect("Message from each publisher should only be added once");
-        Self {
-            #[cfg(test)]
-            root_id: self.root_id,
-            messages,
-            unix_timestamp: self.unix_timestamp,
-            monotonic_time_since_boot: self.monotonic_time_since_boot,
-        }
+impl NodeEvaluationState {
+    fn new(context: Arc<NodeEvaluationContext>) -> Self {
+        Self { context, sync_message_cache: HashMap::new(), async_message_cache: HashMap::new() }
     }
 }
 
@@ -148,36 +106,82 @@ impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
     pub fn evaluate(
         self: &Arc<Self>,
-        context: &Arc<NodeEvaluationContext>,
+        context: Arc<NodeEvaluationContext>,
     ) -> OperationResult<'static, NodeValue, NodeError> {
+        let state = NodeEvaluationState::new(context);
+        self.evaluate_core(state).map_ok(|(value, _state)| value)
+    }
+
+    /// Evaluate AST recursively and use cached messages from the state
+    /// to ensure expression evaluation uses the same message in different branches.
+    fn evaluate_core(
+        self: &Arc<Self>,
+        mut state: NodeEvaluationState,
+    ) -> OperationResult<'static, NodeEvaluationResult, NodeError> {
         match self.as_ref() {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
-                Ok(value.clone()).into()
+                value.clone().into_operation_result(state)
             }
             Node::FieldLeaf { fields, message_provider, publisher_name, .. } => {
                 // Base case of recursion: node is a leaf node, return value
-                if let Some(msg) = context.get_message(publisher_name) {
-                    return NodeValue::extract_value(Cow::Borrowed(msg), fields).into();
+                fn handle_msg<'a, T>(
+                    maybe_msg: Option<T>,
+                    fields: &[String],
+                    msg_selector: impl FnOnce(T) -> Cow<'a, Arc<dyn MessageDyn>>,
+                ) -> Result<NodeValue, NodeError> {
+                    maybe_msg.map_or_else(
+                        || Ok(NodeValue::None),
+                        |msg| NodeValue::extract_value(msg_selector(msg), fields),
+                    )
+                }
+
+                let context_msg = state.context.get_message(publisher_name);
+                if context_msg.is_some() {
+                    // Message provided by an upstream publisher.
+                    return handle_msg(context_msg, fields, Cow::Borrowed)
+                        .map(move |value| (value, state))
+                        .into();
+                }
+
+                let cache_result = state.sync_message_cache.get(publisher_name);
+                if let Some(maybe_msg) = cache_result {
+                    // Message found in the synchronous message cache.
+                    return handle_msg(maybe_msg.as_ref(), fields, Cow::Borrowed)
+                        .map(move |value| (value, state))
+                        .into();
+                }
+
+                // TODO(b/362364604): Check asynchronous message cache before calling message provider.
+                let provider_result = message_provider.get_message(publisher_name);
+                match &provider_result {
+                    ValueHolder::Synchronous(res) => {
+                        if let Ok(maybe_msg) = res {
+                            // Put message into synchronous message cache.
+                            state
+                                .sync_message_cache
+                                .try_insert_value(publisher_name.to_owned(), maybe_msg.to_owned())
+                                .expect(
+                                    "Only one message per publisher should be added into cache",
+                                );
+                        }
+                    }
+                    ValueHolder::Asynchronous(_future) => {
+                        // TODO(b/362364604): Cache message retrieval future.
+                    }
                 }
 
                 let self_clone = Arc::clone(self);
-                message_provider.get_message(publisher_name).err_into().and_then_sync(
-                    move |maybe_msg| {
-                        let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
-                            panic!("Captured node is not a field leaf node: {:?}", self_clone);
-                        };
+                provider_result.err_into().and_then_sync(move |maybe_msg| {
+                    let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
+                        panic!("Captured node is not a field leaf node: {:?}", self_clone);
+                    };
 
-                        maybe_msg.map_or_else(
-                            || Ok(NodeValue::None),
-                            |msg| NodeValue::extract_value(Cow::Owned(msg), fields),
-                        )
-                    },
-                )
+                    handle_msg(maybe_msg, fields, Cow::Owned).map(|value| (value, state))
+                })
             }
             Node::Combination { left, .. } => {
                 // evaluate left branch recursively
-                let context_clone = Arc::clone(context);
                 let self_clone = Arc::clone(self);
                 left
                     .as_ref()
@@ -186,8 +190,8 @@ impl Node {
                         every non-leaf Node has a left child, but evaluate() encountered \
                         a node without left child",
                     )
-                    .evaluate(context)
-                    .and_then(move |left_value| {
+                    .evaluate_core(state)
+                    .and_then(move |(left_value, state)| {
                         let Node::Combination { operator, right, .. } = self_clone.as_ref() else {
                             panic!("Captured node is not a combination node: {:?}", self_clone);
                         };
@@ -196,7 +200,7 @@ impl Node {
                         // If binary operator, then [left] <operator> [right]
                         // The function short-circuits if possible. The closure provides right operand.
                         let right_clone = right.clone();
-                        left_value.operate(operator, move || {
+                        left_value.operate(operator, state, move |state| {
                             right_clone.as_ref()
                                 .unwrap_or_else(|| {
                                     if operator.is_unary_operator() {
@@ -212,17 +216,19 @@ impl Node {
                                         );
                                     }
                                 })
-                                .evaluate(&context_clone)
+                                .evaluate_core(state)
                         })
                     })
             }
             Node::FunctionLeaf { function } => match function {
                 FunctionType::GetCurrentTimestamp { time_source } => {
                     let timestamp = match time_source {
-                        TimeSource::RealtimeClock => context.unix_timestamp,
-                        TimeSource::MonotonicTimeSinceBoot => context.monotonic_time_since_boot,
+                        TimeSource::RealtimeClock => state.context.unix_timestamp,
+                        TimeSource::MonotonicTimeSinceBoot => {
+                            state.context.monotonic_time_since_boot
+                        }
                     };
-                    Ok(NodeValue::Int64(timestamp.0)).into()
+                    NodeValue::Int64(timestamp.0).into_operation_result(state)
                 }
             },
         }
@@ -285,14 +291,6 @@ mod tests {
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
 
     #[test]
-    fn node_evaluation_context_ids_are_ascending() {
-        let context1 = NodeEvaluationContext::new();
-        let context2 = NodeEvaluationContext::new();
-        assert!(context1.root_id < context2.root_id);
-        assert!(context1.monotonic_time_since_boot <= context2.monotonic_time_since_boot);
-    }
-
-    #[test]
     fn evaluate_logical_operator_success() -> Result<(), NodeError> {
         // setup this tree:
         //               XOR
@@ -326,7 +324,7 @@ mod tests {
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             // action + assertion
-            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -394,7 +392,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -410,7 +408,7 @@ mod tests {
         let repeated_doubles_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_string(),
             fields: vec!["repeated_doubles".to_string()],
-            message_provider: MOCK_MESSAGE_PROVIDER.clone(),
+            message_provider: Arc::new(MockMessageProvider::with_default_message()),
         });
         let pi_node =
             Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
@@ -438,7 +436,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -463,7 +461,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -515,7 +513,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -530,10 +528,11 @@ mod tests {
         //           /                \
         //     index 0               index 1
         // TestMessage.float_field       2
+        let message_provider = Arc::new(MockMessageProvider::with_default_message());
         let float_field_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_string(),
             fields: vec![FLOAT_FIELD_NAME.to_owned()],
-            message_provider: MOCK_MESSAGE_PROVIDER.clone(),
+            message_provider: Arc::<MockMessageProvider>::clone(&message_provider),
         });
         let divide_node = Arc::new(Node::Combination {
             operator: OP_DIVIDE.clone(),
@@ -543,7 +542,7 @@ mod tests {
         let int_field_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_string(),
             fields: vec!["int_field".to_string()],
-            message_provider: MOCK_MESSAGE_PROVIDER.clone(),
+            message_provider,
         });
         let lt_node = Arc::new(Node::Combination {
             operator: OP_LT.clone(),
@@ -564,7 +563,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
-            assert_eq!(rust_node.evaluate(&context).unwrap_sync()?, *expected_val_ref);
+            assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
         }
         Ok(())
     }
@@ -581,7 +580,7 @@ mod tests {
 
         let context = Arc::new(NodeEvaluationContext::new());
         // expr is "0 < True"
-        let err = lt_node.evaluate(&context).unwrap_sync().unwrap_err();
+        let err = lt_node.evaluate(context).unwrap_sync().unwrap_err();
 
         // 0 cannot be less than True
         assert!(
@@ -593,16 +592,14 @@ mod tests {
 
     #[test]
     fn evaluate_message_provider_invalid_publisher_name_fails() {
-        let message_provider = Arc::new(MockMessageProvider::new());
-        message_provider.set_next_sync_result(Err(MessageProviderError::InvalidPublisherName));
         let node = Arc::new(Node::FieldLeaf {
             publisher_name: String::default(),
             fields: vec![],
-            message_provider,
+            message_provider: Arc::new(MockMessageProvider::new()),
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let err = node.evaluate(&context).unwrap_sync().unwrap_err();
+        let err = node.evaluate(context).unwrap_sync().unwrap_err();
 
         assert!(
             matches!(&err, NodeError::MessageProviderError { .. }),
@@ -622,7 +619,7 @@ mod tests {
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let res = node.evaluate(&context).unwrap_sync().unwrap();
+        let res = node.evaluate(context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
     }
@@ -640,9 +637,34 @@ mod tests {
             Arc::<Int32Value>::clone(&msg),
         ));
 
-        let res = node.evaluate(&context).unwrap_sync().unwrap();
+        let res = node.evaluate(context).unwrap_sync().unwrap();
         let NodeValue::Message(res_msg) = res else { panic!("Unexpected result: {res:?}") };
         assert!(Arc::ptr_eq(&res_msg, &(msg as Arc<dyn MessageDyn>)));
+    }
+
+    #[test]
+    fn evaluate_caches_synchronous_provider_message() {
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+        message_provider.set_next_sync_result(Ok(Some(msg)));
+        let node1 = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![],
+            message_provider: Arc::<MockMessageProvider>::clone(&message_provider),
+        });
+        let node2 = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![],
+            message_provider,
+        });
+        let node3 = Arc::new(Node::Combination {
+            operator: OP_EQ.clone(),
+            left: Some(node1),
+            right: Some(node2),
+        });
+
+        let res = node3.evaluate(Arc::new(NodeEvaluationContext::new())).unwrap_sync().unwrap();
+        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
     }
 
     #[test]
@@ -652,7 +674,7 @@ mod tests {
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let res = timestamp_node.evaluate(&context).unwrap_sync().unwrap();
+        let res = timestamp_node.evaluate(Arc::clone(&context)).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::Int64(context.unix_timestamp.0));
     }
@@ -668,7 +690,7 @@ mod tests {
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros(),
         )
         .unwrap();
-        let result = timestamp_node.evaluate(&context).unwrap_sync();
+        let result = timestamp_node.evaluate(context).unwrap_sync();
 
         let Ok(NodeValue::Int64(actual_timestamp)) = result else {
             panic!("Unexpected result: {:?}", result);
@@ -685,7 +707,7 @@ mod tests {
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let res = timestamp_node.evaluate(&context).unwrap_sync().unwrap();
+        let res = timestamp_node.evaluate(Arc::clone(&context)).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::Int64(context.monotonic_time_since_boot.0));
     }
@@ -710,7 +732,7 @@ mod tests {
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let err = combination_node.evaluate(&context).unwrap_async().await.unwrap_err();
+        let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
             matches!(&err, NodeError::MessageProviderError { e } if matches!(e, MessageProviderError::InvalidPublisherName)),
@@ -739,7 +761,7 @@ mod tests {
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let err = combination_node.evaluate(&context).unwrap_async().await.unwrap_err();
+        let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
             matches!(&err, NodeError::MessageProviderError { e } if matches!(e, MessageProviderError::InvalidPublisherName)),
@@ -776,7 +798,7 @@ mod tests {
         });
 
         let context = Arc::new(NodeEvaluationContext::new());
-        let res = combination_node.evaluate(&context).unwrap_async().await.unwrap();
+        let res = combination_node.evaluate(context).unwrap_async().await.unwrap();
 
         assert_eq!(&res, &NodeValue::Bool(true));
     }

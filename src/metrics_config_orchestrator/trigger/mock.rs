@@ -10,8 +10,8 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::subscription_manager::SubscriptionManager;
-use crate::metrics_config_orchestrator::NodeEvaluationContext;
 
 /// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {

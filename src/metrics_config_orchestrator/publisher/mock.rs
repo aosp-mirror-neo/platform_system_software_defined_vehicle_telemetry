@@ -8,7 +8,8 @@ use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{Publisher, PublisherActivateError, PublisherDeactivateError};
-use crate::metrics_config_orchestrator::{publisher::CallbackFn, NodeEvaluationContext};
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::metrics_config_orchestrator::publisher::CallbackFn;
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
