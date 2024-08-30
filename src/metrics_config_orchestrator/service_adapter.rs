@@ -31,7 +31,7 @@ pub(crate) trait ServiceAdapter {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
-        new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+        new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>>;
 
     /// Deactivate specified subscription.
@@ -93,7 +93,7 @@ pub(crate) struct ServiceAdapterImpl {
                     AsyncMutex<
                         HashMap<
                             SequenceNumberType,
-                            Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+                            Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
                         >,
                     >,
                 >,
@@ -140,7 +140,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
-        mut new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+        mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
         let maybe_subscription_type = if configuration.is_some() {
             // Subscription has configuration, so it can't be shared.
@@ -149,7 +149,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 .create_subscription(
                     service_name,
                     configuration,
-                    Box::new(move |msg| new_message_callback(msg.as_ref())),
+                    Box::new(move |msg| new_message_callback(&msg.into())),
                 )
                 .await?;
 
@@ -223,8 +223,9 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                     // Synchronously invoke callbacks. The loop needs to wait before
                                     // they finish to release the mutex lock when they're done
                                     // because they're allowed to mutate themselves.
+                                    let msg = message.into();
                                     for subscription in subscriptions.values_mut() {
-                                        subscription(message.as_ref());
+                                        subscription(&msg);
                                     }
                                 }
                             });
@@ -331,7 +332,7 @@ pub(super) mod tests {
             Int32Value::descriptor().field_by_name("value").unwrap();
     }
 
-    fn create_empty_fn_box() -> Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync> {
+    fn create_empty_fn_box() -> Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync> {
         Box::new(|_| {})
     }
 

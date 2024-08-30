@@ -25,7 +25,7 @@ pub(crate) struct MockServiceAdapter {
     num_subscribe_calls: AtomicU32,
     num_unsubscribe_calls: AtomicU32,
     new_message_callback:
-        AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>>>,
+        AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>>>,
     successful_subscribe_sender: Mutex<Option<oneshot::Sender<()>>>,
 }
 
@@ -62,7 +62,7 @@ impl ServiceAdapter for MockServiceAdapter {
         &self,
         _service_name: &str,
         configuration: Option<&Any>,
-        new_message_callback: Box<dyn for<'a> FnMut(&'a dyn MessageDyn) + Send + Sync>,
+        new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
         self.num_subscribe_calls.fetch_add(1, Ordering::Release);
 
@@ -157,7 +157,7 @@ impl MockServiceAdapter {
         rx
     }
 
-    pub(crate) async fn publish_new_message(&self, message: &dyn MessageDyn) {
+    pub(crate) async fn publish_new_message(&self, message: &Arc<dyn MessageDyn>) {
         self.new_message_callback.lock().await.as_mut().unwrap()(message);
     }
 

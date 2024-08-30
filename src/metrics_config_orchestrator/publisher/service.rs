@@ -369,14 +369,15 @@ impl ServicePublisher {
         Ok(new_state)
     }
 
-    fn on_new_message(self: &Arc<Self>, message: &dyn MessageDyn) {
+    fn on_new_message(self: &Arc<Self>, message: &Arc<dyn MessageDyn>) {
         // Create context outside of the task, so that the date/time is set as fast as possible,
         // and not just at the moment when this async task should start running.
-        let msg = message.clone_box().into();
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             self.get_name().to_owned(),
-            Arc::clone(&msg),
+            Arc::clone(message),
         ));
+
+        let msg = Arc::clone(message);
         let self_clone = Arc::clone(self);
         tokio::spawn(async move {
             // Lock state mutex and hold it to make sure the publisher is not deactivated.
@@ -642,7 +643,7 @@ mod tests {
 
         let (tx, rx) = oneshot::channel();
         let mut maybe_tx = Some(tx);
-        let msg = Int32Value { value: 42, ..Default::default() };
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
@@ -660,7 +661,7 @@ mod tests {
         let received_message = rx.await.unwrap();
 
         assert!(
-            received_message.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
+            Arc::ptr_eq(&received_message, &msg),
             "Expected {received_message:?} to equal {msg:?}"
         );
         let state = publisher.state.lock().await;
@@ -761,7 +762,7 @@ mod tests {
 
         let (tx, rx) = oneshot::channel();
         let mut maybe_tx = Some(tx);
-        let msg = Int32Value { value: 42, ..Default::default() };
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
@@ -769,7 +770,7 @@ mod tests {
                     let msg = context
                         .get_message(PUBLISHER_NAME)
                         .expect("Publisher message should be present in the context");
-                    maybe_tx.take().unwrap().send(Arc::new(Arc::clone(msg))).unwrap()
+                    maybe_tx.take().unwrap().send(Arc::clone(msg)).unwrap()
                 }),
             )
             .await;
@@ -778,13 +779,10 @@ mod tests {
         let received_message = rx.await.unwrap();
         let latest_message = publisher.get_latest_message().unwrap_sync().unwrap().unwrap();
         assert!(
-            received_message.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
+            Arc::ptr_eq(&received_message, &msg),
             "Expected {received_message:?} to equal {msg:?}"
         );
-        assert!(
-            latest_message.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
-            "Expected {latest_message:?} to equal {msg:?}"
-        );
+        assert!(Arc::ptr_eq(&latest_message, &msg), "Expected {latest_message:?} to equal {msg:?}");
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
