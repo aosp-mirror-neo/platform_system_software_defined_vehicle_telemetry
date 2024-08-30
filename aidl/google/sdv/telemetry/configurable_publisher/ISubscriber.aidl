@@ -12,6 +12,7 @@ package google.sdv.telemetry.configurable_publisher;
 interface ISubscriber {
     /**
      * Sends data to the subscriber. The data format is already known by the subscriber.
+     *
      * There is no check for maximum data size, however the caller must not send more than 10KB of
      * data at a time as all binders for a process shares the same 1MB buffer limit
      *

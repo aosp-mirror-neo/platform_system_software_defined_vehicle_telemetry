@@ -14,6 +14,8 @@ parcelable PublisherInfo {
     // Protobuf descriptor that contains root published message and all its
     // nested sub-messages. Must be non-null. This schema is used by the telemetry
     // service to deserialize the data sent by the publisher.
+    //
+    // fileDescriptorProto must be less than 10Kb to prevent binder buffer to be full.
     byte[] fileDescriptorProto;
 
     // Name of the type of the root published message. Must be non-null

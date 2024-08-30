@@ -20,6 +20,9 @@ interface ITelemetryService {
     /**
      * Adds telemetry MetricsConfigs to TelemetryService.
      *
+     * This API takes a byte buffer as a parameter, however this is safe as metrics configurations
+     * are simple serialized protobuffers without descriptors (expected to be less than 10KB).
+     *
      * @param apiCallId unique integer id assigned to each API call
      * @param metricsConfig serialized metrics config byte array
      */
