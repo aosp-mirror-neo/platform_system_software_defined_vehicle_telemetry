@@ -16,6 +16,9 @@ interface IConfigurablePublisher {
      * Subscribes to a registered publisher.
      * TODO: b/309128308: Design error mechanism for configurable publisher service
      *
+     * The configuration is expected to be small (<10Kb). This API is not suitable for
+     * passing very large configurations as it may cause binder buffer to be full.
+     *
      * @param subscriber used by publisher to send data
      * @param configuration optional configuration associated with the subscriber. Configuration is
      *         opaque to the telemetry service and is sent as part of the Metrics Configuration
@@ -27,6 +30,11 @@ interface IConfigurablePublisher {
 
     /**
      * Returns latest message for the provided configuration.
+     *
+     * The configuration is expected to be small (<10Kb). This API is not suitable for
+     * passing very large configurations as it may cause binder buffer to be full.
+     *
+     * The returned message must be small (<10Kb) to prevent binder buffer to be full.
      *
      * @return Latest message, null if no messages were published,
      *         or INVALID_OPERATION if operation is not supported.
