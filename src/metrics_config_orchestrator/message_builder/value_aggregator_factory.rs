@@ -170,10 +170,13 @@ impl ValueAggregatorFactoryImpl {
             // MessageBuilder can convert integers to floating points, so assigning an
             // integer to a float field is valid. But the reverse is not true.
             || (matches!(expected, NodeValueType::Float) && matches!(actual, NodeValueType::Int))
+            || (matches!(expected, NodeValueType::FloatList) && matches!(actual, NodeValueType::IntList))
             // If the actual type not known yet, it's valid to assign it to any message field.
             || (matches!(expected, NodeValueType::Message { .. }) && matches!(actual, NodeValueType::Message { descriptor } if descriptor.is_none()))
+            || (matches!(expected, NodeValueType::MessageList { .. }) && matches!(actual, NodeValueType::MessageList { descriptor } if descriptor.is_none()))
             // If the expected type is protobuf Any, it's valid to assign any message field.
             || (matches!(expected, NodeValueType::Message { descriptor } if descriptor.as_ref().is_some_and(|d| d == &Any::descriptor())) && matches!(actual, NodeValueType::Message { .. }))
+            || (matches!(expected, NodeValueType::MessageList { descriptor } if descriptor.as_ref().is_some_and(|d| d == &Any::descriptor())) && matches!(actual, NodeValueType::MessageList { .. }))
     }
 }
 
@@ -231,6 +234,9 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                         NodeValueType::Bool => NodeValueType::BoolList,
                         NodeValueType::Int => NodeValueType::IntList,
                         NodeValueType::Float => NodeValueType::FloatList,
+                        NodeValueType::Message { descriptor } => {
+                            NodeValueType::MessageList { descriptor: descriptor.clone() }
+                        }
                         _ => {
                             return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                                 msg: format!(
@@ -365,9 +371,12 @@ mod tests {
 
     // See all valid field names in src/utils/test_utils/test_message.proto
     const ANY_FIELD_NAME: &str = "any_field";
+    const ANY_LIST_FIELD_NAME: &str = "repeated_any";
     const MESSAGE_FIELD_NAME: &str = "message_field";
+    const MESSAGE_LIST_FIELD_NAME: &str = "repeated_messages";
     const INT_FIELD_NAME: &str = "int_field";
     const FLOAT_FIELD_NAME: &str = "float_field";
+    const FLOAT_LIST_FIELD_NAME: &str = "repeated_doubles";
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const STRING_FIELD_NAME: &str = "string_field";
     const BYTES_FIELD_NAME: &str = "bytes_field";
@@ -531,10 +540,23 @@ mod tests {
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
             Box::new(Result::is_ok),
         ),
+        node_output_is_int_list_but_field_is_float_list_ok: (
+            FLOAT_LIST_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
+
         node_output_message_type_unknown_success: (
             MESSAGE_FIELD_NAME,
             &[Some(NodeValueType::Message { descriptor: None })],
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_list_type_unknown_success: (
+            MESSAGE_LIST_FIELD_NAME,
+            &[Some(NodeValueType::Message { descriptor: None })],
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
             Box::new(Result::is_ok),
         ),
         node_output_message_type_any_success: (
@@ -543,12 +565,22 @@ mod tests {
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
             Box::new(Result::is_ok),
         ),
+        node_output_message_list_type_any_success: (
+            ANY_LIST_FIELD_NAME,
+            &[Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })],
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
         node_output_message_type_compatible_success: (
             MESSAGE_FIELD_NAME,
-            &[Some(NodeValueType::Message {
-                descriptor: Some(TestNestedMessage::descriptor()),
-            })],
+            &[Some(NodeValueType::Message { descriptor: Some(TestNestedMessage::descriptor()) })],
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_list_type_compatible_success: (
+            MESSAGE_LIST_FIELD_NAME,
+            &[Some(NodeValueType::Message { descriptor: Some(TestNestedMessage::descriptor()) })],
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
             Box::new(Result::is_ok),
         ),
 
@@ -713,6 +745,12 @@ mod tests {
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
             Box::new(Result::is_ok),
         ),
+        node_output_is_int_list_but_field_is_float_list_ok: (
+            FLOAT_LIST_FIELD_NAME,
+            (vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })], vec![Some(NodeValueType::Int)]),
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
 
         node_output_message_type_unknown_success: (
             MESSAGE_FIELD_NAME,
@@ -720,10 +758,22 @@ mod tests {
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
             Box::new(Result::is_ok),
         ),
-        node_output_any_type_success: (
+        node_output_message_type_list_unknown_success: (
+            MESSAGE_LIST_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message { descriptor: None })]),
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_type_any_success: (
             ANY_FIELD_NAME,
             (create_node_vec(), vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })]),
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_list_type_any_success: (
+            ANY_LIST_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })]),
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
             Box::new(Result::is_ok),
         ),
         node_output_message_type_compatible_success: (
@@ -732,6 +782,14 @@ mod tests {
                 descriptor: Some(TestNestedMessage::descriptor()),
             })]),
             AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_list_type_compatible_success: (
+            MESSAGE_LIST_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message {
+                descriptor: Some(TestNestedMessage::descriptor()),
+            })]),
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
             Box::new(Result::is_ok),
         ),
 

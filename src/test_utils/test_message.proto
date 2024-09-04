@@ -30,10 +30,11 @@ message TestMessage {
   repeated TestEnum repeated_enums = 12;
   repeated TestNestedMessage repeated_messages = 13;
   repeated google.protobuf.Empty repeated_empty = 14;
+  repeated google.protobuf.Any repeated_any = 15;
 
   // Optional fields
-  optional bool optional_bool_field = 15;
-  optional int64 optional_int64_field = 16;
+  optional bool optional_bool_field = 16;
+  optional int64 optional_int64_field = 17;
 }
 
 message TestNestedMessage {
