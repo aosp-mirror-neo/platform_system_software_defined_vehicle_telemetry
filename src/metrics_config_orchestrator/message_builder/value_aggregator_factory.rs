@@ -359,6 +359,7 @@ mod tests {
         AvgAggregation, CountAggregation, DeltaAggregation, MaxAggregation, MinAggregation,
         NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
     };
+    use sdv_telemetry_test_utils::parameterized_test;
 
     use crate::expr::node_value::NodeValue;
 
@@ -376,13 +377,15 @@ mod tests {
         msg_descriptor.field_by_name(field_name).unwrap()
     }
 
-    fn create_int_node_type() -> Vec<Option<NodeValueType>> {
-        vec![Some(NodeValueType::Int)]
-    }
-
     fn create_int_nodes_of_size(n: usize) -> (Vec<Arc<Node>>, Vec<Option<NodeValueType>>) {
         let node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) });
         let node_type = Some(NodeValueType::Int);
+        (vec![node; n], vec![node_type; n])
+    }
+
+    fn create_float_nodes_of_size(n: usize) -> (Vec<Arc<Node>>, Vec<Option<NodeValueType>>) {
+        let node = Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.0) });
+        let node_type = Some(NodeValueType::Float);
         (vec![node; n], vec![node_type; n])
     }
 
@@ -442,718 +445,366 @@ mod tests {
         aggr
     }
 
-    #[test]
-    fn validate_no_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_vector_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value = AggregatedFieldValueProto::VectorAggregation(
-            create_vector_aggregation_proto(Some(0), Some(1)),
-        );
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_min_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::MinAggregation(create_min_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_max_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::MaxAggregation(create_max_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_avg_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_std_dev_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_sum_aggregation_with_int_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_sum_aggregation_with_float_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Float)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_delta_aggregation_with_int_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Int)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_delta_aggregation_with_float_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Float)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_count_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = vec![];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::CountAggregation(CountAggregation::new());
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_node_index_not_set_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        // expression node index is none
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(None));
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::MissingExpressionNodeIndex),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_node_index_out_of_bound_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        // requires node at index 10
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(10)));
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IndexOutOfBound { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_node_output_is_incompatible_with_field_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Bool)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value = AggregatedFieldValueProto::NoAggregation(
-            // node at index 0 is Bool type, but field type is float
-            // cannot assign boolean to float field
-            create_no_aggregation_proto(Some(0)),
-        );
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_node_output_is_int_but_field_is_float_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_node_output_message_type_incompatible_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
-        let node_types =
-            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_node_output_message_type_unknown_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Message { descriptor: None })];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_node_output_message_type_any_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(ANY_FIELD_NAME);
-        let node_types =
-            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_node_output_message_type_string_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::String)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_node_output_message_type_bytes_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(BYTES_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::ByteList)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_node_output_message_type_compatible_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Message {
-            descriptor: Some(TestNestedMessage::descriptor()),
-        })];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.validate(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn validate_vector_aggregation_with_list_typed_node_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::IntList)];
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        // cannot apply vector aggregation on IntList types
-        let aggregated_field_value = AggregatedFieldValueProto::VectorAggregation(
-            create_vector_aggregation_proto(Some(0), None),
-        );
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleAggregation { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_vector_aggregation_with_zero_max_length_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        let aggregated_field_value = AggregatedFieldValueProto::VectorAggregation(
-            create_vector_aggregation_proto(Some(0), Some(0)),
-        );
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::InvalidMaxLengthForVectorAggregation),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_avg_aggregation_incompatible_field_type_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, &node_types);
-        // avg aggregation will produce a float, cannot assign it to int field
-        let aggregated_field_value =
-            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0)));
-
-        let err = factory.validate(&aggregated_field_value, &context).unwrap_err();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_no_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_vector_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value = AggregatedFieldValueProto::VectorAggregation(
-            create_vector_aggregation_proto(Some(0), Some(1)),
-        );
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_min_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::MinAggregation(create_min_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_max_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::MaxAggregation(create_max_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_avg_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_std_dev_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_sum_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_delta_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_count_aggregation_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::CountAggregation(CountAggregation::new());
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_node_output_message_type_string_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(STRING_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::String)];
-        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })];
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_node_output_message_type_bytes_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(BYTES_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::ByteList)];
-        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })];
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_node_index_not_set_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        // expression node index is none
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(None));
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::MissingExpressionNodeIndex),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_node_index_out_of_bound_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        // requires node at index 10
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(10)));
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IndexOutOfBound { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_node_output_is_incompatible_with_field_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Bool)];
-        let nodes = create_node_vec();
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value = AggregatedFieldValueProto::NoAggregation(
-            // node at index 0 is bool type, but field type is float
-            // cannot assign boolean to float field
-            create_no_aggregation_proto(Some(0)),
-        );
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_node_output_is_int_but_field_is_float_ok() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(FLOAT_FIELD_NAME);
-        let node_types = create_int_node_type();
-        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })];
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_node_output_message_type_incompatible_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
-        let node_types =
-            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
-        let nodes = create_node_vec();
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_node_output_message_type_unknown_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Message { descriptor: None })];
-        let nodes = create_node_vec();
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_node_output_any_type_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(ANY_FIELD_NAME);
-        let node_types =
-            vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })];
-        let nodes = create_node_vec();
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_node_output_message_type_compatible_success() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(MESSAGE_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::Message {
-            descriptor: Some(TestNestedMessage::descriptor()),
-        })];
-        let nodes = create_node_vec();
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value =
-            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0)));
-
-        factory.create(&aggregated_field_value, &context).unwrap();
-    }
-
-    #[test]
-    fn create_vector_aggregation_with_list_typed_node_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
-        let node_types = vec![Some(NodeValueType::IntList)];
-        let nodes = vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Int32List(vec![99]) })];
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        // cannot apply vector aggregation on IntList types
-        let aggregated_field_value = AggregatedFieldValueProto::VectorAggregation(
-            create_vector_aggregation_proto(Some(0), None),
-        );
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleAggregation { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_vector_aggregation_with_zero_max_length_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(REPEATED_INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        let aggregated_field_value = AggregatedFieldValueProto::VectorAggregation(
-            create_vector_aggregation_proto(Some(0), Some(0)),
-        );
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::InvalidMaxLengthForVectorAggregation),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_avg_aggregation_incompatible_field_type_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        // avg aggregation will produce a float, cannot assign it to int field
-        let aggregated_field_value =
-            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0)));
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_std_dev_aggregation_incompatible_field_type_fails() {
-        let factory = ValueAggregatorFactoryImpl {};
-        let field_descriptor = get_field_descriptor_from_name(INT_FIELD_NAME);
-        let (nodes, node_types) = create_int_nodes_of_size(1);
-        let context =
-            ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
-        // standard deviation aggregation will produce a float, cannot assign it to int field
-        let aggregated_field_value =
-            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0)));
-
-        let err = factory.create(&aggregated_field_value, &context).err().unwrap();
-
-        assert!(
-            matches!(err, ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
-        );
-    }
+    parameterized_test!(
+        validate,
+
+        |field_descriptor_name, node_types, aggregation, result_matcher: Box<dyn FnOnce(&Result<_, _>) -> bool>| {
+            let factory = ValueAggregatorFactoryImpl {};
+            let field_descriptor = get_field_descriptor_from_name(field_descriptor_name);
+            let context = ValueAggregatorFactoryValidateContext::new(&field_descriptor, node_types);
+
+            let result = factory.validate(&aggregation, &context);
+
+            assert!(result_matcher(&result), "Unexpected result: {result:?}");
+        },
+
+        no_aggregation_ok: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        vector_aggregation_ok: (
+            REPEATED_INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
+        min_aggregation_ok: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::MinAggregation(create_min_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        max_aggregation_ok: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::MaxAggregation(create_max_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        avg_aggregation_ok: (
+            FLOAT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        std_dev_aggregation_ok: (
+            FLOAT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        sum_aggregation_with_int_ok: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        sum_aggregation_with_float_ok: (
+            FLOAT_FIELD_NAME,
+            &[Some(NodeValueType::Float)],
+            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        delta_aggregation_with_int_ok: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        delta_aggregation_with_float_ok: (
+            FLOAT_FIELD_NAME,
+            &[Some(NodeValueType::Float)],
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        count_aggregation_ok: (
+            INT_FIELD_NAME,
+            &[],
+            AggregatedFieldValueProto::CountAggregation(CountAggregation::new()),
+            Box::new(Result::is_ok),
+        ),
+
+        node_output_is_int_but_field_is_float_ok: (
+            FLOAT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_type_unknown_success: (
+            MESSAGE_FIELD_NAME,
+            &[Some(NodeValueType::Message { descriptor: None })],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_type_any_success: (
+            ANY_FIELD_NAME,
+            &[Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_type_compatible_success: (
+            MESSAGE_FIELD_NAME,
+            &[Some(NodeValueType::Message {
+                descriptor: Some(TestNestedMessage::descriptor()),
+            })],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+
+        node_output_message_type_string_success: (
+            STRING_FIELD_NAME,
+            &[Some(NodeValueType::String)],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_type_bytes_success: (
+            BYTES_FIELD_NAME,
+            &[Some(NodeValueType::ByteList)],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+
+        node_index_not_set_fails: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            // Expression node index is `None`
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(None)),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::MissingExpressionNodeIndex))),
+        ),
+        node_index_out_of_bound_fails: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            // Requires node at index `10`
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(10))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IndexOutOfBound { .. }))),
+        ),
+        node_output_is_incompatible_with_field_fails: (
+            FLOAT_FIELD_NAME,
+            &[Some(NodeValueType::Bool)],
+            AggregatedFieldValueProto::NoAggregation(
+                // node at index 0 is bool type, but field type is float
+                // cannot assign boolean to float field
+                create_no_aggregation_proto(Some(0)),
+            ),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+        node_output_message_type_incompatible_fails: (
+            MESSAGE_FIELD_NAME,
+            &[Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+        vector_aggregation_with_list_typed_node_fails: (
+            REPEATED_INT_FIELD_NAME,
+            &[Some(NodeValueType::IntList)],
+            AggregatedFieldValueProto::VectorAggregation(
+                create_vector_aggregation_proto(Some(0), None),
+            ),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleAggregation { .. }))),
+        ),
+        vector_aggregation_with_zero_max_length_fails: (
+            REPEATED_INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::VectorAggregation(
+                create_vector_aggregation_proto(Some(0), Some(0)),
+            ),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::InvalidMaxLengthForVectorAggregation))),
+        ),
+        avg_aggregation_incompatible_field_type_fails: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+        std_dev_aggregation_incompatible_field_type_fails: (
+            INT_FIELD_NAME,
+            &[Some(NodeValueType::Int)],
+            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+    );
+
+    parameterized_test!(
+        create,
+
+        |field_descriptor_name, nodes_and_types: (Vec<Arc<Node>>, Vec<Option<NodeValueType>>), aggregation, result_matcher: Box<dyn FnOnce(&Result<_, _>) -> bool>| {
+            let (nodes, node_types) = nodes_and_types;
+            let factory = ValueAggregatorFactoryImpl {};
+            let field_descriptor = get_field_descriptor_from_name(field_descriptor_name);
+            let context =
+                ValueAggregatorFactoryCreateContext::new(&field_descriptor, &node_types, &nodes);
+
+            let result = factory.create(&aggregation, &context);
+
+            assert!(result_matcher(&result), "Unexpected result: {result:?}");
+        },
+
+        no_aggregation_ok: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        vector_aggregation_ok: (
+            REPEATED_INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
+        min_aggregation_ok: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::MinAggregation(create_min_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        max_aggregation_ok: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::MaxAggregation(create_max_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        avg_aggregation_ok: (
+            FLOAT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        std_dev_aggregation_ok: (
+            FLOAT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        sum_aggregation_with_int_ok: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        sum_aggregation_with_float_ok: (
+            FLOAT_FIELD_NAME,
+            create_float_nodes_of_size(1),
+            AggregatedFieldValueProto::SumAggregation(create_sum_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        delta_aggregation_with_int_ok: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        delta_aggregation_with_float_ok: (
+            FLOAT_FIELD_NAME,
+            create_float_nodes_of_size(1),
+            AggregatedFieldValueProto::DeltaAggregation(create_delta_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        count_aggregation_ok: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(0),
+            AggregatedFieldValueProto::CountAggregation(CountAggregation::new()),
+            Box::new(Result::is_ok),
+        ),
+
+        node_output_is_int_but_field_is_float_ok: (
+            FLOAT_FIELD_NAME,
+            (vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })], vec![Some(NodeValueType::Int)]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+
+        node_output_message_type_unknown_success: (
+            MESSAGE_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message { descriptor: None })]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_any_type_success: (
+            ANY_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_message_type_compatible_success: (
+            MESSAGE_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message {
+                descriptor: Some(TestNestedMessage::descriptor()),
+            })]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+
+        node_output_type_string_success: (
+            STRING_FIELD_NAME,
+            (vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })], vec![Some(NodeValueType::String)]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        node_output_type_bytes_success: (
+            BYTES_FIELD_NAME,
+            (vec![Arc::new(Node::ConstantLeaf { value: NodeValue::None })], vec![Some(NodeValueType::ByteList)]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+
+        node_index_not_set_fails: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            // Expression node index is `None`
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(None)),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::MissingExpressionNodeIndex))),
+        ),
+        node_index_out_of_bound_fails: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            // Requires node at index `10`
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(10))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IndexOutOfBound { .. }))),
+        ),
+        node_output_is_incompatible_with_field_fails: (
+            FLOAT_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Bool)]),
+            AggregatedFieldValueProto::NoAggregation(
+                // node at index 0 is bool type, but field type is float
+                // cannot assign boolean to float field
+                create_no_aggregation_proto(Some(0)),
+            ),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+        node_output_message_type_incompatible_fails: (
+            MESSAGE_FIELD_NAME,
+            (create_node_vec(), vec![Some(NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) })]),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+        vector_aggregation_with_list_typed_node_fails: (
+            REPEATED_INT_FIELD_NAME,
+            (vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Int32List(vec![99]) })], vec![Some(NodeValueType::IntList)]),
+            AggregatedFieldValueProto::VectorAggregation(
+                create_vector_aggregation_proto(Some(0), None),
+            ),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleAggregation { .. }))),
+        ),
+        vector_aggregation_with_zero_max_length_fails: (
+            REPEATED_INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::VectorAggregation(
+                create_vector_aggregation_proto(Some(0), Some(0)),
+            ),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::InvalidMaxLengthForVectorAggregation))),
+        ),
+        avg_aggregation_incompatible_field_type_fails: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::AvgAggregation(create_avg_aggregation_proto(Some(0))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+        std_dev_aggregation_incompatible_field_type_fails: (
+            INT_FIELD_NAME,
+            create_int_nodes_of_size(1),
+            AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0))),
+            Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
+        ),
+    );
 }

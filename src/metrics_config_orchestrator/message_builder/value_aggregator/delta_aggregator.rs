@@ -7,6 +7,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric delta is calculated.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct DeltaAggregator {
     // Stores the last seen node to be used when calculating the delta for the next node.
     previous_value: NodeValue,
