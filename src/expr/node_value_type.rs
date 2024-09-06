@@ -52,12 +52,12 @@ impl NodeValueType {
     // type to the list
     fn can_apply_list_operator(&self, other: Option<&NodeValueType>) -> bool {
         match self {
-            NodeValueType::BoolList => other.is_none_or(|o| o.is_bool()),
+            NodeValueType::BoolList => OptionExtension::is_none_or(&other, |o| o.is_bool()),
             NodeValueType::IntList | NodeValueType::FloatList => {
-                other.is_none_or(|o| o.is_numeric())
+                OptionExtension::is_none_or(&other, |o| o.is_numeric())
             }
             NodeValueType::MessageList { descriptor } => {
-                other.is_none_or(|o| {
+                OptionExtension::is_none_or(&other, |o| {
                     // Compatible if the other type is a message and the descriptors
                     // match or not specified in either.
                     let NodeValueType::Message { descriptor: other_descriptor } = o else {
@@ -236,7 +236,7 @@ impl OperatorProtoExtension for OperatorProto {
                     | RelationalOperator::LT
                     | RelationalOperator::LT_OR_EQ => {
                         if (left.is_none_or(|l| l.is_numeric()))
-                            && get_right().is_none_or(|r| r.is_numeric())
+                            && OptionExtension::is_none_or(&get_right(), |r| r.is_numeric())
                         {
                             Ok(Some(NodeValueType::Bool))
                         } else {
@@ -264,7 +264,9 @@ impl OperatorProtoExtension for OperatorProto {
                 NodeError::UnknownOperator { op: format!("Logical operator with enum value {}", i) }
             })? {
                 LogicalOperator::AND | LogicalOperator::OR | LogicalOperator::XOR => {
-                    if left.is_none_or(|l| l.is_bool()) && get_right().is_none_or(|r| r.is_bool()) {
+                    if left.is_none_or(|l| l.is_bool())
+                        && OptionExtension::is_none_or(&get_right(), |r| r.is_bool())
+                    {
                         Ok(Some(NodeValueType::Bool))
                     } else {
                         Err(NodeError::LogicalOperatorIncompatibleOperands)
@@ -296,12 +298,12 @@ impl OperatorProtoExtension for OperatorProto {
                         {
                             Ok(Some(NodeValueType::Float))
                         } else if left.is_none_or(|l| l.is_int())
-                            && get_right().is_none_or(|r| r.is_int())
+                            && OptionExtension::is_none_or(&get_right(), |r| r.is_int())
                         {
                             // Type cannot be determined because it can be either int or float.
                             Ok(None)
                         } else if left.is_none_or(|l| l.is_numeric())
-                            && get_right().is_none_or(|r| r.is_numeric())
+                            && OptionExtension::is_none_or(&get_right(), |r| r.is_numeric())
                         {
                             // If the known argument is a float, the result will
                             // always be float, not int.
@@ -312,7 +314,7 @@ impl OperatorProtoExtension for OperatorProto {
                     }
                     ArithmeticOperator::DIVIDE => {
                         if left.is_none_or(|l| l.is_numeric())
-                            && get_right().is_none_or(|r| r.is_numeric())
+                            && OptionExtension::is_none_or(&get_right(), |r| r.is_numeric())
                         {
                             Ok(Some(NodeValueType::Float))
                         } else {
@@ -320,7 +322,8 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                     ArithmeticOperator::MODULO_TRUNC => {
-                        if left.is_none_or(|l| l.is_int()) && get_right().is_none_or(|r| r.is_int())
+                        if left.is_none_or(|l| l.is_int())
+                            && OptionExtension::is_none_or(&get_right(), |r| r.is_int())
                         {
                             Ok(Some(NodeValueType::Int))
                         } else {

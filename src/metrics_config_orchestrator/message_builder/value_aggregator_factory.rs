@@ -155,7 +155,9 @@ impl ValueAggregatorFactoryImpl {
         let value_type = aggregated_field_value.get_node_value_type(node_types)?;
 
         // check value type for compatibility if it's available
-        if value_type.is_none_or(|value_type| Self::is_compatible(&field_type, value_type)) {
+        if OptionExtension::is_none_or(&value_type, |value_type| {
+            Self::is_compatible(&field_type, value_type)
+        }) {
             Ok(())
         } else {
             Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment {
