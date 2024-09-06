@@ -6,6 +6,7 @@ use crate::metrics_config_orchestrator::message_builder::{
 };
 
 /// Implementation of ValueAggregator that has preset output for `compute()`.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct MockValueAggregator {
     fail_compute: bool,
 }

@@ -5,6 +5,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric standard deviation is calculated.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct StdDevAggregator {
     // Stores the running average. This is saved for efficient standard deviation computation
     // updates.

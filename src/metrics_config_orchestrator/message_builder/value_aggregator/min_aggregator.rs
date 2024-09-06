@@ -5,6 +5,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where aggregation for numeric minimum is performed.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct MinAggregator {
     // Stores the minimum so far.
     current_min: Option<NodeValue>,

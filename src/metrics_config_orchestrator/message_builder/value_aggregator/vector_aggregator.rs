@@ -5,6 +5,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where vector(concatenation) aggregation is performed.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct VectorAggregator {
     // Stores the existing vector. New values to be appended to the existing vector.
     current_vec: Option<NodeValue>,

@@ -4,6 +4,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where no aggregation is performed.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct PassThroughAggregator {}
 
 impl ValueAggregator for PassThroughAggregator {

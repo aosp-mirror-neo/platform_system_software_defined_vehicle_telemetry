@@ -6,6 +6,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric sum is calculated.
+#[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct SumAggregator {
     // Stores the sum of values so far.
     current_sum: NodeValue,
