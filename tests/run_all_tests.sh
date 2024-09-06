@@ -4,16 +4,15 @@
 set -e -o pipefail
 
 log() {
-    echo "----------------------"
-    echo "$1"
-    echo "----------------------"
-    echo
+  echo "----------------------"
+  echo "$1"
+  echo "----------------------"
+  echo
 }
 
 log "SDV Telemetry Test Suite"
 
-if [[ -z "$ANDROID_BUILD_TOP" ]]
-then
+if [[ -z "$ANDROID_BUILD_TOP" ]]; then
   log "[ERROR] ANDROID_BUILD_TOP is missing. Please, lunch the Android target."
   exit -1
 fi
@@ -42,10 +41,10 @@ cvd reset -y
 
 # Restart CVD for changes to take effect
 log "Starting VM instance..."
-cvd start
+cvd create
 
 echo "Waiting for VM to come online."
-until adb shell echo 'VM running' &> /dev/null; do
+until adb shell echo 'VM running' &>/dev/null; do
   echo "."
   sleep 1
 done

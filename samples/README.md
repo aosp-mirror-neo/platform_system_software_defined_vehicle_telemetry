@@ -36,7 +36,7 @@ lunch sdv_ivi_cf-trunk_staging-userdebug
 ### Start Guest
 
 ```bash
-cvd start
+cvd create
 adb root
 ```
 

@@ -7,7 +7,7 @@ run_logcat=false
 start_vm() {
 
     cvd clear &>/dev/null
-    cvd start &>/dev/null &
+    cvd create &>/dev/null &
 
     printf "\nPrint simulator logs? (Y/n)?"
     read answer

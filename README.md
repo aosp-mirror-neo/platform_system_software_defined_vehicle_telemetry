@@ -39,11 +39,11 @@ If you want to run specific tests only, use the instructions below.
 ### Unit Test Instructions
 
 Starting with [ag/25844146](http://ag/25844146) unit tests are converted to
-device side tests and instructions have changed. Run `cvd start` in a different
+device side tests and instructions have changed. Run `cvd create` in a different
 terminal:
 
 ```bash
-cvd start
+cvd create
 ```
 
 Run the tests:
@@ -57,7 +57,7 @@ atest libsdv_telemetry_unit_tests
 Start a Cuttlefish Virtual Device:
 
 ```bash
-cvd start
+cvd create
 ```
 
 Run the tests:
@@ -80,10 +80,10 @@ m -j
 ```
 
 Start SDV IVI target (if you want to run it in a second VM instance, otherwise
-you can use `cvd start`):
+you can use `cvd create`):
 
 ```bash
-cvd start -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.sdv.instance_name=instance2 androidboot.virt.address=4"
+cvd create -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.sdv.instance_name=instance2 androidboot.virt.address=4"
 ```
 
 Start the IVI telemetry agent:

@@ -28,18 +28,18 @@ sudo apt install gqui
 
 ## What it does
 
-1.  Converts the `.textproto` files to binary `.pb` files using
+1. Converts the `.textproto` files to binary `.pb` files using
     [gqui](https://g3doc.corp.google.com/util/tools/gqui/g3doc/overview.md) in a
     temporary folder
-2.  Runs `cvd clear` and then `cvd start`
-3.  Pushing all binary config files to the vm
-4.  Starts all publishers listed in [tests/manual_testing/script/.env](.env)
-5.  Starts telemetry client with the configs
-6.  Starts `adb logcat` and directs output to file if specified in
+2. Runs `cvd clear` and then `cvd create`
+3. Pushing all binary config files to the vm
+4. Starts all publishers listed in [tests/manual_testing/script/.env](.env)
+5. Starts telemetry client with the configs
+6. Starts `adb logcat` and directs output to file if specified in
     [tests/manual_testing/script/.env](.env)
-7.  Waits for rust client to finish execution
-8.  Pulls all created reports from the vm into a temporary folder
-9.  Converts binary reports into human-readable `.textproto` files and writes
+7. Waits for rust client to finish execution
+8. Pulls all created reports from the vm into a temporary folder
+9. Converts binary reports into human-readable `.textproto` files and writes
     them to a folder reports/ in the set output directory
 10. Stops publishers, stops vm, deletes temporary folders
 
