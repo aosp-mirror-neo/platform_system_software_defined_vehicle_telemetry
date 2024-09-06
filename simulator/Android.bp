@@ -87,12 +87,6 @@ rust_test {
     defaults: [
         "telemetry_simulator@rust_defaults",
     ],
-    test_suites: [
-        // keep-sorted start
-        "automotive-sdv-tests",
-        "general-tests",
-        // keep-sorted end
-    ],
     rustlibs: [
         // keep-sorted start
         "libsdv_telemetry_test_utils",
@@ -110,13 +104,23 @@ rust_test {
         "test_data/*",
         // keep-sorted end
     ],
-    test_options: {
-        unit_test: true,
-    },
     flags: [
         // keep-sorted start
         "-A clippy::panic",
         "-A clippy::unwrap_used",
         // keep-sorted end
     ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    auto_gen_config: true,
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }
