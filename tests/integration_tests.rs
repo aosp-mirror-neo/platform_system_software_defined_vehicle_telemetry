@@ -243,6 +243,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/crash_reports.textproto",
             "./samples/sample_protos/data_tunnel_publisher.textproto",
             "./samples/sample_protos/data_tunnel_publisher_aggregation.textproto",
+            "./samples/sample_protos/error_publisher.textproto",
             "./samples/sample_protos/frequent_reports.textproto",
             "./samples/sample_protos/journey_summary.textproto",
             "./samples/sample_protos/processing_frequent_data.textproto",
