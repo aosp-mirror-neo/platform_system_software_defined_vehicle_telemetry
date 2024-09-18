@@ -56,6 +56,7 @@ impl Publisher for AggregationPublisher {
         let latest_message = self.base.get_latest_message();
         if self.reset_on_get {
             self.base.reset_latest_message();
+            self.message_builder.reset();
         }
         Ok(latest_message).into()
     }
@@ -277,14 +278,15 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
-    async fn get_latest_message_resets_latest_message() {
+    async fn get_latest_message_resets() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
+        let message_builder = Arc::new(MockMessageBuilder::new());
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
-            Arc::new(MockMessageBuilder::new()),
+            Arc::<MockMessageBuilder>::clone(&message_builder),
             true,
             vec![Arc::<MockTrigger>::clone(&trigger)],
         ));
@@ -302,6 +304,7 @@ mod tests {
 
         assert!(msg1.is_some());
         assert!(msg2.is_none(), "Unexpected message: {:?}", msg2.unwrap());
+        assert_eq!(message_builder.get_num_reset_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

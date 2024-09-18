@@ -4,6 +4,8 @@ use super::node_value_extension::NodeValueExtension;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
+const DEFAULT_DOUBLE_VALUE: NodeValue = NodeValue::Double(0.0);
+
 /// Field value type where numeric standard deviation is calculated.
 #[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct StdDevAggregator {
@@ -43,11 +45,17 @@ impl ValueAggregator for StdDevAggregator {
         self.n += 1;
         Ok(self.current_std_dev.clone())
     }
+
+    fn reset(&mut self) {
+        self.current_avg = DEFAULT_DOUBLE_VALUE;
+        self.current_std_dev = DEFAULT_DOUBLE_VALUE;
+        self.n = 0;
+    }
 }
 
 impl StdDevAggregator {
     pub(crate) fn new() -> Self {
-        Self { current_avg: NodeValue::Double(0.0), current_std_dev: NodeValue::Double(0.0), n: 0 }
+        Self { current_avg: DEFAULT_DOUBLE_VALUE, current_std_dev: DEFAULT_DOUBLE_VALUE, n: 0 }
     }
 
     // Update the running standard deviation after learning the new sample. The calculation is
@@ -109,7 +117,7 @@ mod tests {
     }
 
     #[test]
-    fn std_dev_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let node_outputs: &[i64] = &[2, 4, 4, 4, 5, 5, 7, 9];
         let expected: &[f64] = &[
             0.0,
@@ -127,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn std_dev_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let node_outputs: &[f64] = &[2.0, 3.5, 4.25, 4.75, 5.5, 4.5, 6.75, 9.75];
         let expected: &[f64] = &[
             0.0,
@@ -145,7 +153,7 @@ mod tests {
     }
 
     #[test]
-    fn std_dev_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = StdDevAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -154,15 +162,27 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn std_dev_aggregator_compute_with_non_numeric_value_panics() {
+    fn compute_with_non_numeric_value_panics() {
         let mut bad_std_dev = StdDevAggregator::new();
         bad_std_dev.compute(Some(NodeValue::Bool(true))).unwrap();
     }
 
     #[test]
     #[should_panic]
-    fn std_dev_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = StdDevAggregator::new();
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = StdDevAggregator::new();
+        aggregator.compute(Some(2.into())).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.current_avg, DEFAULT_DOUBLE_VALUE);
+        assert_eq!(aggregator.current_std_dev, DEFAULT_DOUBLE_VALUE);
+        assert_eq!(aggregator.n, 0);
     }
 }

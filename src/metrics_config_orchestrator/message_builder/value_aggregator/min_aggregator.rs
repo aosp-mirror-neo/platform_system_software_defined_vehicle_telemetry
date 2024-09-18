@@ -42,6 +42,10 @@ impl ValueAggregator for MinAggregator {
             Ok(node_value)
         }
     }
+
+    fn reset(&mut self) {
+        self.current_min = None;
+    }
 }
 
 #[cfg(test)]
@@ -61,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn min_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let node_outputs: &[i32] = &[0, 1, 2, 0, -1, -2, -1];
         let expected_min: &[i32] = &[0, 0, 0, 0, -1, -2, -2];
 
@@ -71,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn min_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let node_outputs: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 1.25, 2.5];
         let expected_min: &[f32] = &[5.0, 2.5, 1.25, 0.625, 0.625, 0.625, 0.625];
 
@@ -81,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn min_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = MinAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -89,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn min_aggregator_compute_with_non_numeric_value_fails() {
+    fn compute_with_non_numeric_value_fails() {
         let mut aggregator = MinAggregator::new();
         let err = aggregator.compute(Some(NodeValue::Bool(true))).unwrap_err();
 
@@ -102,8 +106,18 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn min_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = MinAggregator::new();
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = MinAggregator::new();
+        aggregator.compute(Some(2.into())).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.current_min, None);
     }
 }

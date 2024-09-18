@@ -20,6 +20,10 @@ impl ValueAggregator for CountAggregator {
         self.count += 1;
         Ok(NodeValue::Int32(self.count))
     }
+
+    fn reset(&mut self) {
+        self.count = 0;
+    }
 }
 
 #[cfg(test)]
@@ -27,7 +31,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn count_aggregator_compute_ok() {
+    fn compute_ok() {
         let mut aggregator = CountAggregator::new();
 
         // compute 5 times to see the count is incrementing
@@ -38,5 +42,15 @@ mod tests {
             // assert
             assert_eq!(res, NodeValue::Int32(i + 1));
         }
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = CountAggregator::new();
+        aggregator.compute(None).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.count, 0);
     }
 }

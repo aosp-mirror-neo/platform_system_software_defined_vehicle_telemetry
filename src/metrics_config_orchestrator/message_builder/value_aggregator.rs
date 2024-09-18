@@ -36,6 +36,7 @@ pub(crate) enum AggregationError {
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(std::fmt::Debug))]
 pub(crate) trait ValueAggregator: Send + Sync {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError>;
+    fn reset(&mut self);
 }
 
 #[cfg(test)]

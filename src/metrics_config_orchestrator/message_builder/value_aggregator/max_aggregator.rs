@@ -42,6 +42,10 @@ impl ValueAggregator for MaxAggregator {
             Ok(node_value)
         }
     }
+
+    fn reset(&mut self) {
+        self.current_max = None;
+    }
 }
 
 #[cfg(test)]
@@ -61,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn max_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let node_outputs: &[i32] = &[0, 1, 2, 0, -1, 3, 0, -1];
         let expected_max: &[i32] = &[0, 1, 2, 2, 2, 3, 3, 3];
 
@@ -71,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn max_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let node_outputs: &[f32] = &[-1.0, -0.5, 1.0, 2.5, 0.0, -1.0];
         let expected_max: &[f32] = &[-1.0, -0.5, 1.0, 2.5, 2.5, 2.5];
 
@@ -81,7 +85,7 @@ mod tests {
     }
 
     #[test]
-    fn max_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = MaxAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -89,7 +93,7 @@ mod tests {
     }
 
     #[test]
-    fn max_aggregator_compute_with_non_numeric_value_fails() {
+    fn compute_with_non_numeric_value_fails() {
         let mut aggregator = MaxAggregator::new();
         let err = aggregator.compute(Some(NodeValue::Bool(true))).unwrap_err();
 
@@ -102,8 +106,18 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn max_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = MaxAggregator::new();
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = MaxAggregator::new();
+        aggregator.compute(Some(2.into())).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.current_max, None);
     }
 }

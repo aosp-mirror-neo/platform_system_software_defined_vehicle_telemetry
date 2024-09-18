@@ -46,6 +46,10 @@ impl ValueAggregator for DeltaAggregator {
             Ok(current_delta)
         }
     }
+
+    fn reset(&mut self) {
+        self.previous_value = NodeValue::None;
+    }
 }
 
 #[cfg(test)]
@@ -67,7 +71,7 @@ mod tests {
     }
 
     #[test]
-    fn delta_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let node_outputs: &[i64] = &[-2, 0, 2, 4, 6, 8, -32, 0];
         let expected_delta: &[i64] = &[2, 2, 2, 2, 2, -40, 32];
 
@@ -77,7 +81,7 @@ mod tests {
     }
 
     #[test]
-    fn delta_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let node_outputs: &[f64] = &[-2.50, 0.0, 2.20, 4.0, 6.0, 8.70, -32.0, 0.0];
         let expected_delta: &[f64] = &[2.5, 2.2, 1.8, 2.0, 2.7, -40.7, 32.0];
 
@@ -87,7 +91,7 @@ mod tests {
     }
 
     #[test]
-    fn delta_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = DeltaAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -96,15 +100,25 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn delta_aggregator_compute_with_non_numeric_value_panics() {
+    fn compute_with_non_numeric_value_panics() {
         let mut aggregator = DeltaAggregator::new();
         aggregator.compute(Some(NodeValue::Bool(true))).unwrap();
     }
 
     #[test]
     #[should_panic]
-    fn delta_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = DeltaAggregator::new();
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = DeltaAggregator::new();
+        aggregator.compute(Some(2.into())).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.previous_value, NodeValue::None);
     }
 }

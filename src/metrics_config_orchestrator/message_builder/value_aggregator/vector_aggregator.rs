@@ -37,6 +37,10 @@ impl ValueAggregator for VectorAggregator {
             Ok(new_vec)
         }
     }
+
+    fn reset(&mut self) {
+        self.current_vec = None;
+    }
 }
 
 #[cfg(test)]
@@ -49,7 +53,7 @@ mod tests {
     use crate::expr::mock::TEST_MESSAGE;
 
     #[test]
-    fn vector_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let test_int = 100;
         let mut aggregator = VectorAggregator::new(None);
 
@@ -66,7 +70,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_int_and_limited_length_ok() {
+    fn compute_with_int_and_limited_length_ok() {
         let mut aggregator = VectorAggregator::new(
             Some(3), // max length = 3
         );
@@ -90,7 +94,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let test_double = 1.2_f64;
         let mut aggregator = VectorAggregator::new(None);
 
@@ -107,7 +111,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_float_and_limited_length_ok() {
+    fn compute_with_float_and_limited_length_ok() {
         let mut aggregator = VectorAggregator::new(
             Some(3), // max length = 3
         );
@@ -131,7 +135,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_message_value_ok() {
+    fn compute_with_message_value_ok() {
         let message = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let mut aggregator = VectorAggregator::new(None);
 
@@ -148,7 +152,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_message_value_and_limited_length_ok() {
+    fn compute_with_message_value_and_limited_length_ok() {
         let max_len: usize = 3;
         let message = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
         let mut aggregator = VectorAggregator::new(Some(max_len as u32));
@@ -170,7 +174,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = VectorAggregator::new(None);
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -178,7 +182,7 @@ mod tests {
     }
 
     #[test]
-    fn vector_aggregator_compute_with_vector_fails() {
+    fn compute_with_vector_fails() {
         let mut aggregator = VectorAggregator::new(None);
         let err = aggregator.compute(Some(NodeValue::BoolList(vec![true, false]))).unwrap_err();
 
@@ -191,8 +195,18 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn vector_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = VectorAggregator::new(None);
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = VectorAggregator::new(None);
+        aggregator.compute(Some(2.into())).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.current_vec, None);
     }
 }

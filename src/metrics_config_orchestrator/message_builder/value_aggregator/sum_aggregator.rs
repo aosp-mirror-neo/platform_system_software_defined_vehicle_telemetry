@@ -5,6 +5,8 @@ use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator,
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
+const DEFAULT_SUM_VALUE: NodeValue = NodeValue::Int32(0);
+
 /// Field value type where numeric sum is calculated.
 #[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct SumAggregator {
@@ -14,7 +16,7 @@ pub(crate) struct SumAggregator {
 
 impl SumAggregator {
     pub(crate) fn new() -> Self {
-        Self { current_sum: NodeValue::Int32(0) }
+        Self { current_sum: DEFAULT_SUM_VALUE }
     }
 }
 
@@ -30,6 +32,10 @@ impl ValueAggregator for SumAggregator {
             move || Ok(node_value),
         )?;
         Ok(self.current_sum.clone())
+    }
+
+    fn reset(&mut self) {
+        self.current_sum = DEFAULT_SUM_VALUE;
     }
 }
 
@@ -50,7 +56,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let node_outputs: &[i64] = &[-2, 0, 2, 4, 6, 8, -32];
         let expected_sum: &[i64] = &[-2, -2, 0, 4, 10, 18, -14];
         let res = get_computed_sums_from_aggregator(node_outputs);
@@ -58,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let node_outputs: &[f64] = &[-2.0, 0.0, 2.0, 4.0, 6.0, 8.0, -32.0];
         let expected_sum: &[f64] = &[-2.0, -2.0, 0.0, 4.0, 10.0, 18.0, -14.0];
         let res = get_computed_sums_from_aggregator(node_outputs);
@@ -66,7 +72,7 @@ mod tests {
     }
 
     #[test]
-    fn sum_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = SumAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -75,15 +81,25 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn sum_aggregator_compute_with_non_numeric_value_panics() {
+    fn compute_with_non_numeric_value_panics() {
         let mut bad_sum_aggregator = SumAggregator::new();
         bad_sum_aggregator.compute(Some(NodeValue::Bool(true))).unwrap();
     }
 
     #[test]
     #[should_panic]
-    fn sum_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = SumAggregator::new();
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = SumAggregator::new();
+        aggregator.compute(Some(2.into())).unwrap();
+
+        aggregator.reset();
+
+        assert_eq!(aggregator.current_sum, DEFAULT_SUM_VALUE);
     }
 }

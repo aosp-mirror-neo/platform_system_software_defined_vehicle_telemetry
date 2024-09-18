@@ -25,6 +25,9 @@ pub(crate) trait MessageBuilder: Send + Sync {
         self: Arc<Self>,
         context: &Arc<NodeEvaluationContext>,
     ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>;
+
+    /// Resets internal aggregation state of the builder.
+    fn reset(&self);
 }
 
 pub(crate) struct MessageBuilderImpl {
@@ -108,6 +111,10 @@ impl MessageBuilder for MessageBuilderImpl {
             }
             Ok(msg)
         })
+    }
+
+    fn reset(&self) {
+        self.field_assignments.lock().iter_mut().for_each(|(_, aggregator)| aggregator.reset());
     }
 }
 
@@ -520,5 +527,23 @@ mod tests {
 
         let expected_message = TestMessage { int_field: 80, ..Default::default() };
         assert_eq!(&res, &(Box::new(expected_message) as Box<dyn MessageDyn>));
+    }
+
+    #[test]
+    fn reset_ok() {
+        let aggregator = MockValueAggregator::new();
+        let builder = Arc::new(MessageBuilderImpl::new(
+            String::default(),
+            TestMessage::descriptor(),
+            vec![(
+                INT_FIELD_NAME.to_owned(),
+                Box::new(aggregator.clone()) as Box<dyn ValueAggregator>,
+            )],
+            vec![],
+        ));
+
+        builder.reset();
+
+        assert_eq!(aggregator.get_num_reset_calls(), 1);
     }
 }

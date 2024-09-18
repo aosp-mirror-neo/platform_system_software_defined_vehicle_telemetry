@@ -11,6 +11,8 @@ impl ValueAggregator for PassThroughAggregator {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError> {
         Ok(node_value.expect("Aggregator should be provided with a value"))
     }
+
+    fn reset(&mut self) {}
 }
 
 #[cfg(test)]
@@ -18,7 +20,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pass_through_aggregator_compute_ok() {
+    fn compute_ok() {
         let int64_val = NodeValue::Int64(20);
         let mut aggregator = PassThroughAggregator {};
 
@@ -29,8 +31,14 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn pass_through_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = PassThroughAggregator {};
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = PassThroughAggregator {};
+        aggregator.reset();
     }
 }

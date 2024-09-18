@@ -7,6 +7,7 @@ use parking_lot::Mutex;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_utils::operation_result::OperationResult;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
 use crate::expr::node::NodeEvaluationContext;
@@ -16,6 +17,7 @@ pub(crate) struct MockMessageBuilder {
     next_error: Mutex<Option<MessageBuilderError>>,
     next_async_result:
         Mutex<Option<BoxFuture<'static, Result<Box<dyn MessageDyn>, MessageBuilderError>>>>,
+    num_reset_calls: AtomicU32,
     result_callback: Mutex<
         Option<
             Box<
@@ -50,6 +52,10 @@ impl MessageBuilder for MockMessageBuilder {
             })))
         }
     }
+
+    fn reset(&self) {
+        self.num_reset_calls.fetch_add(1, Ordering::AcqRel);
+    }
 }
 
 impl MockMessageBuilder {
@@ -57,8 +63,13 @@ impl MockMessageBuilder {
         Self {
             next_error: None.into(),
             next_async_result: None.into(),
+            num_reset_calls: 0.into(),
             result_callback: None.into(),
         }
+    }
+
+    pub(crate) fn get_num_reset_calls(&self) -> u32 {
+        self.num_reset_calls.load(Ordering::Acquire)
     }
 
     pub(crate) fn set_next_error(&self, error: MessageBuilderError) {

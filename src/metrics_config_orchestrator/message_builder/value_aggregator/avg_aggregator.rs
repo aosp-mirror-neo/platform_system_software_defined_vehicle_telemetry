@@ -4,6 +4,8 @@ use super::node_value_extension::NodeValueExtension;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
+const DEFAULT_AVG_VALUE: NodeValue = NodeValue::Double(0.0);
+
 /// Field value type where numeric average is calculated.
 #[cfg_attr(test, derive(std::fmt::Debug))]
 pub(crate) struct AvgAggregator {
@@ -15,7 +17,7 @@ pub(crate) struct AvgAggregator {
 
 impl AvgAggregator {
     pub(crate) fn new() -> Self {
-        Self { current_avg: NodeValue::Double(0.0), n: 0 }
+        Self { current_avg: DEFAULT_AVG_VALUE, n: 0 }
     }
 }
 
@@ -28,6 +30,11 @@ impl ValueAggregator for AvgAggregator {
         self.current_avg.update_running_average(self.n, &node_value)?;
         self.n += 1;
         Ok(self.current_avg.clone())
+    }
+
+    fn reset(&mut self) {
+        self.current_avg = DEFAULT_AVG_VALUE;
+        self.n = 0;
     }
 }
 
@@ -48,7 +55,7 @@ mod tests {
     }
 
     #[test]
-    fn avg_aggregator_compute_with_int_ok() {
+    fn compute_with_int_ok() {
         let node_outputs: &[i32] = &[-2, 0, 2, 4, 6, 8, -32, 0];
         let expected_avg: &[f64] = &[-2.0, -1.0, 0.0, 1.0, 2.0, 3.0, -2.0, -1.75];
 
@@ -58,7 +65,7 @@ mod tests {
     }
 
     #[test]
-    fn avg_aggregator_compute_with_float_ok() {
+    fn compute_with_float_ok() {
         let node_outputs: &[f32] = &[-1.5, 3.0, 9.0, 6.5, 0.0];
         let expected_avg: &[f64] = &[-1.5, 0.75, 3.5, 4.25, 3.4];
 
@@ -68,7 +75,7 @@ mod tests {
     }
 
     #[test]
-    fn avg_aggregator_compute_with_none_value_ok() {
+    fn compute_with_none_value_ok() {
         let mut aggregator = AvgAggregator::new();
         let res = aggregator.compute(Some(NodeValue::None)).unwrap();
 
@@ -76,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn avg_aggregator_compute_with_non_numeric_value_fails() {
+    fn compute_with_non_numeric_value_fails() {
         let mut aggregator = AvgAggregator::new();
         let err = aggregator.compute(Some(NodeValue::Bool(true))).unwrap_err();
 
@@ -89,8 +96,18 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn avg_aggregator_compute_without_node_value_panics() {
+    fn compute_without_node_value_panics() {
         let mut aggregator = AvgAggregator::new();
         aggregator.compute(None).unwrap();
+    }
+
+    #[test]
+    fn reset_ok() {
+        let mut aggregator = AvgAggregator::new();
+        aggregator.compute(Some(2.into())).unwrap();
+        aggregator.reset();
+
+        assert_eq!(aggregator.current_avg, DEFAULT_AVG_VALUE);
+        assert_eq!(aggregator.n, 0);
     }
 }
