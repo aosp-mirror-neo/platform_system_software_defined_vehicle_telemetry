@@ -6,6 +6,7 @@ use log::{error, info};
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_utils::file_io_utils;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::marker::{Send, Sync};
@@ -83,6 +84,8 @@ pub enum MetricsConfigManagerError {
     ConfigParseError,
     #[error("Error in persisting metrics config to memory: {error}")]
     ConfigWriteError { error: io::Error },
+    #[error("Duplicate metrics config identifier: {uuid}")]
+    DuplicateMetricsConfigUuid { uuid: String },
     #[error("Preallocated Persistence Storage Exceeded")]
     PersistentStorageLimitExceeded,
 }
@@ -319,6 +322,17 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
 
         let path = Path::new(&self.inactive_data_dir).join(&config.uuid);
 
+        match self.metrics_configs_store.lock().entry(config.uuid.clone()) {
+            Entry::Occupied(_) => {
+                return Err(MetricsConfigManagerError::DuplicateMetricsConfigUuid {
+                    uuid: config.uuid.clone(),
+                });
+            }
+            Entry::Vacant(v) => {
+                v.insert(metrics_config.len());
+            }
+        }
+
         if let Err(e) = file_io_utils::write_to_file(&path, metrics_config).await {
             error!("An error occurred while writing to file: {}", e);
             if path.is_file() {
@@ -326,15 +340,13 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
                     error!("An error occurred in removing corrupt config: {}", e)
                 });
             }
+            self.metrics_configs_store.lock().remove(&config.uuid);
             return Err(MetricsConfigManagerError::ConfigWriteError { error: e });
         }
 
-        // Storing the size of the metrics configs in metric_config_map to allow easy access
-        // during remove metrics API call. self.cur_persistent_config_store_size needs to be
-        // updated during each API call that modifies active metrics configs.
-        // Alternate to metric_config_map would be read the file size from memory which constitutes
-        // an IO operation and is inefficient.
-        self.metrics_configs_store.lock().insert(config.uuid.clone(), metrics_config.len());
+        // self.cur_persistent_config_store_size needs to be updated during each API call that
+        // modifies active metrics configs. Alternate to metric_config_map would be read the
+        // file size from memory which constitutes an IO operation and is inefficient.
         self.cur_persistent_config_store_size.fetch_add(metrics_config.len(), Ordering::AcqRel);
 
         Ok(config.uuid)
@@ -790,6 +802,33 @@ mod tests {
         assert!(res.is_ok());
         assert!(file_path.is_file());
         assert_eq!(1, test_environment.get_num_validate_config_calls());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn add_metrics_config_duplicate_config_fail() {
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "add_metrics_config_duplicate_fail";
+        let file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let test_environment =
+            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+
+        info!("Serializing metric config");
+        let serialized_config = create_serialized_config(UUID);
+
+        let res = test_environment.manager.add_metrics_config(&serialized_config).await;
+        let err =
+            test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
+
+        assert!(res.is_ok());
+        assert!(file_path.is_file());
+        assert!(
+            matches!(&err, MetricsConfigManagerError::DuplicateMetricsConfigUuid { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(2, test_environment.get_num_validate_config_calls());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

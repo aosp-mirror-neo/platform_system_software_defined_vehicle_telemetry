@@ -90,6 +90,9 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
         ConfigManagerError::InvalidConfigUuid { .. } => {
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID
         }
+        ConfigManagerError::DuplicateMetricsConfigUuid { .. } => {
+            StatusCodes::ADD_METRICS_CONFIG_FAILED
+        }
         ConfigManagerError::ConfigReadError { .. } => StatusCodes::METRICS_CONFIG_CORRUPTED,
         ConfigManagerError::ConfigRemoveError { .. } => StatusCodes::REMOVE_METRICS_CONFIG_FAILED,
         ConfigManagerError::ConfigParseError => StatusCodes::METRICS_CONFIG_PARSE_ERROR,
