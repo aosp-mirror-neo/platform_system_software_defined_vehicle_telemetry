@@ -132,7 +132,7 @@ impl<T: Send + 'static> MockCallbackListener<T> {
 
     /// Increases fired count and triggers the notify.
     pub(super) fn on_callback_fired(&self, data: T) {
-        self.fired_count.fetch_add(1, Ordering::SeqCst);
+        self.fired_count.fetch_add(1, Ordering::AcqRel);
         self.callback_tx.send(data).unwrap();
     }
 

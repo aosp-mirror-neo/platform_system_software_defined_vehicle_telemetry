@@ -359,7 +359,7 @@ mod tests {
             configuration: Option<&[u8]>,
         ) -> binder::Result<binder::Strong<dyn IConfigurablePublisherSubscription>> {
             *self.last_configuration.lock() = configuration.map(|config| config.to_owned());
-            self.num_subscribe_calls.fetch_add(1, Ordering::SeqCst);
+            self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
             let binder_subscription = BnConfigurablePublisherSubscription::new_binder(
                 MockConfigurablePublisherSubscription {
@@ -399,11 +399,11 @@ mod tests {
         }
 
         pub fn get_num_subscribe_calls(&self) -> u32 {
-            self.num_subscribe_calls.load(Ordering::SeqCst)
+            self.num_subscribe_calls.load(Ordering::Acquire)
         }
 
         pub fn get_num_unsubscribe_calls(&self) -> u32 {
-            self.num_unsubscribe_calls.load(Ordering::SeqCst)
+            self.num_unsubscribe_calls.load(Ordering::Acquire)
         }
     }
 
@@ -415,7 +415,7 @@ mod tests {
 
     impl IConfigurablePublisherSubscription for MockConfigurablePublisherSubscription {
         fn unsubscribe(&self) -> binder::Result<()> {
-            self.num_unsubscribe_calls.upgrade().unwrap().fetch_add(1, Ordering::SeqCst);
+            self.num_unsubscribe_calls.upgrade().unwrap().fetch_add(1, Ordering::AcqRel);
             Ok(())
         }
     }

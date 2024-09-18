@@ -2110,7 +2110,7 @@ mod tests {
         let num_calls = Arc::new(AtomicU32::new(0));
         let num_calls_clone = Arc::clone(&num_calls);
         report_generator_mock.set_activate_callback(move |_| {
-            num_calls_clone.fetch_add(1, Ordering::SeqCst);
+            num_calls_clone.fetch_add(1, Ordering::AcqRel);
         });
 
         // Create and setup orchestrator.
@@ -2131,7 +2131,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
 
         // Verify that the report generator was activated.
-        assert_eq!(num_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(num_calls.load(Ordering::Acquire), 1);
         let config = { Arc::clone(&orchestrator.configs.lock()[UUID]) };
         let config_state = config.state.lock().await;
         assert!(

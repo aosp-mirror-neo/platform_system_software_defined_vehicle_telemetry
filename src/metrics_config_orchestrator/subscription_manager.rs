@@ -148,11 +148,11 @@ mod tests {
         }
 
         fn get_num_activate_calls(&self) -> u32 {
-            self.num_activate_calls.load(Ordering::SeqCst)
+            self.num_activate_calls.load(Ordering::Acquire)
         }
 
         fn get_num_deactivate_calls(&self) -> u32 {
-            self.num_deactivate_calls.load(Ordering::SeqCst)
+            self.num_deactivate_calls.load(Ordering::Acquire)
         }
     }
 
@@ -162,12 +162,12 @@ mod tests {
             self: Arc<Self>,
             callback_map: Arc<AsyncMutex<HashMap<String, CallbackFn<()>>>>,
         ) {
-            self.num_activate_calls.fetch_add(1, Ordering::SeqCst);
+            self.num_activate_calls.fetch_add(1, Ordering::AcqRel);
             self.callback_map.lock().replace(callback_map);
         }
 
         async fn deactivate(&self) {
-            self.num_deactivate_calls.fetch_add(1, Ordering::SeqCst);
+            self.num_deactivate_calls.fetch_add(1, Ordering::AcqRel);
         }
     }
 

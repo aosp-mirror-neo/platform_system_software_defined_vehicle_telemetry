@@ -124,7 +124,7 @@ impl MetricsReportGeneratorImpl {
         match build_result.into_future().await {
             Ok(report_data) => {
                 let mut report = MetricsReport::new();
-                report.report_number = self.report_number.fetch_add(1, Ordering::SeqCst);
+                report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
                 report.report_timestamp = Some(Timestamp::now()).into();
                 report.report_reason = report_reason.into();
                 report.metrics_config_uuid.clone_from(&self.config_uuid);
@@ -230,7 +230,7 @@ mod test {
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = Arc::clone(&num_fired);
         trigger.subscribe_callback.replace(Box::new(move |_| {
-            num_fired_clone.fetch_add(1, Ordering::SeqCst);
+            num_fired_clone.fetch_add(1, Ordering::AcqRel);
         }));
 
         let mut generator = create_default_generator();
@@ -238,7 +238,7 @@ mod test {
 
         Arc::new(generator).activate().await;
 
-        assert_eq!(num_fired.load(Ordering::SeqCst), 1);
+        assert_eq!(num_fired.load(Ordering::Acquire), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -376,7 +376,7 @@ mod test {
         let num_fired = Arc::new(AtomicU32::new(0));
         let num_fired_clone = Arc::clone(&num_fired);
         trigger.set_unsubscribe_callback(move |_| {
-            num_fired_clone.fetch_add(1, Ordering::SeqCst);
+            num_fired_clone.fetch_add(1, Ordering::AcqRel);
         });
 
         let mut generator = create_default_generator();
@@ -386,7 +386,7 @@ mod test {
         Arc::clone(&generator).activate().await;
         generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
 
-        assert_eq!(num_fired.load(Ordering::SeqCst), 1);
+        assert_eq!(num_fired.load(Ordering::Acquire), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

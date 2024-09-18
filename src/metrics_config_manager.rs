@@ -286,7 +286,7 @@ impl MetricsConfigManagerImpl {
             };
         }
 
-        config_manager.cur_persistent_config_store_size.store(total_size, Ordering::SeqCst);
+        config_manager.cur_persistent_config_store_size.store(total_size, Ordering::Release);
 
         info!(
             "Telemetry service initialized with {:} active configs and {:} inactive configs
@@ -308,7 +308,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             .map_err(|_| MetricsConfigManagerError::ConfigParseError)?;
         info!("adding config: {:?} of size: {}\n", config, metrics_config.len());
 
-        if metrics_config.len() + self.cur_persistent_config_store_size.load(Ordering::SeqCst)
+        if metrics_config.len() + self.cur_persistent_config_store_size.load(Ordering::Acquire)
             > self.max_persistent_config_store_size
         {
             return Err(MetricsConfigManagerError::PersistentStorageLimitExceeded);
@@ -335,7 +335,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         // Alternate to metric_config_map would be read the file size from memory which constitutes
         // an IO operation and is inefficient.
         self.metrics_configs_store.lock().insert(config.uuid.clone(), metrics_config.len());
-        self.cur_persistent_config_store_size.fetch_add(metrics_config.len(), Ordering::SeqCst);
+        self.cur_persistent_config_store_size.fetch_add(metrics_config.len(), Ordering::AcqRel);
 
         Ok(config.uuid)
     }
@@ -450,7 +450,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             .await
             .map_err(|e| MetricsConfigManagerError::ConfigRemoveError { error: e })?;
 
-        self.cur_persistent_config_store_size.fetch_sub(config_size, Ordering::SeqCst);
+        self.cur_persistent_config_store_size.fetch_sub(config_size, Ordering::AcqRel);
 
         Ok(())
     }
@@ -486,7 +486,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             }
         }
 
-        self.cur_persistent_config_store_size.store(0, Ordering::SeqCst);
+        self.cur_persistent_config_store_size.store(0, Ordering::Release);
         Ok(())
     }
 

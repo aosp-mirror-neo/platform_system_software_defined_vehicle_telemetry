@@ -40,7 +40,7 @@ impl ServiceAdapter for MockServiceAdapter {
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
-        self.num_get_message_provider_calls.fetch_add(1, Ordering::Release);
+        self.num_get_message_provider_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(error) = self.next_error.lock().take() {
             return Err(error);
@@ -64,7 +64,7 @@ impl ServiceAdapter for MockServiceAdapter {
         configuration: Option<&Any>,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
-        self.num_subscribe_calls.fetch_add(1, Ordering::Release);
+        self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(configuration) = configuration {
             self.latest_configuration.lock().replace(configuration.clone());
@@ -95,7 +95,7 @@ impl ServiceAdapter for MockServiceAdapter {
     }
 
     async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
-        self.num_unsubscribe_calls.fetch_add(1, Ordering::Release);
+        self.num_unsubscribe_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(error) = self.next_error.lock().take() {
             return Err(error);
