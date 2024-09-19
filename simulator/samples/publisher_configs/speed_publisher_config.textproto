@@ -18,7 +18,7 @@ data_format_protos {
         }
     }
 }
-data_format_message_name: "SpeedData"
+data_format_message_name: ".SpeedData"
 data_generators {
     loop_data: true
     default_delay {

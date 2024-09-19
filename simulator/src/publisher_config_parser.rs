@@ -161,9 +161,7 @@ fn get_message_descriptor(
         })?;
 
     for file_descriptor in &file_descriptors {
-        if let Some(message_descriptor) =
-            file_descriptor.message_by_package_relative_name(message_name)
-        {
+        if let Some(message_descriptor) = file_descriptor.message_by_full_name(message_name) {
             return Ok(message_descriptor);
         }
     }

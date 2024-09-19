@@ -26,8 +26,7 @@ pub fn parse_message_descriptors(
     let decoding_message_descriptor_names: HashSet<String> = config
         .metrics_report_configs
         .iter()
-        // Get the message descriptor name without the leading dot.
-        .map(|report_config| report_config.message_builder.message_type.clone().split_off(1))
+        .map(|report_config| report_config.message_builder.message_type.clone())
         .collect();
 
     let mut message_descriptors = HashMap::<String, MessageDescriptor>::new();
@@ -40,7 +39,7 @@ pub fn parse_message_descriptors(
         for message in file_descriptor.messages() {
             if message_descriptors.contains_key(message.full_name()) {
                 return Err(SimulatorError::DuplicateDescriptorProtoMessage {
-                    message_name: message.name().to_owned(),
+                    message_name: message.full_name().to_owned(),
                     file_name: metrics_config_file_name,
                 });
             }
