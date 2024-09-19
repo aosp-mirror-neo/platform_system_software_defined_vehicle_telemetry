@@ -157,7 +157,9 @@ mod tests {
                 if *err == sdv_dt::Result::Overflow),
             "Expected overflow error, got {result:?}"
         );
-        assert_eq!(data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap(), 0);
+        // The change in FMQ (aosp/3119872) that alters the behaviour of the reading pointer reset
+        // in case of the buffer overwrite now preserve half of the queue
+        assert_eq!(data_tunnel_api_client::available_to_read(&subscription_descriptor).unwrap(), 1);
     }
 
     #[test]
