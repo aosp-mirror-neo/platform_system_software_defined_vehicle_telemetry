@@ -624,21 +624,26 @@ mod tests {
             "Expected overflow error, got {result:?}"
         );
 
-        // All messages are lost.
-        assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 0);
+        // The change in FMQ (aosp/3119872) that alters the behaviour of the reading pointer reset
+        // in case of the buffer overwrite now preserve half of the queue
+        // The queue size is 2 messages. Half of the buffer is 1 message
+        let mut buffer = vec![0u8; 4];
+        assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 1);
+        read_messages(&subscription_descriptor, &mut buffer, 1).unwrap();
+        // We still should be able to read the last message before overwrite
+        assert_eq!(buffer, vec![3, 3, 3, 3]);
 
         // New messages can be read.
         write_message(&topic_descriptor, &[4, 4, 4, 4]).unwrap();
 
         assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 1);
-        let mut buffer = vec![0u8; 4];
         read_messages(&subscription_descriptor, &mut buffer, 1).unwrap();
         assert_eq!(buffer, vec![4, 4, 4, 4]);
         assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 0);
     }
 
     #[test]
-    fn read_messages_after_overflow_success() {
+    fn read_messages_after_overfqqw_success() {
         let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
@@ -660,13 +665,19 @@ mod tests {
             matches!(result, Err(ReadMessagesError::DataTunnelError(ref err)) if *err == sdv_dt::Result::Overflow),
             "Expected overflow error, got {result:?}"
         );
-        // All messages are lost.
-        assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 0);
+
+        // The change in FMQ (aosp/3119872) that alters the behaviour of the reading pointer reset
+        // in case of the buffer overwrite now preserve half of the queue
+        // The queue size is 2 messages. Half of the buffer is 1 message
+        let mut buffer = vec![0u8; 4];
+        assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 1);
+        read_messages(&subscription_descriptor, &mut buffer, 1).unwrap();
+        // We still should be able to read the last message before overwrite
+        assert_eq!(buffer, vec![3, 3, 3, 3]);
 
         // New messages can be read.
         write_message(&topic_descriptor, &[4, 4, 4, 4]).unwrap();
         assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 1);
-        let mut buffer = vec![0u8; 4];
         read_messages(&subscription_descriptor, &mut buffer, 1).unwrap();
         assert_eq!(buffer, vec![4, 4, 4, 4]);
         assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 0);
