@@ -37,8 +37,8 @@ pub enum SimulatorError {
     )]
     FailedToReadFile { file_path: PathBuf, error: Error },
 
-    #[error("Failed to parse CSV headers in \"{file_name}\". Missing header(s) {missing:?} and/or containing redundant header(s) {redundant:?}.")]
-    IncorrectCSVHeaders { file_name: String, missing: HashSet<String>, redundant: HashSet<String> },
+    #[error("\"{file_name}\" contains header(s) {incorrect_headers:?} that do not correspond to a message field.")]
+    IncorrectCSVHeaders { file_name: String, incorrect_headers: HashSet<String> },
 
     #[error("{error_message}")]
     Error { error_message: String },

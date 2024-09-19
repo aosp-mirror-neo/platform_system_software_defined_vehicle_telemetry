@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use log::warn;
 use protobuf::{
     descriptor::FileDescriptorProto,
     reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor, RuntimeType},
@@ -123,9 +124,8 @@ fn get_message_descriptor_tree_and_expected_headers_recursively(
 
     for field_descriptor in message_descriptor.fields() {
         if !field_descriptor.is_singular() {
-            return Err(SimulatorError::NotImplemented {
-                feature: "Repeated fields in simulation publishers".to_owned(),
-            });
+            warn!("Repeated fields in simulation publisher message descriptor are not supported yet, field \'{}\' in message \'{}\' will be ignored.\n", field_descriptor.name(), message_descriptor.full_name());
+            continue;
         }
         let field_name = base_name.clone() + field_descriptor.name().trim();
         let mut node = FieldNode::new(field_name.clone(), field_descriptor.clone());

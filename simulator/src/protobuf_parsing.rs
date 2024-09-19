@@ -97,8 +97,9 @@ impl CsvToProtoMessagesParser {
         headers: Vec<String>,
         file_name: String,
         default_delay: Duration,
-        message_descriptor_tree: MessageDescriptorTree,
+        mut message_descriptor_tree: MessageDescriptorTree,
     ) -> Self {
+        trim_message_descriptor_tree(&headers, &mut message_descriptor_tree);
         Self { headers, file_name, default_delay, message_descriptor_tree }
     }
 
@@ -170,6 +171,10 @@ impl CsvToProtoMessagesParser {
             }
             Ok(false)
         } else {
+            if !fields_map.contains_key(&node.csv_field_name) {
+                // Ignore this field because it has an unsupported type.
+                return Ok(false);
+            }
             let csv_value = &fields_map[&node.csv_field_name];
             if csv_value.is_empty() {
                 return Ok(false);
@@ -192,6 +197,31 @@ impl CsvToProtoMessagesParser {
             Ok(true)
         }
     }
+}
+
+/// Removes every child node for which the csv file does not contain any data.
+fn trim_message_descriptor_tree(
+    headers: &Vec<String>,
+    message_descriptor_tree: &mut MessageDescriptorTree,
+) {
+    for child in &mut message_descriptor_tree.root.children {
+        remove_unused_child_nodes(child, headers);
+    }
+}
+
+/// Returns true if data is available for itself or one of its children. Removes
+/// any child nodes with no data available.
+fn remove_unused_child_nodes(node: &mut FieldNode, headers: &Vec<String>) -> bool {
+    if headers.contains(&node.csv_field_name) {
+        return true;
+    }
+    if let Some(ref mut message_field_info) = &mut node.message_field_info {
+        message_field_info
+            .children
+            .retain_mut(|child_node| remove_unused_child_nodes(child_node, headers));
+        return !message_field_info.children.is_empty();
+    }
+    false
 }
 
 fn parse_value(
