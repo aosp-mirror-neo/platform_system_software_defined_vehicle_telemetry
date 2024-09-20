@@ -104,17 +104,14 @@ fn check_headers(
     file_name: &str,
 ) -> Result<(), SimulatorError> {
     let headers_set = HashSet::from_iter(headers);
-    if headers_set == expected_headers_set {
+    let incorrect_headers =
+        headers_set.difference(&expected_headers_set).cloned().collect::<HashSet<_>>();
+    if headers_set == expected_headers_set || incorrect_headers.is_empty() {
         Ok(())
     } else {
-        let missing =
-            expected_headers_set.difference(&headers_set).cloned().collect::<HashSet<_>>();
-        let redundant =
-            headers_set.difference(&expected_headers_set).cloned().collect::<HashSet<_>>();
         Err(SimulatorError::IncorrectCSVHeaders {
             file_name: file_name.to_owned(),
-            missing,
-            redundant,
+            incorrect_headers,
         })
     }
 }
@@ -329,25 +326,6 @@ mod tests {
         assert!(
             check_headers(headers_vector, expected_headers_set, file_name).is_err(),
             "Missed redundant header"
-        );
-    }
-
-    #[test]
-    fn test_check_headers_missing_header() {
-        let file_name = "file_name.csv";
-        let expected_headers_set =
-            vec!["_delay_before_publishing", "speed", "above_speed_limit", "missing_header"]
-                .into_iter()
-                .map(ToString::to_string)
-                .collect::<HashSet<_>>();
-        let headers_vector = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
-            .into_iter()
-            .map(ToString::to_string)
-            .collect();
-
-        assert!(
-            check_headers(headers_vector, expected_headers_set, file_name).is_err(),
-            "Missed missing header"
         );
     }
 
