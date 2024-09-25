@@ -6,6 +6,7 @@ use protobuf::{
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_rust_wrapper::ReportInfo;
+use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::{
     collections::{HashMap, HashSet},
     time::Duration,
@@ -26,15 +27,19 @@ pub fn parse_message_descriptors(
     let decoding_message_descriptor_names: HashSet<String> = config
         .metrics_report_configs
         .iter()
-        .map(|report_config| report_config.message_builder.message_type.clone())
+        // Get the message descriptor name without the leading dot.
+        .map(|report_config| report_config.message_builder.message_type.clone().split_off(1))
         .collect();
 
     let mut message_descriptors = HashMap::<String, MessageDescriptor>::new();
-    let file_descriptors = FileDescriptor::new_dynamic_fds(config.descriptor_protos.to_vec(), &[])
-        .map_err(|error| SimulatorError::FailedToParseFile {
-            file_name: metrics_config_file_name.clone(),
-            error_message: format!("Failed to parse descriptor_protos: {}", error),
-        })?;
+    let file_descriptors = FileDescriptor::new_dynamic_fds(
+        config.descriptor_protos.to_vec(),
+        &WELL_KNOWN_FILE_DESCRIPTORS,
+    )
+    .map_err(|error| SimulatorError::FailedToParseFile {
+        file_name: metrics_config_file_name.clone(),
+        error_message: format!("Failed to parse descriptor_protos: {}", error),
+    })?;
     for file_descriptor in &file_descriptors {
         for message in file_descriptor.messages() {
             if message_descriptors.contains_key(message.full_name()) {
