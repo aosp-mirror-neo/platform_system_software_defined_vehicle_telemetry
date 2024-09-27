@@ -243,13 +243,19 @@ rust_defaults {
     vendor: true,
 }
 
+vintf_fragment {
+    name: "google.sdv.telemetry.configurable_publisher-service.xml",
+    src: "google.sdv.telemetry.configurable_publisher-service.xml",
+    vendor: true,
+}
+
 rust_binary {
     name: "sdv_telemetry_service_agent",
     defaults: ["sdv_telemetry_service_agent_defaults"],
     srcs: [
         "src/main.rs",
     ],
-    vintf_fragments: [
+    vintf_fragment_modules: [
         // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-service.xml",
         // keep-sorted end
@@ -272,7 +278,7 @@ rust_binary {
     srcs: [
         "src/main_ivi.rs",
     ],
-    vintf_fragments: [
+    vintf_fragment_modules: [
         // keep-sorted start
         "google.sdv.telemetry.configurable_publisher-service.xml",
         // keep-sorted end
