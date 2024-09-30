@@ -643,7 +643,7 @@ mod tests {
     }
 
     #[test]
-    fn read_messages_after_overfqqw_success() {
+    fn read_messages_after_overflow_success() {
         let topic_name = unique_dt_topic_name();
         cxx::let_cxx_string!(topic_name = topic_name);
         let topic_descriptor = create_topic(&topic_name, 2, 4);
