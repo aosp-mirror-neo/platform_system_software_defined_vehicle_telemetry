@@ -101,7 +101,7 @@ mod tests {
     };
 
     const TRIGGER_NAME: &str = "trigger";
-    const INTERVAL: Duration = Duration::from_millis(10);
+    const INTERVAL: Duration = Duration::from_millis(300);
 
     fn create_valid_periodic_trigger() -> (Arc<PeriodicTrigger>, MockSubscriptionManager) {
         let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), INTERVAL);
