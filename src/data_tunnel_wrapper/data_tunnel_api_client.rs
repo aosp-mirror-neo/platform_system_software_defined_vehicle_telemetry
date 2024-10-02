@@ -353,14 +353,14 @@ mod tests {
 
         let topic_descriptor = register_topic_with_metadata(
             &topic_name,
-            TopicTypedMetadata { message_count_: 3, message_size_: 10 },
+            TopicTypedMetadata { message_count_: 4, message_size_: 10 },
             vec![1, 2, 3, 4, 5],
         )
         .unwrap();
 
         assert!(topic_exists(&topic_name).unwrap());
         assert_eq!(get_topic_metadata(&topic_name).unwrap().as_slice(), &[1, 2, 3, 4, 5]);
-        assert_eq!(available_to_write(&topic_descriptor).unwrap(), 3);
+        assert_eq!(available_to_write(&topic_descriptor).unwrap(), 4);
     }
 
     #[test]
