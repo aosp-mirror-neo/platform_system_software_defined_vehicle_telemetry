@@ -3,6 +3,7 @@
 //! Errors that can arise from incorrect node setup and from AST traversal.
 
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
+use std::sync::Arc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -33,7 +34,7 @@ pub enum NodeError {
     #[error("Field leaf node encountered error: {e}")]
     MessageProviderError {
         #[from]
-        e: MessageProviderError,
+        e: Arc<MessageProviderError>,
     },
     #[error("Descriptor not found: {e}")]
     DescriptorProviderError {
