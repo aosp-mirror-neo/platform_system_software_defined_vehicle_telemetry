@@ -15,8 +15,9 @@ use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodePr
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{borrow::Cow, convert::From, error::Error, sync::Arc};
 
-use crate::expr::node::{NodeEvaluationResult, NodeEvaluationState};
+use crate::expr::node::NodeEvaluationResult;
 use crate::expr::node_error::NodeError;
+use crate::expr::node_evaluation_state::NodeEvaluationState;
 use crate::expr::proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt;
 
 /// Holds a generic value.

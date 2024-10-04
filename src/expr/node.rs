@@ -1,20 +1,16 @@
 // Copyright 2024 Google LLC
 
-use futures::future::{self, BoxFuture};
 use futures::FutureExt;
 use protobuf::MessageDyn;
 use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
-use sdv_telemetry_utils::{
-    collection_extension::HashMapExtension, operation_result::OperationResult,
-    value_holder::ValueHolder,
-};
+use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
 use std::borrow::Cow;
-use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::expr::node_error::{MessageProviderError, NodeError};
+use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::expr::node_evaluation_state::NodeEvaluationState;
 use crate::expr::node_factory::MessageProvider;
 use crate::expr::node_value::NodeValue;
 use crate::expr::node_value_type::OperatorProtoExtension;
@@ -75,37 +71,6 @@ pub enum TimeSource {
     MonotonicTimeSinceBoot,
 }
 
-/// Stores expression evaluation state to ensure expression evaluation uses the same message
-/// in different branches.
-///
-/// Since messages from different sources are shared and retrieved differently, they are stored
-/// in different caches, listed according to their priority:
-/// - `context` stores messages from the upstream publishers that triggered expression evaluation;
-/// - `sync_message_cache` caches synchronously retrieved messages.
-/// - `async_message_cache` caches messages that are retrieved through asynchronous getters.
-pub(super) struct NodeEvaluationState {
-    context: Arc<NodeEvaluationContext>,
-    sync_message_cache: HashMap<String, Option<Arc<dyn MessageDyn>>>,
-    async_message_cache: HashMap<
-        String,
-        future::Shared<
-            BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
-        >,
-    >,
-}
-
-impl Default for NodeEvaluationState {
-    fn default() -> Self {
-        NodeEvaluationState::new(NodeEvaluationContext::new().into())
-    }
-}
-
-impl NodeEvaluationState {
-    fn new(context: Arc<NodeEvaluationContext>) -> Self {
-        Self { context, sync_message_cache: HashMap::new(), async_message_cache: HashMap::new() }
-    }
-}
-
 impl Node {
     /// Evaluate AST recursively with messages from the "message_provider".
     pub fn evaluate(
@@ -140,24 +105,16 @@ impl Node {
                     )
                 }
 
-                let context_msg = state.context.get_message(publisher_name);
-                if context_msg.is_some() {
-                    // Message provided by an upstream publisher.
-                    return handle_msg(context_msg, fields, Cow::Borrowed)
+                let sync_message_result = state.get_sync_message(publisher_name);
+                if let Some(maybe_msg) = sync_message_result {
+                    // Synchronously available message found in the state.
+                    return handle_msg(maybe_msg, fields, Cow::Borrowed)
                         .map(move |value| (value, state))
                         .into();
                 }
 
-                let sync_cache_result = state.sync_message_cache.get(publisher_name);
-                if let Some(maybe_msg) = sync_cache_result {
-                    // Message found in the synchronous message cache.
-                    return handle_msg(maybe_msg.as_ref(), fields, Cow::Borrowed)
-                        .map(move |value| (value, state))
-                        .into();
-                }
-
-                let async_cache_result = state.async_message_cache.get(publisher_name);
-                let provider_result = if let Some(future) = async_cache_result {
+                let async_message_result = state.get_async_message(publisher_name);
+                let provider_result = if let Some(future) = async_message_result {
                     // Provider result future found in the asynchronous message cache.
                     ValueHolder::Asynchronous(future.clone().boxed())
                 } else {
@@ -166,26 +123,19 @@ impl Node {
                         ValueHolder::Synchronous(res) => {
                             if let Ok(maybe_msg) = &res {
                                 // Put message into synchronous message cache.
-                                state
-                                    .sync_message_cache
-                                    .try_insert_value(
-                                        publisher_name.to_owned(),
-                                        maybe_msg.to_owned(),
-                                    )
-                                    .expect(
-                                        "Only one message per publisher should be added into cache",
-                                    );
+                                state.cache_sync_message(
+                                    publisher_name.to_owned(),
+                                    maybe_msg.to_owned(),
+                                );
                             }
                             ValueHolder::Synchronous(res)
                         }
                         ValueHolder::Asynchronous(future) => {
                             let shared_future = future.shared();
-                            state
-                                .async_message_cache
-                                .try_insert_value(publisher_name.to_owned(), shared_future.clone())
-                                .expect(
-                                    "Only one message per publisher should be added into cache",
-                                );
+                            state.cache_async_message(
+                                publisher_name.to_owned(),
+                                shared_future.clone(),
+                            );
                             ValueHolder::Asynchronous(shared_future.boxed())
                         }
                     }
@@ -243,9 +193,9 @@ impl Node {
             Node::FunctionLeaf { function } => match function {
                 FunctionType::GetCurrentTimestamp { time_source } => {
                     let timestamp = match time_source {
-                        TimeSource::RealtimeClock => state.context.unix_timestamp,
+                        TimeSource::RealtimeClock => state.get_context().unix_timestamp,
                         TimeSource::MonotonicTimeSinceBoot => {
-                            state.context.monotonic_time_since_boot
+                            state.get_context().monotonic_time_since_boot
                         }
                     };
                     NodeValue::Int64(timestamp.0).into_operation_result(state)

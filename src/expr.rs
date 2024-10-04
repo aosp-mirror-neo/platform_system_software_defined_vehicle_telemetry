@@ -10,5 +10,7 @@ pub(crate) mod node_value;
 pub(crate) mod node_value_type;
 pub(crate) mod proto_node_value_converter;
 
+mod node_evaluation_state;
+
 #[cfg(test)]
 pub(crate) mod mock;
