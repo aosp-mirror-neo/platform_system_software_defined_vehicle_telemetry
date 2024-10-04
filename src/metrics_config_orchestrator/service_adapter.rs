@@ -102,10 +102,6 @@ pub(crate) struct ServiceAdapterImpl {
     >,
 }
 
-struct ServiceMessageProviderImpl {
-    service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
-}
-
 impl ServiceSubscriptionType {
     fn new_configured(
         accessor_subscription: Box<dyn ServicePublisherSubscription>,
@@ -127,6 +123,20 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
+        struct ServiceMessageProviderImpl {
+            service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
+        }
+
+        #[async_trait::async_trait]
+        impl ServiceMessageProvider for ServiceMessageProviderImpl {
+            async fn get_latest_message(
+                &self,
+                configuration: Option<&Any>,
+            ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+                self.service_publisher_message_provider.get_latest_message(configuration).await
+            }
+        }
+
         let res = self.service_publisher_accessor.get_message_provider(service_name)?.map(
             |service_publisher_message_provider| {
                 Box::new(ServiceMessageProviderImpl { service_publisher_message_provider })
@@ -294,16 +304,6 @@ impl ServiceAdapterImpl {
             service_publisher_accessor: service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
         }
-    }
-}
-
-#[async_trait::async_trait]
-impl ServiceMessageProvider for ServiceMessageProviderImpl {
-    async fn get_latest_message(
-        &self,
-        configuration: Option<&Any>,
-    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
-        self.service_publisher_message_provider.get_latest_message(configuration).await
     }
 }
 
