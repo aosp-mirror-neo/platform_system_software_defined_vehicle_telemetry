@@ -10,12 +10,11 @@ use std::sync::Arc;
 
 use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_state::NodeEvaluationState;
+use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
+use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
 use crate::expr::node_factory::MessageProvider;
 use crate::expr::node_value::NodeValue;
 use crate::expr::node_value_type::OperatorProtoExtension;
-
-pub(super) type NodeEvaluationResult = (NodeValue, NodeEvaluationState);
 
 const EMPTY: &str = "Empty";
 
@@ -108,9 +107,7 @@ impl Node {
                 let sync_message_result = state.get_sync_message(publisher_name);
                 if let Some(maybe_msg) = sync_message_result {
                     // Synchronously available message found in the state.
-                    return handle_msg(maybe_msg, fields, Cow::Borrowed)
-                        .map(move |value| (value, state))
-                        .into();
+                    return handle_msg(maybe_msg, fields, Cow::Borrowed).with_state(state).into();
                 }
 
                 let async_message_result = state.get_async_message(publisher_name);
@@ -147,7 +144,7 @@ impl Node {
                         panic!("Captured node is not a field leaf node: {:?}", self_clone);
                     };
 
-                    handle_msg(maybe_msg, fields, Cow::Owned).map(|value| (value, state))
+                    handle_msg(maybe_msg, fields, Cow::Owned).with_state(state)
                 })
             }
             Node::Combination { left, .. } => {

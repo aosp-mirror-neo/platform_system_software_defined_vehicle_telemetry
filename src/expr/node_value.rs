@@ -15,9 +15,9 @@ use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodePr
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{borrow::Cow, convert::From, error::Error, sync::Arc};
 
-use crate::expr::node::NodeEvaluationResult;
 use crate::expr::node_error::NodeError;
-use crate::expr::node_evaluation_state::NodeEvaluationState;
+use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
+use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
 use crate::expr::proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt;
 
 /// Holds a generic value.
@@ -134,10 +134,7 @@ impl NodeValue {
         get_right_operand: impl FnOnce() -> Result<NodeValue, NodeError> + Send,
     ) -> Result<NodeValue, NodeError> {
         self.operate(op, NodeEvaluationState::default(), move |state| {
-            OperationResult::Synchronous(Self::map_into_evaluation_result(
-                get_right_operand(),
-                state,
-            ))
+            OperationResult::Synchronous(get_right_operand().with_state(state))
         })
         .unwrap_sync()
         .map(|(value, _state)| value)
@@ -645,7 +642,7 @@ impl NodeValue {
         state: NodeEvaluationState,
         handler: impl FnOnce(&NodeValue) -> Result<NodeValue, NodeError>,
     ) -> OperationResult<'static, NodeEvaluationResult, NodeError> {
-        Self::map_into_evaluation_result(handler(self), state).into()
+        handler(self).with_state(state).into()
     }
 
     /// Handles binary operation on self using provided node value handler.
@@ -662,7 +659,7 @@ impl NodeValue {
                 return Ok((NodeValue::None, state));
             }
 
-            Self::map_into_evaluation_result(handler(&self, &right), state)
+            handler(&self, &right).with_state(state)
         })
     }
 
@@ -741,13 +738,6 @@ impl NodeValue {
     /// Check if node holds an integer value.
     fn is_int(&self) -> bool {
         matches!(self, NodeValue::Int32(_) | NodeValue::Int64(_))
-    }
-
-    fn map_into_evaluation_result<E>(
-        result: Result<NodeValue, E>,
-        state: NodeEvaluationState,
-    ) -> Result<NodeEvaluationResult, E> {
-        result.map(move |value| (value, state))
     }
 
     /// Applies the provided function on two numeric NodeValues based on
