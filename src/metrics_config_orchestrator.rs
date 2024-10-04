@@ -1,5 +1,6 @@
 // Copyright 2023 Google LLC
 
+mod async_event_processor;
 mod descriptor_provider;
 mod descriptor_provider_factory;
 mod message_builder;
@@ -818,7 +819,6 @@ mod tests {
     use super::*;
 
     use anyhow::anyhow;
-    use async_trait::async_trait;
     use parking_lot::Mutex;
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
