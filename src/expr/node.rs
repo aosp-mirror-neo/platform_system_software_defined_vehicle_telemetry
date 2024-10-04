@@ -157,43 +157,37 @@ impl Node {
                 }
 
                 let async_cache_result = state.async_message_cache.get(publisher_name);
-                if let Some(future) = async_cache_result {
-                    // Message found in the asynchronous message cache.
-                    let self_clone = Arc::clone(self);
-                    return ValueHolder::Asynchronous(future.clone().boxed())
-                        .err_into()
-                        .and_then_sync(move |maybe_msg| {
-                            let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
-                                panic!("Captured node is not a field leaf node: {:?}", self_clone);
-                            };
-
-                            handle_msg(maybe_msg, fields, Cow::Owned).map(|value| (value, state))
-                        });
-                }
-
-                let provider_result = match message_provider
-                    .get_message(publisher_name)
-                    .map_err(Arc::new)
-                {
-                    ValueHolder::Synchronous(res) => {
-                        if let Ok(maybe_msg) = &res {
-                            // Put message into synchronous message cache.
+                let provider_result = if let Some(future) = async_cache_result {
+                    // Provider result future found in the asynchronous message cache.
+                    ValueHolder::Asynchronous(future.clone().boxed())
+                } else {
+                    // Call message provider and cache the result.
+                    match message_provider.get_message(publisher_name).map_err(Arc::new) {
+                        ValueHolder::Synchronous(res) => {
+                            if let Ok(maybe_msg) = &res {
+                                // Put message into synchronous message cache.
+                                state
+                                    .sync_message_cache
+                                    .try_insert_value(
+                                        publisher_name.to_owned(),
+                                        maybe_msg.to_owned(),
+                                    )
+                                    .expect(
+                                        "Only one message per publisher should be added into cache",
+                                    );
+                            }
+                            ValueHolder::Synchronous(res)
+                        }
+                        ValueHolder::Asynchronous(future) => {
+                            let shared_future = future.shared();
                             state
-                                .sync_message_cache
-                                .try_insert_value(publisher_name.to_owned(), maybe_msg.to_owned())
+                                .async_message_cache
+                                .try_insert_value(publisher_name.to_owned(), shared_future.clone())
                                 .expect(
                                     "Only one message per publisher should be added into cache",
                                 );
+                            ValueHolder::Asynchronous(shared_future.boxed())
                         }
-                        ValueHolder::Synchronous(res)
-                    }
-                    ValueHolder::Asynchronous(future) => {
-                        let shared_future = future.shared();
-                        state
-                            .async_message_cache
-                            .try_insert_value(publisher_name.to_owned(), shared_future.clone())
-                            .expect("Only one message per publisher should be added into cache");
-                        ValueHolder::Asynchronous(shared_future.boxed())
                     }
                 };
 
