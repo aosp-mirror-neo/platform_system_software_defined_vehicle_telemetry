@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use futures::future::{self, BoxFuture};
+use futures::FutureExt;
 use protobuf::MessageDyn;
 use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
 use sdv_telemetry_utils::{
@@ -12,7 +13,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::expr::node_error::NodeError;
+use crate::expr::node_error::{MessageProviderError, NodeError};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::MessageProvider;
 use crate::expr::node_value::NodeValue;
@@ -85,9 +86,12 @@ pub enum TimeSource {
 pub(super) struct NodeEvaluationState {
     context: Arc<NodeEvaluationContext>,
     sync_message_cache: HashMap<String, Option<Arc<dyn MessageDyn>>>,
-    #[allow(dead_code)]
-    async_message_cache:
-        HashMap<String, future::Shared<BoxFuture<'static, Option<Arc<dyn MessageDyn>>>>>,
+    async_message_cache: HashMap<
+        String,
+        future::Shared<
+            BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
+        >,
+    >,
 }
 
 impl Default for NodeEvaluationState {
@@ -144,19 +148,35 @@ impl Node {
                         .into();
                 }
 
-                let cache_result = state.sync_message_cache.get(publisher_name);
-                if let Some(maybe_msg) = cache_result {
+                let sync_cache_result = state.sync_message_cache.get(publisher_name);
+                if let Some(maybe_msg) = sync_cache_result {
                     // Message found in the synchronous message cache.
                     return handle_msg(maybe_msg.as_ref(), fields, Cow::Borrowed)
                         .map(move |value| (value, state))
                         .into();
                 }
 
-                // TODO(b/362364604): Check asynchronous message cache before calling message provider.
-                let provider_result = message_provider.get_message(publisher_name);
-                match &provider_result {
+                let async_cache_result = state.async_message_cache.get(publisher_name);
+                if let Some(future) = async_cache_result {
+                    // Message found in the asynchronous message cache.
+                    let self_clone = Arc::clone(self);
+                    return ValueHolder::Asynchronous(future.clone().boxed())
+                        .err_into()
+                        .and_then_sync(move |maybe_msg| {
+                            let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
+                                panic!("Captured node is not a field leaf node: {:?}", self_clone);
+                            };
+
+                            handle_msg(maybe_msg, fields, Cow::Owned).map(|value| (value, state))
+                        });
+                }
+
+                let provider_result = match message_provider
+                    .get_message(publisher_name)
+                    .map_err(Arc::new)
+                {
                     ValueHolder::Synchronous(res) => {
-                        if let Ok(maybe_msg) = res {
+                        if let Ok(maybe_msg) = &res {
                             // Put message into synchronous message cache.
                             state
                                 .sync_message_cache
@@ -165,11 +185,17 @@ impl Node {
                                     "Only one message per publisher should be added into cache",
                                 );
                         }
+                        ValueHolder::Synchronous(res)
                     }
-                    ValueHolder::Asynchronous(_future) => {
-                        // TODO(b/362364604): Cache message retrieval future.
+                    ValueHolder::Asynchronous(future) => {
+                        let shared_future = future.shared();
+                        state
+                            .async_message_cache
+                            .try_insert_value(publisher_name.to_owned(), shared_future.clone())
+                            .expect("Only one message per publisher should be added into cache");
+                        ValueHolder::Asynchronous(shared_future.boxed())
                     }
-                }
+                };
 
                 let self_clone = Arc::clone(self);
                 provider_result.err_into().and_then_sync(move |maybe_msg| {
@@ -667,6 +693,33 @@ mod tests {
         assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
     }
 
+    #[tokio::test]
+    async fn evaluate_caches_asynchronous_provider_message() {
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+        message_provider
+            .set_next_async_result(async { Ok(Some(msg as Arc<dyn MessageDyn>)) }.boxed());
+        let node1 = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![],
+            message_provider: Arc::<MockMessageProvider>::clone(&message_provider),
+        });
+        let node2 = Arc::new(Node::FieldLeaf {
+            publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
+            fields: vec![],
+            message_provider,
+        });
+        let node3 = Arc::new(Node::Combination {
+            operator: OP_EQ.clone(),
+            left: Some(node1),
+            right: Some(node2),
+        });
+
+        let res =
+            node3.evaluate(Arc::new(NodeEvaluationContext::new())).unwrap_async().await.unwrap();
+        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
+    }
+
     #[test]
     fn evaluate_function_timestamp_time_source_realtime_success() {
         let timestamp_node = Arc::new(Node::FunctionLeaf {
@@ -735,7 +788,7 @@ mod tests {
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
-            matches!(&err, NodeError::MessageProviderError { e } if matches!(e, MessageProviderError::InvalidPublisherName)),
+            matches!(&err, NodeError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
             "Unexpected error: {:?}",
             err
         );
@@ -764,7 +817,7 @@ mod tests {
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
-            matches!(&err, NodeError::MessageProviderError { e } if matches!(e, MessageProviderError::InvalidPublisherName)),
+            matches!(&err, NodeError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
             "Unexpected error: {:?}",
             err
         );
