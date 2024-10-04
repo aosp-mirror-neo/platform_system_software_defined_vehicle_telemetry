@@ -102,18 +102,23 @@ lazy_static! {
 
         test_message
     };
-    pub static ref EMPTY_TEST_MESSAGE: TestMessage = TestMessage::new();
-    pub static ref MOCK_MESSAGE_PROVIDER: Arc<MockMessageProvider> = Arc::new(MockMessageProvider::new());
 }
 
 pub struct MockMessageProvider {
     next_result:
         Mutex<Option<OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError>>>,
+    return_default_message: bool,
 }
 
 impl MockMessageProvider {
     pub fn new() -> Self {
-        Self { next_result: None.into() }
+        Self { next_result: None.into(), return_default_message: false }
+    }
+
+    pub fn with_default_message() -> Self {
+        let mut res = Self::new();
+        res.return_default_message = true;
+        res
     }
 
     pub fn set_next_async_result(
@@ -144,7 +149,11 @@ impl MessageProvider for MockMessageProvider {
         _publisher_name: &str,
     ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
         self.next_result.lock().take().unwrap_or_else(|| {
-            OperationResult::Synchronous(Ok(Some(Arc::new(TEST_MESSAGE.clone()))))
+            OperationResult::Synchronous(if self.return_default_message {
+                Ok(Some(Arc::new(TEST_MESSAGE.clone())))
+            } else {
+                Err(MessageProviderError::InvalidPublisherName)
+            })
         })
     }
 }

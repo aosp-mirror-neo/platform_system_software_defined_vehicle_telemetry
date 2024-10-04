@@ -11,8 +11,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node::Node;
 use crate::expr::node_error::NodeError;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
     ReflectRepeatedMutExt, ToReflectValueBox,
 };
@@ -60,7 +61,7 @@ impl MessageBuilder for MessageBuilderImpl {
     ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError> {
         let operation_results = self.value_providers.iter().map(|(field_name, node)| {
             let name_clone = field_name.to_owned();
-            node.evaluate(context).map(move |res| (name_clone, res))
+            node.evaluate(Arc::clone(context)).map(move |res| (name_clone, res))
         });
         let self_clone = Arc::clone(&self);
         ValueHolder::collect_unordered(operation_results).map(move |results| {

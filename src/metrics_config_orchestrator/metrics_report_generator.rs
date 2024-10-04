@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;

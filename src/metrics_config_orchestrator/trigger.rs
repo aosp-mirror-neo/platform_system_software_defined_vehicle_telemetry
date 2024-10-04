@@ -5,7 +5,7 @@ use std::marker::{Send, Sync};
 use std::sync::Arc;
 
 use super::subscription_manager::CallbackFn;
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 mod base;
 pub(crate) mod conditional;

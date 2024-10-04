@@ -7,7 +7,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::base::BaseTrigger;
 use super::Trigger;
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::subscription_manager::Activatable;
 use crate::metrics_config_orchestrator::trigger::{TriggerCallbackFn, TriggerSubscriber};
 use crate::metrics_config_orchestrator::Publisher;

@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::expr::node::NodeEvaluationContext;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, SubscriptionManager, SubscriptionManagerImpl,
 };

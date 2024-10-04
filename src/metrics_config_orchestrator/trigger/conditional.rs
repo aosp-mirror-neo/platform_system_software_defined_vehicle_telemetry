@@ -12,8 +12,9 @@ use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{base::BaseTrigger, Trigger, TriggerCallbackFn, TriggerSubscriber};
-use crate::expr::node::{Node, NodeEvaluationContext};
+use crate::expr::node::Node;
 use crate::expr::node_error::NodeError;
+use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::subscription_manager::Activatable;
 
@@ -138,7 +139,7 @@ impl ConditionalTrigger {
             })
         }
 
-        let result_holder = self.selector_expression.evaluate(&context);
+        let result_holder = self.selector_expression.evaluate(Arc::clone(&context));
         match result_holder {
             OperationResult::Asynchronous(future) => {
                 // Spawn a task that awaits the async result, checks it and fires the trigger if it's true.
