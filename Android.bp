@@ -200,6 +200,9 @@ rust_test {
     name: "libsdv_telemetry_dt_wrapper_integration_tests",
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
+    test_options: {
+        unit_test: false,
+    },
     rustlibs: [
         // keep-sorted start
         "librand",
@@ -389,6 +392,9 @@ rust_test {
 rust_test {
     name: "sdv_telemetry_integration_tests",
     defaults: ["sdv_telemetry@rust_defaults"],
+    test_options: {
+        unit_test: false,
+    },
     srcs: [
         "tests/integration_tests.rs",
     ],
