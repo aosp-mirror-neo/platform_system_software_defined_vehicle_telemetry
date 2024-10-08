@@ -7,6 +7,7 @@ use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    path::PathBuf,
 };
 
 use crate::{
@@ -22,13 +23,15 @@ use crate::{
 pub struct MetricsConfigsTracker {
     metrics_configs: HashMap<String, MetricsConfigInfo>,
     write_report_files: bool,
+    output_directory: PathBuf,
 }
 
 impl MetricsConfigsTracker {
-    pub fn new(write_report_files_to_disk: bool) -> Self {
+    pub fn new(write_report_files_to_disk: bool, output_directory: PathBuf) -> Self {
         MetricsConfigsTracker {
             metrics_configs: HashMap::new(),
             write_report_files: write_report_files_to_disk,
+            output_directory,
         }
     }
 
@@ -57,7 +60,7 @@ impl MetricsConfigsTracker {
             MetricsConfigInfo::new(&file_name, serialized_config, message_descriptors);
 
         for report_config in &config.metrics_report_configs {
-            let report_log_path = Path::new(io::OUTPUT_DIR).join(format!(
+            let report_log_path = self.output_directory.join(format!(
                 "{}_all_reports_for_{}.txt",
                 config.uuid,
                 report_config.name.to_ascii_lowercase()
@@ -135,6 +138,8 @@ impl MetricsConfigsTracker {
         report_info: &ReportInfo,
         report: MetricsReport,
     ) -> Result<(), SimulatorError> {
+        let reports_directory = self.output_directory.join(io::REPORTS_DIR_NAME);
+
         let metrics_config = self.get_metrics_config_info(report_info)?;
         let (report_config, message_descriptor) =
             metrics_config.get_report_config_info(report_info)?;
@@ -146,7 +151,7 @@ impl MetricsConfigsTracker {
                 report_info.report_config_name,
                 report.report_number
             );
-            let output_file_path = Path::new(io::REPORTS_DIR).join(&output_file_name);
+            let output_file_path = reports_directory.join(&output_file_name);
             write_report_to_file(&output_file_path, &report)?;
             report_file_names.push(output_file_name);
         }

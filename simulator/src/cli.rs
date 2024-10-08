@@ -61,6 +61,10 @@ pub struct TelemetryClientArgs {
     /// After how many returned reports to finish the simulator
     #[arg(long = "max-report-count", required = false)]
     pub max_report_count: Option<u64>,
+
+    /// The output directory to write results to.
+    #[arg(long = "output-directory", default_value = "/data/local/tmp/telemetry_simulator_out", value_hint = clap::ValueHint::DirPath)]
+    pub output_directory: PathBuf,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -188,6 +192,10 @@ mod tests {
         if let Commands::TelemetryClient { telemetry_client_args } = args.command {
             assert!(telemetry_client_args.no_binary_reports);
             assert_eq!(telemetry_client_args.max_report_count, Some(5));
+            assert_eq!(
+                telemetry_client_args.output_directory,
+                PathBuf::from("/data/local/tmp/telemetry_simulator_out"),
+            );
         } else {
             panic!("Wrong subcommand: {:?}", args.command);
         };
@@ -223,6 +231,8 @@ mod tests {
             "publisher_config_2.textproto",
             "--max-report-count",
             "5",
+            "--output-directory",
+            "/foo/bar",
         ]);
         let args = args.unwrap();
         assert_eq!(args.max_simulation_time, Duration::from_secs(10));
@@ -238,6 +248,7 @@ mod tests {
                 ]
             );
             assert_eq!(telemetry_client_args.max_report_count, Some(5));
+            assert_eq!(telemetry_client_args.output_directory, PathBuf::from("/foo/bar"));
 
             assert_eq!(
                 simulation_publisher_args.publisher_config_paths,
@@ -339,6 +350,7 @@ mod tests {
                     max_report_count: Some(5),
                     metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
                     no_binary_reports: false,
+                    output_directory: PathBuf::from("/foo/bar"),
                 },
             },
             max_simulation_time: Duration::from_secs(10),
@@ -382,6 +394,7 @@ Application will finish after 00:00:10.
                     max_report_count: Some(5),
                     metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
                     no_binary_reports: true,
+                    output_directory: PathBuf::from("/foo/bar"),
                 },
                 simulation_publisher_args: SimulationPublisherArgs {
                     publisher_config_paths: vec![

@@ -15,8 +15,7 @@ use std::{
 
 use crate::{output_strings::report_log_header, SimulatorError};
 
-pub const OUTPUT_DIR: &str = "/data/local/tmp/telemetry_simulator_out/";
-pub const REPORTS_DIR: &str = "/data/local/tmp/telemetry_simulator_out/reports/";
+pub const REPORTS_DIR_NAME: &str = "reports";
 
 /// Reads the metrics config at the provided file path into a byte array.
 pub fn read_metrics_config_from_file(

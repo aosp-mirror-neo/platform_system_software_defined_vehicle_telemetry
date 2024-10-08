@@ -20,7 +20,7 @@ mod util;
 use anyhow::Error;
 use binder::BinderFeatures;
 use clap::Parser;
-use io::REPORTS_DIR;
+use io::REPORTS_DIR_NAME;
 use protobuf::Message;
 use log::{error, info};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
@@ -73,6 +73,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
+                &telemetry_client_args.output_directory,
             )
             .await?;
         }
@@ -93,6 +94,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
+                &telemetry_client_args.output_directory,
             )
             .await?;
         }
@@ -106,12 +108,15 @@ async fn run_telemetry_client(
     no_binary_reports: bool,
     max_report_count: Option<u64>,
     max_simulation_time: Duration,
+    output_directory: &Path,
 ) -> anyhow::Result<()> {
+    let reports_directory = output_directory.join(REPORTS_DIR_NAME);
     create_output_directory(
-        Path::new(io::OUTPUT_DIR),
-        if no_binary_reports { None } else { Some(Path::new(REPORTS_DIR)) },
+        output_directory,
+        (!no_binary_reports).then_some(reports_directory.as_path()),
     )?;
-    let mut metrics_configs_tracker = MetricsConfigsTracker::new(!no_binary_reports);
+    let mut metrics_configs_tracker =
+        MetricsConfigsTracker::new(!no_binary_reports, output_directory.to_owned());
 
     for path in metrics_config_paths {
         metrics_configs_tracker.parse_metrics_config(path)?;
