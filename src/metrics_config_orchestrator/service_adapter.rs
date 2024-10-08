@@ -7,9 +7,11 @@ use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::select;
-use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
+use crate::metrics_config_orchestrator::async_event_processor::{
+    AsyncEventHandler, AsyncEventProcessor,
+};
 use crate::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
     ServicePublisherSubscription,
@@ -39,7 +41,7 @@ pub(crate) trait ServiceAdapter {
     async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 pub(crate) trait ServiceMessageProvider: Send + Sync {
     async fn get_latest_message(
         &self,
@@ -86,9 +88,7 @@ pub(crate) struct ServiceAdapterImpl {
             String,
             (
                 Box<dyn ServicePublisherSubscription>,
-                // TODO(b/329515273): Remove this workaround once all
-                // `ServicePublisherSubscription`s correctly drop their callback on unsubscription.
-                oneshot::Sender<()>,
+                AsyncEventProcessor,
                 Arc<
                     AsyncMutex<
                         HashMap<
@@ -186,7 +186,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 }
                 Entry::Vacant(v) => {
                     // If there is no active subscription, create a new one and store it.
-                    let (on_message_tx, mut on_message_rx) = mpsc::unbounded_channel();
+                    let (sender, receiver) = mpsc::unbounded_channel();
                     let service_name_clone = service_name.to_owned();
                     let create_subscription_outcome = self
                         .service_publisher_accessor
@@ -194,8 +194,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             service_name,
                             None,
                             Box::new(move |msg| {
-                                if on_message_tx.send(msg).is_err() {
-                                    // This means that `on_message_rx` was dropped - which should
+                                if sender.send(msg).is_err() {
+                                    // This means that `receiver` was dropped - which should
                                     // never happen, since it is only dropped when unsubscribing.
                                     error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
                                 }
@@ -205,30 +205,25 @@ impl ServiceAdapter for ServiceAdapterImpl {
 
                     match create_subscription_outcome {
                         CreateSubscriptionOutcome::Subscribed(subscription) => {
-                            let callbacks =
-                                HashMap::from([(subscription_id, new_message_callback)]);
-                            let callback_container = Arc::new(AsyncMutex::new(callbacks));
-                            let callback_container_clone = Arc::clone(&callback_container);
+                            struct ServiceAdapterHandler {
+                                callback_container: Arc<
+                                    AsyncMutex<
+                                        HashMap<
+                                            SequenceNumberType,
+                                            Box<
+                                                dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>)
+                                                    + Send
+                                                    + Sync,
+                                            >,
+                                        >,
+                                    >,
+                                >,
+                            }
 
-                            // TODO(b/329515273): Remove this workaround once all
-                            // `ServicePublisherSubscription`s correctly drop their callback on
-                            // unsubscription.
-                            let (cancel_reader_tx, mut cancel_reader_rx) = oneshot::channel();
-
-                            tokio::spawn(async move {
-                                // This loop runs until there are no no more messages in the queue
-                                // AND (`on_message_tx` is dropped OR cancellation is signalled by
-                                // `cancel_reader_rx`).
-                                while let Some(message) = select! {
-                                    // Always check for pending messages before cancellation.
-                                    biased;
-                                    // This will stop the loop if `on_message_tx` was dropped.
-                                    m = on_message_rx.recv() => m,
-                                    // Stop the loop if `cancel_reader_rx` receives an event or
-                                    // errors.
-                                    _ = &mut cancel_reader_rx => None,
-                                } {
-                                    let mut subscriptions = callback_container_clone.lock().await;
+                            #[async_trait]
+                            impl AsyncEventHandler<Box<dyn MessageDyn>> for ServiceAdapterHandler {
+                                async fn handle(&mut self, message: Box<dyn MessageDyn>) {
+                                    let mut subscriptions = self.callback_container.lock().await;
 
                                     // Synchronously invoke callbacks. The loop needs to wait before
                                     // they finish to release the mutex lock when they're done
@@ -238,9 +233,19 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                         subscription(&msg);
                                     }
                                 }
-                            });
+                            }
 
-                            v.insert((subscription, cancel_reader_tx, callback_container));
+                            let callbacks =
+                                HashMap::from([(subscription_id, new_message_callback)]);
+                            let callback_container = Arc::new(AsyncMutex::new(callbacks));
+                            let callback_container_clone = Arc::clone(&callback_container);
+                            let event_queue = AsyncEventProcessor::new(
+                                receiver,
+                                ServiceAdapterHandler {
+                                    callback_container: callback_container_clone,
+                                },
+                            );
+                            v.insert((subscription, event_queue, callback_container));
                             Some(ServiceSubscriptionType::new_shared(
                                 service_name.to_owned(),
                                 subscription_id,
@@ -276,13 +281,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         if is_last_callback {
                             // Remove entry and unsubscribe from the underlying subscription
                             // if the last callback was removed.
-                            let (_, (underlying_subscription, cancel_reader_tx, _)) =
-                                o.remove_entry();
-                            // We do not really care whether the reader is still alive or not - just
-                            // tell it to cancel processing messages. We don't even really have to
-                            // send something here, just dropping it would also be enough to tell
-                            // the reader to stop.
-                            let _ = cancel_reader_tx.send(());
+                            let (_, (underlying_subscription, _, _)) = o.remove_entry();
                             underlying_subscription.unsubscribe().await?;
                         }
                     }
