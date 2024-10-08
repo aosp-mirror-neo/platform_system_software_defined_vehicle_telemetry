@@ -59,8 +59,8 @@ pub struct TelemetryClientArgs {
     pub no_binary_reports: bool,
 
     /// After how many returned reports to finish the simulator
-    #[arg(long = "max-report-count", required = true)]
-    pub max_report_count: u64,
+    #[arg(long = "max-report-count", required = false)]
+    pub max_report_count: Option<u64>,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -73,6 +73,27 @@ pub struct SimulationPublisherArgs {
 
 impl fmt::Display for CliArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fn write_finish_condition(
+            f: &mut fmt::Formatter<'_>,
+            max_simulation_time: &Duration,
+            max_report_count: &Option<u64>,
+        ) -> fmt::Result {
+            if let Some(max_report_count) = max_report_count {
+                writeln!(
+                    f,
+                    "Application will finish after {} or {} returned reports, whichever comes first.",
+                    printable_duration(max_simulation_time)?,
+                    max_report_count
+                )
+            } else {
+                writeln!(
+                    f,
+                    "Application will finish after {}.",
+                    printable_duration(max_simulation_time)?,
+                )
+            }
+        }
+
         match &self.command {
             Commands::TelemetryClient { telemetry_client_args } => {
                 writeln!(f, "Running telemetry client only")?;
@@ -80,11 +101,10 @@ impl fmt::Display for CliArgs {
                 if telemetry_client_args.no_binary_reports {
                     writeln!(f, "Not writing reports to disk.")?;
                 }
-                writeln!(
+                write_finish_condition(
                     f,
-                    "Application will finish after {} or {} returned reports, whichever comes first.",
-                    printable_duration(self.max_simulation_time)?,
-                    telemetry_client_args.max_report_count
+                    &self.max_simulation_time,
+                    &telemetry_client_args.max_report_count,
                 )
             }
             Commands::SimulationPublishers { simulation_publisher_args } => {
@@ -94,12 +114,7 @@ impl fmt::Display for CliArgs {
                     "Publisher configs: {:?}",
                     simulation_publisher_args.publisher_config_paths
                 )?;
-
-                writeln!(
-                    f,
-                    "Application will finish after {}.",
-                    printable_duration(self.max_simulation_time)?,
-                )
+                write_finish_condition(f, &self.max_simulation_time, &None)
             }
             Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
                 writeln!(f, "Running telemetry client and simulation publishers")?;
@@ -112,11 +127,10 @@ impl fmt::Display for CliArgs {
                 if telemetry_client_args.no_binary_reports {
                     writeln!(f, "Not writing reports to disk.")?;
                 }
-                writeln!(
+                write_finish_condition(
                     f,
-                    "Application will finish after {} or {} returned reports, whichever comes first.",
-                    printable_duration(self.max_simulation_time)?,
-                    telemetry_client_args.max_report_count
+                    &self.max_simulation_time,
+                    &telemetry_client_args.max_report_count,
                 )
             }
         }
@@ -173,6 +187,7 @@ mod tests {
         let args = args.unwrap();
         if let Commands::TelemetryClient { telemetry_client_args } = args.command {
             assert!(telemetry_client_args.no_binary_reports);
+            assert_eq!(telemetry_client_args.max_report_count, Some(5));
         } else {
             panic!("Wrong subcommand: {:?}", args.command);
         };
@@ -222,7 +237,7 @@ mod tests {
                     PathBuf::from("metrics_config_2.textproto")
                 ]
             );
-            assert_eq!(telemetry_client_args.max_report_count, 5);
+            assert_eq!(telemetry_client_args.max_report_count, Some(5));
 
             assert_eq!(
                 simulation_publisher_args.publisher_config_paths,
@@ -234,6 +249,56 @@ mod tests {
         } else {
             panic!("Wrong subcommand: {:?}", args.command);
         };
+    }
+
+    #[test]
+    fn test_parse_cli_args_telemetry_client_subcommand_no_report_count() {
+        let args = CliArgs::try_parse_from(vec![
+            "sdv_telemetry_simulator",
+            "--max-simulation-time",
+            "seconds:10",
+            "telemetry-client",
+            "--metrics-configs",
+            "metrics_config_1.textproto",
+            "--no-binary-reports",
+        ]);
+        let args = args.unwrap();
+        assert!(
+            matches!(
+                args.command,
+                Commands::TelemetryClient {
+                    telemetry_client_args: TelemetryClientArgs { max_report_count: None, .. },
+                },
+            ),
+            "Unexpected result: {:?}",
+            args.command
+        )
+    }
+
+    #[test]
+    fn test_parse_cli_args_full_simulation_subcommand_no_report_count() {
+        let args = CliArgs::try_parse_from(vec![
+            "sdv_telemetry_simulator",
+            "--max-simulation-time",
+            "seconds:10",
+            "full-simulation",
+            "--metrics-configs",
+            "metrics_config_1.textproto",
+            "--publisher-configs",
+            "publisher_config_1.textproto",
+        ]);
+        let args = args.unwrap();
+        assert!(
+            matches!(
+                args.command,
+                Commands::FullSimulation {
+                    telemetry_client_args: TelemetryClientArgs { max_report_count: None, .. },
+                    ..
+                },
+            ),
+            "Unexpected result: {:?}",
+            args.command
+        )
     }
 
     #[test]
@@ -271,7 +336,7 @@ mod tests {
         let args = CliArgs {
             command: Commands::TelemetryClient {
                 telemetry_client_args: TelemetryClientArgs {
-                    max_report_count: 5,
+                    max_report_count: Some(5),
                     metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
                     no_binary_reports: false,
                 },
@@ -314,7 +379,7 @@ Application will finish after 00:00:10.
         let args = CliArgs {
             command: Commands::FullSimulation {
                 telemetry_client_args: TelemetryClientArgs {
-                    max_report_count: 5,
+                    max_report_count: Some(5),
                     metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
                     no_binary_reports: true,
                 },

@@ -104,7 +104,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
 async fn run_telemetry_client(
     metrics_config_paths: &Vec<PathBuf>,
     no_binary_reports: bool,
-    max_report_count: u64,
+    max_report_count: Option<u64>,
     max_simulation_time: Duration,
 ) -> anyhow::Result<()> {
     create_output_directory(
@@ -274,7 +274,7 @@ async fn await_next_report(
 /// it uses the default values.
 fn get_finish_condition(
     max_duration: Duration,
-    max_reports: u64,
+    max_reports: Option<u64>,
 ) -> Result<impl FnMut(u64) -> bool, SimulatorError> {
     let (simulator_done_tx, mut simulator_done_rx) = oneshot::channel();
     task::spawn(async move {
@@ -284,7 +284,8 @@ fn get_finish_condition(
 
     Ok(move |num_reports: u64| {
         let time_limit_reached = !matches!(simulator_done_rx.try_recv(), Err(TryRecvError::Empty));
-        let reports_limit_reached = num_reports >= max_reports;
+        let reports_limit_reached =
+            max_reports.map(|max_reports| num_reports >= max_reports).unwrap_or(false);
         time_limit_reached || reports_limit_reached
     })
 }

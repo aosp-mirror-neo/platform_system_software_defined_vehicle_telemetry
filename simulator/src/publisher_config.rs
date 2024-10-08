@@ -62,7 +62,7 @@ impl fmt::Display for PublisherConfig {
 
 impl fmt::Display for ParsedDataEntry {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        writeln!(f, "Delay: {}", printable_small_duration(self.delay)?)?;
+        writeln!(f, "Delay: {}", printable_small_duration(&self.delay)?)?;
         writeln!(f, "{}", self.message)
     }
 }
