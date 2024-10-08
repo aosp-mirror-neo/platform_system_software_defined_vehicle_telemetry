@@ -53,14 +53,8 @@ rust_test_host {
         "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
-    test_suites: [
-        // keep-sorted start
-        "automotive-sdv-tests",
-        "general-tests",
-        // keep-sorted end
-    ],
-    auto_gen_config: true,
     test_options: {
         unit_test: true,
     },
+    auto_gen_config: true,
 }

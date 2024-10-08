@@ -35,10 +35,13 @@ rust_bindgen {
 rust_test {
     name: "libsdv_telemetry_time_bindgen_tests",
     defaults: ["sdv_telemetry@rust_defaults"],
+    crate_name: "sdv_telemetry_time_bindgen_tests",
     srcs: [
         ":libsdv_telemetry_time_bindgen",
     ],
-    crate_name: "sdv_telemetry_time_bindgen_tests",
+    test_options: {
+        unit_test: true,
+    },
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
@@ -80,6 +83,9 @@ rust_test {
     name: "libsdv_telemetry_time_wrapper_tests",
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper_tests",
+    test_options: {
+        unit_test: true,
+    },
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
@@ -87,9 +93,6 @@ rust_test {
         // keep-sorted end
     ],
     auto_gen_config: true,
-    test_options: {
-        unit_test: true,
-    },
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,
