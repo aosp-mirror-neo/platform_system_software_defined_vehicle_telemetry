@@ -123,31 +123,32 @@ impl fmt::Display for CliArgs {
     }
 }
 
+#[allow(clippy::as_conversions, reason = "No alternatives for casting from float to int exist")]
 fn parse_duration(s: &str) -> Result<Duration, Error> {
     let Some((text, value)) = s.split_once(':') else {
         return Err(clap::Error::new(ErrorKind::InvalidValue));
     };
 
-    let Ok(value) = value.parse::<u64>() else {
+    let Ok(value) = value.parse::<f64>() else {
         return Err(clap::Error::new(ErrorKind::InvalidValue));
     };
 
-    match text {
-        "second" | "seconds" => convert_duration(value, ChronoDuration::try_seconds),
-        "minute" | "minutes" => convert_duration(value, ChronoDuration::try_minutes),
-        "hour" | "hours" => convert_duration(value, ChronoDuration::try_hours),
-        _ => Err(clap::Error::new(ErrorKind::InvalidValue)),
-    }
-}
+    let seconds = match text {
+        "second" | "seconds" => value,
+        "minute" | "minutes" => value * 60.0,
+        "hour" | "hours" => value * 3600.0,
+        _ => return Err(clap::Error::new(ErrorKind::InvalidValue)),
+    };
 
-/// Tries to convert a positive number of seconds/minutes/hours/... to a
-/// std::time::Duration. If the number of seconds is too large, returns an error
-/// but does not panic.
-fn convert_duration(
-    value: u64,
-    chrono_fn: impl Fn(i64) -> Option<chrono::Duration>,
-) -> Result<Duration, Error> {
-    Ok(chrono_fn(value.try_into().map_err(|_| clap::Error::new(ErrorKind::InvalidValue))?)
+    if seconds < 0.0 {
+        return Err(clap::Error::new(ErrorKind::InvalidValue));
+    }
+
+    let whole_seconds = seconds.trunc() as i64;
+    let sub_seconds = seconds.fract();
+    let sub_nanos = (sub_seconds * 1_000_000_000.0).floor() as u32;
+
+    Ok(ChronoDuration::new(whole_seconds, sub_nanos)
         .ok_or(clap::Error::new(ErrorKind::InvalidValue))?
         .to_std()
         .expect("Could not convert chrono Duration to std Duration."))
@@ -156,6 +157,8 @@ fn convert_duration(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use sdv_telemetry_test_utils::parameterized_test;
 
     #[test]
     fn test_parse_cli_args_telemetry_client_subcommand() {
@@ -338,81 +341,32 @@ Application will finish after 00:00:10 or 5 returned reports, whichever comes fi
         assert_eq!(actual_output, expected_output);
     }
 
-    #[test]
-    fn test_convert_duration_seconds() {
-        let duration = convert_duration(10, ChronoDuration::try_seconds).unwrap();
-        assert_eq!(duration, Duration::from_secs(10));
-    }
+    parameterized_test!(
+        test_parse_duration,
 
-    #[test]
-    fn test_convert_duration_minutes() {
-        let duration = convert_duration(5, ChronoDuration::try_minutes).unwrap();
-        assert_eq!(duration, Duration::from_secs(300));
-    }
+        |expected, input| {
+            let result = parse_duration(input);
+            if let Some(expected) = expected {
+                assert_eq!(result.unwrap(), expected);
+            } else {
+                assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
+            }
+        },
 
-    #[test]
-    fn test_convert_duration_hours() {
-        let duration = convert_duration(2, ChronoDuration::try_hours).unwrap();
-        assert_eq!(duration, Duration::from_secs(7200));
-    }
+        second: (Some(Duration::from_secs(1)), "second:1",),
+        seconds: (Some(Duration::from_secs(10)), "seconds:10",),
+        minute: (Some(Duration::from_secs(60)), "minute:1",),
+        minutes: (Some(Duration::from_secs(120)), "minutes:2",),
+        hour: (Some(Duration::from_secs(3600)), "hour:1",),
+        hours: (Some(Duration::from_secs(7200)), "hours:2",),
 
-    #[test]
-    fn test_convert_duration_too_large() {
-        let result = convert_duration(u64::MAX, ChronoDuration::try_seconds);
-        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
-    }
+        float_seconds: (Some(Duration::from_millis(6500)), "seconds:6.5",),
+        float_minutes: (Some(Duration::from_secs(150)), "minutes:2.5",),
+        float_hours: (Some(Duration::from_secs(30 * 60)), "hours:0.5",),
 
-    #[test]
-    fn test_parse_duration_second() {
-        let duration = parse_duration("second:1").unwrap();
-        assert_eq!(duration, Duration::from_secs(1));
-    }
-
-    #[test]
-    fn test_parse_duration_seconds() {
-        let duration = parse_duration("seconds:10").unwrap();
-        assert_eq!(duration, Duration::from_secs(10));
-    }
-
-    #[test]
-    fn test_parse_duration_minute() {
-        let duration = parse_duration("minutes:2").unwrap();
-        assert_eq!(duration, Duration::from_secs(120));
-    }
-
-    #[test]
-    fn test_parse_duration_minutes() {
-        let duration = parse_duration("minute:1").unwrap();
-        assert_eq!(duration, Duration::from_secs(60));
-    }
-
-    #[test]
-    fn test_parse_duration_hour() {
-        let duration = parse_duration("hour:1").unwrap();
-        assert_eq!(duration, Duration::from_secs(3600));
-    }
-
-    #[test]
-    fn test_parse_duration_hours() {
-        let duration = parse_duration("hours:2").unwrap();
-        assert_eq!(duration, Duration::from_secs(7200));
-    }
-
-    #[test]
-    fn test_parse_duration_invalid_unit() {
-        let result = parse_duration("days:1");
-        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
-    }
-
-    #[test]
-    fn test_parse_duration_invalid_value() {
-        let result = parse_duration("seconds:abc");
-        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
-    }
-
-    #[test]
-    fn test_parse_duration_missing_colon() {
-        let result = parse_duration("seconds10");
-        assert_eq!(result.unwrap_err().kind(), ErrorKind::InvalidValue);
-    }
+        invalid_unit: (None, "days:1",),
+        invalid_value: (None, "seconds:abc",),
+        negative_value: (None, "seconds:-1",),
+        missing_colon: (None, "seconds10",),
+    );
 }
