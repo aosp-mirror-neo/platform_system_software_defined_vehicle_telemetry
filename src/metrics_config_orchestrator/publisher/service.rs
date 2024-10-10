@@ -7,7 +7,9 @@ use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
-use std::{collections::HashMap, mem, sync::Arc, time::Duration};
+use std::sync::{Arc, Weak};
+use std::{collections::HashMap, mem, time::Duration};
+use tokio::sync::mpsc;
 use tokio::{select, sync::Mutex as AsyncMutex};
 use tokio_util::sync::CancellationToken;
 
@@ -15,6 +17,9 @@ use super::{
     base::BasePublisher, CallbackFn, Publisher, PublisherActivateError, PublisherDeactivateError,
 };
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::metrics_config_orchestrator::async_event_processor::{
+    AsyncEventHandler, AsyncEventProcessor,
+};
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
@@ -64,6 +69,9 @@ enum ServicePublisherState {
     ActiveSubscribed {
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
+
+        // Processor of incoming messages.
+        _event_processor: AsyncEventProcessor,
 
         // Subscription to ServiceAdapter.
         service_subscription: Option<ServiceSubscription>,
@@ -152,7 +160,9 @@ impl Publisher for ServicePublisher {
                 cancellation_token.cancel()
             }
             ServicePublisherState::ActiveGetter { .. } => {}
-            ServicePublisherState::ActiveSubscribed { callback_map, service_subscription } => {
+            ServicePublisherState::ActiveSubscribed {
+                callback_map, service_subscription, ..
+            } => {
                 assert!(
                     callback_map.is_empty(),
                     "Unable to deactivate publisher {} with active subscriptions",
@@ -350,50 +360,69 @@ impl ServicePublisher {
             Some(ServicePublisherState::ActiveGetter { message_provider: message_provider.into() })
         } else {
             // Subscribe to the service adapter.
-            let self_clone = Arc::clone(self);
+            let (sender, receiver) = mpsc::unbounded_channel();
             let maybe_subscription = self
                 .service_adapter
                 .subscribe(
                     &self.service_name,
                     self.configuration.as_ref(),
-                    Box::new(move |msg| self_clone.on_new_message(msg)),
+                    Box::new(move |msg| {
+                        sender
+                            .send(Arc::clone(msg))
+                            .expect("Callback should only receive messages when subscribed")
+                    }),
                 )
                 .await
                 .map_err(|error| PublisherActivateError::ServiceAdapterSubscribeError { error })?;
 
+            struct ServicePublisherHandler {
+                service_publisher: Weak<ServicePublisher>,
+            }
+
+            #[async_trait]
+            impl AsyncEventHandler<Arc<dyn MessageDyn>> for ServicePublisherHandler {
+                async fn handle(&mut self, message: Arc<dyn MessageDyn>) {
+                    self.service_publisher
+                        .upgrade()
+                        .expect("Handler should only be called when service publisher is active")
+                        .on_new_message(message)
+                        .await;
+                }
+            }
+
+            let event_processor = AsyncEventProcessor::new(
+                receiver,
+                ServicePublisherHandler { service_publisher: Arc::downgrade(self) },
+            );
             maybe_subscription.map(|subscription| ServicePublisherState::ActiveSubscribed {
                 callback_map: HashMap::new(),
+                _event_processor: event_processor,
                 service_subscription: Some(subscription),
             })
         };
         Ok(new_state)
     }
 
-    fn on_new_message(self: &Arc<Self>, message: &Arc<dyn MessageDyn>) {
-        // Create context outside of the task, so that the date/time is set as fast as possible,
-        // and not just at the moment when this async task should start running.
+    async fn on_new_message(&self, message: Arc<dyn MessageDyn>) {
+        // Create context outside of the lock, so that the date/time is set as fast as possible,
+        // and not just at the moment when the lock is obtained.
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             self.get_name().to_owned(),
-            Arc::clone(message),
+            Arc::clone(&message),
         ));
 
-        let msg = Arc::clone(message);
-        let self_clone = Arc::clone(self);
-        tokio::spawn(async move {
-            // Lock state mutex and hold it to make sure the publisher is not deactivated.
-            let mut state_lock = self_clone.state.lock().await;
+        // Lock state mutex and hold it to make sure the publisher is not deactivated.
+        let mut state_lock = self.state.lock().await;
 
-            let ServicePublisherState::ActiveSubscribed { callback_map, .. } = &mut *state_lock
-            else {
-                panic!(
-                    "Publisher {} received callback when it was in the {} state",
-                    self_clone.get_name(),
-                    state_lock
-                );
-            };
+        let ServicePublisherState::ActiveSubscribed { callback_map, .. } = &mut *state_lock else {
+            panic!(
+                "Publisher {} received callback when it was in the {} state",
+                self.get_name(),
+                state_lock
+            );
+        };
 
-            self_clone.base.set_new_message(msg, &context, callback_map);
-        });
+        self.base.set_new_message(message, &context, callback_map);
     }
 }
 
