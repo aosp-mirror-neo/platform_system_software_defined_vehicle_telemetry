@@ -1,0 +1,28 @@
+// Copyright 2024 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+aidl_interface {
+    name: "google.sdv.telemetry.configurable_publisher",
+    srcs: [
+        "google/sdv/telemetry/configurable_publisher/*.aidl",
+    ],
+    vendor_available: true,
+    always_use_unfrozen: true,
+    stability: "vintf",
+    owner: "google",
+    backend: {
+        java: {
+            enabled: true,
+        },
+        rust: {
+            enabled: true,
+        },
+        ndk: {
+            enabled: true,
+        },
+    },
+}

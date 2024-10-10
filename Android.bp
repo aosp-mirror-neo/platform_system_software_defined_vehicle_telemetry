@@ -5,41 +5,6 @@ package {
     default_applicable_licenses: ["sdv_license"],
 }
 
-cc_defaults {
-    name: "sdv_telemetry@cc_defaults",
-    defaults: [
-        "sdv@cc_defaults",
-        "sdv_tracing@cc_defaults",
-    ],
-    cflags: [
-        "-Wno-unused-private-field",
-    ],
-}
-
-rust_defaults {
-    name: "sdv_telemetry@rust_defaults",
-    defaults: [
-        "sdv@rust_defaults",
-        "sdv_tracing@rust_defaults",
-    ],
-    flags: [
-        // By enforcing this lint, we make it a lot more obvious when a conversion
-        // is potentially lossy, because lossless conversions are no longer
-        // allowed to be written as `a as XX`.
-        "-D clippy::cast_lossless",
-        // By enabling this lint, we make it easier to understand whether
-        // something being cloned is actually just cloning a pointer, or cloning
-        // the actual object.
-        "-D clippy::clone_on_ref_ptr",
-        // We prefer `if let ... {} else {}` over a `match` with two arms (note:
-        // this lint will not apply if the `match` statement has very simple
-        // arms).
-        "-D clippy::single_match_else",
-        // Similarly, we prefer `if ... {} else {}` over a `match` for bools.
-        "-D clippy::match_bool",
-    ],
-}
-
 rust_defaults {
     name: "libsdv_telemetry_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
