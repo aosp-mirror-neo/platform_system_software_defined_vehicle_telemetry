@@ -6,14 +6,18 @@ use protobuf::MessageDyn;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
-use std::{collections::HashMap, sync::Arc};
-use tokio::sync::Mutex as AsyncMutex;
+use std::collections::HashMap;
+use std::sync::{Arc, Weak};
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 use super::{
     base::BasePublisher, CallbackFn, Publisher, PublisherActivateError, PublisherDeactivateError,
 };
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::metrics_config_orchestrator::message_builder::MessageBuilder;
+use crate::metrics_config_orchestrator::async_event_processor::{
+    AsyncEventHandler, AsyncEventProcessor,
+};
+use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 
 pub(crate) struct AggregationPublisher {
@@ -37,6 +41,9 @@ enum AggregationPublisherState {
     Active {
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
+
+        // Processor of incoming trigger events.
+        _event_processor: AsyncEventProcessor,
     },
 }
 
@@ -72,20 +79,59 @@ impl Publisher for AggregationPublisher {
         );
 
         // Subscribe to parent triggers.
+        let (sender, receiver) = mpsc::unbounded_channel();
         for trigger in &self.triggers {
-            let self_clone = Arc::clone(&self);
+            let self_reference = Arc::downgrade(&self);
+            let sender_clone = sender.clone();
             Arc::clone(trigger)
                 .subscribe(
                     &self.trigger_subscriber,
                     Box::new(move |context| {
-                        self_clone.on_trigger_fired(context);
+                        // Synchronously build aggregated message and enqueue the result.
+                        let message_builder = Arc::clone(&self_reference.upgrade().expect("Callback should only be called when aggregation publisher is active").message_builder);
+                        let build_result = message_builder.build(&context);
+                        sender_clone.send((build_result, context)).expect("Callback should only receive messages when subscribed")
                     }),
                 )
                 .await;
         }
 
+        struct AggregationPublisherHandler {
+            aggregation_publisher: Weak<AggregationPublisher>,
+        }
+
+        #[async_trait]
+        impl
+            AsyncEventHandler<(
+                OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>,
+                Arc<NodeEvaluationContext>,
+            )> for AggregationPublisherHandler
+        {
+            async fn handle(
+                &mut self,
+                (build_result, context): (
+                    OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>,
+                    Arc<NodeEvaluationContext>,
+                ),
+            ) {
+                self.aggregation_publisher
+                    .upgrade()
+                    .expect("Handler should only be called when aggregation publisher is active")
+                    .on_new_message(build_result, context)
+                    .await;
+            }
+        }
+
+        let event_processor = AsyncEventProcessor::new(
+            receiver,
+            AggregationPublisherHandler { aggregation_publisher: Arc::downgrade(&self) },
+        );
+
         // Set the new state and release the mutex.
-        *state_lock = AggregationPublisherState::Active { callback_map: HashMap::new() };
+        *state_lock = AggregationPublisherState::Active {
+            callback_map: HashMap::new(),
+            _event_processor: event_processor,
+        };
 
         Ok(())
     }
@@ -186,37 +232,37 @@ impl AggregationPublisher {
         }
     }
 
-    fn on_trigger_fired(self: &Arc<Self>, context: Arc<NodeEvaluationContext>) {
-        let res = Arc::clone(&self.message_builder).build(&context);
-        let self_clone = Arc::clone(self);
-        tokio::spawn(async move {
-            // Lock state mutex and hold it to make sure the publisher is not deactivated.
-            let mut state_lock = self_clone.state.lock().await;
+    async fn on_new_message(
+        &self,
+        build_result: OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>,
+        context: Arc<NodeEvaluationContext>,
+    ) {
+        // Lock state mutex and hold it to make sure the publisher is not deactivated.
+        let mut state_lock = self.state.lock().await;
 
-            let AggregationPublisherState::Active { callback_map, .. } = &mut *state_lock else {
-                panic!(
-                    "Publisher {} received callback when it was in the {} state",
-                    self_clone.get_name(),
-                    state_lock
+        let AggregationPublisherState::Active { callback_map, .. } = &mut *state_lock else {
+            panic!(
+                "Publisher {} received callback when it was in the {} state",
+                self.get_name(),
+                state_lock
+            );
+        };
+
+        let message = match build_result.into_future().await {
+            Ok(msg) => msg.into(),
+            Err(err) => {
+                error!(
+                    "Error when trying to evaluate expression for publisher {}: {}",
+                    self.get_name(),
+                    err
                 );
-            };
+                return;
+            }
+        };
 
-            let msg = match res.into_future().await {
-                Ok(msg) => msg.into(),
-                Err(err) => {
-                    error!(
-                        "Error when trying to evaluate expression for publisher {}: {}",
-                        self_clone.get_name(),
-                        err
-                    );
-                    return;
-                }
-            };
-
-            let context =
-                context.to_child_context(self_clone.get_name().to_owned(), Arc::clone(&msg)).into();
-            self_clone.base.set_new_message(msg, &context, callback_map);
-        });
+        let context =
+            context.to_child_context(self.get_name().to_owned(), Arc::clone(&message)).into();
+        self.base.set_new_message(message, &context, callback_map);
     }
 }
 
