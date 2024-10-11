@@ -707,7 +707,6 @@ mod tests {
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
         let res_trigger = res.downcast_arc::<ConditionalTrigger>().ok().unwrap();
-        assert!(matches!(res_trigger.condition_type, ConditionType::AllChanges));
         // selector_expression should match the node at index 0
         assert!(Arc::ptr_eq(&res_trigger.selector_expression, &node_0));
         assert!(!Arc::ptr_eq(&res_trigger.selector_expression, &node_1));

@@ -3,19 +3,21 @@
 use anyhow::anyhow;
 use async_trait::async_trait;
 use log::error;
-use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
-use std::marker::Send;
 use std::sync::{Arc, Weak};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
-use super::{base::BaseTrigger, Trigger, TriggerCallbackFn, TriggerSubscriber};
+use super::base::{BaseTrigger, TriggerState};
+use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
 use crate::expr::node::Node;
 use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_value::NodeValue;
+use crate::metrics_config_orchestrator::async_event_processor::{
+    AsyncEventHandler, AsyncEventProcessor,
+};
 use crate::metrics_config_orchestrator::subscription_manager::Activatable;
 
 pub(crate) enum ConditionType {
@@ -29,12 +31,132 @@ pub(crate) enum ConditionType {
 pub(crate) struct ConditionalTrigger {
     base: BaseTrigger,
 
-    pub(crate) condition_type: ConditionType,
     pub(crate) triggers: Vec<Arc<dyn Trigger>>,
     pub(crate) selector_expression: Arc<Node>,
 
-    maybe_previous_value: Mutex<Option<NodeValue>>,
+    condition_checker: fn(NodeValue, &mut Option<NodeValue>) -> anyhow::Result<bool>,
     subscriber: TriggerSubscriber,
+}
+
+#[async_trait]
+impl Trigger for ConditionalTrigger {
+    fn get_name(&self) -> &str {
+        self.base.get_name()
+    }
+
+    async fn subscribe(
+        self: Arc<Self>,
+        subscriber: &TriggerSubscriber,
+        on_fired_callback: TriggerCallbackFn,
+    ) {
+        self.base.subscription_manager.subscribe(subscriber.clone(), on_fired_callback).await;
+    }
+
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
+        self.base.subscription_manager.unsubscribe(subscriber).await;
+    }
+}
+
+#[async_trait]
+impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalTrigger {
+    async fn activate(
+        self: Arc<Self>,
+        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
+    ) {
+        // Lock state mutex and hold it until the state transition is complete.
+        let mut state_lock = self.base.state.lock().await;
+        assert!(
+            matches!(*state_lock, TriggerState::Inactive),
+            "Unable to activate trigger {}: it's in {} state",
+            self.get_name(),
+            state_lock
+        );
+
+        let (sender, receiver) = mpsc::unbounded_channel();
+        for trigger in &self.triggers {
+            let self_reference = Arc::downgrade(&self);
+            let sender_clone = sender.clone();
+            Arc::clone(trigger)
+                .subscribe(
+                    &self.subscriber,
+                    Box::new(move |context| {
+                        // Synchronously evaluate selector expression and enqueue the result.
+                        let self_clone = &self_reference.upgrade().expect(
+                            "Callback should only be called when conditional trigger is active",
+                        );
+                        let evaluation_result =
+                            self_clone.selector_expression.evaluate(Arc::clone(&context));
+                        sender_clone
+                            .send((evaluation_result, context))
+                            .expect("Callback should only receive messages when subscribed")
+                    }),
+                )
+                .await;
+        }
+
+        struct ConditionalTriggerHandler {
+            callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
+            conditional_trigger: Weak<ConditionalTrigger>,
+            maybe_previous_value: Option<NodeValue>,
+        }
+
+        #[async_trait]
+        impl
+            AsyncEventHandler<(
+                OperationResult<'static, NodeValue, NodeError>,
+                Arc<NodeEvaluationContext>,
+            )> for ConditionalTriggerHandler
+        {
+            async fn handle(
+                &mut self,
+                (evaluation_result, context): (
+                    OperationResult<'static, NodeValue, NodeError>,
+                    Arc<NodeEvaluationContext>,
+                ),
+            ) {
+                self.conditional_trigger
+                    .upgrade()
+                    .expect("Handler should only be called when conditional trigger is active")
+                    .on_new_message(
+                        evaluation_result,
+                        &self.callback_map,
+                        context,
+                        &mut self.maybe_previous_value,
+                    )
+                    .await;
+            }
+        }
+
+        let event_processor = AsyncEventProcessor::new(
+            receiver,
+            ConditionalTriggerHandler {
+                callback_map,
+                conditional_trigger: Arc::downgrade(&self),
+                maybe_previous_value: None,
+            },
+        );
+
+        // Set the new state and release the mutex.
+        *state_lock = TriggerState::Active { _event_processor: event_processor };
+    }
+
+    async fn deactivate(&self) {
+        // Lock state mutex and hold it until the state transition is complete.
+        let mut state_lock = self.base.state.lock().await;
+        assert!(
+            matches!(*state_lock, TriggerState::Active { .. }),
+            "Unable to deactivate trigger {}: it's in {} state",
+            self.get_name(),
+            state_lock
+        );
+
+        for trigger in &self.triggers {
+            trigger.unsubscribe(&self.subscriber).await;
+        }
+
+        // Set the new state and release the mutex.
+        *state_lock = TriggerState::Inactive;
+    }
 }
 
 impl ConditionalTrigger {
@@ -44,12 +166,40 @@ impl ConditionalTrigger {
         triggers: Vec<Arc<dyn Trigger>>,
         selector_expression: Arc<Node>,
     ) -> Arc<Self> {
+        let condition_checker: for<'a> fn(
+            NodeValue,
+            &'a mut Option<NodeValue>,
+        ) -> anyhow::Result<bool> = match condition_type {
+            ConditionType::RisingEdge => |current_value, previous_value_holder| {
+                Self::compare_with_previous(
+                    current_value,
+                    previous_value_holder,
+                    &Operator::RelationalOperator(RelationalOperator::GT.into()),
+                )
+            },
+            ConditionType::FallingEdge => |current_value, previous_value_holder| {
+                Self::compare_with_previous(
+                    current_value,
+                    previous_value_holder,
+                    &Operator::RelationalOperator(RelationalOperator::LT.into()),
+                )
+            },
+            ConditionType::AllChanges => |current_value, previous_value_holder| {
+                Self::compare_with_previous(
+                    current_value,
+                    previous_value_holder,
+                    &Operator::RelationalOperator(RelationalOperator::NOT_EQ.into()),
+                )
+            },
+            ConditionType::IsTrue => |current_value, _| Self::is_true(&current_value),
+            ConditionType::IsFalse => |current_value, _| Self::is_false(&current_value),
+        };
+
         Arc::new_cyclic(|me: &Weak<Self>| Self {
             base: BaseTrigger::new(name.clone(), Weak::clone(me) as Weak<dyn Activatable<_, _>>),
-            condition_type,
             triggers,
             selector_expression,
-            maybe_previous_value: None.into(),
+            condition_checker,
             subscriber: TriggerSubscriber::ConditionalTrigger { name },
         })
     }
@@ -58,11 +208,11 @@ impl ConditionalTrigger {
     /// current value in the new previous value holder and returns comparison result.
     fn compare_with_previous(
         current_value: NodeValue,
-        previous_value_holder: &Mutex<Option<NodeValue>>,
+        previous_value_holder: &mut Option<NodeValue>,
         operator: &Operator,
     ) -> anyhow::Result<bool> {
         // Extract previous value and save current value.
-        let maybe_previous_value = previous_value_holder.lock().replace(current_value.clone());
+        let maybe_previous_value = previous_value_holder.replace(current_value.clone());
 
         // Perform comparison or return false if there's no previous value.
         if let Some(previous_value) = maybe_previous_value {
@@ -101,155 +251,38 @@ impl ConditionalTrigger {
         Ok(res)
     }
 
-    /// A callback to handle a fire event from conditional trigger's associated parent trigger.
-    /// Passes the result of expression evaluation and the previous value holder to
-    /// condition_checker and fires the trigger if it returns true.
-    fn on_conditional_trigger_parent_trigger_fired(
-        self: &Arc<Self>,
+    /// A callback to handle a new message generated from the selector expression as a result of
+    /// a fire event from conditional trigger's associated parent trigger.
+    async fn on_new_message(
+        &self,
+        evaluation_result: OperationResult<'static, NodeValue, NodeError>,
         callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-        condition_checker: impl FnOnce(NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>
-            + Send
-            + 'static,
         context: Arc<NodeEvaluationContext>,
+        maybe_previous_value: &mut Option<NodeValue>,
     ) {
-        fn check_evaluation_result(
-            trigger: &Arc<ConditionalTrigger>,
-            result: Result<NodeValue, NodeError>,
-            condition_checker: impl FnOnce(NodeValue, &Mutex<Option<NodeValue>>) -> anyhow::Result<bool>,
-        ) -> bool {
-            let node_value = match result {
-                Ok(node_value) => node_value,
-                Err(err) => {
-                    error!(
-                        "Error when performing expression evaluation for trigger {}: {}",
-                        trigger.get_name(),
-                        err
-                    );
-                    return false;
-                }
-            };
-
-            if node_value.is_none() {
-                // TODO: b/307547570 - properly handle absent values
-                return false;
-            }
-
-            condition_checker(node_value, &trigger.maybe_previous_value).unwrap_or_else(|err| {
-                panic!("Failed to perform comparison for trigger {}: {}", trigger.get_name(), err)
-            })
-        }
-
-        let result_holder = self.selector_expression.evaluate(Arc::clone(&context));
-        match result_holder {
-            OperationResult::Asynchronous(future) => {
-                // Spawn a task that awaits the async result, checks it and fires the trigger if it's true.
-                let self_clone = Arc::clone(self);
-                let callback_map_clone = Arc::clone(callback_map);
-                tokio::spawn(async move {
-                    if check_evaluation_result(&self_clone, future.await, condition_checker) {
-                        BaseTrigger::fire_trigger(
-                            self_clone.get_name(),
-                            &callback_map_clone,
-                            &context,
-                        )
-                        .await;
-                    }
-                });
-            }
-            OperationResult::Synchronous(result) => {
-                // Check result in the current thread and spawn a task to fire the trigger if it's true.
-                if check_evaluation_result(self, result, condition_checker) {
-                    let callback_map_clone = Arc::clone(callback_map);
-                    let trigger_name_clone = self.get_name().to_owned();
-                    tokio::spawn(async move {
-                        BaseTrigger::fire_trigger(
-                            &trigger_name_clone,
-                            &callback_map_clone,
-                            &context,
-                        )
-                        .await;
-                    });
-                }
+        let node_value = match evaluation_result.into_future().await {
+            Ok(node_value) => node_value,
+            Err(err) => {
+                error!(
+                    "Error when performing expression evaluation for trigger {}: {}",
+                    self.get_name(),
+                    err
+                );
+                return;
             }
         };
-    }
-}
 
-#[async_trait]
-impl Trigger for ConditionalTrigger {
-    fn get_name(&self) -> &str {
-        self.base.get_name()
-    }
-
-    async fn subscribe(
-        self: Arc<Self>,
-        subscriber: &TriggerSubscriber,
-        on_fired_callback: TriggerCallbackFn,
-    ) {
-        self.base.subscription_manager.subscribe(subscriber.clone(), on_fired_callback).await;
-    }
-
-    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
-        self.base.subscription_manager.unsubscribe(subscriber).await;
-    }
-}
-
-#[async_trait]
-impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalTrigger {
-    async fn activate(
-        self: Arc<Self>,
-        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-    ) {
-        let condition_checker: for<'a> fn(
-            NodeValue,
-            &'a Mutex<Option<NodeValue>>,
-        ) -> anyhow::Result<bool> = match self.condition_type {
-            ConditionType::RisingEdge => |current_value, previous_value_holder| {
-                Self::compare_with_previous(
-                    current_value,
-                    previous_value_holder,
-                    &Operator::RelationalOperator(RelationalOperator::GT.into()),
-                )
-            },
-            ConditionType::FallingEdge => |current_value, previous_value_holder| {
-                Self::compare_with_previous(
-                    current_value,
-                    previous_value_holder,
-                    &Operator::RelationalOperator(RelationalOperator::LT.into()),
-                )
-            },
-            ConditionType::AllChanges => |current_value, previous_value_holder| {
-                Self::compare_with_previous(
-                    current_value,
-                    previous_value_holder,
-                    &Operator::RelationalOperator(RelationalOperator::NOT_EQ.into()),
-                )
-            },
-            ConditionType::IsTrue => |current_value, _| Self::is_true(&current_value),
-            ConditionType::IsFalse => |current_value, _| Self::is_false(&current_value),
-        };
-
-        for trigger in &self.triggers {
-            let self_clone = Arc::clone(&self);
-            let callback_map = Arc::clone(&callback_map);
-            Arc::clone(trigger)
-                .subscribe(
-                    &self.subscriber,
-                    Box::new(move |context| {
-                        self_clone.on_conditional_trigger_parent_trigger_fired(
-                            &callback_map,
-                            condition_checker,
-                            context,
-                        )
-                    }),
-                )
-                .await;
+        if node_value.is_none() {
+            // TODO: b/307547570 - properly handle absent values
+            return;
         }
-    }
 
-    async fn deactivate(&self) {
-        for trigger in &self.triggers {
-            trigger.unsubscribe(&self.subscriber).await;
+        let condition_result = (self.condition_checker)(node_value, maybe_previous_value)
+            .unwrap_or_else(|err| {
+                panic!("Failed to perform comparison for trigger {}: {}", self.get_name(), err)
+            });
+        if condition_result {
+            BaseTrigger::fire_trigger(self.get_name(), callback_map, &context).await;
         }
     }
 }
@@ -305,6 +338,7 @@ mod tests {
     async fn setup_active_conditional_trigger(
         condition_type: ConditionType,
     ) -> (
+        Arc<ConditionalTrigger>,
         Arc<MockMessageProvider>,
         Arc<MockTrigger>,
         Arc<MockCallbackListener<Arc<NodeEvaluationContext>>>,
@@ -313,14 +347,14 @@ mod tests {
             create_valid_conditional_trigger(condition_type, None);
 
         let callback_listener = Arc::new(MockCallbackListener::new());
-        trigger.activate(callback_listener.create_callback_map()).await;
+        Arc::clone(&trigger).activate(callback_listener.create_callback_map()).await;
 
-        (message_provider, parent_trigger, callback_listener)
+        (trigger, message_provider, parent_trigger, callback_listener)
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_subscribes_to_parents() {
+    async fn activate_subscribes_to_parents() {
         let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
@@ -341,7 +375,7 @@ mod tests {
         );
         let callback_listener = Arc::new(MockCallbackListener::new());
 
-        trigger.activate(callback_listener.create_callback_map()).await;
+        Arc::clone(&trigger).activate(callback_listener.create_callback_map()).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
         let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
@@ -363,7 +397,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn conditional_trigger_shares_context_across_subscribers() {
+    async fn activate_shares_context_across_subscribers() {
         let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
@@ -387,7 +421,7 @@ mod tests {
             Box::new(move |context| child_context1_tx.take().unwrap().send(context).unwrap()),
         );
 
-        trigger.activate(callback_map).await;
+        Arc::clone(&trigger).activate(callback_map).await;
 
         message_provider.set_next_sync_result(Ok(Some(Arc::new(Int32Value {
             value: 1,
@@ -405,8 +439,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_filters_none() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_filters_none() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::AllChanges).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -430,8 +464,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_filters_all_changes() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_filters_all_changes() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::AllChanges).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -456,8 +490,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_filters_falling_edge() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_filters_falling_edge() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::FallingEdge).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -482,8 +516,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_filters_rising_edge() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_filters_rising_edge() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::RisingEdge).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -508,8 +542,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_is_true_filters_true() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_is_true_filters_true() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
@@ -536,8 +570,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_is_false_filters_false() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_is_false_filters_false() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsFalse).await;
 
         let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
@@ -564,8 +598,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_is_true_filters_non_zero() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_is_true_filters_non_zero() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
@@ -591,8 +625,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_is_false_filters_zero() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_is_false_filters_zero() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsFalse).await;
 
         let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
@@ -618,8 +652,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_is_true_filters_none() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_is_true_filters_none() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -643,8 +677,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_is_false_filters_none() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_is_false_filters_none() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsFalse).await;
 
         let msg = Arc::new(Int32Value { value: 0, ..Default::default() });
@@ -668,8 +702,8 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_conditional_trigger_handles_async_expression_result() {
-        let (message_provider, parent_trigger, callback_listener) =
+    async fn activate_handles_async_expression_result() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
             setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
@@ -683,7 +717,17 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn deactivate_conditional_trigger_unsubscribes_from_parents() {
+    #[should_panic]
+    async fn activate_active_panics() {
+        let (trigger, _, _, _) = setup_active_conditional_trigger(ConditionType::AllChanges).await;
+
+        // Activate the trigger again.
+        trigger.activate(Arc::new(AsyncMutex::new(HashMap::new()))).await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn deactivate_unsubscribes_from_parents() {
         let mut parent_trigger = MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
@@ -705,5 +749,15 @@ mod tests {
 
         // Verify that the trigger was unsubscribed from once.
         assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn deactivate_inactive_panics() {
+        let (trigger, _, _) = create_valid_conditional_trigger(ConditionType::AllChanges, None);
+
+        // Deactivate the trigger.
+        trigger.deactivate().await;
     }
 }

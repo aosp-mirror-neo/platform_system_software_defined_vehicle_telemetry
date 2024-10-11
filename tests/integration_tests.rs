@@ -195,8 +195,7 @@ async fn telemetry_service_vector_aggregation() {
     let result = get_int_vector_field_value(&*report_data, "int_vector");
     eprintln!("{result:?}");
 
-    // TODO(b/343012972): The following assert is currently failing.
-    // assert_eq!(result, (1..=70).collect::<Vec<_>>());
+    assert_eq!(result, (1..=70).collect::<Vec<_>>());
 }
 
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
