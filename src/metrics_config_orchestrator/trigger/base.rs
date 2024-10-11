@@ -6,6 +6,7 @@ use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::metrics_config_orchestrator::async_event_processor::AsyncEventProcessor;
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, SubscriptionManager, SubscriptionManagerImpl,
 };
@@ -14,10 +15,22 @@ use crate::metrics_config_orchestrator::trigger::{TriggerCallbackFn, TriggerSubs
 pub(super) struct BaseTrigger {
     name: String,
 
+    pub(super) state: AsyncMutex<TriggerState>,
+
     // Manages trigger subscriptions. The first subscription activates the trigger, passing a
     // reference to the callback map. The last unsubscription deactivates the trigger.
     pub(super) subscription_manager:
         Box<dyn SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>>,
+}
+
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
+pub(super) enum TriggerState {
+    Inactive,
+    Active {
+        // Processor of incoming events.
+        _event_processor: AsyncEventProcessor,
+    },
 }
 
 impl BaseTrigger {
@@ -25,7 +38,11 @@ impl BaseTrigger {
         name: String,
         trigger: Weak<dyn Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>>>,
     ) -> Self {
-        BaseTrigger { name, subscription_manager: Box::new(SubscriptionManagerImpl::new(trigger)) }
+        BaseTrigger {
+            name,
+            state: TriggerState::Inactive.into(),
+            subscription_manager: Box::new(SubscriptionManagerImpl::new(trigger)),
+        }
     }
 
     pub(super) fn get_name(&self) -> &str {
