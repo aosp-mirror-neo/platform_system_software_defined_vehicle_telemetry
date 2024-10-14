@@ -16,7 +16,7 @@ use tokio::sync::Notify;
 
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription,
+    ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
@@ -122,6 +122,8 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         topic_name: &str,
         _configuration: Option<&Any>,
+        // TODO: b/335448653 - Not yet implemented.
+        _sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
@@ -438,6 +440,7 @@ mod tests {
             .create_subscription(
                 &topic_name,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -466,6 +469,7 @@ mod tests {
             .create_subscription(
                 &topic_name,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -494,6 +498,7 @@ mod tests {
             .create_subscription(
                 &topic_name,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -505,6 +510,7 @@ mod tests {
             .create_subscription(
                 &topic_name,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(|_| {
                     unreachable!();
                 }),
@@ -536,6 +542,7 @@ mod tests {
             .create_subscription(
                 &topic_name,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx1.send(message).unwrap()),
             )
             .await
@@ -546,6 +553,7 @@ mod tests {
             .create_subscription(
                 &topic_name,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx2.send(message).unwrap()),
             )
             .await

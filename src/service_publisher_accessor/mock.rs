@@ -81,6 +81,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        _sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock();

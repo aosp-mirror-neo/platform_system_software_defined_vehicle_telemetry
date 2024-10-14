@@ -289,6 +289,7 @@ mod tests {
         ConnectionType, ServicePublisher,
     };
     use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
+    use crate::service_publisher_accessor::SubSamplingInterval;
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
     const NODE_INDEX: u32 = 42;
@@ -472,6 +473,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::new(MockServiceAdapter::new()),
         ));
@@ -502,6 +504,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::new(MockServiceAdapter::new()),
         ));

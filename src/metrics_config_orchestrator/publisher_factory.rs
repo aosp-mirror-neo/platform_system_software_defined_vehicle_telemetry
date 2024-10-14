@@ -1,11 +1,14 @@
 // Copyright 2023 Google LLC
 
+use anyhow::anyhow;
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
     AggregationPublisher as AggregationPublisherProto, Publisher as PublisherProto,
+    ServicePublisher as ServicePublisherProto,
 };
+use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
@@ -18,6 +21,7 @@ use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPubli
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
+use crate::service_publisher_accessor::SubSamplingInterval;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait PublisherFactory: Send + Sync {
@@ -66,6 +70,8 @@ pub(crate) enum PublisherFactoryError {
     NameNotSet,
     #[error("Unknown publisher type")]
     UnknownPublisherType,
+    #[error("Sub-sampling interval is invalid: {err:#}")]
+    InvalidSubSamplingInterval { err: anyhow::Error },
 }
 
 pub(crate) struct PublisherFactoryImpl {
@@ -87,6 +93,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                     publisher_name,
                     service_publisher.service_name.clone(),
                     service_publisher.configuration.as_ref().cloned(),
+                    Self::get_sub_sampling_interval(service_publisher)?,
                     Self::get_connection_type(service_publisher.connection_type)?,
                     Arc::clone(&self.service_adapter),
                 )))
@@ -106,6 +113,7 @@ impl PublisherFactory for PublisherFactoryImpl {
         Self::verify_name_set(publisher_proto)?;
         match &publisher_proto.publisher_type {
             Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+                Self::get_sub_sampling_interval(service_publisher)?;
                 Self::get_connection_type(service_publisher.connection_type)?;
             }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
@@ -184,6 +192,19 @@ impl PublisherFactoryImpl {
             Ok(())
         }
     }
+
+    fn get_sub_sampling_interval(
+        service_publisher_proto: &ServicePublisherProto,
+    ) -> Result<SubSamplingInterval, PublisherFactoryError> {
+        let duration =
+            try_into_duration(&service_publisher_proto.sub_sampling_interval).map_err(|_| {
+                PublisherFactoryError::InvalidSubSamplingInterval {
+                    err: anyhow!("Sub-sampling interval must be positive."),
+                }
+            })?;
+        SubSamplingInterval::try_from(duration)
+            .map_err(|err| PublisherFactoryError::InvalidSubSamplingInterval { err })
+    }
 }
 
 #[cfg(test)]
@@ -191,9 +212,11 @@ mod tests {
     use super::*;
 
     use async_trait::async_trait;
+    use protobuf::well_known_types::duration::Duration as DurationProto;
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
     use sdv_telemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
+    use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::collections::HashMap;
     use std::time::Duration;
@@ -224,6 +247,7 @@ mod tests {
             &self,
             _service_name: &str,
             _configuration: Option<&Any>,
+            _sub_sampling_interval: &SubSamplingInterval,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         ) -> anyhow::Result<Option<ServiceSubscription>> {
             unreachable!()
@@ -262,6 +286,20 @@ mod tests {
     fn create_service_publisher_with_unspecified_connection_type() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
         publisher.mut_service_publisher();
+        publisher
+    }
+
+    fn create_service_publisher_with_negative_sub_sampling_interval() -> PublisherProto {
+        let mut publisher = create_publisher(PUBLISHER_NAME);
+        publisher.mut_service_publisher().sub_sampling_interval =
+            Some(DurationProto { seconds: -1, ..Default::default() }).into();
+        publisher
+    }
+
+    fn create_service_publisher_with_too_big_sub_sampling_interval() -> PublisherProto {
+        let mut publisher = create_publisher(PUBLISHER_NAME);
+        publisher.mut_service_publisher().sub_sampling_interval =
+            Some(DurationProto { seconds: i64::MAX, ..Default::default() }).into();
         publisher
     }
 
@@ -366,6 +404,24 @@ mod tests {
         assert!(matches!(res_publisher.connection_type, ConnectionType::Subscription));
     }
 
+    parameterized_test!(
+        create_service_publisher,
+
+        |publisher| {
+            let factory = create_default_factory();
+            let err = factory.create_using_default_context(&publisher).err().unwrap();
+
+            assert!(
+                matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. }),
+                "Unexpected error: {:?}",
+                err
+            );
+        },
+
+        negative_sub_sampling_interval_fails: (create_service_publisher_with_negative_sub_sampling_interval(),),
+        too_big_sub_sampling_interval_fails: (create_service_publisher_with_too_big_sub_sampling_interval(),),
+    );
+
     #[test]
     fn create_service_publisher_success() {
         let factory = create_default_factory();
@@ -445,6 +501,24 @@ mod tests {
 
         factory.validate_using_default_context(&publisher).unwrap();
     }
+
+    parameterized_test!(
+        validate_service_publisher,
+
+        |publisher| {
+            let factory = create_default_factory();
+            let err = factory.validate_using_default_context(&publisher).unwrap_err();
+
+            assert!(
+                matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. }),
+                "Unexpected error: {:?}",
+                err
+            );
+        },
+
+        negative_sub_sampling_interval_fails: (create_service_publisher_with_negative_sub_sampling_interval(),),
+        too_big_sub_sampling_interval_fails: (create_service_publisher_with_too_big_sub_sampling_interval(),),
+    );
 
     #[test]
     fn validate_service_publisher_success() {

@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
-    ServicePublisherMetadata,
+    ServicePublisherMetadata, SubSamplingInterval,
 };
 
 /// Struct for managing all implementations of ServicePublisherAccessor trait.
@@ -58,11 +58,12 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        sub_sampling_interval: &SubSamplingInterval,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         for service_publisher_manager_impl in &self.service_publisher_registry {
             callback = match service_publisher_manager_impl
-                .create_subscription(service_name, configuration, callback)
+                .create_subscription(service_name, configuration, sub_sampling_interval, callback)
                 .await?
             {
                 outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
@@ -186,7 +187,12 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, configuration_msg.as_ref(), create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                configuration_msg.as_ref(),
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -205,7 +211,12 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME2,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .err()
             .unwrap();
@@ -223,7 +234,12 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let res = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME2, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME2,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -241,7 +257,12 @@ mod tests {
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let subscription = service_publisher_manager_impl
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .unwrap();

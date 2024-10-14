@@ -169,6 +169,23 @@ message ServicePublisher {
   // Optional.
   // Service-specific configuration.
   google.protobuf.Any configuration = 3;
+
+  // Optional.
+  //
+  // Specifies the sub-sampling interval for new messages. If not specified or
+  // 0, defaults to no sub-sampling. The maximum allowed value is 2^32
+  // milliseconds. Values less than 0 are not allowed.
+  //
+  // Behaves differently depending on the `ConnectionType`:
+  // - Subscription publishers: Will only be notified of new messages with the
+  //   provided interval. When more than one message arrived in the sub-sampling
+  //   interval, all but the latest message are discarded.
+  // - Getter publishers: No effect.
+  //
+  // - TODO: b/335448653 - Not yet implemented for data tunnel publishers.
+  // - TODO: b/373332101 - Not yet implemented for configurable publishers.
+  // - TODO: b/373332617 - Not yet implemented for getter publishers.
+  google.protobuf.Duration sub_sampling_interval = 4;
 }
 
 // When triggered uses message builder to create a new message according

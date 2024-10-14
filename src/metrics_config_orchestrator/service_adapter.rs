@@ -14,7 +14,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
-    ServicePublisherSubscription,
+    ServicePublisherSubscription, SubSamplingInterval,
 };
 
 /// Provides an interface to subscribe to messages published by services.
@@ -33,6 +33,7 @@ pub(crate) trait ServiceAdapter {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>>;
 
@@ -150,15 +151,20 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
-        let maybe_subscription_type = if configuration.is_some() {
+        let maybe_subscription_type = if configuration.is_some()
+            // TODO: b/373333238 - Share subscriptions to sub-sampled publishers.
+            || sub_sampling_interval != &SubSamplingInterval::ZERO
+        {
             // Subscription has configuration, so it can't be shared.
             let create_subscription_outcome = self
                 .service_publisher_accessor
                 .create_subscription(
                     service_name,
                     configuration,
+                    sub_sampling_interval,
                     Box::new(move |msg| new_message_callback(&msg.into())),
                 )
                 .await?;
@@ -170,7 +176,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 CreateSubscriptionOutcome::NotRegistered(_) => None,
             }
         } else {
-            // Subscription doesn't have configuration, so it can be shared.
+            // Subscription doesn't have configuration, or minimum sampling interval, so it can be shared.
             let subscription_id = self.next_subscription_id.next();
 
             match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
@@ -193,6 +199,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         .create_subscription(
                             service_name,
                             None,
+                            &SubSamplingInterval::ZERO,
                             Box::new(move |msg| {
                                 if sender.send(msg).is_err() {
                                     // This means that `receiver` was dropped - which should
@@ -412,7 +419,12 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                Some(&Any::new()),
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .err()
             .unwrap();
@@ -429,7 +441,12 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let res = service_adapter
-            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                Some(&Any::new()),
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -450,6 +467,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -475,7 +493,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .err()
             .unwrap();
@@ -491,8 +509,10 @@ pub(super) mod tests {
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let res =
-            service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        let res = service_adapter
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .await
+            .unwrap();
 
         assert!(res.is_none());
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
@@ -516,6 +536,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -524,6 +545,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME_2,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -560,6 +582,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -568,6 +591,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
             )
             .await
@@ -606,6 +630,7 @@ pub(super) mod tests {
                 .subscribe(
                     SERVICE_NAME,
                     None,
+                    &SubSamplingInterval::ZERO,
                     Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
                 )
                 .await
@@ -633,7 +658,10 @@ pub(super) mod tests {
         let service_adapter = create_default_service_adapter();
 
         // Create subscription for a different service.
-        service_adapter.subscribe(SERVICE_NAME, None, create_empty_fn_box()).await.unwrap();
+        service_adapter
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .await
+            .unwrap();
 
         // Try unsubscribing using invalid subscription.
         service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap();
@@ -647,7 +675,12 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                Some(&Any::new()),
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -666,7 +699,12 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, Some(&Any::new()), create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                Some(&Any::new()),
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -684,7 +722,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -703,7 +741,7 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -721,13 +759,13 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .unwrap()
             .expect("Subscription should be available");
 
         let _subscription2 = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -746,13 +784,13 @@ pub(super) mod tests {
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .unwrap()
             .expect("Subscription should be available");
 
         let subscription2 = service_adapter
-            .subscribe(SERVICE_NAME, None, create_empty_fn_box())
+            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
             .await
             .unwrap()
             .expect("Subscription should be available");

@@ -23,6 +23,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
+use crate::service_publisher_accessor::SubSamplingInterval;
 
 const NUM_RETRY_ATTEMPTS: u8 = 11;
 const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -34,6 +35,7 @@ pub(crate) enum ConnectionType {
 
 pub(crate) struct ServicePublisher {
     pub(crate) configuration: Option<Any>,
+    pub(crate) sub_sampling_interval: SubSamplingInterval,
     pub(crate) connection_type: ConnectionType,
     pub(crate) service_name: String,
 
@@ -256,12 +258,14 @@ impl ServicePublisher {
         name: String,
         service_name: String,
         configuration: Option<Any>,
+        sub_sampling_interval: SubSamplingInterval,
         connection_type: ConnectionType,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name),
             configuration,
+            sub_sampling_interval,
             connection_type,
             retry_interval: RETRY_INTERVAL,
             service_adapter,
@@ -366,6 +370,7 @@ impl ServicePublisher {
                 .subscribe(
                     &self.service_name,
                     self.configuration.as_ref(),
+                    &self.sub_sampling_interval,
                     Box::new(move |msg| {
                         sender
                             .send(Arc::clone(msg))
@@ -452,6 +457,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             service_adapter,
         ))
@@ -464,6 +470,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
         ))
@@ -584,6 +591,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
         );
@@ -616,6 +624,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             Some(Any::pack(Empty::default_instance()).unwrap()),
+            SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
         ));
@@ -662,6 +671,7 @@ mod tests {
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
+            SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
         );

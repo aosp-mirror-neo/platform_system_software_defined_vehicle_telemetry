@@ -18,7 +18,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription,
+    ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -144,6 +144,8 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        // TODO: b/373332101 - Not yet implemented.
+        _sub_sampling_interval: &SubSamplingInterval,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
@@ -568,7 +570,12 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -585,7 +592,12 @@ mod tests {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
         let res = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -600,7 +612,12 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         let subscription = configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -610,7 +627,6 @@ mod tests {
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unregister_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
@@ -618,7 +634,12 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .unwrap();
@@ -641,7 +662,12 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher).await;
 
         configurable_publisher_registry
-            .create_subscription(SERVICE_NAME, None, create_empty_fn_box())
+            .create_subscription(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .unwrap();

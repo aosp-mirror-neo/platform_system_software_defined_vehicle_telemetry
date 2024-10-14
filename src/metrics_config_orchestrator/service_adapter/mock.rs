@@ -62,6 +62,7 @@ impl ServiceAdapter for MockServiceAdapter {
         &self,
         _service_name: &str,
         configuration: Option<&Any>,
+        _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
         self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
