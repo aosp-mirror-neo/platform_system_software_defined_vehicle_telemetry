@@ -70,35 +70,6 @@ rust_binary {
     defaults: ["telemetry_simulator@rust_defaults"],
 }
 
-rust_protobuf {
-    name: "libsdv_telemetry_proto_simulation_publisher",
-    crate_name: "sdv_telemetry_proto_simulation_publisher",
-    proto_flags: [
-        "-I external/protobuf/src",
-        "-I .",
-    ],
-    protos: ["src/simulation_publisher.proto"],
-    source_stem: "sdv_telemetry_proto_simulation_publisher_source",
-    vendor_available: true,
-}
-
-python_library_host {
-    name: "libsdv_telemetry_proto_simulation_publisher_python",
-    version: {
-        py3: {
-            enabled: true,
-        },
-    },
-    srcs: ["src/simulation_publisher.proto"],
-    proto: {
-        canonical_path_from_root: true,
-        include_dirs: [
-            "external/protobuf/src",
-            ".",
-        ],
-    },
-}
-
 rust_test {
     name: "libsdv_telemetry_simulator_unit_tests",
     defaults: [
