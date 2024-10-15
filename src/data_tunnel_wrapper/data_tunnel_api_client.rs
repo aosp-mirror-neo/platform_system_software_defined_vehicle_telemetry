@@ -9,6 +9,7 @@ use std::sync::Arc;
 use cxx::{CxxString, CxxVector, UniquePtr};
 use log::error;
 use sdv_dt::{c_void, SubscriptionNotificationType, TopicTypedMetadata};
+use sdv_telemetry::service_publisher_accessor::SubSamplingInterval;
 use tokio::sync::Notify;
 
 /// The main purpose of this wrapper is to implement `std::error::Error` through `thiserror::Error`.
@@ -236,7 +237,7 @@ unsafe extern "C" fn on_notification_callback(
 pub(super) fn set_notification_handler(
     subscription_descriptor: &SubscriptionDescriptor,
     notify: Arc<Notify>,
-    notification_interval: u32,
+    notification_interval: &SubSamplingInterval,
 ) -> Result<(), DataTunnelError> {
     // TODO(b/329515273): For now, we intentionally leak the `Arc` `notify_ptr` points to. This is
     // because it needs to be referenced in `on_notification_callback`, and there is currently no
@@ -254,7 +255,7 @@ pub(super) fn set_notification_handler(
                 subscription_descriptor.dt_handle,
                 sdv_dt::SubscriptionNotificationCallback(on_notification_callback),
                 notify_ptr as *mut c_void,
-                notification_interval,
+                notification_interval.as_millis(),
             )
         },
     )
@@ -285,6 +286,8 @@ mod tests {
     use super::*;
 
     use sdv_telemetry_test_utils::unique_dt_topic_name;
+    use std::time::Duration;
+    use tokio::{sync::mpsc, time::Instant};
 
     fn create_topic(
         topic_name: &CxxString,
@@ -692,7 +695,12 @@ mod tests {
         let subscription_descriptor = subscribe(&topic_name).unwrap();
 
         let notify = Arc::new(Notify::new());
-        set_notification_handler(&subscription_descriptor, Arc::clone(&notify), 0).unwrap();
+        set_notification_handler(
+            &subscription_descriptor,
+            Arc::clone(&notify),
+            &SubSamplingInterval::ZERO,
+        )
+        .unwrap();
 
         write_message(&topic_descriptor, &[1, 1, 1, 1]).unwrap();
         notify.notified().await;
@@ -712,7 +720,12 @@ mod tests {
         let subscription_descriptor = subscribe(&topic_name).unwrap();
 
         let notify = Arc::new(Notify::new());
-        set_notification_handler(&subscription_descriptor, Arc::clone(&notify), 0).unwrap();
+        set_notification_handler(
+            &subscription_descriptor,
+            Arc::clone(&notify),
+            &SubSamplingInterval::ZERO,
+        )
+        .unwrap();
 
         write_message(&topic_descriptor, &[1, 1, 1, 1]).unwrap();
         notify.notified().await;
@@ -733,5 +746,65 @@ mod tests {
             available_to_read(&subscription_descriptor).unwrap_err(),
             sdv_dt::Result::Overflow
         );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn set_notification_handler_with_notification_interval_success() {
+        let topic_name = unique_dt_topic_name();
+        cxx::let_cxx_string!(topic_name = topic_name);
+        let topic_descriptor = create_topic(&topic_name, 10, 4);
+        let subscription_descriptor = subscribe(&topic_name).unwrap();
+        let notification_interval = SubSamplingInterval::try_from(Duration::from_secs(2)).unwrap();
+
+        let notify = Arc::new(Notify::new());
+
+        // This task ensures that received notifications are timestamps as soon as they are
+        // received, and not just once the test gets around to `await` the `Notify`.
+        let notify_clone = Arc::clone(&notify);
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        tokio::spawn(async move {
+            loop {
+                notify_clone.notified().await;
+                tx.send(Instant::now()).unwrap();
+            }
+        });
+
+        set_notification_handler(&subscription_descriptor, notify, &notification_interval).unwrap();
+
+        let first_message_sent_at = Instant::now();
+        write_message(&topic_descriptor, &[1, 1, 1, 1]).unwrap();
+
+        let first_notification_received_at = rx.recv().await.unwrap();
+
+        write_message(&topic_descriptor, &[2, 2, 2, 2]).unwrap();
+        write_message(&topic_descriptor, &[3, 3, 3, 3]).unwrap();
+
+        let second_notification_received_at = rx.recv().await.unwrap();
+
+        {
+            let elapsed = first_notification_received_at.duration_since(first_message_sent_at);
+            // The first notification should arrive almost instantly, but to avoid flakiness, add
+            // 20% of leeway.
+            let max_elapsed = notification_interval.as_duration().mul_f64(0.2);
+            assert!(elapsed <= max_elapsed, "Elapsed time before notification should be at most {max_elapsed:?}, but was {elapsed:?}");
+        }
+        {
+            let elapsed =
+                second_notification_received_at.duration_since(first_notification_received_at);
+            // The second notification should arrive `notification_interval` after the first
+            // notification. To avoid flakiness, add 20% of leeway.
+            let min_elapsed = notification_interval.as_duration().mul_f64(0.8);
+            assert!(elapsed >= min_elapsed, "Elapsed time before notification should be at least {min_elapsed:?}, but was {elapsed:?}");
+        }
+
+        // We should still be able to read all of the messages, regardless of the notification
+        // interval.
+        assert_eq!(available_to_read(&subscription_descriptor).unwrap(), 3);
+        let mut buffer = vec![0u8; 12];
+        read_messages(&subscription_descriptor, &mut buffer, 3).unwrap();
+        assert_eq!(buffer, vec![1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3]);
     }
 }

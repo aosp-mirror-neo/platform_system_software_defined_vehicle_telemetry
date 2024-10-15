@@ -26,9 +26,6 @@ use crate::data_tunnel_api_client::{
     self, DataTunnelError, ReadMessagesError, SubscriptionDescriptor,
 };
 
-// Notification interval between two consecutive messages received from Data Tunnel.
-const NOTIFICATION_INTERVAL: u32 = 0;
-
 type Callback = Arc<Mutex<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>;
 
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
@@ -122,14 +119,15 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         topic_name: &str,
         _configuration: Option<&Any>,
-        // TODO: b/335448653 - Not yet implemented.
-        _sub_sampling_interval: &SubSamplingInterval,
+        sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         info!("Subscribing to data tunnel topic {}", topic_name);
 
         match self.topic_subscriptions.lock().entry(topic_name.to_owned()) {
             Entry::Occupied(o) => {
+                // TODO: b/335448653 - We may need to update the sub-sampling interval here.
+
                 let mut callbacks = self.topic_callbacks.lock();
 
                 match callbacks.entry(topic_name.to_owned()) {
@@ -165,7 +163,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                 data_tunnel_api_client::set_notification_handler(
                     &subscription_descriptor,
                     Arc::clone(&notify),
-                    NOTIFICATION_INTERVAL,
+                    sub_sampling_interval,
                 )
                 .with_context(|| {
                     format!("Failed to set notification handler for data tunnel topic {topic_name}")
@@ -202,6 +200,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                 let topic_name = topic_name.to_owned();
                 let subscription_descriptor_clone = Arc::clone(&subscription_descriptor);
                 let topic_callbacks_clone = Arc::clone(&self.topic_callbacks);
+                let sub_sampling_interval_clone = sub_sampling_interval.to_owned();
                 // Tokio task for fetching data from data tunnel and pushing it to telemetry service.
                 tokio::spawn(async move {
                     // This loop runs infinitely until the telemetry service stops. In case of an error
@@ -227,8 +226,18 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                             }
                         };
 
+                        let messages: Box<dyn std::iter::Iterator<Item = _>> = {
+                            let all_messages = buffer.chunks(message_size).take(number_of_messages);
+                            if sub_sampling_interval_clone == SubSamplingInterval::ZERO {
+                                Box::new(all_messages)
+                            } else {
+                                // Only process the last (=newest) message.
+                                Box::new(all_messages.rev().take(1))
+                            }
+                        };
+
                         info!("Received {number_of_messages} messages for topic {topic_name}.");
-                        for message_bytes in buffer.chunks(message_size).take(number_of_messages) {
+                        for message_bytes in messages {
                             match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
                                 Ok(msg) => {
                                     let mut callbacks = topic_callbacks_clone.lock();
@@ -365,7 +374,9 @@ mod tests {
     use sdv_telemetry_test_proto::test_message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::unique_dt_topic_name;
+    use std::time::Duration;
     use tokio::sync::mpsc;
+    use tokio::time::Instant;
 
     use crate::data_tunnel_api_client::TopicDescriptor;
 
@@ -570,5 +581,67 @@ mod tests {
 
         assert_eq!(get_int_field_value(rx2.recv().await.unwrap()), 1);
         assert_eq!(get_int_field_value(rx2.recv().await.unwrap()), 2);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn create_subscription_and_read_messages_with_sub_sampling_interval_success() {
+        let topic_name = unique_dt_topic_name();
+        let notification_interval = SubSamplingInterval::try_from(Duration::from_secs(2)).unwrap();
+
+        let topic_descriptor = register_topic(
+            &topic_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+                ..Default::default()
+            },
+        );
+
+        let subscriber = DataTunnelSubscriber::new();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let outcome = subscriber
+            .create_subscription(
+                &topic_name,
+                None,
+                &notification_interval,
+                Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+
+        let message1_sent_at = Instant::now();
+        write_message(&topic_descriptor, TestMessage { int_field: 1, ..Default::default() });
+        let (message1_received_at, message1) = rx.recv().await.unwrap();
+
+        write_message(&topic_descriptor, TestMessage { int_field: 2, ..Default::default() });
+        write_message(&topic_descriptor, TestMessage { int_field: 3, ..Default::default() });
+        let (message3_received_at, message3) = rx.recv().await.unwrap();
+
+        assert_eq!(get_int_field_value(message1), 1);
+        // Message 2 should be silently discarded.
+        assert_eq!(get_int_field_value(message3), 3);
+        assert!(
+            matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
+            "The channel should be empty."
+        );
+
+        {
+            let elapsed = message1_received_at.duration_since(message1_sent_at);
+            // The first notification should arrive almost instantly, but to avoid flakiness, add
+            // 20% of leeway.
+            let max_elapsed = notification_interval.as_duration().mul_f64(0.2);
+            assert!(elapsed <= max_elapsed, "Elapsed time before notification should be at most {max_elapsed:?}, but was {elapsed:?}");
+        }
+        {
+            let elapsed = message3_received_at.duration_since(message1_received_at);
+            // The second notification should arrive `notification_interval` after the first
+            // notification. To avoid flakiness, add 20% of leeway.
+            let min_elapsed = notification_interval.as_duration().mul_f64(0.8);
+            assert!(elapsed >= min_elapsed, "Elapsed time before notification should be at least {min_elapsed:?}, but was {elapsed:?}");
+        }
     }
 }

@@ -12,7 +12,7 @@ use std::marker::{Send, Sync};
 use std::time::Duration;
 
 /// Wrapper around an integer representing a sub-sampling interval.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct SubSamplingInterval {
     interval_ms: u32,
 }
