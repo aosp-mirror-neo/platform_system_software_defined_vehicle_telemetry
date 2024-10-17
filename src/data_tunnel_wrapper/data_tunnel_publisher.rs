@@ -5,6 +5,10 @@
 use crate::data_tunnel_api_client;
 use anyhow::{anyhow, Context};
 
+/// The old, deprecated implementation of a data tunnel publisher for the DT API v0.
+pub type DeprecatedDataTunnelPublisher =
+    crate::deprecated_data_tunnel_publisher::DeprecatedDataTunnelPublisher;
+
 /// Represents the data publisher side of a data tunnel.
 pub struct DataTunnelPublisher {
     topic_descriptor: data_tunnel_api_client::TopicDescriptor,
