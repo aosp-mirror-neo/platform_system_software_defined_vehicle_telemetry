@@ -395,6 +395,9 @@ rust_test {
         "liblogger",
         "libprotobuf",
         "librand",
+        "libsdv_comms_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
         "libsdv_telemetry_dt_wrapper",
         "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_proto_rust",
@@ -423,6 +426,7 @@ rust_test {
         "tests/**/*.textproto",
         // keep-sorted end
     ],
+    ld_flags: ["-Wl,--no-as-needed"],
     auto_gen_config: true,
     // Requires root so the test can perform Binder calls.
     require_root: true,

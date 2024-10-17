@@ -6,7 +6,13 @@ use anyhow::anyhow;
 use log::info;
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
 use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DeprecatedDataTunnelPublisher;
+use sdv_comms::id::ServiceFqin;
+use sdv_comms::sd::UnitType;
+use sdv_comms::ContextRef;
+use sdv_telemetry_comms_utils::wait_for_service_discovery_ready_and_create_context;
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::{
+    DataTunnelPublisher, DeprecatedDataTunnelPublisher,
+};
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsConfig,
@@ -20,11 +26,38 @@ use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_l
 use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Once;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, OnceCell};
 
 const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
+
+async fn make_context() -> ContextRef {
+    static CONTEXT_REF: OnceCell<ContextRef> = OnceCell::const_new();
+    *CONTEXT_REF
+        .get_or_init(|| async {
+            // Tests may run in multiple parallel processes, therefore we need to ensure that the FQINs
+            // created by the processes do not conflict with each other. This is achieved by embedding
+            // the process ID into the FQIN.
+            let fqin = ServiceFqin::from_str(&format!(
+                "vm:com.google.sdv.telemetry.tests.IntegrationTest{}/instance",
+                std::process::id()
+            ))
+            .unwrap();
+
+            wait_for_service_discovery_ready_and_create_context(fqin).await
+        })
+        .await
+}
+
+fn make_unique_unit_type() -> UnitType {
+    UnitType::from_str(&format!(
+        "com.google.sdv.telemetry.tests.IntegrationTest#{}",
+        unique_dt_topic_name()
+    ))
+    .unwrap()
+}
 
 fn setup_once() {
     static SETUP_ONCE: Once = Once::new();
@@ -84,10 +117,27 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Successfully finished service");
 }
 
-fn create_publisher(
+enum Publisher {
+    Deprecated(DeprecatedDataTunnelPublisher),
+    Current(DataTunnelPublisher),
+}
+
+impl Publisher {
+    pub fn publish_length_delimited_proto<M: protobuf::Message>(
+        &self,
+        message: &M,
+    ) -> anyhow::Result<()> {
+        match self {
+            Self::Deprecated(publisher) => publisher.publish_length_delimited_proto(message),
+            Self::Current(publisher) => publisher.publish_length_delimited_proto(message),
+        }
+    }
+}
+
+async fn create_deprecated_publisher(
     topic_name: &str,
     publisher_metadata: TelemetryPublisherMetadata,
-) -> anyhow::Result<DeprecatedDataTunnelPublisher> {
+) -> anyhow::Result<Publisher> {
     let publisher_metadata = {
         let mut vec = vec![];
         publisher_metadata.write_to_vec(&mut vec)?;
@@ -95,7 +145,30 @@ fn create_publisher(
     };
     let publisher =
         DeprecatedDataTunnelPublisher::register_topic(topic_name, 100, 100, publisher_metadata)?;
-    Ok(publisher)
+    Ok(Publisher::Deprecated(publisher))
+}
+
+async fn create_publisher(
+    ctx: ContextRef,
+    unit_type: &UnitType,
+    unit_name: &str,
+    publisher_metadata: TelemetryPublisherMetadata,
+) -> anyhow::Result<Publisher> {
+    let publisher_metadata = {
+        let mut vec = vec![];
+        publisher_metadata.write_to_vec(&mut vec)?;
+        vec
+    };
+    let publisher = DataTunnelPublisher::register_topic(
+        ctx,
+        unit_type,
+        unit_name,
+        100,
+        100,
+        publisher_metadata,
+    )
+    .await?;
+    Ok(Publisher::Current(publisher))
 }
 
 fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> {
@@ -110,22 +183,7 @@ fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> 
         .collect()
 }
 
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
-#[tokio::test]
-async fn telemetry_service_vector_aggregation() {
-    setup_once();
-
-    let topic_name = unique_dt_topic_name();
-    let publisher = create_publisher(
-        &topic_name,
-        TelemetryPublisherMetadata {
-            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-
+async fn run_vector_aggregation_test(publisher: Publisher, service_name: String) {
     // Publish a few messages _before_ subscribing.
     for i in -3..=-1 {
         publisher
@@ -154,7 +212,7 @@ async fn telemetry_service_vector_aggregation() {
     let mut config = MetricsConfig::parse_from_bytes(&config).unwrap();
     assert!(config.publishers[0].has_service_publisher());
     assert_eq!(config.publishers[0].service_publisher().service_name, "<placeholder>");
-    config.publishers[0].mut_service_publisher().service_name = topic_name;
+    config.publishers[0].mut_service_publisher().service_name = service_name;
     let serialized_config = config.write_to_bytes().unwrap();
 
     let config_uuid = service.add_metrics_config(&serialized_config).await.unwrap();
@@ -197,6 +255,76 @@ async fn telemetry_service_vector_aggregation() {
     eprintln!("{result:?}");
 
     assert_eq!(result, (1..=70).collect::<Vec<_>>());
+}
+
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_vector_aggregation_deprecated_publisher() {
+    setup_once();
+
+    let topic_name = unique_dt_topic_name();
+    let publisher = create_deprecated_publisher(
+        &topic_name,
+        TelemetryPublisherMetadata {
+            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    run_vector_aggregation_test(publisher, topic_name).await;
+}
+
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_vector_aggregation() {
+    setup_once();
+
+    const UNIT_NAME: &str = "default";
+
+    let ctx = make_context().await;
+    let unit_type = make_unique_unit_type();
+    let publisher = create_publisher(
+        ctx,
+        &unit_type,
+        UNIT_NAME,
+        TelemetryPublisherMetadata {
+            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    run_vector_aggregation_test(publisher, format!("{unit_type}|{UNIT_NAME}")).await;
+}
+
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_vector_aggregation_with_fqin() {
+    setup_once();
+
+    const UNIT_NAME: &str = "default";
+
+    let ctx = make_context().await;
+    let unit_type = make_unique_unit_type();
+    let publisher = create_publisher(
+        ctx,
+        &unit_type,
+        UNIT_NAME,
+        TelemetryPublisherMetadata {
+            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+
+    run_vector_aggregation_test(publisher, format!("{}|{UNIT_NAME}", ctx.get_self_fqin())).await;
 }
 
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
