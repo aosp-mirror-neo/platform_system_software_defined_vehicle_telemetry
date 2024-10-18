@@ -15,7 +15,7 @@ pub fn create_empty_fn_box() -> Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync
 ///
 /// TODO(b/343140446): We should clean up data tunnel topics.
 pub fn unique_dt_topic_name() -> String {
-    const PREFIX: &str = "TelemetryTest.";
+    const PREFIX: &str = "TelemetryTest";
     const SUFFIX_LEN: usize = 30;
     const _: () = assert!(PREFIX.len() + SUFFIX_LEN <= 48, "Generated data tunnel topic name must be less than or equal to Data Tunnel's maximum topic name length.");
 

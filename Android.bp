@@ -97,13 +97,17 @@ rust_defaults {
         "liblogger",
         "libparking_lot",
         "libprotobuf",
+        "libsdv_comms_rs",
         "libsdv_dt_rust",
+        "libsdv_status_rs",
         "libsdv_telemetry",
+        "libsdv_telemetry_comms_utils",
         "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
         "libtokio_util",
+        "libweak_table",
         // keep-sorted end
     ],
     proc_macros: [
@@ -111,6 +115,7 @@ rust_defaults {
         "libasync_trait",
         // keep-sorted end
     ],
+    ld_flags: ["-Wl,--no-as-needed"],
     vendor_available: true,
 }
 
@@ -123,6 +128,18 @@ rust_library {
 rust_defaults {
     name: "telemetry_dt_wrapper_tests_defaults",
     defaults: ["telemetry_dt_wrapper_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libpaste",
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
@@ -154,11 +171,6 @@ rust_test {
     test_options: {
         unit_test: true,
     },
-    proc_macros: [
-        // keep-sorted start
-        "libsdv_telemetry_test_utils_macros",
-        // keep-sorted end
-    ],
     // Requires root so the test can create required directories in
     // /data/local/tests/
     require_root: true,
@@ -173,7 +185,7 @@ rust_test {
     },
     rustlibs: [
         // keep-sorted start
-        "libgoogletest_rust",
+        "libnix",
         "librand",
         "libsdv_telemetry_test_proto",
         "libsdv_telemetry_test_utils",
