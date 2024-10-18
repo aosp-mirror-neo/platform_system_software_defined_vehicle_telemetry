@@ -6,8 +6,9 @@ use crate::expr::mock::MockDescriptorProvider;
 
 pub(crate) struct MockDescriptorProviderFactory {}
 
+#[async_trait]
 impl DescriptorProviderFactory for MockDescriptorProviderFactory {
-    fn create(
+    async fn create(
         &self,
         _fds: &[FileDescriptor],
         _publishers: &[PublisherProto],

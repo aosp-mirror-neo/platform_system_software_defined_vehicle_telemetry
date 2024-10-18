@@ -49,7 +49,10 @@ pub trait ServicePublisherAccessor: Send + Sync {
     /// Returns metadata of the specified service publisher.
     /// Returns None if the service publisher is not registered.
     /// Returns error if the service publisher is registered, but metadata retrieval failed.
-    fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>>;
+    async fn get_metadata(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<Option<ServicePublisherMetadata>>;
 
     /// Returns provider of messages from the publisher specified by the service name.
     /// Returns None if the service publisher is not registered

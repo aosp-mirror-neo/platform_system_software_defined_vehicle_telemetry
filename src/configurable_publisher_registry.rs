@@ -107,7 +107,10 @@ impl Default for ConfigurablePublisherRegistry {
 
 #[async_trait]
 impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
-    fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+    async fn get_metadata(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
         let maybe_metadata = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.supports_get)
         });
@@ -473,11 +476,12 @@ mod tests {
         (configurable_publisher_registry, binder_adapter)
     }
 
-    #[test]
-    fn get_metadata_incorrect_service_name_returns_none() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_metadata_incorrect_service_name_returns_none() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).unwrap();
+        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap();
 
         assert!(res.is_none());
     }
@@ -489,7 +493,8 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).unwrap().unwrap();
+        let res =
+            configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
 
         assert!(res.supports_get);
         assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());

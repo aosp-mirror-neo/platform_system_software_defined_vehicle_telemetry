@@ -27,9 +27,12 @@ impl ServicePublisherManager {
 
 #[async_trait]
 impl ServicePublisherAccessor for ServicePublisherManager {
-    fn get_metadata(&self, service_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+    async fn get_metadata(
+        &self,
+        service_name: &str,
+    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
         for accessor in &self.service_publisher_registry {
-            let metadata = accessor.get_metadata(service_name)?;
+            let metadata = accessor.get_metadata(service_name).await?;
 
             if metadata.is_some() {
                 return Ok(metadata);
@@ -100,7 +103,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME).unwrap().unwrap();
+        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
 
         assert_eq!(service_publisher.get_num_get_metadata_calls(), 1);
         assert_eq!(res.message_descriptor, Empty::descriptor());
@@ -116,7 +119,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let err = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).err().unwrap();
+        let err = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.err().unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
@@ -129,7 +132,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).unwrap();
+        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.unwrap();
 
         assert!(res.is_none());
     }

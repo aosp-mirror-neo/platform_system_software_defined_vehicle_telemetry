@@ -1,5 +1,8 @@
 // Copyright 2023 Google LLC
+#![allow(dead_code, unused_variables, unused_imports)]
 
+use async_trait::async_trait;
+use futures::stream::{self, TryStreamExt};
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
@@ -12,8 +15,9 @@ use crate::expr::node_factory::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
 
+#[async_trait]
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
-    fn create(
+    async fn create(
         &self,
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
@@ -40,46 +44,44 @@ pub(crate) enum DescriptorProviderFactoryError {
 
 pub(crate) struct DescriptorProviderFactoryImpl;
 
+#[async_trait]
 impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
-    fn create(
+    async fn create(
         &self,
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
         service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
-        let publisher_message_descriptor =
-            publishers.iter().try_fold(HashMap::new(), |mut map, publisher| {
-                let descriptor = match &publisher.publisher_type {
-                    Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
-                        service_publisher_manager
-                            .get_metadata(&service_publisher_proto.service_name)?
-                            .map(|metadata| metadata.message_descriptor)
-                    }
-                    Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
-                        let message_builder = aggregation_publisher_proto
-                            .message_builder
-                            .as_ref()
-                            .ok_or(DescriptorProviderFactoryError::InvalidAggregationPublisher {
-                                pub_name: publisher.name.clone(),
-                            })?;
-                        if let Some(msg_descriptor) = fds
-                            .iter()
-                            .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
-                        {
-                            Some(msg_descriptor)
-                        } else {
-                            return Err(DescriptorProviderFactoryError::MissingMessageDescriptor {
-                                pub_name: publisher.name.clone(),
-                                msg_type: message_builder.message_type.clone(),
-                            });
-                        }
-                    }
-                    // Skip unknown publisher types.
-                    _ => return Ok(map),
-                };
-                map.insert(publisher.name.clone(), descriptor);
-                Ok(map)
-            })?;
+        let mut publisher_message_descriptor = HashMap::new();
+        for publisher in publishers {
+            let descriptor = match &publisher.publisher_type {
+                Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
+                    service_publisher_manager
+                        .get_metadata(&service_publisher_proto.service_name)
+                        .await?
+                        .map(|metadata| metadata.message_descriptor)
+                }
+                Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
+                    let message_builder = aggregation_publisher_proto
+                        .message_builder
+                        .as_ref()
+                        .ok_or(DescriptorProviderFactoryError::InvalidAggregationPublisher {
+                            pub_name: publisher.name.clone(),
+                        })?;
+                    let descriptor = fds
+                        .iter()
+                        .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
+                        .ok_or(DescriptorProviderFactoryError::MissingMessageDescriptor {
+                            pub_name: publisher.name.clone(),
+                            msg_type: message_builder.message_type.clone(),
+                        })?;
+                    Some(descriptor)
+                }
+                // Skip unknown publisher types.
+                _ => continue,
+            };
+            publisher_message_descriptor.insert(publisher.name.clone(), descriptor);
+        }
         Ok(Box::new(DescriptorProviderImpl { publisher_message_descriptor }))
     }
 }
@@ -147,8 +149,9 @@ mod tests {
         publisher
     }
 
-    #[test]
-    fn create_descriptor_provider_service_publisher_manager_error_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn create_descriptor_provider_service_publisher_manager_error_fails() {
         let service_publisher_manager =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!("Error")));
 
@@ -163,6 +166,7 @@ mod tests {
                 &[publisher],
                 &(service_publisher_manager as Arc<dyn ServicePublisherAccessor>),
             )
+            .await
             .err()
             .unwrap();
 
@@ -173,8 +177,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_descriptor_provider_aggregation_publisher_no_proto_message_builder_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn create_descriptor_provider_aggregation_publisher_no_proto_message_builder_fails() {
         let publisher = create_aggregation_publisher_with_no_proto_message_builder(PUBLISHER_1);
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
@@ -184,6 +189,7 @@ mod tests {
                 &[publisher],
                 &create_default_service_publisher_accessor(),
             )
+            .await
             .err()
             .unwrap();
 
@@ -194,11 +200,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn get_descriptor_invalid_publisher_name_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_descriptor_invalid_publisher_name_fails() {
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let descriptor_provider = descriptor_provider_factory
             .create(get_test_file_descriptors(), &[], &create_default_service_publisher_accessor())
+            .await
             .unwrap();
 
         let err = descriptor_provider.get_descriptor(PUBLISHER_3).unwrap_err();
@@ -210,8 +218,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn get_descriptor_service_publisher_success() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_descriptor_service_publisher_success() {
         let mut publisher = PublisherProto::new();
         PUBLISHER_1.clone_into(&mut publisher.name);
         publisher.mut_service_publisher();
@@ -223,6 +232,7 @@ mod tests {
                 &[publisher],
                 &create_service_publisher_accessor(TestMessage::descriptor()),
             )
+            .await
             .unwrap();
 
         assert_eq!(
@@ -231,8 +241,9 @@ mod tests {
         )
     }
 
-    #[test]
-    fn get_descriptor_aggregation_publisher_success() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_descriptor_aggregation_publisher_success() {
         let publisher_1 =
             create_aggregation_publisher_with_msg_type(PUBLISHER_1, TEST_MESSAGE_TYPE_NAME);
         let publisher_2 =
@@ -245,6 +256,7 @@ mod tests {
                 &[publisher_1, publisher_2],
                 &create_default_service_publisher_accessor(),
             )
+            .await
             .unwrap();
 
         assert_eq!(

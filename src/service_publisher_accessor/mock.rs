@@ -47,7 +47,7 @@ struct MockServicePublisherSubscription {
 
 #[async_trait]
 impl ServicePublisherAccessor for MockServicePublisherAccessor {
-    fn get_metadata(
+    async fn get_metadata(
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<ServicePublisherMetadata>> {

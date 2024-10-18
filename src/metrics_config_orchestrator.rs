@@ -85,7 +85,7 @@ pub trait MetricsConfigOrchestrator {
     async fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError>;
 
     /// Verify that Metrics Configuration is valid.
-    fn validate_config(
+    async fn validate_config(
         &self,
         config: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError>;
@@ -197,11 +197,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl::new());
-        let descriptor_provider = self.descriptor_provider_factory.create(
-            &file_descriptors,
-            &config_proto.publishers,
-            &self.service_publisher_manager,
-        )?;
+        let descriptor_provider = self
+            .descriptor_provider_factory
+            .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
+            .await?;
         let node_factory_context = NodeFactoryContext {
             message_provider: Some(Arc::<MessageProviderImpl>::clone(&message_provider)),
             descriptor_provider,
@@ -420,7 +419,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         Ok(())
     }
 
-    fn validate_config(
+    async fn validate_config(
         &self,
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
@@ -439,11 +438,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             cloned_descriptor_protos,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )?;
-        let descriptor_provider = self.descriptor_provider_factory.create(
-            &file_descriptors,
-            &config_proto.publishers,
-            &self.service_publisher_manager,
-        )?;
+        let descriptor_provider = self
+            .descriptor_provider_factory
+            .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
+            .await?;
         let node_factory_context =
             NodeFactoryContext { message_provider: None, descriptor_provider };
 
@@ -2577,13 +2575,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_config_with_invalid_expression_nodes_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_with_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator.node_factory().fail_validate();
         let config = create_valid_config_with_dependencies();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
@@ -2592,12 +2591,13 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_config_duplicate_publisher_name_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_duplicate_publisher_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_name();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -2607,12 +2607,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_duplicate_trigger_name_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_duplicate_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_trigger_name();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -2622,12 +2623,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_duplicate_publisher_trigger_name_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_duplicate_publisher_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_trigger_name();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
@@ -2637,12 +2639,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_publisher_trigger_cycle_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_publisher_trigger_cycle_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_publisher_trigger_cycle();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
@@ -2652,12 +2655,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_aggregation_publisher_invalid_trigger_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_aggregation_publisher_invalid_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_aggregation_publisher_trigger();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2667,12 +2671,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_data_trigger_invalid_publisher_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_data_trigger_invalid_publisher_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_data_trigger_publisher();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
@@ -2682,12 +2687,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_conditional_trigger_invalid_parent_trigger_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_conditional_trigger_invalid_parent_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_invalid_conditional_trigger_parent_trigger();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2697,12 +2703,13 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_duplicate_metrics_report_config_name_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_duplicate_metrics_report_config_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_metrics_report_config_name();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
@@ -2719,7 +2726,7 @@ mod tests {
         let (config1, config2) = create_configs_with_duplicate_uuid();
         orchestrator.initialize_config(&config1).await.unwrap();
 
-        let err = orchestrator.validate_config(&config2).unwrap_err();
+        let err = orchestrator.validate_config(&config2).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
@@ -2729,15 +2736,16 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
-    #[test]
-    fn validate_config_invalid_expression_nodes_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator.node_factory().fail_validate();
 
         let mut config = MetricsConfigProto::new();
         config.expression_nodes.push(NodeProto::new());
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
@@ -2747,15 +2755,16 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_publisher_factory_error_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_publisher_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
             .publisher_factory()
             .set_validate_callback(|_| Some(PublisherFactoryError::UnknownPublisherType));
         let config = create_valid_config_with_publisher();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
@@ -2765,15 +2774,16 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_trigger_factory_error_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_trigger_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator
             .trigger_factory()
             .set_validate_callback(|_| Some(TriggerFactoryError::UnknownTriggerType));
         let config = create_valid_config_with_trigger();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
@@ -2783,8 +2793,9 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_metrics_report_config_factory_error_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_metrics_report_config_factory_error_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator.metrics_report_generator_factory().error.lock().replace(
             MetricsReportGeneratorFactoryError::InvalidTriggerName {
@@ -2793,7 +2804,7 @@ mod tests {
         );
         let config = create_valid_config_with_metrics_report_config();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         let MetricsConfigOrchestratorError::InvalidMetricsReportConfig {
             report_config_name,
@@ -2810,8 +2821,9 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_config_with_dependencies_success() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_with_dependencies_success() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
         let factory_calls_clone1 = Arc::clone(&factory_calls);
@@ -2826,7 +2838,7 @@ mod tests {
         });
         let config = create_valid_config_with_dependencies();
 
-        orchestrator.validate_config(&config).unwrap();
+        orchestrator.validate_config(&config).await.unwrap();
 
         let expected_calls = vec![
             SERVICE_PUBLISHER_NAME,
@@ -2838,23 +2850,25 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[test]
-    fn validate_config_with_known_protobuf_type_success() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_with_known_protobuf_type_success() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_valid_config_with_known_protobuf_type();
 
-        orchestrator.validate_config(&config).unwrap();
+        orchestrator.validate_config(&config).await.unwrap();
     }
 
-    #[test]
-    fn validate_config_invalid_start_trigger_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_invalid_start_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
         SOME_TRIGGER_NAME.clone_into(&mut config.start_trigger_name);
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2863,15 +2877,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_config_invalid_end_trigger_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_invalid_end_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
         SOME_TRIGGER_NAME.clone_into(&mut config.end_trigger_name);
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2880,15 +2895,16 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_config_invalid_finish_trigger_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_invalid_finish_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let mut config = MetricsConfigProto::new();
         UUID.clone_into(&mut config.uuid);
         SOME_TRIGGER_NAME.clone_into(&mut config.finish_trigger_name);
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
@@ -2897,13 +2913,14 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_config_only_end_trigger_set_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn validate_config_only_end_trigger_set_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let config = create_config_with_end_trigger_only();
 
-        let err = orchestrator.validate_config(&config).unwrap_err();
+        let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),

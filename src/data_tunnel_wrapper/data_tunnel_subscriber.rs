@@ -53,59 +53,11 @@ impl Default for DataTunnelSubscriber {
 
 #[async_trait]
 impl ServicePublisherAccessor for DataTunnelSubscriber {
-    fn get_metadata(&self, topic_name: &str) -> anyhow::Result<Option<ServicePublisherMetadata>> {
-        let message_descriptor = match self
-            .topic_message_descriptors
-            .lock()
-            .entry(topic_name.to_owned())
-        {
-            Entry::Occupied(o) => o.get().clone(),
-            Entry::Vacant(v) => {
-                cxx::let_cxx_string!(cxx_topic_name = topic_name);
-                let topic_exists = data_tunnel_api_client::topic_exists(&cxx_topic_name)
-                    .with_context(|| {
-                        format!("Failed to check whether topic {topic_name} exists.")
-                    })?;
-                if !topic_exists {
-                    return Ok(None);
-                }
-
-                let publisher_metadata =
-                    data_tunnel_api_client::get_topic_metadata(&cxx_topic_name).with_context(
-                        || format!("Failed to get publisher metadata for topic {topic_name}."),
-                    )?;
-                let publisher_metadata =
-                    TelemetryPublisherMetadata::parse_from_bytes(publisher_metadata.as_slice())
-                        .with_context(|| {
-                            format!("Failed to parse publisher metadata for topic {topic_name}.")
-                        })?;
-
-                // Build the provided proto file descriptors.
-                let file_descriptors = FileDescriptor::new_dynamic_fds(
-                    publisher_metadata.descriptor_protos,
-                    &WELL_KNOWN_FILE_DESCRIPTORS,
-                )
-                .map_err(|e| anyhow!("Invalid Descriptor Protos: {:?}", e))?;
-
-                // Iterate through all `file_descriptors` and find `MessageDescriptor` for the given
-                // `message_type_name`. `message_by_full_name()` function requires the name to start
-                // with a dot. The function returns a clone of the `MessageDescriptor`, so we can
-                // return it as-is without cloning again.
-                let message_descriptor = file_descriptors
-                    .iter()
-                    .find_map(|fd| fd.message_by_full_name(&publisher_metadata.message_type_name))
-                    .ok_or(anyhow!(
-                        "Message Name {} not found in descriptor",
-                        publisher_metadata.message_type_name
-                    ))?;
-
-                v.insert(message_descriptor.clone());
-
-                message_descriptor
-            }
-        };
-
-        Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
+    async fn get_metadata(
+        &self,
+        topic_name: &str,
+    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+        self.get_metadata_impl(topic_name)
     }
 
     fn get_message_provider(
@@ -187,7 +139,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
                 };
 
                 let message_descriptor = self
-                    .get_metadata(topic_name)?
+                    .get_metadata_impl(topic_name)?
                     .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
                     .message_descriptor;
 
@@ -278,6 +230,64 @@ impl DataTunnelSubscriber {
             topic_subscriptions: HashMap::new().into(),
             topic_callbacks: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn get_metadata_impl(
+        &self,
+        topic_name: &str,
+    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+        let message_descriptor = match self
+            .topic_message_descriptors
+            .lock()
+            .entry(topic_name.to_owned())
+        {
+            Entry::Occupied(o) => o.get().clone(),
+            Entry::Vacant(v) => {
+                cxx::let_cxx_string!(cxx_topic_name = topic_name);
+                let topic_exists = data_tunnel_api_client::topic_exists(&cxx_topic_name)
+                    .with_context(|| {
+                        format!("Failed to check whether topic {topic_name} exists.")
+                    })?;
+                if !topic_exists {
+                    return Ok(None);
+                }
+
+                let publisher_metadata =
+                    data_tunnel_api_client::get_topic_metadata(&cxx_topic_name).with_context(
+                        || format!("Failed to get publisher metadata for topic {topic_name}."),
+                    )?;
+                let publisher_metadata =
+                    TelemetryPublisherMetadata::parse_from_bytes(publisher_metadata.as_slice())
+                        .with_context(|| {
+                            format!("Failed to parse publisher metadata for topic {topic_name}.")
+                        })?;
+
+                // Build the provided proto file descriptors.
+                let file_descriptors = FileDescriptor::new_dynamic_fds(
+                    publisher_metadata.descriptor_protos,
+                    &WELL_KNOWN_FILE_DESCRIPTORS,
+                )
+                .map_err(|e| anyhow!("Invalid Descriptor Protos: {:?}", e))?;
+
+                // Iterate through all `file_descriptors` and find `MessageDescriptor` for the given
+                // `message_type_name`. `message_by_full_name()` function requires the name to start
+                // with a dot. The function returns a clone of the `MessageDescriptor`, so we can
+                // return it as-is without cloning again.
+                let message_descriptor = file_descriptors
+                    .iter()
+                    .find_map(|fd| fd.message_by_full_name(&publisher_metadata.message_type_name))
+                    .ok_or(anyhow!(
+                        "Message Name {} not found in descriptor",
+                        publisher_metadata.message_type_name
+                    ))?;
+
+                v.insert(message_descriptor.clone());
+
+                message_descriptor
+            }
+        };
+
+        Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
 
     /// Read all available messages from the data tunnel and write them to the `buffer`.
@@ -409,17 +419,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn get_metadata_topic_not_registered_returns_none() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_metadata_topic_not_registered_returns_none() {
         let topic_name = unique_dt_topic_name();
 
         let subscriber = DataTunnelSubscriber::new();
         // The topic should not exist yet, therefore metadata should be `None`.
-        assert!(subscriber.get_metadata(&topic_name).unwrap().is_none());
+        assert!(subscriber.get_metadata(&topic_name).await.unwrap().is_none());
     }
 
-    #[test]
-    fn get_metadata_success() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_metadata_success() {
         let topic_name = unique_dt_topic_name();
 
         register_topic(
@@ -432,7 +444,7 @@ mod tests {
         );
 
         let subscriber = DataTunnelSubscriber::new();
-        let publisher_metadata = subscriber.get_metadata(&topic_name).unwrap().unwrap();
+        let publisher_metadata = subscriber.get_metadata(&topic_name).await.unwrap().unwrap();
         assert!(!publisher_metadata.supports_get);
         assert_eq!(publisher_metadata.message_descriptor.name(), "TestMessage");
         assert_eq!(

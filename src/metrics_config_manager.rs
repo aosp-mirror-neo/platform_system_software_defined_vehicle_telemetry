@@ -318,7 +318,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         }
 
         // Validate the metrics config and report any errors to client
-        self.metrics_config_orchestrator.validate_config(&config)?;
+        self.metrics_config_orchestrator.validate_config(&config).await?;
 
         let path = Path::new(&self.inactive_data_dir).join(&config.uuid);
 
@@ -600,7 +600,10 @@ mod tests {
             Ok(())
         }
 
-        fn validate_config(&self, _: &MetricsConfigProto) -> Result<(), ConfigOrchestratorError> {
+        async fn validate_config(
+            &self,
+            _: &MetricsConfigProto,
+        ) -> Result<(), ConfigOrchestratorError> {
             let mut num_calls = self.num_validate_config_calls.lock();
             *num_calls += 1;
 
