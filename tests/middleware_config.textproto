@@ -1,0 +1,141 @@
+# Copyright 2024 Google LLC
+# proto-file: proto/metrics_configuration.proto
+# proto-message: MetricsConfig
+
+uuid: "94619dc5-b19b-436c-89d7-b7b9d7619225"
+version: 01
+descriptor_protos {
+  name: "metrics.proto"
+  package: "android.automotive.telemetry.messages"
+  message_type {
+    name: "Report"
+    field {
+      type: TYPE_INT32
+      name: "front_left"
+      number: 1
+    }
+    field {
+      type: TYPE_INT32
+      name: "front_right"
+      number: 2
+    }
+    field {
+      type: TYPE_INT32
+      name: "rear_left"
+      number: 3
+    }
+    field {
+      type: TYPE_INT32
+      name: "rear_right"
+      number: 4
+    }
+  }
+}
+
+publishers {
+  name: "tire_pressure_front_left_publisher"
+  service_publisher {
+    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-left"
+  }
+}
+
+publishers {
+  name: "tire_pressure_front_right_publisher"
+  service_publisher {
+    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-right"
+  }
+}
+
+publishers {
+  name: "tire_pressure_rear_left_publisher"
+  service_publisher {
+    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-left"
+  }
+}
+
+publishers {
+  name: "tire_pressure_rear_right_publisher"
+  service_publisher {
+    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-right"
+  }
+}
+
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "tire_pressure_front_left_publisher"
+    field_names: "pressure"
+  }
+}
+
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "tire_pressure_front_right_publisher"
+    field_names: "pressure"
+  }
+}
+
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "tire_pressure_rear_left_publisher"
+    field_names: "pressure"
+  }
+}
+
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "tire_pressure_rear_right_publisher"
+    field_names: "pressure"
+  }
+}
+
+triggers {
+  name: "finish_trigger"
+  periodic_trigger {
+    interval {
+      seconds: 6
+    }
+  }
+}
+
+triggers {
+  name: "report_trigger"
+  periodic_trigger {
+    interval {
+      seconds: 4
+    }
+  }
+}
+
+finish_trigger_name: "finish_trigger"
+
+metrics_report_configs {
+  name: "Report"
+  trigger_names: "report_trigger"
+  message_builder {
+    message_type: ".android.automotive.telemetry.messages.Report"
+    field_assignments {
+      field_name: "front_left"
+      no_aggregation {
+        expression_node_index: 0
+      }
+    }
+    field_assignments {
+      field_name: "front_right"
+      no_aggregation {
+        expression_node_index: 1
+      }
+    }
+    field_assignments {
+      field_name: "rear_left"
+      no_aggregation {
+        expression_node_index: 2
+      }
+    }
+    field_assignments {
+      field_name: "rear_right"
+      no_aggregation {
+        expression_node_index: 3
+      }
+    }
+  }
+}

@@ -10,6 +10,8 @@ use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
+use sdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader::{publisher, TireSensorsReader};
+use sdv_mw_rs_sdv_comms::SdvComms;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::{
     DataTunnelPublisher, DeprecatedDataTunnelPublisher,
@@ -19,6 +21,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsConfig,
 };
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
+use sdv_telemetry_sample_middleware_proto::tire::TirePressure;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_test_proto::test_message;
 use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -28,7 +31,7 @@ use std::ffi::OsStr;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Once;
+use std::sync::{Arc, Once};
 use tokio::sync::{mpsc, OnceCell};
 
 const CONFIG_PATH: &str = "tests/config.textproto";
@@ -172,6 +175,17 @@ async fn create_publisher(
     )
     .await?;
     Ok(Publisher::Current(publisher))
+}
+
+fn get_int_field_value(message: &dyn MessageDyn, name: &str) -> i32 {
+    let field_descriptor = message.descriptor_dyn().field_by_name(name).unwrap();
+    field_descriptor
+        .get_singular(message)
+        .map(|value| match value {
+            ReflectValueRef::I32(value) => value,
+            value => panic!("Unexpected value: {value:?}"),
+        })
+        .unwrap()
 }
 
 fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> {
@@ -373,6 +387,87 @@ async fn telemetry_service_someip() {
     assert_eq!(metrics_report.report_data.unpack::<Int32Value>().unwrap().unwrap().value, 42);
 }
 
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_middleware() {
+    setup_once();
+
+    let ctx = make_context().await;
+
+    let mut publisher_service =
+        TireSensorsReader::new(Arc::new(SdvComms { context: ctx })).await.unwrap();
+
+    let tire_pressure_publishers = publisher::Variant::<TirePressure>::ALL_VARIANTS
+        .iter()
+        .map(|variant| publisher_service.take_publisher(variant).unwrap())
+        .collect::<Vec<_>>();
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    info!("Setting report ready listener");
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status_code, status_msg| {
+                info!("Received status message {status_code}: {status_msg}");
+            },
+            move |report_info| report_ready_tx.send(report_info).unwrap(),
+        )
+        .await
+        .unwrap();
+
+    info!("Adding metrics config");
+    let config =
+        metrics_config_reader_utils::read(Path::new("tests/middleware_config.textproto")).unwrap();
+    let config = MetricsConfig::parse_from_bytes(&config).unwrap();
+    let serialized_config = config.write_to_bytes().unwrap();
+    let config_uuid = service.add_metrics_config(&serialized_config).await.unwrap();
+
+    info!("Activating metrics config");
+    service.activate_metrics_config(&config_uuid).await.unwrap();
+
+    for (i, publisher) in tire_pressure_publishers.iter().enumerate() {
+        let message = TirePressure { pressure: i.try_into().unwrap(), ..Default::default() };
+        publisher.publish(&message).unwrap();
+    }
+
+    let report_info = report_ready_rx.recv().await.unwrap();
+    info!("Received metrics report notification");
+    assert_eq!(config_uuid, report_info.metrics_config_uuid);
+
+    let metrics_report = service.get_metrics_report(report_info).await.unwrap();
+    info!("Received metrics report");
+    eprintln!("{metrics_report:?}");
+
+    info!("Removing metrics config");
+    service.remove_all_metrics_configs().await.unwrap();
+
+    service.finish().unwrap();
+
+    assert_eq!(metrics_report.report_reason, ReportReason::REGULAR.into());
+    assert_eq!(metrics_report.metrics_config_uuid, config_uuid);
+    assert_eq!(metrics_report.metrics_config_version, 1);
+    assert_eq!(metrics_report.report_config_name, "Report");
+    assert_eq!(
+        metrics_report.report_data.type_url,
+        "type.googleapis.com/android.automotive.telemetry.messages.Report"
+    );
+    let file_descriptor =
+        FileDescriptor::new_dynamic(config.descriptor_protos[0].clone(), &[]).unwrap();
+    let report_descriptor = file_descriptor.message_by_package_relative_name("Report").unwrap();
+
+    let report_data = metrics_report.report_data.unpack_dyn(&report_descriptor).unwrap().unwrap();
+    let result = [
+        get_int_field_value(&*report_data, "front_left"),
+        get_int_field_value(&*report_data, "front_right"),
+        get_int_field_value(&*report_data, "rear_left"),
+        get_int_field_value(&*report_data, "rear_right"),
+    ];
+
+    assert_eq!(result, [0, 1, 2, 3]);
+}
+
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut result = vec![];
     if dir.is_dir() {
@@ -425,6 +520,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/sudden_tire_pressure_drop.textproto",
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto",
+            "./tests/middleware_config.textproto",
             "./tests/someip.textproto",
         ]
     );
