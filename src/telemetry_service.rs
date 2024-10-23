@@ -8,6 +8,7 @@ mod metrics_config_orchestrator;
 mod metrics_report_listener;
 pub mod service_publisher_accessor;
 pub mod service_publisher_manager;
+pub mod sub_sampling_interval;
 
 // External dependencies.
 use async_trait::async_trait;

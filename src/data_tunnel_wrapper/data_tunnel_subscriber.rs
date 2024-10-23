@@ -25,8 +25,9 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription, SubSamplingInterval,
+    ServicePublisherSubscription,
 };
+use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::conversions::u32_into_usize;

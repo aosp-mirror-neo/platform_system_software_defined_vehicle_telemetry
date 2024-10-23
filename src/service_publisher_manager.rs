@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
-    ServicePublisherMetadata, SubSamplingInterval,
+    ServicePublisherMetadata,
 };
+use crate::sub_sampling_interval::SubSamplingInterval;
 
 /// Struct for managing all implementations of ServicePublisherAccessor trait.
 pub struct ServicePublisherManager {
