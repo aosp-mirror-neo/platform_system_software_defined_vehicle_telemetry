@@ -11,7 +11,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use tokio::sync::Notify;
 
 use sdv_telemetry::service_publisher_accessor::{
@@ -21,28 +21,41 @@ use sdv_telemetry::service_publisher_accessor::{
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
+use weak_table::PtrWeakHashSet;
 
 use crate::data_tunnel_api_client::{
     self, DataTunnelError, ReadMessagesError, SubscriptionDescriptor,
 };
 
-type Callback = Arc<Mutex<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>;
+type Callback = Mutex<Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>;
 
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
 pub struct DeprecatedDataTunnelSubscriber {
     /// Hashmap to store topic names and their `MessageDescriptor`s.
     topic_message_descriptors: Mutex<HashMap<String, MessageDescriptor>>,
-    /// Hashmap to store topic names and their `DataTunnelSubscription`s.
+    /// Hashmap to store topic names and their associated subscription data.
     /// TODO: b/349242614: Remove temporary workaround once unsubscribe is supported
-    topic_subscriptions: Mutex<HashMap<String, Arc<SubscriptionDescriptor>>>,
-    /// Hashmap to store topic names and their callbacks.
-    /// TODO: b/349242614: Remove temporary workaround once unsubscribe is supported
-    topic_callbacks: Arc<Mutex<HashMap<String, Vec<Callback>>>>,
+    topic_subscriptions: Arc<
+        Mutex<
+            HashMap<
+                // topic name
+                String,
+                (
+                    Arc<SubscriptionDescriptor>,
+                    // Weakly hold onto the set of callbacks for this topic.
+                    PtrWeakHashSet<Weak<Callback>>,
+                ),
+            >,
+        >,
+    >,
 }
 
 /// Struct for subscription of DT topic.
 pub struct DataTunnelSubscription {
     _subscription_descriptor: Arc<SubscriptionDescriptor>,
+    // The callback associated with this subscription. `DeprecatedDataTunnelSubscriber` only holds a
+    // weak reference to it, so dropping `Self` is equivalent to unsubscribing.
+    _callback: Arc<Callback>,
 }
 
 impl Default for DeprecatedDataTunnelSubscriber {
@@ -77,23 +90,18 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
         info!("Subscribing to data tunnel topic {}", topic_name);
 
         match self.topic_subscriptions.lock().entry(topic_name.to_owned()) {
-            Entry::Occupied(o) => {
+            Entry::Occupied(mut o) => {
                 // TODO: b/335448653 - We may need to update the sub-sampling interval here.
 
-                let mut callbacks = self.topic_callbacks.lock();
-
-                match callbacks.entry(topic_name.to_owned()) {
-                    Entry::Occupied(mut entry) => {
-                        let arc_callback = Arc::new(Mutex::new(callback));
-                        entry.get_mut().push(arc_callback);
-                    }
-                    Entry::Vacant(_) => {
-                        panic!("Data Tunnel Callbacks missing for {topic_name}");
-                    }
-                }
+                let (subscription_descriptor, ref mut stored_callbacks) = o.get_mut();
+                let callback = Arc::new(Mutex::new(callback));
+                stored_callbacks.insert(Arc::clone(&callback));
 
                 return Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
-                    DataTunnelSubscription { _subscription_descriptor: Arc::clone(o.get()) },
+                    DataTunnelSubscription {
+                        _subscription_descriptor: Arc::clone(subscription_descriptor),
+                        _callback: callback,
+                    },
                 )));
             }
             Entry::Vacant(v) => {
@@ -143,15 +151,9 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                     .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
                     .message_descriptor;
 
-                {
-                    let callback = Arc::new(Mutex::new(callback));
-                    let mut callbacks = self.topic_callbacks.lock();
-                    callbacks.entry(topic_name.to_owned()).or_default().push(callback);
-                }
-
                 let topic_name = topic_name.to_owned();
                 let subscription_descriptor_clone = Arc::clone(&subscription_descriptor);
-                let topic_callbacks_clone = Arc::clone(&self.topic_callbacks);
+                let topic_subscriptions_clone = Arc::clone(&self.topic_subscriptions);
                 let sub_sampling_interval_clone = sub_sampling_interval.to_owned();
                 // Tokio task for fetching data from data tunnel and pushing it to telemetry service.
                 tokio::spawn(async move {
@@ -192,14 +194,13 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                         for message_bytes in messages {
                             match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
                                 Ok(msg) => {
-                                    let mut callbacks = topic_callbacks_clone.lock();
-                                    if let Some(callback_list) = callbacks.get_mut(&topic_name) {
-                                        for callback in callback_list.iter_mut() {
-                                            let mut callback = callback.lock();
-                                            (callback)(msg.clone());
-                                        }
-                                    } else {
-                                        error!("No callbacks found for topic: {}", topic_name);
+                                    let mut topic_subscriptions_lock = topic_subscriptions_clone.lock();
+                                    let Some((_, ref mut callbacks)) = topic_subscriptions_lock.get_mut(&topic_name) else {
+                                        trace!("No more subscribers to topic: {topic_name}");
+                                        continue;
+                                    };
+                                    for callback in callbacks.iter() {
+                                        (callback.lock())(msg.clone());
                                     }
                                 },
                                 Err(err) => error!(
@@ -210,9 +211,14 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                     }
                 });
 
-                v.insert(Arc::clone(&subscription_descriptor));
+                let callback = Arc::new(Mutex::new(callback));
+                v.insert((
+                    Arc::clone(&subscription_descriptor),
+                    PtrWeakHashSet::from_iter([Arc::clone(&callback)]),
+                ));
                 let data_tunnel_subscription = Box::new(DataTunnelSubscription {
                     _subscription_descriptor: subscription_descriptor,
+                    _callback: callback,
                 });
 
                 Ok(CreateSubscriptionOutcome::Subscribed(data_tunnel_subscription))
@@ -227,8 +233,7 @@ impl DeprecatedDataTunnelSubscriber {
     pub fn new() -> Self {
         Self {
             topic_message_descriptors: HashMap::new().into(),
-            topic_subscriptions: HashMap::new().into(),
-            topic_callbacks: Arc::new(Mutex::new(HashMap::new())),
+            topic_subscriptions: Arc::new(HashMap::new().into()),
         }
     }
 
