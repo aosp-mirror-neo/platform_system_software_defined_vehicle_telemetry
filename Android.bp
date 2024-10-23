@@ -19,6 +19,7 @@ rust_defaults {
         "libdowncast_rs",
         "libfutures",
         "liblog_rust",
+        "libnum_integer",
         "libparking_lot",
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
@@ -90,6 +91,7 @@ rust_defaults {
         // keep-sorted start
         "libanyhow",
         "libcxx",
+        "libfutures",
         "liblibc",
         "liblog_rust",
         "liblogger",
@@ -101,7 +103,6 @@ rust_defaults {
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
-        "libweak_table",
         // keep-sorted end
     ],
     proc_macros: [
