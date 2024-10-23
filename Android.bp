@@ -103,6 +103,7 @@ rust_defaults {
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
+        "libtokio_util",
         // keep-sorted end
     ],
     proc_macros: [
@@ -172,6 +173,7 @@ rust_test {
     },
     rustlibs: [
         // keep-sorted start
+        "libgoogletest_rust",
         "librand",
         "libsdv_telemetry_test_proto",
         "libsdv_telemetry_test_utils",

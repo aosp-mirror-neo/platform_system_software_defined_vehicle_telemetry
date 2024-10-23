@@ -14,8 +14,10 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::iter::Iterator;
 use std::sync::{Arc, Weak};
+use tokio::select;
 use tokio::sync::Notify;
-use tokio::time::{Duration, Instant};
+use tokio::time::{sleep, Duration, Instant};
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
@@ -31,22 +33,25 @@ use crate::data_tunnel_api_client::{
 
 type Callback = Mutex<Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>;
 
+type TopicSubscription = (
+    Arc<SubscriptionDescriptor>,
+    Arc<Notify>,
+    SubSamplingInterval, // calculated sub-sampling interval
+    Option<DropGuard>,   // `DropGuard` for a task to send a synthetic notification
+    HashMap<
+        SubSamplingInterval, // actually requested sub-sampling interval
+        (
+            // Weakly hold onto the set of callbacks for this (topic, sub_sampling_interval).
+            Vec<Weak<Callback>>,
+            Option<Instant>, // last time the callbacks were called
+        ),
+    >,
+);
+
 type TopicSubscriptions = Mutex<
     HashMap<
         String, // topic name
-        (
-            Arc<SubscriptionDescriptor>,
-            Arc<Notify>,
-            SubSamplingInterval, // calculated sub-sampling interval
-            HashMap<
-                SubSamplingInterval, // actually requested sub-sampling interval
-                (
-                    // Weakly hold onto the set of callbacks for this (topic, sub_sampling_interval).
-                    Vec<Weak<Callback>>,
-                    Option<Instant>, // last time the callbacks were called
-                ),
-            >,
-        ),
+        TopicSubscription,
     >,
 >;
 
@@ -108,6 +113,7 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                     subscription_descriptor,
                     notify,
                     stored_calculated_sub_sampling_interval,
+                    _,
                     ref mut callback_map,
                 ) = o.get_mut();
 
@@ -226,7 +232,7 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                         );
 
                         let mut topic_subscriptions_lock = topic_subscriptions_clone.lock();
-                        let Some((_, _, _, ref mut callback_map)) =
+                        let Some(topic_subscription) =
                             topic_subscriptions_lock.get_mut(&topic_name_clone)
                         else {
                             trace!("No more subscriber to topic: {topic_name_clone}");
@@ -249,48 +255,13 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                             })
                             .collect::<Vec<_>>();
 
-                        let now = Instant::now();
-                        for (sub_sampling_interval, (callbacks, ref mut last_call)) in
-                            callback_map.iter_mut()
-                        {
-                            if callbacks.is_empty() {
-                                // If no more subscriber exists, skip all of the work.
-                                continue;
-                            };
-
-                            let outstanding_duration =
-                                last_call.map_or(Duration::ZERO, |last_call| {
-                                    let duration_since_last_call = now.duration_since(last_call);
-                                    sub_sampling_interval
-                                        .as_duration()
-                                        .saturating_sub(duration_since_last_call)
-                                });
-
-                            if outstanding_duration.as_millis() >= 1 {
-                                continue;
-                            }
-
-                            let messages: Box<dyn Iterator<Item = _>> = {
-                                if sub_sampling_interval == &SubSamplingInterval::ZERO {
-                                    Box::new(messages.iter())
-                                } else {
-                                    // Only process the last (=newest) message.
-                                    Box::new(messages.iter().rev().take(1))
-                                }
-                            };
-
-                            for message in messages {
-                                if let Some(message) = LazyCell::force(message) {
-                                    for callback in callbacks.iter() {
-                                        if let Some(callback) = callback.upgrade() {
-                                            (callback.lock())(message.clone());
-                                        }
-                                    }
-                                }
-                            }
-
-                            *last_call = Some(now);
-                        }
+                        Self::handle_messages(
+                            topic_name_clone.clone(),
+                            None,
+                            topic_subscription,
+                            &messages,
+                            Arc::clone(&topic_subscriptions_clone),
+                        );
                     }
                 });
 
@@ -304,6 +275,7 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                     Arc::clone(&subscription_descriptor),
                     notify,
                     sub_sampling_interval.to_owned(),
+                    None,
                     callback_map,
                 ));
 
@@ -387,6 +359,129 @@ impl DeprecatedDataTunnelSubscriber {
         };
 
         Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
+    }
+
+    fn handle_messages<M>(
+        topic_name: String,
+        sub_sampling_interval_filter: Option<Vec<SubSamplingInterval>>,
+        topic_subscription: &mut TopicSubscription,
+        messages: &[M],
+        topic_subscriptions: Arc<TopicSubscriptions>,
+    ) where
+        M: std::ops::Deref<Target = Option<Box<dyn protobuf::MessageDyn>>> + Sized,
+    {
+        let (_, _, _, ref mut drop_guard, ref mut callback_map) = topic_subscription;
+        *drop_guard = None;
+
+        struct SyntheticNotificationOptions {
+            notify_after: Duration,
+            sub_sampling_interval_filter: Vec<SubSamplingInterval>,
+        }
+        impl SyntheticNotificationOptions {
+            fn combine(mut self, other: Self) -> Self {
+                self.sub_sampling_interval_filter.extend(other.sub_sampling_interval_filter);
+                self.notify_after = self.notify_after.min(other.notify_after);
+                self
+            }
+        }
+
+        let mut synthetic_notification_options: Option<SyntheticNotificationOptions> = None;
+        let now = Instant::now();
+        for (sub_sampling_interval, (callbacks, ref mut last_call)) in callback_map.iter_mut() {
+            if sub_sampling_interval_filter.as_ref().is_some_and(|sub_sampling_interval_filter| {
+                !sub_sampling_interval_filter.contains(sub_sampling_interval)
+            }) {
+                continue;
+            }
+
+            if callbacks.is_empty() {
+                // If no more subscriber exists, skip all of the work.
+                continue;
+            }
+
+            let outstanding_duration = last_call.map_or(Duration::ZERO, |last_call| {
+                let duration_since_last_call = now.duration_since(last_call);
+                sub_sampling_interval.as_duration().saturating_sub(duration_since_last_call)
+            });
+
+            if outstanding_duration.as_millis() >= 1 {
+                assert_ne!(
+                    sub_sampling_interval,
+                    &SubSamplingInterval::ZERO,
+                    "If there is an outstanding duration, the sub-sampling interval cannot be 0 - this can never happen."
+                );
+
+                let options = SyntheticNotificationOptions {
+                    notify_after: outstanding_duration,
+                    sub_sampling_interval_filter: vec![sub_sampling_interval.clone()],
+                };
+
+                synthetic_notification_options = Some(match synthetic_notification_options {
+                    None => options,
+                    Some(synthetic_notification_options) => {
+                        synthetic_notification_options.combine(options)
+                    }
+                });
+                continue;
+            }
+
+            let messages: Box<dyn Iterator<Item = _>> = {
+                if sub_sampling_interval == &SubSamplingInterval::ZERO {
+                    Box::new(messages.iter())
+                } else {
+                    // Only process the last (=newest) message.
+                    Box::new(messages.iter().rev().take(1))
+                }
+            };
+
+            for message in messages {
+                if let Some(message) = message.deref() {
+                    for callback in callbacks.iter() {
+                        if let Some(callback) = callback.upgrade() {
+                            (callback.lock())(message.clone());
+                        }
+                    }
+                }
+            }
+
+            *last_call = Some(now);
+        }
+
+        let Some(synthetic_notification_options) = synthetic_notification_options else {
+            return;
+        };
+
+        let last_message =
+            messages.iter().rev().take(1).next().and_then(|message| message.deref().clone());
+        let Some(message) = last_message else {
+            return;
+        };
+
+        let cancellation_token = CancellationToken::new();
+        *drop_guard = Some(cancellation_token.clone().drop_guard());
+
+        let topic_subscriptions = Arc::clone(&topic_subscriptions);
+        tokio::spawn(async move {
+            select! {
+                biased;
+                _ = cancellation_token.cancelled() => return,
+                _ = sleep(synthetic_notification_options.notify_after) => {},
+            };
+
+            let mut topic_subscriptions_lock = topic_subscriptions.lock();
+            let Some(topic_subscription) = topic_subscriptions_lock.get_mut(&topic_name) else {
+                trace!("No more subscriber to topic: {topic_name}");
+                return;
+            };
+
+            Self::handle_messages(
+                topic_name,
+                Some(synthetic_notification_options.sub_sampling_interval_filter),
+                topic_subscription,
+                &[Box::new(Some(message))],
+                Arc::clone(&topic_subscriptions),
+            );
+        });
     }
 
     /// Read all available messages from the data tunnel and write them to the `buffer`.
@@ -487,6 +582,7 @@ impl DataTunnelSubscription {
             subscription_descriptor,
             notify,
             ref mut stored_calculated_sub_sampling_interval,
+            _,
             ref mut callbacks_by_sub_sampling_interval_map,
         ) = topic_subscription.get_mut();
 
@@ -548,16 +644,18 @@ mod tests {
 mod tests {
     use super::*;
 
-    use futures::future::join_all;
+    use futures::future::{join_all, ready};
+    use futures::FutureExt;
     use protobuf::reflect::ReflectValueRef;
     use protobuf::MessageFull;
     use sdv_dt::TopicTypedMetadata;
     use sdv_telemetry_test_proto::test_message;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::unique_dt_topic_name;
+    use std::iter::zip;
     use std::time::Duration;
     use tokio::sync::mpsc;
-    use tokio::time::{interval, Instant};
+    use tokio::time::{interval, sleep, Instant};
 
     use crate::data_tunnel_api_client::TopicDescriptor;
 
@@ -840,21 +938,60 @@ mod tests {
         }
     }
 
-    async fn run_sub_sampling_test(
+    struct SubSamplingTestConfig {
         publishing_interval: Duration,
         message_count: u128,
-        data: Vec<(Duration, Vec<(u128, u128)>)>,
-    ) {
-        let sub_sampling_intervals = data
+        subscribers: Vec<SubSamplingTestSubscriberConfig>,
+    }
+
+    #[derive(Debug, Clone)]
+    enum SubSamplingUnsubscribeKind {
+        Drop,
+        CallUnsubscribe,
+    }
+
+    impl Default for SubSamplingUnsubscribeKind {
+        fn default() -> Self {
+            Self::CallUnsubscribe
+        }
+    }
+
+    struct SubSamplingTestSubscriberConfig {
+        sub_sampling_interval: Duration,
+        expected_result: Vec<(u128, u128)>,
+
+        subscribe_at: Duration,
+        unsubscribe_at: Option<(Duration, SubSamplingUnsubscribeKind)>,
+    }
+
+    async fn run_sub_sampling_test(config: SubSamplingTestConfig) {
+        let mut subscriptions = config
+            .subscribers
             .iter()
-            .map(|(sub_sampling_interval, _)| {
-                SubSamplingInterval::try_from(*sub_sampling_interval).unwrap()
+            .map(|subscriber_config| {
+                let sub_sampling_interval =
+                    SubSamplingInterval::try_from(subscriber_config.sub_sampling_interval).unwrap();
+
+                let (tx, rx) = mpsc::unbounded_channel();
+                (
+                    sub_sampling_interval,
+                    // This holds the `DataTunnelSubscription` once subscribed.
+                    Arc::new(Mutex::new(None)),
+                    Some(tx),
+                    rx,
+                    subscriber_config.subscribe_at,
+                    subscriber_config.unsubscribe_at.clone(),
+                )
             })
             .collect::<Vec<_>>();
-        let want = data.into_iter().map(|(_, want)| want).collect::<Vec<_>>();
+
+        let want = config
+            .subscribers
+            .into_iter()
+            .map(|subscriber| subscriber.expected_result)
+            .collect::<Vec<_>>();
 
         let topic_name = unique_dt_topic_name();
-
         let topic_descriptor = register_topic(
             &topic_name,
             TelemetryPublisherMetadata {
@@ -863,16 +1000,57 @@ mod tests {
                 ..Default::default()
             },
         );
+        let subscriber = Arc::new(DeprecatedDataTunnelSubscriber::new());
 
-        let subscriber = DeprecatedDataTunnelSubscriber::new();
+        // Create subscriptions for subscribers that should start at the beginning, and await them.
+        join_all(subscriptions.iter_mut().map(
+            |(sub_sampling_interval, stored_subscription, tx, _, subscribe_at, _)| {
+                if subscribe_at != &Duration::ZERO {
+                    return ready(()).boxed();
+                }
 
-        let subscriptions =
-            join_all(sub_sampling_intervals.into_iter().map(|sub_sampling_interval| {
                 let subscriber = &subscriber;
                 let topic_name = topic_name.clone();
-                async move {
-                    let (tx, rx) = mpsc::unbounded_channel();
+                let tx = tx.take().unwrap();
+                Box::pin(async move {
                     let outcome = subscriber
+                        .create_subscription(
+                            &topic_name,
+                            None,
+                            sub_sampling_interval,
+                            Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
+                        )
+                        .await
+                        .unwrap();
+
+                    let CreateSubscriptionOutcome::Subscribed(subscription) = outcome else {
+                        panic!("Unexpected outcome for subscription");
+                    };
+                    *stored_subscription.lock() = Some(subscription);
+                })
+            },
+        ))
+        .await;
+
+        // Schedule tasks to subscribe for subscriptions that shouldn't start immediately.
+        subscriptions.iter_mut().for_each(
+            |(sub_sampling_interval, stored_subscription, tx, _, subscribe_at, _)| {
+                if subscribe_at == &Duration::ZERO {
+                    return;
+                }
+
+                let subscriber = Arc::downgrade(&subscriber);
+                let topic_name = topic_name.clone();
+                let tx = tx.take().unwrap();
+
+                let sub_sampling_interval = sub_sampling_interval.clone();
+                let subscribe_at = subscribe_at.to_owned();
+                let stored_subscription = Arc::clone(stored_subscription);
+                tokio::spawn(async move {
+                    sleep(subscribe_at).await;
+                    let outcome = subscriber
+                        .upgrade()
+                        .unwrap()
                         .create_subscription(
                             &topic_name,
                             None,
@@ -885,15 +1063,36 @@ mod tests {
                     let CreateSubscriptionOutcome::Subscribed(subscription) = outcome else {
                         panic!("Unexpected outcome for subscription");
                     };
+                    *stored_subscription.lock() = Some(subscription);
+                });
+            },
+        );
 
-                    (subscription, rx)
-                }
-            }))
-            .await;
+        // Schedule tasks to unsubscribe if necessary.
+        subscriptions.iter().for_each(|(_, stored_subscription, _, _, _, unsubscribe_at)| {
+            if let Some((unsubscribe_at, unsubscribe_kind)) = unsubscribe_at {
+                let unsubscribe_at = unsubscribe_at.to_owned();
+                let unsubscribe_kind = unsubscribe_kind.to_owned();
+                let stored_subscription = Arc::clone(stored_subscription);
+                tokio::spawn(async move {
+                    sleep(unsubscribe_at).await;
 
-        let mut interval = interval(publishing_interval);
+                    let subscription = stored_subscription.lock().take().unwrap();
+                    match unsubscribe_kind {
+                        SubSamplingUnsubscribeKind::CallUnsubscribe => {
+                            subscription.unsubscribe().await.unwrap();
+                        }
+                        SubSamplingUnsubscribeKind::Drop => {
+                            drop(subscription);
+                        }
+                    }
+                });
+            }
+        });
+
+        let mut interval = interval(config.publishing_interval);
         let start = Instant::now();
-        for i in 0..message_count {
+        for i in 0..config.message_count {
             interval.tick().await;
             write_message(
                 &topic_descriptor,
@@ -905,8 +1104,8 @@ mod tests {
         }
         interval.tick().await;
 
-        let subscription_results =
-            join_all(subscriptions.into_iter().map(|(_subscription, mut rx)| async move {
+        let subscription_results = join_all(subscriptions.into_iter().map(
+            |(_, _subscription, _, mut rx, _, _)| async move {
                 let mut messages = vec![];
                 loop {
                     let Ok(message) = rx.try_recv() else {
@@ -914,12 +1113,13 @@ mod tests {
                     };
                     messages.push(message);
                 }
-            }))
-            .await;
+            },
+        ))
+        .await;
 
         let mut got = subscription_results.iter().map(|_| vec![]).collect::<Vec<_>>();
 
-        for (subscription_result, got) in subscription_results.iter().zip(got.iter_mut()) {
+        for (subscription_result, got) in zip(subscription_results.iter(), got.iter_mut()) {
             for (received_at, message) in subscription_result {
                 let received_at = received_at.duration_since(start).as_millis();
                 let sent_at = get_int_field_value(&**message).try_into().unwrap();
@@ -941,65 +1141,97 @@ mod tests {
         eprintln!("Want");
         print_result(want.as_slice());
 
-        assert_eq!(got.len(), want.len());
-        for (got, want) in got.iter().zip(want) {
-            assert_eq!(got.len(), want.len());
+        use googletest::prelude::*;
+
+        expect_that!(got.len(), eq(want.len()));
+        for (got, want) in zip(got.into_iter(), want.into_iter()) {
+            expect_that!(got.len(), eq(want.len()));
+
+            // Ensure that all timestamps received are strictly sorted.
+            let (got_received_ats, got_sent_ats): (Vec<_>, Vec<_>) = got.iter().cloned().unzip();
+            expect_that!(
+                got_received_ats,
+                predicate(|values: &Vec<_>| values.windows(2).all(|w| w[0] < w[1]))
+            );
+            expect_that!(
+                got_sent_ats,
+                predicate(|values: &Vec<_>| values.windows(2).all(|w| w[0] < w[1]))
+            );
+
             for ((got_received_at, got_sent_at), (want_received_at, want_sent_at)) in
-                got.iter().zip(want)
+                zip(got.into_iter(), want.into_iter())
             {
-                // These can be compared strictly, since we set `sent_at` based on loop iteration,
-                // not actual time.
-                assert_eq!(got_sent_at, &want_sent_at);
-                // These must be compared with some leeway, since there may be a few milliseconds
-                // delay due to processing overhead.
-                assert!(
-                    got_received_at.abs_diff(want_received_at)
-                        < interval.period().mul_f64(0.2).as_millis()
+                expect_that!(got_received_at.abs_diff(want_received_at), lt(50));
+
+                // In the worst-case, we may receive a message that is almost two publishing
+                // intervals old.
+                expect_that!(
+                    got_sent_at,
+                    any!(
+                        eq(want_sent_at.saturating_sub(2 * config.publishing_interval.as_millis())),
+                        eq(want_sent_at.saturating_sub(config.publishing_interval.as_millis())),
+                        eq(want_sent_at)
+                    )
                 );
             }
         }
     }
 
     #[sdv_telemetry_test_utils_macros::timeout(30_000)]
+    #[googletest::test]
     // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
     // more accurate, even when one of the threads is stuck in synchronous FFI code.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn read_messages_with_multiple_sub_sampling_intervals_success() {
-        run_sub_sampling_test(
-            Duration::from_millis(300),
-            40,
-            vec![
-                (
-                    Duration::from_secs(2),
-                    vec![
-                        (0, 0),
-                        (2000, 1800),
-                        (4000, 3900),
-                        (6000, 6000),
-                        (8000, 7800),
-                        (10000, 9900),
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(400),
+            message_count: 30,
+            subscribers: vec![
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(1700),
+                    expected_result: vec![
+                        (800, 800),
+                        (2500, 2400),
+                        (4200, 4000),
+                        (5900, 5600),
+                        (7600, 7600),
+                        (9300, 9200),
+                        (11000, 10800),
                     ],
-                ),
-                (Duration::from_secs(3), vec![(0, 0), (3000, 3000), (6000, 6000), (9000, 9000)]),
-                (Duration::from_secs(5), vec![(0, 0), (5000, 4800), (10000, 9900)]),
+                    subscribe_at: Duration::from_millis(450),
+                    unsubscribe_at: None,
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_secs(3),
+                    expected_result: vec![(800, 800), (3800, 3600), (6800, 6800), (9800, 9600)],
+                    subscribe_at: Duration::from_millis(450),
+                    unsubscribe_at: None,
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(5500),
+                    expected_result: vec![(800, 800), (6300, 6000), (11800, 11600)],
+                    subscribe_at: Duration::from_millis(450),
+                    unsubscribe_at: None,
+                },
             ],
-        )
+        })
         .await;
     }
 
     #[sdv_telemetry_test_utils_macros::timeout(30_000)]
+    #[googletest::test]
     // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
     // more accurate, even when one of the threads is stuck in synchronous FFI code.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn read_messages_with_multiple_sub_sampling_intervals_including_zero_success() {
-        run_sub_sampling_test(
-            Duration::from_millis(1500),
-            8,
-            vec![
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(1500),
+            message_count: 8,
+            subscribers: vec![
                 // No sub-sampling, therefore all messages should be received immediately.
-                (
-                    Duration::ZERO,
-                    vec![
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::ZERO,
+                    expected_result: vec![
                         (0, 0),
                         (1500, 1500),
                         (3000, 3000),
@@ -1009,21 +1241,212 @@ mod tests {
                         (9000, 9000),
                         (10500, 10500),
                     ],
-                ),
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
                 // With sub-sampling, therefore we should only receive the latest messages.
-                (
-                    Duration::from_secs(5),
-                    // TODO: This should really be equal to the following instead:
-                    // ```
-                    // vec![(0, 0), (5000, 4500), (10000, 9000)]
-                    // ```
-                    // The discrepancy stems from the fact that we only check whether we need to
-                    // notify a sub-sampled subscription when we get a new message, instead of every
-                    // sub-sample interval.
-                    vec![(0, 0), (6000, 6000)],
-                ),
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_secs(5),
+                    expected_result: vec![(0, 0), (5000, 4500), (10000, 9000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
             ],
-        )
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn read_messages_with_sub_sampling_interval_and_unsubscribe_success() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(300),
+            message_count: 10,
+            subscribers: vec![SubSamplingTestSubscriberConfig {
+                sub_sampling_interval: Duration::from_millis(800),
+                expected_result: vec![(0, 0), (800, 600), (1600, 1500)],
+                subscribe_at: Duration::ZERO,
+                unsubscribe_at: Some((
+                    Duration::from_millis(1700),
+                    SubSamplingUnsubscribeKind::CallUnsubscribe,
+                )),
+            }],
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn read_messages_with_sub_sampling_interval_and_drop_success() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(300),
+            message_count: 10,
+            subscribers: vec![SubSamplingTestSubscriberConfig {
+                sub_sampling_interval: Duration::from_millis(800),
+                expected_result: vec![(0, 0), (800, 600), (1600, 1500)],
+                subscribe_at: Duration::ZERO,
+                unsubscribe_at: Some((
+                    Duration::from_millis(1700),
+                    SubSamplingUnsubscribeKind::Drop,
+                )),
+            }],
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn read_messages_with_multiple_sub_sampling_intervals_and_unsubscribe_success() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(300),
+            message_count: 15,
+            subscribers: vec![
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(1),
+                    expected_result: vec![(0, 0), (300, 300), (600, 600)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: Some((
+                        Duration::from_millis(750),
+                        SubSamplingUnsubscribeKind::default(),
+                    )),
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(800),
+                    expected_result: vec![
+                        (0, 0),
+                        // In between the above and the below message, at exactly 750ms, the
+                        // notification interval is updated from 1ms to 800ms, because the other
+                        // subscriber unsubscribed.
+                        (800, 600),
+                        // At 900ms, we receive the next message. After updating the notification
+                        // interval, the next message is passed through immediately and only then is
+                        // the notification interval restarted. Therefore, the next notification
+                        // will now arrive at 900ms+800ms=1700ms, then at 2500ms, etc.
+                        //
+                        // The messages sent at 1200ms and 1500ms are never received, because they
+                        // fall into the aforementioned notification interval of 800ms that was
+                        // reset at 750ms and restarted at 900ms. This means that the next message
+                        // that is actually received is the one sent at 1800ms. Hence, the next
+                        // result contains the message sent at 900ms, which is the latest one we
+                        // have been notified of at this point.
+                        (1600, 900),
+                        // The last notification was received at 1700ms, therefore the newest
+                        // message is still the one sent at 1500ms.
+                        (2400, 1500),
+                        // The last notification was received at 2500ms, therefore the newest
+                        // message is still the one sent at 2400ms.
+                        (3200, 2400),
+                    ],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: Some((
+                        Duration::from_millis(3300),
+                        SubSamplingUnsubscribeKind::default(),
+                    )),
+                },
+            ],
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn subscribing_later_with_same_sub_sampling_interval_does_not_reset_last_call_success() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(200),
+            message_count: 30,
+            subscribers: vec![
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::ZERO,
+                    expected_result: (0..30).map(|i| (i * 200, i * 200)).collect(),
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(5100),
+                    expected_result: vec![(0, 0), (5100, 5000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+                // Even though this one subscribes much later, it should still receive the message
+                // at 5000ms, just like the earlier subscriber above.
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(5100),
+                    expected_result: vec![(5100, 5000)],
+                    subscribe_at: Duration::from_millis(4000),
+                    unsubscribe_at: None,
+                },
+            ],
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sub_sampling_works_when_slower_than_publishing_interval() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(1000),
+            message_count: 4,
+            subscribers: vec![SubSamplingTestSubscriberConfig {
+                sub_sampling_interval: Duration::from_millis(300),
+                expected_result: vec![(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)],
+                subscribe_at: Duration::ZERO,
+                unsubscribe_at: None,
+            }],
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sub_sampling_works_when_slower_than_publishing_interval_with_multiple_subscribers() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(1000),
+            message_count: 4,
+            subscribers: vec![
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(100),
+                    expected_result: vec![(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(300),
+                    expected_result: vec![(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(500),
+                    expected_result: vec![(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(700),
+                    expected_result: vec![(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+            ],
+        })
         .await;
     }
 }
