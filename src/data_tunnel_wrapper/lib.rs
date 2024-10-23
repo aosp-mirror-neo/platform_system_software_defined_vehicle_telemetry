@@ -7,3 +7,4 @@ pub mod data_tunnel_subscriber;
 
 mod data_tunnel_api_client;
 mod deprecated_data_tunnel_publisher;
+mod deprecated_data_tunnel_subscriber;

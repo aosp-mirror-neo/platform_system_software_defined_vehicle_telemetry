@@ -26,6 +26,10 @@ use crate::data_tunnel_api_client::{
     self, DataTunnelError, ReadMessagesError, SubscriptionDescriptor,
 };
 
+/// The old, deprecated implementation of a data tunnel subscriber for the DT API v0.
+pub type DeprecatedDataTunnelSubscriber =
+    crate::deprecated_data_tunnel_subscriber::DeprecatedDataTunnelSubscriber;
+
 type Callback = Arc<Mutex<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>;
 
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.

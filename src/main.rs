@@ -10,7 +10,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 use log::{info, error};
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry::ServicePublisherAccessor;
-use sdv_telemetry_dt_wrapper::data_tunnel_subscriber::DataTunnelSubscriber;
+use sdv_telemetry_dt_wrapper::data_tunnel_subscriber::DeprecatedDataTunnelSubscriber;
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistryService,
 };
@@ -32,7 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
 
     // Data Tunnel Wrapper to manage subscriptions
-    let data_tunnel_wrapper = Arc::new(DataTunnelSubscriber::new());
+    let data_tunnel_wrapper = Arc::new(DeprecatedDataTunnelSubscriber::new());
 
     // Add all service publishers to the manager in order of priority
     let service_publishers = vec![
