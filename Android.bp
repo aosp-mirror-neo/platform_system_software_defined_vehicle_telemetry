@@ -101,6 +101,7 @@ rust_defaults {
         "libsdv_telemetry_utils",
         "libthiserror",
         "libtokio",
+        "libweak_table",
         // keep-sorted end
     ],
     proc_macros: [
