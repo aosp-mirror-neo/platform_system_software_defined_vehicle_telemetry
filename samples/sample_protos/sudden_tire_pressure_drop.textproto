@@ -108,7 +108,7 @@ triggers {
 publishers {
     name: "tire_pressure_publisher"
     service_publisher {
-        service_name: "DataTunnelTirePressureSamplePublisher"
+        service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherTirePressure#TirePressure"
     }
 }
 

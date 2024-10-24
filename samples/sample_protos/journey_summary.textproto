@@ -84,14 +84,14 @@ triggers {
 publishers {
     name: "speed_publisher"
     service_publisher {
-        service_name: "DataTunnelSpeedSamplePublisher"
+        service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherSpeed#Speed"
     }
 }
 
 publishers {
     name: "error_report_publisher"
     service_publisher {
-        service_name: "DataTunnelErrorReportSamplePublisher"
+        service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherErrorReport#ErrorReport"
     }
 }
 
