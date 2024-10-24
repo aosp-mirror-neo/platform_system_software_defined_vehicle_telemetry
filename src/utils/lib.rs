@@ -4,6 +4,7 @@
 
 pub mod atomic;
 pub mod collection_extension;
+pub mod conversions;
 pub mod descriptor_utils;
 pub mod duration_utils;
 pub mod file_io_utils;
