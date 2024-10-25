@@ -124,12 +124,8 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
 
     fn get_message_provider(
         &self,
-        service_name: &str,
+        _service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
-        let Ok(_service_name) = ServiceName::parse(service_name) else {
-            return Ok(None);
-        };
-
         Ok(None)
     }
 
