@@ -88,6 +88,7 @@ impl ServiceAdapter for MockServiceAdapter {
                 subscription_type: ServiceSubscriptionType::Shared {
                     service_name: String::default(),
                     subscription_id: SequenceNumberType::MAX,
+                    sub_sampling_interval: SubSamplingInterval::MAX,
                 },
             }))
         } else {
