@@ -13,9 +13,9 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
-        "google.sdv.service_discovery.discovery-aidl-V1-rust",
         "libbinder_tokio_rs",
         "liblog_rust",
+        "libsdv_comms_ctx_impl",
         "libsdv_comms_rs",
         "libtokio",
         // keep-sorted end
