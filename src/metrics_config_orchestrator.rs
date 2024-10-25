@@ -190,10 +190,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
     ) -> Result<(), MetricsConfigOrchestratorError> {
         // Build the provided proto file descriptors
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let file_descriptors = FileDescriptor::new_dynamic_fds(
+        let mut file_descriptors = FileDescriptor::new_dynamic_fds(
             cloned_descriptor_protos,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )?;
+        file_descriptors.append(&mut WELL_KNOWN_FILE_DESCRIPTORS.clone());
 
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl::new());
@@ -434,10 +435,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Build the provided proto file descriptors
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let file_descriptors = FileDescriptor::new_dynamic_fds(
+        let mut file_descriptors = FileDescriptor::new_dynamic_fds(
             cloned_descriptor_protos,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )?;
+        file_descriptors.append(&mut WELL_KNOWN_FILE_DESCRIPTORS.clone());
         let descriptor_provider = self
             .descriptor_provider_factory
             .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
