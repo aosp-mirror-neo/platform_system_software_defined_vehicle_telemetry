@@ -11,7 +11,7 @@ use error_report_publisher_proto::error_report_publisher::ErrorReportData;
 use log::{error, info, trace};
 use protobuf::{Message, MessageFull};
 use rand::Rng;
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DeprecatedDataTunnelPublisher;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::{thread, time::Duration};
@@ -32,14 +32,14 @@ fn main() -> anyhow::Result<()> {
     })
 }
 
-fn create_dt_publisher() -> anyhow::Result<DataTunnelPublisher> {
+fn create_dt_publisher() -> anyhow::Result<DeprecatedDataTunnelPublisher> {
     let mut publisher_metadata = TelemetryPublisherMetadata::new();
     publisher_metadata.descriptor_protos =
         vec![error_report_publisher::file_descriptor().proto().clone()];
     publisher_metadata.message_type_name =
         format!(".{}", ErrorReportData::descriptor().full_name());
 
-    DataTunnelPublisher::register_topic(
+    DeprecatedDataTunnelPublisher::register_topic(
         DT_TOPIC_NAME,
         DT_QUEUE_SIZE,
         DT_MESSAGE_SIZE,

@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use log::info;
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
 use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DeprecatedDataTunnelPublisher;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsConfig,
@@ -87,13 +87,14 @@ async fn telemetry_service_simple_config_end_to_end_test() {
 fn create_publisher(
     topic_name: &str,
     publisher_metadata: TelemetryPublisherMetadata,
-) -> anyhow::Result<DataTunnelPublisher> {
+) -> anyhow::Result<DeprecatedDataTunnelPublisher> {
     let publisher_metadata = {
         let mut vec = vec![];
         publisher_metadata.write_to_vec(&mut vec)?;
         vec
     };
-    let publisher = DataTunnelPublisher::register_topic(topic_name, 100, 100, publisher_metadata)?;
+    let publisher =
+        DeprecatedDataTunnelPublisher::register_topic(topic_name, 100, 100, publisher_metadata)?;
     Ok(publisher)
 }
 
