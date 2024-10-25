@@ -182,7 +182,6 @@ message ServicePublisher {
   //   interval, all but the latest message are discarded.
   // - Getter publishers: No effect.
   //
-  // - TODO: b/335448653 - Not yet implemented for data tunnel publishers.
   // - TODO: b/373332101 - Not yet implemented for configurable publishers.
   // - TODO: b/373332617 - Not yet implemented for getter publishers.
   google.protobuf.Duration sub_sampling_interval = 4;
