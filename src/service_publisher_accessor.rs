@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
-use std::marker::{Send, Sync};
+use std::sync::Arc;
 
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -39,6 +39,14 @@ pub trait ServicePublisherAccessor: Send + Sync {
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome>;
+
+    /// Registers a callback that will be called when a service with the specified string
+    /// service_name becomes available.
+    async fn register_availability_callback(
+        &self,
+        service_name: &str,
+        callback: &Arc<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()>;
 }
 
 /// Provides messages from a Service Publisher.

@@ -291,6 +291,14 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
             }
         }
     }
+
+    async fn register_availability_callback(
+        &self,
+        _service_name: &str,
+        _callback: &Arc<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 /// Subscriber struct impl that encapsulates the data required for reading messages.

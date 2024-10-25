@@ -110,6 +110,14 @@ impl ServiceAdapter for MockServiceAdapter {
 
         Ok(())
     }
+
+    async fn register_availability_callback(
+        &self,
+        _service_name: &str,
+        _callback: Box<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 impl MockServiceAdapter {

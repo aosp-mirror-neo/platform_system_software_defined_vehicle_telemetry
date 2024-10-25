@@ -35,6 +35,8 @@ struct MockServicePublisherAccessorData {
     num_subscribe_calls: u32,
     /// The number of times unsubscribe function of the mock was called.
     num_unsubscribe_calls: u32,
+    /// The number of times register_availability_callback function of the mock was called.
+    num_register_availability_callback_calls: u32,
 }
 
 struct MockServicePublisherMessageProvider {
@@ -111,6 +113,17 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         };
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(subscription)))
     }
+
+    async fn register_availability_callback(
+        &self,
+        _service_name: &str,
+        _callback: &Arc<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        let mut data = self.data.lock();
+        data.num_register_availability_callback_calls += 1;
+        data.check_next_error()?;
+        Ok(())
+    }
 }
 
 impl MockServicePublisherAccessor {
@@ -126,6 +139,7 @@ impl MockServicePublisherAccessor {
             num_get_metadata_calls: 0,
             num_subscribe_calls: 0,
             num_unsubscribe_calls: 0,
+            num_register_availability_callback_calls: 0,
         }));
         Self { data }
     }
@@ -144,6 +158,10 @@ impl MockServicePublisherAccessor {
 
     pub(crate) fn get_num_unsubscribe_calls(&self) -> u32 {
         self.data.lock().num_unsubscribe_calls
+    }
+
+    pub(crate) fn get_num_register_availability_callback_calls(&self) -> u32 {
+        self.data.lock().num_register_availability_callback_calls
     }
 
     pub(crate) fn notify_subscriber(

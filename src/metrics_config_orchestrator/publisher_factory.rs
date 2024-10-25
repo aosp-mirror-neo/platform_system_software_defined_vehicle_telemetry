@@ -256,6 +256,14 @@ mod tests {
         async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
             unreachable!()
         }
+
+        async fn register_availability_callback(
+            &self,
+            _service_name: &str,
+            _callback: Box<dyn Fn() + Send + Sync>,
+        ) -> anyhow::Result<()> {
+            unreachable!()
+        }
     }
 
     fn create_default_factory() -> PublisherFactoryImpl {

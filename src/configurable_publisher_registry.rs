@@ -185,6 +185,14 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             },
         )))
     }
+
+    async fn register_availability_callback(
+        &self,
+        _service_name: &str,
+        _callback: &Arc<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 impl ConfigurablePublisherRegistry {

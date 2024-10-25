@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::iter::Iterator;
 use std::str::FromStr;
+use std::sync::Arc;
 use tokio::select;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -216,6 +217,14 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
             Box::new(DataTunnelSubscription { _subscription_drop_guard: subscription_drop_guard });
 
         Ok(CreateSubscriptionOutcome::Subscribed(data_tunnel_subscription))
+    }
+
+    async fn register_availability_callback(
+        &self,
+        _service_name: &str,
+        _callback: &Arc<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
 }
 

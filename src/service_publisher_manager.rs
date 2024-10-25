@@ -65,8 +65,8 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         sub_sampling_interval: &SubSamplingInterval,
         mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
-        for service_publisher_manager_impl in &self.service_publisher_registry {
-            callback = match service_publisher_manager_impl
+        for accessor in &self.service_publisher_registry {
+            callback = match accessor
                 .create_subscription(service_name, configuration, sub_sampling_interval, callback)
                 .await?
             {
@@ -76,6 +76,18 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         }
 
         Ok(CreateSubscriptionOutcome::NotRegistered(callback))
+    }
+
+    async fn register_availability_callback(
+        &self,
+        service_name: &str,
+        callback: &Arc<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        for accessor in &self.service_publisher_registry {
+            accessor.register_availability_callback(service_name, callback).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -275,5 +287,46 @@ mod tests {
         assert!(res.is_ok(), "Unexpected result: {:?}", res);
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
         assert_eq!(service_publisher.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn register_availability_callback_success() {
+        let service_publisher = Arc::new(MockServicePublisherAccessor::new());
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        service_publisher_manager_impl
+            .register_availability_callback(
+                SERVICE_NAME,
+                &(Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(service_publisher.get_num_register_availability_callback_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn register_availability_callback_propagates_error() {
+        let service_publisher = Arc::new(
+            MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
+        );
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let err = service_publisher_manager_impl
+            .register_availability_callback(
+                SERVICE_NAME2,
+                &(Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>),
+            )
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 }

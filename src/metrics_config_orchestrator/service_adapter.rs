@@ -41,6 +41,15 @@ pub(crate) trait ServiceAdapter {
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
     async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
+
+    /// Registers a callback that will be called when a service with the specified string
+    /// service_name becomes available.
+    #[allow(dead_code)]
+    async fn register_availability_callback(
+        &self,
+        service_name: &str,
+        callback: Box<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()>;
 }
 
 #[async_trait]
@@ -319,6 +328,16 @@ impl ServiceAdapter for ServiceAdapterImpl {
         }
 
         Ok(())
+    }
+
+    async fn register_availability_callback(
+        &self,
+        service_name: &str,
+        callback: Box<dyn Fn() + Send + Sync>,
+    ) -> anyhow::Result<()> {
+        self.service_publisher_accessor
+            .register_availability_callback(service_name, &callback.into())
+            .await
     }
 }
 
@@ -868,5 +887,38 @@ pub(super) mod tests {
 
         // Verify the number of registry unsubscribe calls.
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn register_availability_callback_success() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        service_adapter
+            .register_availability_callback(SERVICE_NAME, Box::new(|| ()))
+            .await
+            .unwrap();
+
+        assert_eq!(accessor.get_num_register_availability_callback_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn register_availability_callback_propagates_error() {
+        let accessor = Arc::new(
+            MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
+        );
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let err = service_adapter
+            .register_availability_callback(SERVICE_NAME, Box::new(|| ()))
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
 }
