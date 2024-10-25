@@ -11,7 +11,7 @@ use protobuf::{Message, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
-use sdv_telemetry_comms_utils::wait_for_service_discovery_ready_and_create_context;
+use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
@@ -67,7 +67,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
 
     let fqin = ServiceFqin::from_str(SERVICE_FQIN)
         .with_context(|| format!("Failed to parse FQIN '{SERVICE_FQIN}'."))?;
-    let ctx = wait_for_service_discovery_ready_and_create_context(fqin).await;
+    let ctx = wait_for_sdv_agents_and_create_context(fqin).await;
 
     info!("Creating publisher");
     let unit_type = UnitType::from_str(UNIT_TYPE)

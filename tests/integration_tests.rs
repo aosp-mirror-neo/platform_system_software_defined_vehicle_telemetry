@@ -9,7 +9,7 @@ use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
-use sdv_telemetry_comms_utils::wait_for_service_discovery_ready_and_create_context;
+use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::{
     DataTunnelPublisher, DeprecatedDataTunnelPublisher,
 };
@@ -46,7 +46,7 @@ async fn make_context() -> ContextRef {
             ))
             .unwrap();
 
-            wait_for_service_discovery_ready_and_create_context(fqin).await
+            wait_for_sdv_agents_and_create_context(fqin).await
         })
         .await
 }

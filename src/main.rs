@@ -17,7 +17,7 @@ use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistryService,
 };
 use sdv_telemetry_utils::logging::validated_log_tag;
-use sdv_telemetry_comms_utils::wait_for_service_discovery_ready_and_create_context;
+use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 
 use binder_tokio::TokioRuntime;
 use log::{error, info};
@@ -35,7 +35,7 @@ async fn make_context() -> ContextRef {
     const SERVICE_FQIN: &str = "vm:com.google.sdv.telemetry.TelemetryService/default";
 
     let fqin = ServiceFqin::from_str(SERVICE_FQIN).unwrap();
-    wait_for_service_discovery_ready_and_create_context(fqin).await
+    wait_for_sdv_agents_and_create_context(fqin).await
 }
 
 #[tokio::main]

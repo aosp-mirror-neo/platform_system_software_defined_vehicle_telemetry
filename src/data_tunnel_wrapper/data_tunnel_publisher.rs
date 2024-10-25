@@ -115,7 +115,7 @@ mod tests {
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition, UnitType};
     use sdv_status_rs::SdvStatusCode;
-    use sdv_telemetry_comms_utils::wait_for_service_discovery_ready_and_create_context;
+    use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::unique_dt_topic_name;
     use std::str::FromStr;
@@ -136,7 +136,7 @@ mod tests {
                 ))
                 .unwrap();
 
-                wait_for_service_discovery_ready_and_create_context(fqin).await
+                wait_for_sdv_agents_and_create_context(fqin).await
             })
             .await
     }

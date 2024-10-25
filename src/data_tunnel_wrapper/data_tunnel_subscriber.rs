@@ -324,7 +324,7 @@ impl ServicePublisherSubscription for DataTunnelSubscription {
 
 #[cfg(test)]
 async fn make_context(fqin_extra: u8) -> ContextRef {
-    use sdv_telemetry_comms_utils::wait_for_service_discovery_ready_and_create_context;
+    use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
     use tokio::sync::OnceCell;
 
     static CONTEXT_REF: OnceCell<ContextRef> = OnceCell::const_new();
@@ -342,7 +342,7 @@ async fn make_context(fqin_extra: u8) -> ContextRef {
             // The FQIN of the created context is actually silently updated with the correct VM
             // name, so we must not rely on `fqin`, but instead query it from the Context via
             // `ctx.get_self_fqin()`.
-            wait_for_service_discovery_ready_and_create_context(fqin).await
+            wait_for_sdv_agents_and_create_context(fqin).await
         })
         .await
 }

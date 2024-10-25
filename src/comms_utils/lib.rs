@@ -10,15 +10,15 @@ use sdv_comms::id::ServiceFqin;
 use sdv_comms::ContextRef;
 use sdv_comms_ctx::wait_for_agents;
 
-/// Waits for Service Discovery to be ready and then converts the provided FQIN into a `ContextRef`
+/// Waits for SDV agents to be ready and then converts the provided FQIN into a `ContextRef`
 /// object.
-pub async fn wait_for_service_discovery_ready_and_create_context(fqin: ServiceFqin) -> ContextRef {
-    wait_for_comms().await;
+pub async fn wait_for_sdv_agents_and_create_context(fqin: ServiceFqin) -> ContextRef {
+    wait_for_sdv_agents().await;
     // This just crashes if the Service Discovery is not yet ready.
     ContextRef::create(fqin)
 }
 
-async fn wait_for_comms() {
+async fn wait_for_sdv_agents() {
     loop {
         let Err(err) = tokio::task::spawn_blocking(wait_for_agents).await else {
             return;
