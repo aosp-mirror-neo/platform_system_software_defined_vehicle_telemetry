@@ -4,7 +4,8 @@
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use futures::{future, StreamExt};
+use futures::future::{self, BoxFuture};
+use futures::StreamExt;
 use log::{error, info};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
@@ -39,7 +40,7 @@ pub type DeprecatedDataTunnelSubscriber =
 
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
 pub struct DataTunnelSubscriber {
-    ctx: ContextRef,
+    ctx: future::Shared<BoxFuture<'static, ContextRef>>,
 
     /// Hashmap to store service names and their `MessageDescriptor`s.
     service_message_descriptors: AsyncMutex<HashMap<ServiceName, MessageDescriptor>>,
@@ -153,7 +154,7 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
         let mut subscriber_stream = dt::SubscriberStream::create(
-            self.ctx,
+            self.ctx.clone().await,
             &unit_identifier,
             sub_sampling_interval.as_duration(),
             dt::SubscriberOptions { fetch_last_message: false },
@@ -220,12 +221,12 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
 /// Subscriber struct impl that encapsulates the data required for reading messages.
 impl DataTunnelSubscriber {
     /// Creates a new instance of the data tunnel subscriber.
-    pub fn new(ctx: ContextRef) -> Self {
+    pub fn new(ctx: future::Shared<BoxFuture<'static, ContextRef>>) -> Self {
         Self { service_message_descriptors: HashMap::new().into(), ctx }
     }
 
     async fn discover_service(&self, service_name: &ServiceName) -> Option<ServiceUnitDefinition> {
-        let sd = ServiceDiscoveryManager::new(self.ctx);
+        let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
         match service_name {
             ServiceName::UnitTypeBased { unit_type, unit_name } => {
                 let mut units = sd
@@ -323,6 +324,14 @@ impl ServicePublisherSubscription for DataTunnelSubscription {
 }
 
 #[cfg(test)]
+fn create_subscriber_with_context(fqin_extra: u8) -> DataTunnelSubscriber {
+    use futures::FutureExt;
+
+    let ctx = make_context(fqin_extra).boxed().shared();
+    DataTunnelSubscriber::new(ctx)
+}
+
+#[cfg(test)]
 async fn make_context(fqin_extra: u8) -> ContextRef {
     use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
     use tokio::sync::OnceCell;
@@ -361,24 +370,21 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_metadata_invalid_service_name_success() {
-        let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
         assert!(subscriber.get_metadata(INVALID_SERVICE_NAME).await.unwrap().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_invalid_service_name_success() {
-        let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
         assert!(subscriber.get_message_provider(INVALID_SERVICE_NAME).unwrap().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_invalid_service_name_success() {
-        let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
         assert!(matches!(
             subscriber
                 .create_subscription(
@@ -396,8 +402,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
-        let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
         assert!(subscriber.get_message_provider(VALID_SERVICE_NAME).unwrap().is_none());
     }
 
@@ -460,6 +465,7 @@ mod tests {
 mod tests {
     use super::*;
 
+    use futures::FutureExt;
     use protobuf::reflect::ReflectValueRef;
     use protobuf::MessageFull;
     use sdv_comms::sd::PublisherUnitMetadata;
@@ -473,6 +479,10 @@ mod tests {
     use tokio::time::Instant;
 
     const UNIT_NAME: &str = "default";
+
+    fn create_subscriber(ctx: ContextRef) -> DataTunnelSubscriber {
+        DataTunnelSubscriber::new(std::future::ready(ctx).boxed().shared())
+    }
 
     fn make_unique_unit_type() -> UnitType {
         UnitType::from_str(&format!(
@@ -537,8 +547,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_no_matching_service_exists_fails() {
-        let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
 
         let unit_type = make_unique_unit_type();
 
@@ -554,7 +563,7 @@ mod tests {
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_one_matching_service_exists_success() {
         let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
 
         let unit_type = make_unique_unit_type();
         let _publisher1 = register_topic(
@@ -593,9 +602,8 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_two_matching_services_exist_fail() {
-        let (ctx1, ctx2, ctx3) =
-            (make_context(1).await, make_context(2).await, make_context(3).await);
-        let subscriber = DataTunnelSubscriber::new(ctx1);
+        let subscriber = create_subscriber_with_context(1);
+        let (ctx2, ctx3) = (make_context(2).await, make_context(3).await);
 
         let unit_type = make_unique_unit_type();
         let _publisher1 = register_topic(
@@ -632,8 +640,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_no_matching_service_exists_fails() {
-        let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
 
         let unit_type = make_unique_unit_type();
 
@@ -652,7 +659,7 @@ mod tests {
     async fn discover_service_by_unit_type_and_unit_name_when_exactly_one_matching_service_exists_success(
     ) {
         let ctx = make_context(0).await;
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
 
         let unit_type = make_unique_unit_type();
         let _publisher1 = register_topic(
@@ -774,8 +781,7 @@ mod tests {
             fork_and_create_publisher_then_sleep(2, format!("{unit_type}|{UNIT_NAME}"));
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let ctx = make_context(0).await;
-            let subscriber = DataTunnelSubscriber::new(ctx);
+            let subscriber = create_subscriber_with_context(0);
 
             let service_name = ServiceName::UnitTypeBased {
                 unit_type: unit_type.clone(),
@@ -800,8 +806,7 @@ mod tests {
             fork_and_create_publisher_then_sleep(1, format!("{unit_type}|different-name"));
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let ctx = make_context(2).await;
-            let subscriber = DataTunnelSubscriber::new(ctx);
+            let subscriber = create_subscriber_with_context(2);
 
             let service_name =
                 ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
@@ -822,8 +827,7 @@ mod tests {
             fork_and_create_publisher_then_sleep(1, format!("{unit_type}|{UNIT_NAME}"));
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let ctx = make_context(2).await;
-            let subscriber = DataTunnelSubscriber::new(ctx);
+            let subscriber = create_subscriber_with_context(2);
 
             let service_name =
                 ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
@@ -874,11 +878,9 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_metadata_topic_not_registered_returns_none() {
-        let ctx = make_context(0).await;
-
         let service_name = make_unique_service_name();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
         // The service should not exist yet, therefore metadata should be `None`.
         assert!(subscriber.get_metadata(&service_name).await.unwrap().is_none());
     }
@@ -902,7 +904,7 @@ mod tests {
         .await
         .unwrap();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
         let publisher_metadata = subscriber.get_metadata(&service_name).await.unwrap().unwrap();
         assert!(!publisher_metadata.supports_get);
         assert_eq!(publisher_metadata.message_descriptor.name(), "TestMessage");
@@ -915,11 +917,9 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn create_subscription_when_topic_does_not_exist_failure() {
-        let ctx = make_context(0).await;
-
         let service_name = make_unique_service_name();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber_with_context(0);
         let outcome = subscriber
             .create_subscription(
                 &service_name,
@@ -953,7 +953,7 @@ mod tests {
         .await
         .unwrap();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
         let outcome = subscriber
             .create_subscription(
                 &service_name,
@@ -987,7 +987,7 @@ mod tests {
         .await
         .unwrap();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
         let outcome1 = subscriber
             .create_subscription(
                 &service_name,
@@ -1034,7 +1034,7 @@ mod tests {
         .await
         .unwrap();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
 
         let (tx1, mut rx1) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
         let outcome1 = subscriber
@@ -1093,7 +1093,7 @@ mod tests {
         .await
         .unwrap();
 
-        let subscriber = DataTunnelSubscriber::new(ctx);
+        let subscriber = create_subscriber(ctx);
         let (tx, mut rx) = mpsc::unbounded_channel();
         let outcome = subscriber
             .create_subscription(

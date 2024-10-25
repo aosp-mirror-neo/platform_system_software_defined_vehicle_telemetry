@@ -20,6 +20,7 @@ use sdv_telemetry_utils::logging::validated_log_tag;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 
 use binder_tokio::TokioRuntime;
+use futures::FutureExt;
 use log::{error, info};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::ContextRef;
@@ -44,14 +45,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     sdv_tracing::init_tracing();
     binder::ProcessState::start_thread_pool();
 
-    let ctx = make_context().await;
+    // Make a shared future of ContextRef to avoid blocking Telemetry Service startup.
+    let ctx_future = make_context().boxed().shared();
 
     // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
     // Create Configurable Publishers
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
 
     // Data Tunnel wrappers to manage subscriptions
-    let data_tunnel_subscriber = Arc::new(DataTunnelSubscriber::new(ctx));
+    let data_tunnel_subscriber = Arc::new(DataTunnelSubscriber::new(ctx_future));
     let deprecated_data_tunnel_subscriber = Arc::new(DeprecatedDataTunnelSubscriber::new());
 
     // Add all service publishers to the manager in order of priority
