@@ -30,8 +30,25 @@ data_format_protos {
             number: 1
         }
         field {
-            type: TYPE_INT32
+            type: TYPE_ENUM
             name: "urgency"
+            type_name: ".Urgency"
+            number: 2
+        }
+    }
+
+    enum_type {
+        name: "Urgency"
+        value {
+            name: "HIGH"
+            number: 0
+        }
+        value {
+            name: "MEDIUM"
+            number: 1
+        }
+        value {
+            name: "LOW"
             number: 2
         }
     }

@@ -259,11 +259,43 @@ fn parse_value(
         RuntimeType::VecU8 => Err(SimulatorError::NotImplemented {
             feature: "Byte array type in simulation publishers".to_owned(),
         }),
-        RuntimeType::Enum(_) => Err(SimulatorError::NotImplemented {
-            feature: "Enum types in simulation publishers".to_owned(),
-        }),
+        RuntimeType::Enum(enum_descriptor) => match enum_descriptor.value_by_name(value) {
+            Some(enum_value) => Ok(enum_value.into()),
+            None => Err(value_parsing_error(&format!("enum '{}'", enum_descriptor.full_name()))),
+        },
         RuntimeType::Message(_) => Err(SimulatorError::NotImplemented {
             feature: "Message types in simulation publishers".to_owned(),
         }),
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use protobuf::EnumFull;
+    use sdv_telemetry_simulator_test_proto::test_enum::TestEnum;
+    use sdv_telemetry_test_utils::parameterized_test;
+
+    parameterized_test!(
+        test_parse_value,
+
+        |run_time_type, value, expected_output| {
+            let result = parse_value(
+                value,
+                run_time_type,
+                |_| SimulatorError::Error { error_message: "".to_owned() },
+            ).unwrap();
+            assert_eq!(result, expected_output);
+        },
+
+        type_i32: (RuntimeType::I32,"123", ReflectValueBox::I32(123),),
+        type_i64: (RuntimeType::I64, "123", ReflectValueBox::I64(123),),
+        type_u32: (RuntimeType::U32, "123", ReflectValueBox::U32(123),),
+        type_u64: (RuntimeType::U64, "123", ReflectValueBox::U64(123),),
+        type_f32: (RuntimeType::F32, "123", ReflectValueBox::F32(123.0),),
+        type_f64: (RuntimeType::F64, "123", ReflectValueBox::F64(123.0),),
+        type_bool: (RuntimeType::Bool, "false", ReflectValueBox::Bool(false),),
+        type_string: (RuntimeType::String, "a string", ReflectValueBox::String("a string".to_owned()),),
+        type_enum: (RuntimeType::Enum(TestEnum::enum_descriptor()), "ONE", ReflectValueBox::Enum(TestEnum::enum_descriptor(), 1),),
+    );
 }

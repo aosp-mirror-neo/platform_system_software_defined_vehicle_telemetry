@@ -70,6 +70,17 @@ rust_binary {
     defaults: ["telemetry_simulator@rust_defaults"],
 }
 
+rust_protobuf {
+    name: "libsdv_telemetry_simulator_test_proto",
+    crate_name: "sdv_telemetry_simulator_test_proto",
+    protos: ["test_data/test_enum.proto"],
+    proto_flags: [
+        "-I external/protobuf/src",
+    ],
+    source_stem: "sdv_telemetry_simulator_test_proto",
+    vendor_available: true,
+}
+
 rust_test {
     name: "libsdv_telemetry_simulator_unit_tests",
     defaults: [
@@ -77,6 +88,7 @@ rust_test {
     ],
     rustlibs: [
         // keep-sorted start
+        "libsdv_telemetry_simulator_test_proto",
         "libsdv_telemetry_test_utils",
         "libtempfile",
         // keep-sorted end
