@@ -8,29 +8,22 @@ use tokio::time::{sleep, Duration};
 
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::ContextRef;
-
-use google_sdv_service_discovery_discovery_aidl::aidl::google::sdv::service_discovery::discovery::IServiceDiscoveryAgent::{BpServiceDiscoveryAgent, IServiceDiscoveryAgent};
+use sdv_comms_ctx::wait_for_agents;
 
 /// Waits for Service Discovery to be ready and then converts the provided FQIN into a `ContextRef`
 /// object.
 pub async fn wait_for_service_discovery_ready_and_create_context(fqin: ServiceFqin) -> ContextRef {
-    wait_for_service_discovery().await;
+    wait_for_comms().await;
     // This just crashes if the Service Discovery is not yet ready.
     ContextRef::create(fqin)
 }
 
-async fn wait_for_service_discovery() {
-    let descriptor = <BpServiceDiscoveryAgent as IServiceDiscoveryAgent>::get_descriptor()
-        .to_owned()
-        + "/default";
-
+async fn wait_for_comms() {
     loop {
-        let interface =
-            binder_tokio::wait_for_interface::<dyn IServiceDiscoveryAgent>(&descriptor).await;
-        if interface.is_ok() {
+        let Err(err) = tokio::task::spawn_blocking(wait_for_agents).await else {
             return;
-        }
-        info!("Retrying wait for service discovery.");
+        };
+        info!("Retrying wait for service discovery: {err:?}");
         sleep(Duration::from_secs(10)).await;
     }
 }
