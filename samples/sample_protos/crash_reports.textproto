@@ -77,7 +77,7 @@ triggers {
 publishers {
     name: "error_report_publisher"
     service_publisher {
-        service_name: "DataTunnelErrorReportSamplePublisher"
+        service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherErrorReport#ErrorReport"
     }
 }
 

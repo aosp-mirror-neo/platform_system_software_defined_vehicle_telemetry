@@ -50,14 +50,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create Configurable Publishers
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
 
-    // Data Tunnel Wrapper to manage subscriptions
+    // Data Tunnel wrappers to manage subscriptions
+    let data_tunnel_subscriber = Arc::new(DataTunnelSubscriber::new(ctx));
     let deprecated_data_tunnel_subscriber = Arc::new(DeprecatedDataTunnelSubscriber::new());
-    let data_tunnel_wrapper = Arc::new(DataTunnelSubscriber::new(ctx));
 
     // Add all service publishers to the manager in order of priority
     let service_publishers = vec![
         Arc::clone(&configurable_publisher_registry) as Arc<dyn ServicePublisherAccessor>,
-        data_tunnel_wrapper as Arc<dyn ServicePublisherAccessor>,
+        data_tunnel_subscriber as Arc<dyn ServicePublisherAccessor>,
         deprecated_data_tunnel_subscriber as Arc<dyn ServicePublisherAccessor>,
     ];
 
