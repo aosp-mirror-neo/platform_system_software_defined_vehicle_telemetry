@@ -65,6 +65,8 @@ enum ServiceSubscriptionType {
     Shared {
         /// The name of the service of the shared subscription.
         service_name: String,
+        /// The sub-sampling interval of the shared subscription.
+        sub_sampling_interval: SubSamplingInterval,
         /// Unique service subscription identifier.
         subscription_id: SequenceNumberType,
     },
@@ -78,15 +80,17 @@ pub(crate) struct ServiceAdapterImpl {
     // The registry of available service publishers.
     service_publisher_accessor: Arc<dyn ServicePublisherAccessor>,
 
-    // The map with service name as a key and a tuple as a value that consists of:
+    // The map with service name and sub-sampling interval as a key and a tuple as a value that
+    // consists of:
     // 1. Underlying ServicePublisherSubscription.
     // 2. The map of functions that need to be called when a new message is available.
+    //
     // The first subscription to service creates a new function map and passes it to the callback
-    // that handles new messages. Last unsubscription to service clears the map signaling that
-    // the callback shouldn't process messages.
+    // that handles new messages. Last unsubscription to service clears the map signaling that the
+    // callback shouldn't process messages.
     service_subscriptions: AsyncMutex<
         HashMap<
-            String,
+            (String, SubSamplingInterval),
             (
                 Box<dyn ServicePublisherSubscription>,
                 AsyncEventProcessor,
@@ -113,8 +117,9 @@ impl ServiceSubscriptionType {
     fn new_shared(
         service_name: String,
         subscription_id: SequenceNumberType,
+        sub_sampling_interval: SubSamplingInterval,
     ) -> ServiceSubscriptionType {
-        ServiceSubscriptionType::Shared { service_name, subscription_id }
+        ServiceSubscriptionType::Shared { service_name, subscription_id, sub_sampling_interval }
     }
 }
 
@@ -154,10 +159,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
-        let maybe_subscription_type = if configuration.is_some()
-            // TODO: b/373333238 - Share subscriptions to sub-sampled publishers.
-            || sub_sampling_interval != &SubSamplingInterval::ZERO
-        {
+        let maybe_subscription_type = if configuration.is_some() {
             // Subscription has configuration, so it can't be shared.
             let create_subscription_outcome = self
                 .service_publisher_accessor
@@ -176,10 +178,15 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 CreateSubscriptionOutcome::NotRegistered(_) => None,
             }
         } else {
-            // Subscription doesn't have configuration, or minimum sampling interval, so it can be shared.
+            // Subscription doesn't have configuration, so it can be shared.
             let subscription_id = self.next_subscription_id.next();
 
-            match self.service_subscriptions.lock().await.entry(service_name.to_owned()) {
+            match self
+                .service_subscriptions
+                .lock()
+                .await
+                .entry((service_name.to_owned(), sub_sampling_interval.to_owned()))
+            {
                 Entry::Occupied(o) => {
                     // If there's already an active subscription, add callback to its map.
                     let (_, _, callback_container) = o.get();
@@ -188,6 +195,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     Some(ServiceSubscriptionType::new_shared(
                         service_name.to_owned(),
                         subscription_id,
+                        sub_sampling_interval.to_owned(),
                     ))
                 }
                 Entry::Vacant(v) => {
@@ -199,7 +207,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         .create_subscription(
                             service_name,
                             None,
-                            &SubSamplingInterval::ZERO,
+                            sub_sampling_interval,
                             Box::new(move |msg| {
                                 if sender.send(msg).is_err() {
                                     // This means that `receiver` was dropped - which should
@@ -256,6 +264,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             Some(ServiceSubscriptionType::new_shared(
                                 service_name.to_owned(),
                                 subscription_id,
+                                sub_sampling_interval.to_owned(),
                             ))
                         }
                         CreateSubscriptionOutcome::NotRegistered(_) => None,
@@ -273,8 +282,17 @@ impl ServiceAdapter for ServiceAdapterImpl {
             ServiceSubscriptionType::Configured { accessor_subscription } => {
                 accessor_subscription.unsubscribe().await?;
             }
-            ServiceSubscriptionType::Shared { service_name, subscription_id } => {
-                match self.service_subscriptions.lock().await.entry(service_name) {
+            ServiceSubscriptionType::Shared {
+                service_name,
+                subscription_id,
+                sub_sampling_interval,
+            } => {
+                match self
+                    .service_subscriptions
+                    .lock()
+                    .await
+                    .entry((service_name, sub_sampling_interval))
+                {
                     Entry::Occupied(o) => {
                         let (_, _, callback_container) = o.get();
                         let is_last_callback = {
@@ -293,7 +311,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         }
                     }
                     Entry::Vacant(v) => {
-                        panic!("No entry found for service name {}", v.key());
+                        panic!("No entry found for service name {:?}", v.key());
                     }
                 }
             }
@@ -351,6 +369,7 @@ pub(super) mod tests {
             subscription_type: ServiceSubscriptionType::Shared {
                 service_name: String::default(),
                 subscription_id: SequenceNumberType::MAX,
+                sub_sampling_interval: SubSamplingInterval::MAX,
             },
         }
     }
@@ -474,7 +493,7 @@ pub(super) mod tests {
             .unwrap();
 
         // Notify about a new message and receive the message.
-        accessor.notify_subscriber(SERVICE_NAME, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg.clone());
         let msg_received = rx.recv().await.unwrap();
 
         // Verify that the received message is the same as the one sent.
@@ -552,10 +571,10 @@ pub(super) mod tests {
             .unwrap();
 
         // Notify about a new message from each service and receive the message.
-        accessor.notify_subscriber(SERVICE_NAME, msg1.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg1.clone());
         let msg1_received = rx.recv().await.unwrap();
 
-        accessor.notify_subscriber(SERVICE_NAME_2, msg2.clone());
+        accessor.notify_subscriber(SERVICE_NAME_2, &SubSamplingInterval::ZERO, msg2.clone());
         let msg2_received = rx.recv().await.unwrap();
 
         // Verify that the received messages are the same as the ones sent.
@@ -599,7 +618,7 @@ pub(super) mod tests {
 
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
-        accessor.notify_subscriber(SERVICE_NAME, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg.clone());
         let msg1_received = rx.recv().await.unwrap();
         let msg2_received = rx.recv().await.unwrap();
 
@@ -610,6 +629,53 @@ pub(super) mod tests {
 
         // Verify the number of registry subscribe calls.
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn subscribe_shared_same_service_different_sub_sampling_interval_subscribes_twice() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let (tx, mut rx) = mpsc::channel(2);
+        let mut msg = Box::new(Int32Value::new());
+        msg.value = 1;
+
+        // Create two subscriptions to the same service.
+        let tx_clone = tx.clone();
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+            )
+            .await
+            .unwrap();
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::MAX,
+                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+            )
+            .await
+            .unwrap();
+
+        // Notify about a new message from the service
+        // and receive messages from the two subscriptions.
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::MAX, msg.clone());
+        let msg1_received = rx.recv().await.unwrap();
+        let msg2_received = rx.recv().await.unwrap();
+
+        // Verify that the received messages are the same as the one sent.
+        let msg = msg as Box<dyn MessageDyn>;
+        assert_eq!(&msg1_received, &msg);
+        assert_eq!(&msg2_received, &msg);
+
+        // Verify the number of registry subscribe calls.
+        assert_eq!(accessor.get_num_subscribe_calls(), 2);
     }
 
     // This test must run on a multi-threaded executor, because only then does the code under test
@@ -639,6 +705,7 @@ pub(super) mod tests {
             for i in RANGE {
                 accessor.notify_subscriber(
                     SERVICE_NAME,
+                    &SubSamplingInterval::ZERO,
                     Box::new(Int32Value { value: i, ..Default::default() }),
                 );
             }

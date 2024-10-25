@@ -14,8 +14,9 @@ pub(crate) struct MockServicePublisherAccessor {
 }
 
 struct MockServicePublisherAccessorData {
-    /// The map of subscribed callbacks, keyed by service name.
-    callbacks: HashMap<String, Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
+    /// The map of subscribed callbacks, keyed by service name and sub-sampling interval.
+    callbacks:
+        HashMap<(String, SubSamplingInterval), Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
     /// The last configuration message that was passed to create_subscription.
     last_configuration: Option<Any>,
     /// When set, the descriptor will be returned on the next call to get_metadata.
@@ -43,6 +44,7 @@ struct MockServicePublisherMessageProvider {
 struct MockServicePublisherSubscription {
     data: Weak<Mutex<MockServicePublisherAccessorData>>,
     service_name: String,
+    sub_sampling_interval: SubSamplingInterval,
 }
 
 #[async_trait]
@@ -81,7 +83,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
-        _sub_sampling_interval: &SubSamplingInterval,
+        sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock();
@@ -94,13 +96,18 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
             return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
         }
 
-        if data.callbacks.try_insert_value(service_name.to_owned(), callback).is_err() {
+        if data
+            .callbacks
+            .try_insert_value((service_name.to_owned(), sub_sampling_interval.to_owned()), callback)
+            .is_err()
+        {
             panic!("Callback is already set for service name {}", service_name);
         }
 
         let subscription = MockServicePublisherSubscription {
             service_name: service_name.to_owned(),
             data: Arc::downgrade(&self.data),
+            sub_sampling_interval: sub_sampling_interval.to_owned(),
         };
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(subscription)))
     }
@@ -139,9 +146,17 @@ impl MockServicePublisherAccessor {
         self.data.lock().num_unsubscribe_calls
     }
 
-    pub(crate) fn notify_subscriber(&self, service_name: &str, message: Box<dyn MessageDyn>) {
+    pub(crate) fn notify_subscriber(
+        &self,
+        service_name: &str,
+        sub_sampling_interval: &SubSamplingInterval,
+        message: Box<dyn MessageDyn>,
+    ) {
         let mut data_lock = self.data.lock();
-        data_lock.callbacks.get_mut(service_name).unwrap()(message);
+        data_lock
+            .callbacks
+            .get_mut(&(service_name.to_owned(), sub_sampling_interval.to_owned()))
+            .unwrap()(message);
     }
 
     pub(crate) fn set_next_error(&self, error: anyhow::Error) {
@@ -202,7 +217,7 @@ impl ServicePublisherSubscription for MockServicePublisherSubscription {
         data.num_unsubscribe_calls += 1;
         data.check_next_error()?;
 
-        let _ = data.callbacks.remove(&self.service_name).unwrap();
+        let _ = data.callbacks.remove(&(self.service_name, self.sub_sampling_interval)).unwrap();
         Ok(())
     }
 }

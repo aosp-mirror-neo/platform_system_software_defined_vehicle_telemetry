@@ -20,6 +20,8 @@ pub struct SubSamplingInterval {
 impl SubSamplingInterval {
     /// A sub-sampling interval of zero (= no sub-sampling).
     pub const ZERO: Self = Self { interval_ms: 0 };
+    /// A sub-sampling interval with the maximum possible value.
+    pub const MAX: Self = Self { interval_ms: u32::MAX };
 
     /// Returns the sub-sampling interval in milliseconds.
     pub fn as_millis(&self) -> u32 {
