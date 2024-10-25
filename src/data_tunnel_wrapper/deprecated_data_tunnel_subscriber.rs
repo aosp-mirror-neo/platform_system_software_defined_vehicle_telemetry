@@ -196,7 +196,6 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
                     .ok_or_else(|| anyhow!("Metadata not found for topic: {}", topic_name))?
                     .message_descriptor;
 
-                let topic_name = topic_name.to_owned();
                 let subscription_descriptor_clone = Arc::clone(&subscription_descriptor);
                 let topic_subscriptions_clone = Arc::clone(&self.topic_subscriptions);
                 let notify_clone = Arc::clone(&notify);
@@ -361,9 +360,13 @@ impl DeprecatedDataTunnelSubscriber {
         Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
 
+    /// Handles the provided messages for the given topic and subscription.
+    ///
+    /// `only_process_messages_for`, if `Some(_)` will only process the provided messages for
+    /// callbacks registered for a sub-sampling interval specified in it.
     fn handle_messages<M>(
         topic_name: String,
-        sub_sampling_interval_filter: Option<Vec<SubSamplingInterval>>,
+        only_process_messages_for: Option<Vec<SubSamplingInterval>>,
         topic_subscription: &mut TopicSubscription,
         messages: &[M],
         topic_subscriptions: Arc<TopicSubscriptions>,
@@ -375,11 +378,11 @@ impl DeprecatedDataTunnelSubscriber {
 
         struct SyntheticNotificationOptions {
             notify_after: Duration,
-            sub_sampling_interval_filter: Vec<SubSamplingInterval>,
+            only_process_messages_for: Vec<SubSamplingInterval>,
         }
         impl SyntheticNotificationOptions {
             fn combine(mut self, other: Self) -> Self {
-                self.sub_sampling_interval_filter.extend(other.sub_sampling_interval_filter);
+                self.only_process_messages_for.extend(other.only_process_messages_for);
                 self.notify_after = self.notify_after.min(other.notify_after);
                 self
             }
@@ -388,8 +391,8 @@ impl DeprecatedDataTunnelSubscriber {
         let mut synthetic_notification_options: Option<SyntheticNotificationOptions> = None;
         let now = Instant::now();
         for (sub_sampling_interval, (callbacks, ref mut last_call)) in callback_map.iter_mut() {
-            if sub_sampling_interval_filter.as_ref().is_some_and(|sub_sampling_interval_filter| {
-                !sub_sampling_interval_filter.contains(sub_sampling_interval)
+            if only_process_messages_for.as_ref().is_some_and(|only_process_messages_for| {
+                !only_process_messages_for.contains(sub_sampling_interval)
             }) {
                 continue;
             }
@@ -413,7 +416,7 @@ impl DeprecatedDataTunnelSubscriber {
 
                 let options = SyntheticNotificationOptions {
                     notify_after: outstanding_duration,
-                    sub_sampling_interval_filter: vec![sub_sampling_interval.clone()],
+                    only_process_messages_for: vec![sub_sampling_interval.clone()],
                 };
 
                 synthetic_notification_options = Some(match synthetic_notification_options {
@@ -476,7 +479,7 @@ impl DeprecatedDataTunnelSubscriber {
 
             Self::handle_messages(
                 topic_name,
-                Some(synthetic_notification_options.sub_sampling_interval_filter),
+                Some(synthetic_notification_options.only_process_messages_for),
                 topic_subscription,
                 &[Box::new(Some(message))],
                 Arc::clone(&topic_subscriptions),
@@ -1443,6 +1446,36 @@ mod tests {
                     sub_sampling_interval: Duration::from_millis(700),
                     expected_result: vec![(0, 0), (1000, 1000), (2000, 2000), (3000, 3000)],
                     subscribe_at: Duration::ZERO,
+                    unsubscribe_at: None,
+                },
+            ],
+        })
+        .await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[googletest::test]
+    // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
+    // more accurate, even when one of the threads is stuck in synchronous FFI code.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn sub_sampling_works_when_re_subscribing_after_unsubscribing() {
+        run_sub_sampling_test(SubSamplingTestConfig {
+            publishing_interval: Duration::from_millis(200),
+            message_count: 12,
+            subscribers: vec![
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(550),
+                    expected_result: vec![(0, 0), (550, 400), (1100, 1000)],
+                    subscribe_at: Duration::ZERO,
+                    unsubscribe_at: Some((
+                        Duration::from_millis(1300),
+                        SubSamplingUnsubscribeKind::default(),
+                    )),
+                },
+                SubSamplingTestSubscriberConfig {
+                    sub_sampling_interval: Duration::from_millis(550),
+                    expected_result: vec![(1800, 1800), (2350, 2200)],
+                    subscribe_at: Duration::from_millis(1700),
                     unsubscribe_at: None,
                 },
             ],
