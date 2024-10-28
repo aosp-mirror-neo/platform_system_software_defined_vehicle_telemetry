@@ -14,8 +14,9 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
-    ServicePublisherSubscription, SubSamplingInterval,
+    ServicePublisherSubscription,
 };
+use crate::sub_sampling_interval::SubSamplingInterval;
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]

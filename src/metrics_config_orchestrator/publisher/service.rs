@@ -23,7 +23,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
-use crate::service_publisher_accessor::SubSamplingInterval;
+use crate::sub_sampling_interval::SubSamplingInterval;
 
 const NUM_RETRY_ATTEMPTS: u8 = 11;
 const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);

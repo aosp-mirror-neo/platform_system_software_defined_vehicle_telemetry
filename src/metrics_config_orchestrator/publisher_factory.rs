@@ -21,7 +21,7 @@ use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPubli
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
-use crate::service_publisher_accessor::SubSamplingInterval;
+use crate::sub_sampling_interval::SubSamplingInterval;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait PublisherFactory: Send + Sync {

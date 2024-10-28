@@ -9,7 +9,7 @@ use std::sync::Arc;
 use cxx::{CxxString, CxxVector, UniquePtr};
 use log::error;
 use sdv_dt::{c_void, SubscriptionNotificationType, TopicTypedMetadata};
-use sdv_telemetry::service_publisher_accessor::SubSamplingInterval;
+use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use tokio::sync::Notify;
 
 /// The main purpose of this wrapper is to implement `std::error::Error` through `thiserror::Error`.

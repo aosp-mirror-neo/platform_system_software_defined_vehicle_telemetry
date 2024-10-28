@@ -18,8 +18,9 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription, SubSamplingInterval,
+    ServicePublisherSubscription,
 };
+use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
