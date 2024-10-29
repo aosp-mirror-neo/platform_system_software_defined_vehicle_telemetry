@@ -46,7 +46,14 @@ pub trait ServicePublisherAccessor: Send + Sync {
         &self,
         service_name: &str,
         callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>>;
+}
+
+/// Interface of the availability callback registration.
+#[async_trait]
+pub trait AvailabilityCallbackRegistration: Send + Sync {
+    /// Unregisters the callback.
+    async fn unregister(&self);
 }
 
 /// Provides messages from a Service Publisher.

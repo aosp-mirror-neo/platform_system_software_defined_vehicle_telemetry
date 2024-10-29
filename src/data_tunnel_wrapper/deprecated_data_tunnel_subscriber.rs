@@ -20,8 +20,8 @@ use tokio::time::{sleep, Duration, Instant};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherMessageProvider,
+    ServicePublisherMetadata, ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
@@ -76,6 +76,8 @@ pub struct DataTunnelSubscription {
     callback: Arc<Callback>,
     topic_subscriptions: Weak<TopicSubscriptions>,
 }
+
+struct AvailabilityCallbackRegistrationImpl {}
 
 impl Default for DeprecatedDataTunnelSubscriber {
     fn default() -> Self {
@@ -296,8 +298,8 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
         &self,
         _service_name: &str,
         _callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        Ok(Box::new(AvailabilityCallbackRegistrationImpl {}))
     }
 }
 
@@ -637,6 +639,11 @@ impl DataTunnelSubscription {
 
         Ok(())
     }
+}
+
+#[async_trait]
+impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
+    async fn unregister(&self) {}
 }
 
 #[cfg(all(test, unit_tests))]

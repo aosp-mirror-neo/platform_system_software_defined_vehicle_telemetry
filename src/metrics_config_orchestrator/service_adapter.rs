@@ -13,8 +13,8 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
-    ServicePublisherSubscription,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -49,7 +49,7 @@ pub(crate) trait ServiceAdapter {
         &self,
         service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()>;
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>>;
 }
 
 #[async_trait]
@@ -334,7 +334,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
         self.service_publisher_accessor
             .register_availability_callback(service_name, &callback.into())
             .await

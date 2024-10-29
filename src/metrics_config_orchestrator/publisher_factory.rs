@@ -226,6 +226,7 @@ mod tests {
         ServiceMessageProvider, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
+    use crate::service_publisher_accessor::AvailabilityCallbackRegistration;
 
     const INTERVAL: Duration = Duration::from_millis(42);
     const PUBLISHER_NAME: &str = "publisher";
@@ -261,7 +262,7 @@ mod tests {
             &self,
             _service_name: &str,
             _callback: Box<dyn Fn() + Send + Sync>,
-        ) -> anyhow::Result<()> {
+        ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
             unreachable!()
         }
     }

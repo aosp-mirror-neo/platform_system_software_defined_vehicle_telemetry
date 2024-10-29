@@ -37,6 +37,8 @@ struct MockServicePublisherAccessorData {
     num_unsubscribe_calls: u32,
     /// The number of times register_availability_callback function of the mock was called.
     num_register_availability_callback_calls: u32,
+    /// The number of times availability callback unregister function of the mock was called.
+    num_unregister_availability_callback_calls: u32,
 }
 
 struct MockServicePublisherMessageProvider {
@@ -47,6 +49,10 @@ struct MockServicePublisherSubscription {
     data: Weak<Mutex<MockServicePublisherAccessorData>>,
     service_name: String,
     sub_sampling_interval: SubSamplingInterval,
+}
+
+struct MockAvailabilityCallbackRegistration {
+    data: Weak<Mutex<MockServicePublisherAccessorData>>,
 }
 
 #[async_trait]
@@ -118,11 +124,11 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         _service_name: &str,
         _callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
         let mut data = self.data.lock();
         data.num_register_availability_callback_calls += 1;
         data.check_next_error()?;
-        Ok(())
+        Ok(Box::new(MockAvailabilityCallbackRegistration { data: Arc::downgrade(&self.data) }))
     }
 }
 
@@ -140,6 +146,7 @@ impl MockServicePublisherAccessor {
             num_subscribe_calls: 0,
             num_unsubscribe_calls: 0,
             num_register_availability_callback_calls: 0,
+            num_unregister_availability_callback_calls: 0,
         }));
         Self { data }
     }
@@ -162,6 +169,10 @@ impl MockServicePublisherAccessor {
 
     pub(crate) fn get_num_register_availability_callback_calls(&self) -> u32 {
         self.data.lock().num_register_availability_callback_calls
+    }
+
+    pub(crate) fn get_num_unregister_availability_callback_calls(&self) -> u32 {
+        self.data.lock().num_unregister_availability_callback_calls
     }
 
     pub(crate) fn notify_subscriber(
@@ -210,6 +221,14 @@ impl MockServicePublisherAccessorData {
     /// Return next error if it's set or Ok otherwise.
     fn check_next_error(&mut self) -> anyhow::Result<()> {
         self.next_error.take().map_or_else(|| Ok(()), Err)
+    }
+}
+
+#[async_trait]
+impl AvailabilityCallbackRegistration for MockAvailabilityCallbackRegistration {
+    async fn unregister(&self) {
+        let data_reference = self.data.upgrade().unwrap();
+        data_reference.lock().num_unregister_availability_callback_calls += 1;
     }
 }
 

@@ -34,6 +34,8 @@ pub(crate) struct MockServiceMessageProvider {
     next_error: Mutex<Option<anyhow::Error>>,
 }
 
+pub(crate) struct MockAvailabilityCallbackRegistration {}
+
 #[async_trait]
 impl ServiceAdapter for MockServiceAdapter {
     fn get_message_provider(
@@ -115,8 +117,8 @@ impl ServiceAdapter for MockServiceAdapter {
         &self,
         _service_name: &str,
         _callback: Box<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        Ok(Box::new(MockAvailabilityCallbackRegistration {}))
     }
 }
 
@@ -209,4 +211,9 @@ impl MockServiceMessageProvider {
         self.next_error.lock().replace(error);
         self
     }
+}
+
+#[async_trait]
+impl AvailabilityCallbackRegistration for MockAvailabilityCallbackRegistration {
+    async fn unregister(&self) {}
 }

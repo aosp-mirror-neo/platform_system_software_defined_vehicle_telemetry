@@ -26,8 +26,8 @@ use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherMessageProvider,
+    ServicePublisherMetadata, ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
@@ -52,6 +52,8 @@ pub struct DataTunnelSubscriber {
 pub struct DataTunnelSubscription {
     _subscription_drop_guard: DropGuard,
 }
+
+struct AvailabilityCallbackRegistrationImpl {}
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 enum ServiceName {
@@ -223,8 +225,8 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         _service_name: &str,
         _callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        Ok(Box::new(AvailabilityCallbackRegistrationImpl {}))
     }
 }
 
@@ -331,6 +333,11 @@ impl ServicePublisherSubscription for DataTunnelSubscription {
         // This drops `self` and therefore cancels the subscription via the `DropGuard`.
         Ok(())
     }
+}
+
+#[async_trait]
+impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
+    async fn unregister(&self) {}
 }
 
 #[cfg(test)]

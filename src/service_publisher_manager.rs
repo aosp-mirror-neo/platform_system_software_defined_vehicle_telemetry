@@ -4,12 +4,13 @@
 //! to the underlying implementations.
 
 use async_trait::async_trait;
+use futures::future;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider,
-    ServicePublisherMetadata,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
+    ServicePublisherMessageProvider, ServicePublisherMetadata,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -17,6 +18,10 @@ use crate::sub_sampling_interval::SubSamplingInterval;
 pub struct ServicePublisherManager {
     /// Hashmap to store Service Publisher Accessors.
     service_publisher_registry: Vec<Arc<dyn ServicePublisherAccessor>>,
+}
+
+struct AggregateAvailabilityCallbackRegistration {
+    registrations: Vec<Box<dyn AvailabilityCallbackRegistration>>,
 }
 
 impl ServicePublisherManager {
@@ -82,12 +87,33 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         &self,
         service_name: &str,
         callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        let mut registrations = Vec::new();
+
         for accessor in &self.service_publisher_registry {
-            accessor.register_availability_callback(service_name, callback).await?;
+            match accessor.register_availability_callback(service_name, callback).await {
+                Ok(registration) => {
+                    registrations.push(registration);
+                }
+                Err(err) => {
+                    for registration in registrations {
+                        registration.unregister().await;
+                    }
+                    return Err(err);
+                }
+            }
         }
 
-        Ok(())
+        Ok(Box::new(AggregateAvailabilityCallbackRegistration { registrations }))
+    }
+}
+
+#[async_trait]
+impl AvailabilityCallbackRegistration for AggregateAvailabilityCallbackRegistration {
+    async fn unregister(&self) {
+        let unregister_tasks =
+            self.registrations.iter().map(|registration| registration.unregister());
+        future::join_all(unregister_tasks).await;
     }
 }
 
@@ -292,9 +318,12 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn register_availability_callback_success() {
-        let service_publisher = Arc::new(MockServicePublisherAccessor::new());
-        let service_publishers =
-            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
+        let service_publisher2 = Arc::new(MockServicePublisherAccessor::new());
+        let service_publishers = vec![
+            Arc::clone(&service_publisher1) as Arc<dyn ServicePublisherAccessor>,
+            Arc::clone(&service_publisher2) as Arc<dyn ServicePublisherAccessor>,
+        ];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         service_publisher_manager_impl
@@ -305,17 +334,21 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(service_publisher.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher1.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher2.get_num_register_availability_callback_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn register_availability_callback_propagates_error() {
-        let service_publisher = Arc::new(
+    async fn register_availability_callback_propagates_error_and_unsubscribes() {
+        let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
+        let service_publisher2 = Arc::new(
             MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
         );
-        let service_publishers =
-            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publishers = vec![
+            Arc::clone(&service_publisher1) as Arc<dyn ServicePublisherAccessor>,
+            Arc::clone(&service_publisher2) as Arc<dyn ServicePublisherAccessor>,
+        ];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
         let err = service_publisher_manager_impl
@@ -328,5 +361,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
+        assert_eq!(service_publisher1.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher1.get_num_unregister_availability_callback_calls(), 1);
+        assert_eq!(service_publisher2.get_num_register_availability_callback_calls(), 1);
     }
 }

@@ -16,10 +16,7 @@ use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
-use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription,
-};
+use sdv_telemetry::service_publisher_accessor::{AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription};
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -82,6 +79,8 @@ trait BinderAdapter: Send + Sync {
 }
 
 struct BinderAdapterImpl {}
+
+struct AvailabilityCallbackRegistrationImpl {}
 
 /// Publisher registry entry.
 struct PublisherEntry {
@@ -190,8 +189,8 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         _service_name: &str,
         _callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<()> {
-        Ok(())
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        Ok(Box::new(AvailabilityCallbackRegistrationImpl {}))
     }
 }
 
@@ -309,6 +308,11 @@ impl BinderAdapter for BinderAdapterImpl {
         publisher.as_binder().link_to_death(&mut death_recipient)?;
         Ok(death_recipient)
     }
+}
+
+#[async_trait]
+impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
+    async fn unregister(&self) {}
 }
 
 #[async_trait]
