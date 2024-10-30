@@ -2,16 +2,16 @@
 
 use async_trait::async_trait;
 use futures::FutureExt;
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
 use std::sync::{Arc, Weak};
-use std::{collections::HashMap, mem, time::Duration};
+use std::{collections::HashMap, mem};
 use tokio::sync::mpsc;
-use tokio::{select, sync::Mutex as AsyncMutex};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
     base::BasePublisher, CallbackFn, Publisher, PublisherActivateError, PublisherDeactivateError,
@@ -23,10 +23,8 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::service_adapter::{
     ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
+use crate::service_publisher_accessor::AvailabilityCallbackRegistration;
 use crate::sub_sampling_interval::SubSamplingInterval;
-
-const NUM_RETRY_ATTEMPTS: u8 = 11;
-const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 pub(crate) enum ConnectionType {
     Subscription,
@@ -42,7 +40,6 @@ pub(crate) struct ServicePublisher {
     base: BasePublisher,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     state: AsyncMutex<ServicePublisherState>,
-    retry_interval: Duration,
 }
 
 #[derive(strum_macros::Display)]
@@ -54,11 +51,11 @@ enum ServicePublisherState {
     /// The publisher attempted activation, but service wasn't available.
     /// It will retry activation after timeout.
     Pending {
+        // Registration to service availability notifications.
+        availability_registration: Arc<Mutex<Option<Box<dyn AvailabilityCallbackRegistration>>>>,
+
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
-
-        // Cancellation token that is flagged to cancel pending activation.
-        cancellation_token: CancellationToken,
     },
     /// The publisher is not subscribed to the underlying data source,
     /// but provides the latest message on demand.
@@ -131,19 +128,44 @@ impl Publisher for ServicePublisher {
             state_lock
         );
 
-        let new_state = self.try_activate().await?.unwrap_or_else(|| {
+        let new_state = if let Some(state) = self.try_activate().await? {
+            state
+        } else {
             info!(
-                "Publisher {} activation wasn't able to discover the service. Will retry in {} seconds",
-                self.get_name(), self.retry_interval.as_secs());
+                "Publisher {} activation wasn't able to discover the service.\
+                Subscribing to availability notifications",
+                self.get_name()
+            );
 
-            let cancellation_token = CancellationToken::new();
-            let cancellation_token_clone = cancellation_token.clone();
+            let registration_container = Arc::new(Mutex::new(None));
+            let registration_container_clone = Arc::clone(&registration_container);
             let self_clone = Arc::clone(&self);
-            tokio::spawn(async move {
-                self_clone.retry_activation(cancellation_token_clone).await;
-            });
-            ServicePublisherState::Pending { callback_map: HashMap::new(), cancellation_token }
-        });
+            let registration = self
+                .service_adapter
+                .register_availability_callback(
+                    &self.service_name,
+                    Box::new(move || {
+                        let registration_container_clone =
+                            Arc::clone(&registration_container_clone);
+                        let self_clone = Arc::clone(&self_clone);
+                        tokio::spawn(async move {
+                            self_clone.retry_activation(registration_container_clone).await;
+                        });
+                    }),
+                )
+                .await
+                .map_err(|error| {
+                    PublisherActivateError::ServiceAdapterRegisterAvailabilityCallbackError {
+                        error,
+                    }
+                })?;
+            assert!(registration_container.lock().replace(registration).is_none());
+
+            ServicePublisherState::Pending {
+                availability_registration: registration_container,
+                callback_map: HashMap::new(),
+            }
+        };
 
         // Set the new state and release the mutex.
         *state_lock = new_state;
@@ -158,8 +180,12 @@ impl Publisher for ServicePublisher {
             ServicePublisherState::Inactive => {
                 panic!("Unable to deactivate publisher {}: it's inactive", self.get_name())
             }
-            ServicePublisherState::Pending { cancellation_token, .. } => {
-                cancellation_token.cancel()
+            ServicePublisherState::Pending { availability_registration, .. } => {
+                let registration = availability_registration
+                    .lock()
+                    .take()
+                    .expect("Valid pending state should contain availability registration");
+                registration.unregister().await
             }
             ServicePublisherState::ActiveGetter { .. } => {}
             ServicePublisherState::ActiveSubscribed {
@@ -267,7 +293,6 @@ impl ServicePublisher {
             configuration,
             sub_sampling_interval,
             connection_type,
-            retry_interval: RETRY_INTERVAL,
             service_adapter,
             service_name,
             state: ServicePublisherState::Inactive.into(),
@@ -293,56 +318,61 @@ impl ServicePublisher {
         }
     }
 
-    /// Retries publisher activation in a loop.
-    async fn retry_activation(self: &Arc<Self>, cancellation_token: CancellationToken) {
-        for i in 1..=NUM_RETRY_ATTEMPTS {
-            // Wait before retrying and lock state mutex or cancel if cancellation token is flagged.
-            let mut state_lock = select! {
-                biased;
-                _ = cancellation_token.cancelled() => break,
-                state_lock = async {
-                    tokio::time::sleep(self.retry_interval).await;
-                    self.state.lock().await
-                } => state_lock,
-            };
+    /// Retries publisher activation.
+    async fn retry_activation(
+        self: &Arc<Self>,
+        availability_registration: Arc<Mutex<Option<Box<dyn AvailabilityCallbackRegistration>>>>,
+    ) {
+        // Lock state mutex and hold it until operation is complete.
+        let mut state_lock = self.state.lock().await;
 
-            match &mut *state_lock {
-                ServicePublisherState::Inactive => {
-                    panic!("Publisher {} state is Inactive, but cancellation token wasn't cancelled", self.get_name());
-                },
-                ServicePublisherState::Pending { callback_map, .. } => {
-                    match self.try_activate().await {
-                        Ok(Some(mut new_state)) => {
-                            Self::maybe_swap_callback_map(&mut new_state, callback_map);
-                            debug!(
-                                "Publisher {} activation attempt {}/{} was successful and it's now {}",
-                                self.get_name(), i, NUM_RETRY_ATTEMPTS, new_state
-                            );
-                            *state_lock = new_state;
-                            break;
-                        },
-                        Ok(None) => {
-                            info!(
-                                "Publisher {} activation attempt {}/{} wasn't able to discover the service",
-                                self.get_name(), i, NUM_RETRY_ATTEMPTS
-                            );
-                        }
-                        Err(err) => {
-                            error!(
-                                "Publisher {} activation attempt {}/{} failed: {:?}",
-                                self.get_name(), i, NUM_RETRY_ATTEMPTS, err
-                            );
-                        }
+        let Some(registration) = availability_registration.lock().take() else {
+            // Abort retry operation because either retry has already been processed,
+            // or Publisher state is no longer Pending.
+            return;
+        };
+
+        match &mut *state_lock {
+            ServicePublisherState::Inactive => {
+                panic!("Publisher {} state is Inactive, but registration wasn't taken", self.get_name());
+            },
+            ServicePublisherState::Pending { callback_map, .. } => {
+                match self.try_activate().await {
+                    Ok(Some(mut new_state)) => {
+                        registration.unregister().await;
+                        Self::maybe_swap_callback_map(&mut new_state, callback_map);
+                        debug!(
+                            "Publisher {} activation retry was successful and it's now {}",
+                            self.get_name(), new_state
+                        );
+                        *state_lock = new_state;
+                        return;
+                    },
+                    Ok(None) => {
+                        warn!(
+                            "Publisher {} activation retry wasn't able to discover the service,\
+                            despite receiving availability notification",
+                            self.get_name()
+                        );
                     }
-                },
-                ServicePublisherState::ActiveGetter { .. } =>
-                    panic!("Unable to retry activation of publisher {} due to invalid state: getter publisher is already active",
-                        self.get_name()),
-                ServicePublisherState::ActiveSubscribed { .. } =>
-                    panic!("Unable to retry activation of publisher {} due to invalid state: publisher is already subscribed",
-                        self.get_name()),
-            }
+                    Err(err) => {
+                        error!(
+                            "Publisher {} activation retry failed: {:?}",
+                            self.get_name(), err
+                        );
+                    }
+                }
+            },
+            ServicePublisherState::ActiveGetter { .. } =>
+                panic!("Unable to retry activation of publisher {} due to invalid state: getter publisher is already active",
+                    self.get_name()),
+            ServicePublisherState::ActiveSubscribed { .. } =>
+                panic!("Unable to retry activation of publisher {} due to invalid state: publisher is already subscribed",
+                    self.get_name()),
         }
+
+        // Activation retry was unsuccessful, so keep availability registration active.
+        assert!(availability_registration.lock().replace(registration).is_none());
     }
 
     /// Attempts to activate service publisher and returns the new state if activation was successful.
@@ -544,6 +574,8 @@ mod tests {
         ));
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 0);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -563,6 +595,8 @@ mod tests {
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 0);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -581,26 +615,34 @@ mod tests {
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_retries_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let mut publisher = ServicePublisher::new(
+        let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-        );
-        publisher.retry_interval = Duration::from_millis(1);
-        let publisher = Arc::new(publisher);
+        ));
 
         Arc::clone(&publisher).activate().await.unwrap();
 
-        service_adapter.set_next_message_provider(MockServiceMessageProvider::new()).await.unwrap();
+        // Fire availability callback when service is still not available.
+        service_adapter.call_availability_callback();
+        tokio::task::yield_now().await;
+
+        // Fire availability callback when service is available.
+        let call_receiver =
+            service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
+        service_adapter.call_availability_callback();
+        call_receiver.await.unwrap();
 
         let state = publisher.state.lock().await;
         assert!(
@@ -613,13 +655,44 @@ mod tests {
             "Unexpected number of get_message_provider calls: {}",
             service_adapter.get_num_get_message_provider_calls()
         );
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn activate_getter_with_retries_unsubscribes_on_deactivate() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher = Arc::new(ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            SubSamplingInterval::ZERO,
+            ConnectionType::Getter,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+        publisher.deactivate().await.unwrap();
+
+        // Ensure availability callback is ignored.
+        service_adapter.call_availability_callback();
+        tokio::task::yield_now().await;
+
+        let state = publisher.state.lock().await;
+        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_subscription_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
@@ -629,8 +702,14 @@ mod tests {
             Arc::<MockServiceAdapter>::clone(&service_adapter),
         ));
 
-        publisher.activate().await.unwrap();
+        Arc::clone(&publisher).activate().await.unwrap();
 
+        let state = publisher.state.lock().await;
+        assert!(
+            matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
+            "Unexpected state: {}",
+            *state
+        );
         let latest_configuration = service_adapter
             .latest_configuration
             .lock()
@@ -642,6 +721,8 @@ mod tests {
         assert_eq!(&latest_configuration, Empty::default_instance());
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 0);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -661,22 +742,22 @@ mod tests {
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_subscription_retries_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let mut publisher = ServicePublisher::new(
+        let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-        );
-        publisher.retry_interval = Duration::ZERO;
-        let publisher = Arc::new(publisher);
+        ));
 
         Arc::clone(&publisher).activate().await.unwrap();
 
@@ -695,7 +776,10 @@ mod tests {
             )
             .await;
 
-        service_adapter.set_next_subscribe_successful().await.unwrap();
+        let subscribe_receiver = service_adapter.set_next_subscribe_successful();
+        service_adapter.call_availability_callback();
+        subscribe_receiver.await.unwrap();
+
         service_adapter.publish_new_message(&msg).await;
         let received_message = rx.await.unwrap();
 
@@ -715,6 +799,8 @@ mod tests {
             "Unexpected number of subscribe calls: {}",
             service_adapter.get_num_subscribe_calls()
         );
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

@@ -44,7 +44,6 @@ pub(crate) trait ServiceAdapter {
 
     /// Registers a callback that will be called when a service with the specified string
     /// service_name becomes available.
-    #[allow(dead_code)]
     async fn register_availability_callback(
         &self,
         service_name: &str,

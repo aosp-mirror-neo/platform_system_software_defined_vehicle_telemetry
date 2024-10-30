@@ -44,10 +44,13 @@ pub(crate) trait Publisher: Send + Sync {
 #[cfg(test)]
 downcast_rs::impl_downcast!(sync Publisher);
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Error, Debug)]
 pub(crate) enum PublisherActivateError {
     #[error("Service adapter failed to create message provider: {error:#}")]
     ServiceAdapterGetMessageProviderError { error: anyhow::Error },
+    #[error("Service adapter failed to subscribe to service availability: {error:#}")]
+    ServiceAdapterRegisterAvailabilityCallbackError { error: anyhow::Error },
     #[error("Service adapter failed to process subscription request: {error:#}")]
     ServiceAdapterSubscribeError { error: anyhow::Error },
 }

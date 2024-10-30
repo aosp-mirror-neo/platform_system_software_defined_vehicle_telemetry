@@ -18,12 +18,15 @@ pub(crate) struct MockServiceAdapter {
     pub(crate) notify_subscribing: Arc<Notify>,
     // Notify that's triggered when unsubscribe is blocked.
     pub(crate) notify_unsubscribing: Arc<Notify>,
+    availability_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     message_provider_returned_sender: Mutex<Option<oneshot::Sender<()>>>,
     next_error: Mutex<Option<anyhow::Error>>,
     next_message_provider: Mutex<Option<MockServiceMessageProvider>>,
     num_get_message_provider_calls: AtomicU32,
     num_subscribe_calls: AtomicU32,
     num_unsubscribe_calls: AtomicU32,
+    num_register_availability_callback_calls: AtomicU32,
+    num_unregister_availability_callback_calls: Arc<AtomicU32>,
     new_message_callback:
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>>>,
     successful_subscribe_sender: Mutex<Option<oneshot::Sender<()>>>,
@@ -34,7 +37,9 @@ pub(crate) struct MockServiceMessageProvider {
     next_error: Mutex<Option<anyhow::Error>>,
 }
 
-pub(crate) struct MockAvailabilityCallbackRegistration {}
+pub(crate) struct MockAvailabilityCallbackRegistration {
+    num_unregister_availability_callback_calls: Arc<AtomicU32>,
+}
 
 #[async_trait]
 impl ServiceAdapter for MockServiceAdapter {
@@ -116,15 +121,22 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn register_availability_callback(
         &self,
         _service_name: &str,
-        _callback: Box<dyn Fn() + Send + Sync>,
+        callback: Box<dyn Fn() + Send + Sync>,
     ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
-        Ok(Box::new(MockAvailabilityCallbackRegistration {}))
+        self.num_register_availability_callback_calls.fetch_add(1, Ordering::AcqRel);
+        self.availability_callback.lock().replace(callback);
+        Ok(Box::new(MockAvailabilityCallbackRegistration {
+            num_unregister_availability_callback_calls: Arc::clone(
+                &self.num_unregister_availability_callback_calls,
+            ),
+        }))
     }
 }
 
 impl MockServiceAdapter {
     pub(crate) fn new() -> Self {
         Self {
+            availability_callback: None.into(),
             block_subscribe: false,
             block_unsubscribe: false,
             successful_subscribe_sender: None.into(),
@@ -138,6 +150,8 @@ impl MockServiceAdapter {
             num_get_message_provider_calls: 0.into(),
             num_subscribe_calls: 0.into(),
             num_unsubscribe_calls: 0.into(),
+            num_register_availability_callback_calls: 0.into(),
+            num_unregister_availability_callback_calls: Arc::new(0.into()),
         }
     }
 
@@ -151,6 +165,18 @@ impl MockServiceAdapter {
 
     pub(crate) fn get_num_unsubscribe_calls(&self) -> u32 {
         self.num_unsubscribe_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn get_num_register_availability_callback_calls(&self) -> u32 {
+        self.num_register_availability_callback_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn get_num_unregister_availability_callback_calls(&self) -> u32 {
+        self.num_unregister_availability_callback_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn call_availability_callback(&self) {
+        self.availability_callback.lock().as_ref().unwrap()();
     }
 
     pub(crate) fn set_next_message_provider(
@@ -215,5 +241,7 @@ impl MockServiceMessageProvider {
 
 #[async_trait]
 impl AvailabilityCallbackRegistration for MockAvailabilityCallbackRegistration {
-    async fn unregister(&self) {}
+    async fn unregister(&self) {
+        self.num_unregister_availability_callback_calls.fetch_add(1, Ordering::AcqRel);
+    }
 }
