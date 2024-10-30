@@ -54,7 +54,7 @@ use metrics_report_generator_factory::{
     MetricsReportGeneratorFactoryError, MetricsReportGeneratorFactoryImpl,
     MetricsReportGeneratorFactoryValidateContext,
 };
-use publisher::{Publisher, PublisherActivateError};
+use publisher::Publisher;
 use publisher_factory::{
     PublisherFactory, PublisherFactoryCreateContext, PublisherFactoryError, PublisherFactoryImpl,
     PublisherFactoryValidateContext,
@@ -132,7 +132,7 @@ pub enum MetricsConfigOrchestratorError {
     #[error("End trigger cannot be set if start trigger is not set")]
     NoStartTriggerDefined,
     #[error("Unable to activate publisher {publisher_name}: {error}")]
-    UnableToActivatePublisher { publisher_name: String, error: PublisherActivateError },
+    UnableToActivatePublisher { publisher_name: String, error: anyhow::Error },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -1924,9 +1924,7 @@ mod tests {
     async fn initialize_config_publisher_doesnt_activate_fails() {
         // Setup mock factory.
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
-        publisher_mock.set_activate_callback(move |_| {
-            Some(PublisherActivateError::ServiceAdapterSubscribeError { error: anyhow!("Error") })
-        });
+        publisher_mock.set_activate_callback(move |_| Some(anyhow!("Error")));
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator.publisher_factory().add_publishers(vec![publisher_mock.into()]);
@@ -1942,7 +1940,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && matches!(error, PublisherActivateError::ServiceAdapterSubscribeError { .. })),
+            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && error.to_string() == "Error"),
             "Unexpected error: {:?}",
             err
         );

@@ -10,9 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
-use super::{
-    base::BasePublisher, CallbackFn, Publisher, PublisherActivateError, PublisherDeactivateError,
-};
+use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
@@ -68,7 +66,7 @@ impl Publisher for AggregationPublisher {
         Ok(latest_message).into()
     }
 
-    async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
+    async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         assert!(
@@ -136,7 +134,7 @@ impl Publisher for AggregationPublisher {
         Ok(())
     }
 
-    async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
+    async fn deactivate(&self) -> anyhow::Result<()> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         match &*state_lock {

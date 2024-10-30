@@ -1,5 +1,6 @@
 // Copyright 2024 Google LLC
 
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -13,9 +14,7 @@ use std::{collections::HashMap, mem};
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{
-    base::BasePublisher, CallbackFn, Publisher, PublisherActivateError, PublisherDeactivateError,
-};
+use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
@@ -118,7 +117,7 @@ impl Publisher for ServicePublisher {
         .into()
     }
 
-    async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
+    async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         assert!(
@@ -154,11 +153,7 @@ impl Publisher for ServicePublisher {
                     }),
                 )
                 .await
-                .map_err(|error| {
-                    PublisherActivateError::ServiceAdapterRegisterAvailabilityCallbackError {
-                        error,
-                    }
-                })?;
+                .with_context(|| "Service adapter failed to subscribe to service availability")?;
             assert!(registration_container.lock().replace(registration).is_none());
 
             ServicePublisherState::Pending {
@@ -172,7 +167,7 @@ impl Publisher for ServicePublisher {
         Ok(())
     }
 
-    async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
+    async fn deactivate(&self) -> anyhow::Result<()> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
 
@@ -198,7 +193,9 @@ impl Publisher for ServicePublisher {
                 );
 
                 if let Some(subscription) = service_subscription.take() {
-                    self.service_adapter.unsubscribe(subscription).await?;
+                    self.service_adapter.unsubscribe(subscription).await.with_context(|| {
+                        "Service adapter failed to process unsubscription request"
+                    })?;
                 } else {
                     panic!(
                         "Unable to deactivate publisher {} because it's in an inconsistent state: it's deactivating, but subscription is not set",
@@ -376,15 +373,12 @@ impl ServicePublisher {
     }
 
     /// Attempts to activate service publisher and returns the new state if activation was successful.
-    async fn try_activate(
-        self: &Arc<Self>,
-    ) -> Result<Option<ServicePublisherState>, PublisherActivateError> {
+    async fn try_activate(self: &Arc<Self>) -> anyhow::Result<Option<ServicePublisherState>> {
         let maybe_message_provider = match self.connection_type {
-            ConnectionType::Getter => {
-                self.service_adapter.get_message_provider(&self.service_name).map_err(|error| {
-                    PublisherActivateError::ServiceAdapterGetMessageProviderError { error }
-                })?
-            }
+            ConnectionType::Getter => self
+                .service_adapter
+                .get_message_provider(&self.service_name)
+                .with_context(|| "Service adapter failed to create message provider")?,
             ConnectionType::Subscription => None,
         };
 
@@ -408,7 +402,7 @@ impl ServicePublisher {
                     }),
                 )
                 .await
-                .map_err(|error| PublisherActivateError::ServiceAdapterSubscribeError { error })?;
+                .with_context(|| "Service adapter failed to process subscription request")?;
 
             struct ServicePublisherHandler {
                 service_publisher: Weak<ServicePublisher>,
@@ -552,10 +546,9 @@ mod tests {
 
         let err = publisher.activate().await.unwrap_err();
 
-        assert!(
-            matches!(&err, PublisherActivateError::ServiceAdapterGetMessageProviderError { error } if error.to_string() == ERROR_MESSAGE),
-            "Unexpected error: {:?}",
-            err
+        assert_eq!(
+            err.chain().map(|err| err.to_string()).collect::<Vec<_>>(),
+            vec!["Service adapter failed to create message provider", ERROR_MESSAGE]
         );
     }
 

@@ -7,7 +7,7 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{Publisher, PublisherActivateError, PublisherDeactivateError};
+use super::Publisher;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::publisher::CallbackFn;
 
@@ -16,9 +16,8 @@ pub(crate) struct MockPublisher {
     pub latest_message: Option<Arc<dyn MessageDyn>>,
 
     name: String,
-    activate_callback: Option<Box<dyn Fn(&str) -> Option<PublisherActivateError> + Send + Sync>>,
-    deactivate_callback:
-        Option<Box<dyn Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync>>,
+    activate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
+    deactivate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
     latest_message_error: Mutex<Option<anyhow::Error>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
@@ -44,7 +43,7 @@ impl Publisher for MockPublisher {
         Ok(self.latest_message.clone()).into()
     }
 
-    async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError> {
+    async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
         if let Some(callback) = &self.activate_callback {
             if let Some(error) = callback(&self.name) {
                 return Err(error);
@@ -54,7 +53,7 @@ impl Publisher for MockPublisher {
         Ok(())
     }
 
-    async fn deactivate(&self) -> Result<(), PublisherDeactivateError> {
+    async fn deactivate(&self) -> anyhow::Result<()> {
         if let Some(callback) = &self.deactivate_callback {
             if let Some(error) = callback(&self.name) {
                 return Err(error);
@@ -102,14 +101,14 @@ impl MockPublisher {
 
     pub(crate) fn set_activate_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<PublisherActivateError> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<anyhow::Error> + Send + Sync + 'static,
     ) {
         self.activate_callback.replace(Box::new(callback));
     }
 
     pub(crate) fn set_deactivate_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<PublisherDeactivateError> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<anyhow::Error> + Send + Sync + 'static,
     ) {
         self.deactivate_callback.replace(Box::new(callback));
     }

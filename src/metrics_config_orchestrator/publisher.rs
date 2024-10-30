@@ -1,13 +1,10 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use log::error;
 use protobuf::MessageDyn;
 use sdv_telemetry_utils::operation_result::OperationResult;
-use std::fmt::Debug;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
-use thiserror::Error;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
@@ -34,8 +31,8 @@ pub(crate) trait Publisher: Send + Sync {
         self: Arc<Self>,
     ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error>;
 
-    async fn activate(self: Arc<Self>) -> Result<(), PublisherActivateError>;
-    async fn deactivate(&self) -> Result<(), PublisherDeactivateError>;
+    async fn activate(self: Arc<Self>) -> anyhow::Result<()>;
+    async fn deactivate(&self) -> anyhow::Result<()>;
 
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn);
     async fn unsubscribe(&self, data_trigger_name: &str);
@@ -43,23 +40,3 @@ pub(crate) trait Publisher: Send + Sync {
 
 #[cfg(test)]
 downcast_rs::impl_downcast!(sync Publisher);
-
-#[allow(clippy::enum_variant_names)]
-#[derive(Error, Debug)]
-pub(crate) enum PublisherActivateError {
-    #[error("Service adapter failed to create message provider: {error:#}")]
-    ServiceAdapterGetMessageProviderError { error: anyhow::Error },
-    #[error("Service adapter failed to subscribe to service availability: {error:#}")]
-    ServiceAdapterRegisterAvailabilityCallbackError { error: anyhow::Error },
-    #[error("Service adapter failed to process subscription request: {error:#}")]
-    ServiceAdapterSubscribeError { error: anyhow::Error },
-}
-
-#[derive(Error, Debug)]
-pub(crate) enum PublisherDeactivateError {
-    #[error("Service adapter failed to process unsubscription request: {error:#}")]
-    ServiceAdapterUnsubscribeError {
-        #[from]
-        error: anyhow::Error,
-    },
-}
