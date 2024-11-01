@@ -87,12 +87,13 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         &self,
         service_name: &str,
         callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let mut registrations = Vec::new();
 
         for accessor in &self.service_publisher_registry {
             match accessor.register_availability_callback(service_name, callback).await {
-                Ok(registration) => {
+                Ok(None) => {}
+                Ok(Some(registration)) => {
                     registrations.push(registration);
                 }
                 Err(err) => {
@@ -104,7 +105,11 @@ impl ServicePublisherAccessor for ServicePublisherManager {
             }
         }
 
-        Ok(Box::new(AggregateAvailabilityCallbackRegistration { registrations }))
+        if registrations.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Box::new(AggregateAvailabilityCallbackRegistration { registrations })))
+        }
     }
 }
 
@@ -319,6 +324,33 @@ mod tests {
     #[tokio::test]
     async fn register_availability_callback_success() {
         let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
+        let service_publisher2 =
+            Arc::new(MockServicePublisherAccessor::new().with_availability_callback());
+        let service_publishers = vec![
+            Arc::clone(&service_publisher1) as Arc<dyn ServicePublisherAccessor>,
+            Arc::clone(&service_publisher2) as Arc<dyn ServicePublisherAccessor>,
+        ];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let registration = service_publisher_manager_impl
+            .register_availability_callback(
+                SERVICE_NAME,
+                &(Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>),
+            )
+            .await
+            .unwrap();
+        registration.unwrap().unregister().await;
+
+        assert_eq!(service_publisher1.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher1.get_num_unregister_availability_callback_calls(), 0);
+        assert_eq!(service_publisher2.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher2.get_num_unregister_availability_callback_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn register_availability_callback_no_callbacks_success() {
+        let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
         let service_publisher2 = Arc::new(MockServicePublisherAccessor::new());
         let service_publishers = vec![
             Arc::clone(&service_publisher1) as Arc<dyn ServicePublisherAccessor>,
@@ -326,7 +358,7 @@ mod tests {
         ];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        service_publisher_manager_impl
+        let registration = service_publisher_manager_impl
             .register_availability_callback(
                 SERVICE_NAME,
                 &(Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>),
@@ -334,14 +366,18 @@ mod tests {
             .await
             .unwrap();
 
+        assert!(registration.is_none());
         assert_eq!(service_publisher1.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher1.get_num_unregister_availability_callback_calls(), 0);
         assert_eq!(service_publisher2.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_publisher1.get_num_unregister_availability_callback_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn register_availability_callback_propagates_error_and_unsubscribes() {
-        let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
+        let service_publisher1 =
+            Arc::new(MockServicePublisherAccessor::new().with_availability_callback());
         let service_publisher2 = Arc::new(
             MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
         );

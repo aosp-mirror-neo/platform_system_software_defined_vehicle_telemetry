@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
@@ -139,7 +139,7 @@ impl Publisher for ServicePublisher {
             let registration_container = Arc::new(Mutex::new(None));
             let registration_container_clone = Arc::clone(&registration_container);
             let self_clone = Arc::clone(&self);
-            let registration = self
+            let maybe_registration = self
                 .service_adapter
                 .register_availability_callback(
                     &self.service_name,
@@ -154,6 +154,13 @@ impl Publisher for ServicePublisher {
                 )
                 .await
                 .with_context(|| "Service adapter failed to subscribe to service availability")?;
+            let Some(registration) = maybe_registration else {
+                return Err(anyhow!(
+                    "Service with name {} is not supported by underlying data providers",
+                    self.service_name
+                ));
+            };
+
             assert!(registration_container.lock().replace(registration).is_none());
 
             ServicePublisherState::Pending {
@@ -595,7 +602,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_pending_if_not_found() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -615,7 +622,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_retries_if_not_found() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
@@ -656,7 +663,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_with_retries_unsubscribes_on_deactivate() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
@@ -721,7 +728,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_subscription_pending_if_not_found() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher =
             create_inactive_subscription_service_publisher(Some(Arc::clone(&service_adapter)));
 
@@ -742,7 +749,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_subscription_retries_if_not_found() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             SERVICE_NAME.to_owned(),
@@ -798,6 +805,30 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
+    async fn activate_subscription_no_availability_callback_fails() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher = Arc::new(ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            SubSamplingInterval::ZERO,
+            ConnectionType::Subscription,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+        ));
+
+        let err = Arc::clone(&publisher).activate().await.err().unwrap();
+
+        assert!(
+            err.to_string().contains("is not supported by underlying data providers"),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
     #[should_panic]
     async fn activate_when_active_panics() {
         let publisher = create_active_subscribed_service_publisher(None).await;
@@ -826,7 +857,7 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn deactivate_pending_success() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher =
             create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
 

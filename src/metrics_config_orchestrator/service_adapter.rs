@@ -48,7 +48,7 @@ pub(crate) trait ServiceAdapter {
         &self,
         service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>>;
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>>;
 }
 
 #[async_trait]
@@ -333,7 +333,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         &self,
         service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         self.service_publisher_accessor
             .register_availability_callback(service_name, &callback.into())
             .await
@@ -891,13 +891,14 @@ pub(super) mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn register_availability_callback_success() {
-        let accessor = Arc::new(MockServicePublisherAccessor::new());
+        let accessor = Arc::new(MockServicePublisherAccessor::new().with_availability_callback());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
         service_adapter
             .register_availability_callback(SERVICE_NAME, Box::new(|| ()))
             .await
+            .unwrap()
             .unwrap();
 
         assert_eq!(accessor.get_num_register_availability_callback_calls(), 1);

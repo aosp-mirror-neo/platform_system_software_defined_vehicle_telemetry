@@ -29,6 +29,7 @@ pub(crate) struct MockServiceAdapter {
     num_unregister_availability_callback_calls: Arc<AtomicU32>,
     new_message_callback:
         AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>>>,
+    return_availability_callback_registration: bool,
     successful_subscribe_sender: Mutex<Option<oneshot::Sender<()>>>,
 }
 
@@ -122,14 +123,18 @@ impl ServiceAdapter for MockServiceAdapter {
         &self,
         _service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         self.num_register_availability_callback_calls.fetch_add(1, Ordering::AcqRel);
         self.availability_callback.lock().replace(callback);
-        Ok(Box::new(MockAvailabilityCallbackRegistration {
-            num_unregister_availability_callback_calls: Arc::clone(
-                &self.num_unregister_availability_callback_calls,
-            ),
-        }))
+        if self.return_availability_callback_registration {
+            Ok(Some(Box::new(MockAvailabilityCallbackRegistration {
+                num_unregister_availability_callback_calls: Arc::clone(
+                    &self.num_unregister_availability_callback_calls,
+                ),
+            })))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -152,6 +157,7 @@ impl MockServiceAdapter {
             num_unsubscribe_calls: 0.into(),
             num_register_availability_callback_calls: 0.into(),
             num_unregister_availability_callback_calls: Arc::new(0.into()),
+            return_availability_callback_registration: false,
         }
     }
 
@@ -197,6 +203,11 @@ impl MockServiceAdapter {
 
     pub(crate) async fn publish_new_message(&self, message: &Arc<dyn MessageDyn>) {
         self.new_message_callback.lock().await.as_mut().unwrap()(message);
+    }
+
+    pub(crate) fn with_availability_callback(mut self) -> Self {
+        self.return_availability_callback_registration = true;
+        self
     }
 
     pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {

@@ -225,8 +225,9 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         &self,
         _service_name: &str,
         _callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
-        Ok(Box::new(AvailabilityCallbackRegistrationImpl {}))
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
+        // TODO(b/361105719): Implement availability notifications.
+        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {})))
     }
 }
 

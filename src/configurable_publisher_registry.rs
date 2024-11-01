@@ -195,7 +195,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
         callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let callback_weak = Arc::downgrade(callback);
 
         match self.availability_callbacks.lock().entry(service_name.to_owned()) {
@@ -205,11 +205,11 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             }
         };
 
-        Ok(Box::new(AvailabilityCallbackRegistrationImpl {
+        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {
             availability_callbacks: Arc::clone(&self.availability_callbacks),
             service_name: service_name.to_owned(),
             callback: Arc::clone(callback),
-        }))
+        })))
     }
 }
 
@@ -761,10 +761,16 @@ mod tests {
         let callback1 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
         let callback2 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
 
-        let _reg1 =
-            registry.register_availability_callback(SERVICE_NAME, &callback1).await.unwrap();
-        let _reg2 =
-            registry.register_availability_callback(SERVICE_NAME, &callback2).await.unwrap();
+        let _reg1 = registry
+            .register_availability_callback(SERVICE_NAME, &callback1)
+            .await
+            .unwrap()
+            .unwrap();
+        let _reg2 = registry
+            .register_availability_callback(SERVICE_NAME, &callback2)
+            .await
+            .unwrap()
+            .unwrap();
 
         // Verify the callbacks are stored
         let callbacks = registry.availability_callbacks.lock();
@@ -784,8 +790,16 @@ mod tests {
         let callback1 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
         let callback2 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
 
-        let reg1 = registry.register_availability_callback(SERVICE_NAME, &callback1).await.unwrap();
-        let reg2 = registry.register_availability_callback(SERVICE_NAME, &callback2).await.unwrap();
+        let reg1 = registry
+            .register_availability_callback(SERVICE_NAME, &callback1)
+            .await
+            .unwrap()
+            .unwrap();
+        let reg2 = registry
+            .register_availability_callback(SERVICE_NAME, &callback2)
+            .await
+            .unwrap()
+            .unwrap();
 
         // Unregister the first callback
         reg1.unregister().await;

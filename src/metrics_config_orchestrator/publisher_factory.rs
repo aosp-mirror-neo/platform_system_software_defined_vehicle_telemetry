@@ -262,7 +262,7 @@ mod tests {
             &self,
             _service_name: &str,
             _callback: Box<dyn Fn() + Send + Sync>,
-        ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
             unreachable!()
         }
     }

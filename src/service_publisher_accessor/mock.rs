@@ -10,7 +10,10 @@ use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 
 pub(crate) struct MockServicePublisherAccessor {
+    /// Shared mock data.
     data: Arc<Mutex<MockServicePublisherAccessorData>>,
+    /// Indicates whether to return Some availability callback registration or None.
+    return_availability_callback_registration: bool,
 }
 
 struct MockServicePublisherAccessorData {
@@ -124,11 +127,17 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         &self,
         _service_name: &str,
         _callback: &Arc<dyn Fn() + Send + Sync>,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let mut data = self.data.lock();
         data.num_register_availability_callback_calls += 1;
         data.check_next_error()?;
-        Ok(Box::new(MockAvailabilityCallbackRegistration { data: Arc::downgrade(&self.data) }))
+        if self.return_availability_callback_registration {
+            Ok(Some(Box::new(MockAvailabilityCallbackRegistration {
+                data: Arc::downgrade(&self.data),
+            })))
+        } else {
+            Ok(None)
+        }
     }
 }
 
@@ -148,7 +157,7 @@ impl MockServicePublisherAccessor {
             num_register_availability_callback_calls: 0,
             num_unregister_availability_callback_calls: 0,
         }));
-        Self { data }
+        Self { data, return_availability_callback_registration: false }
     }
 
     pub(crate) fn get_num_get_message_provider_calls(&self) -> u32 {
@@ -194,6 +203,11 @@ impl MockServicePublisherAccessor {
 
     pub(crate) fn take_last_configuration(&self) -> Option<Any> {
         self.data.lock().last_configuration.take()
+    }
+
+    pub(crate) fn with_availability_callback(mut self) -> Self {
+        self.return_availability_callback_registration = true;
+        self
     }
 
     pub(crate) fn with_latest_message(self, message: Box<dyn MessageDyn>) -> Self {
