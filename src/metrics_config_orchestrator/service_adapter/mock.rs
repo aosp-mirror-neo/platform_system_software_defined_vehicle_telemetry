@@ -241,7 +241,7 @@ impl MockServiceMessageProvider {
 
 #[async_trait]
 impl AvailabilityCallbackRegistration for MockAvailabilityCallbackRegistration {
-    async fn unregister(&self) {
+    async fn unregister(self: Box<Self>) {
         self.num_unregister_availability_callback_calls.fetch_add(1, Ordering::AcqRel);
     }
 }

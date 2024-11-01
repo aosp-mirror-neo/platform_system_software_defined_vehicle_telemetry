@@ -226,7 +226,7 @@ impl MockServicePublisherAccessorData {
 
 #[async_trait]
 impl AvailabilityCallbackRegistration for MockAvailabilityCallbackRegistration {
-    async fn unregister(&self) {
+    async fn unregister(self: Box<Self>) {
         let data_reference = self.data.upgrade().unwrap();
         data_reference.lock().num_unregister_availability_callback_calls += 1;
     }

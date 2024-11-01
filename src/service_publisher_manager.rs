@@ -110,9 +110,9 @@ impl ServicePublisherAccessor for ServicePublisherManager {
 
 #[async_trait]
 impl AvailabilityCallbackRegistration for AggregateAvailabilityCallbackRegistration {
-    async fn unregister(&self) {
+    async fn unregister(self: Box<Self>) {
         let unregister_tasks =
-            self.registrations.iter().map(|registration| registration.unregister());
+            self.registrations.into_iter().map(|registration| registration.unregister());
         future::join_all(unregister_tasks).await;
     }
 }

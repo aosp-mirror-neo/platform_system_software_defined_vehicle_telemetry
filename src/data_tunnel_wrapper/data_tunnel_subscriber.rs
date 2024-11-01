@@ -337,7 +337,7 @@ impl ServicePublisherSubscription for DataTunnelSubscription {
 
 #[async_trait]
 impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
-    async fn unregister(&self) {}
+    async fn unregister(self: Box<Self>) {}
 }
 
 #[cfg(test)]

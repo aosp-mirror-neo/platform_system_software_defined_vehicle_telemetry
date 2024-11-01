@@ -21,6 +21,7 @@ use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
+use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
 use thiserror::Error;
@@ -34,6 +35,7 @@ const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
 /// ConfigurablePublisherRegistry that maintains the list of configurable publishers in memory.
 pub struct ConfigurablePublisherRegistry {
+    availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
     /// Adapter to make calls into Binder library.
     binder_adapter: Box<dyn BinderAdapter>,
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
@@ -80,7 +82,11 @@ trait BinderAdapter: Send + Sync {
 
 struct BinderAdapterImpl {}
 
-struct AvailabilityCallbackRegistrationImpl {}
+struct AvailabilityCallbackRegistrationImpl {
+    availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
+    service_name: String,
+    callback: Arc<dyn Fn() + Send + Sync>,
+}
 
 /// Publisher registry entry.
 struct PublisherEntry {
@@ -187,10 +193,23 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
 
     async fn register_availability_callback(
         &self,
-        _service_name: &str,
-        _callback: &Arc<dyn Fn() + Send + Sync>,
+        service_name: &str,
+        callback: &Arc<dyn Fn() + Send + Sync>,
     ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
-        Ok(Box::new(AvailabilityCallbackRegistrationImpl {}))
+        let callback_weak = Arc::downgrade(callback);
+
+        match self.availability_callbacks.lock().entry(service_name.to_owned()) {
+            Entry::Occupied(mut o) => o.get_mut().push(callback_weak),
+            Entry::Vacant(v) => {
+                v.insert(vec![callback_weak]);
+            }
+        };
+
+        Ok(Box::new(AvailabilityCallbackRegistrationImpl {
+            availability_callbacks: Arc::clone(&self.availability_callbacks),
+            service_name: service_name.to_owned(),
+            callback: Arc::clone(callback),
+        }))
     }
 }
 
@@ -198,6 +217,7 @@ impl ConfigurablePublisherRegistry {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
         Self {
+            availability_callbacks: Arc::new(Mutex::new(HashMap::new())),
             binder_adapter: Box::new(BinderAdapterImpl {}),
             publisher_entries: Mutex::new(HashMap::new()).into(),
         }
@@ -240,6 +260,16 @@ impl ConfigurablePublisherRegistry {
                     publisher: publisher.clone(),
                     supports_get: publisher_info.supportsGet,
                 });
+            }
+        }
+
+        // Notify availability callbacks for the service.
+        if let Some(callbacks) = self.availability_callbacks.lock().get(&publisher_info.serviceName)
+        {
+            for callback in callbacks.iter() {
+                if let Some(cb) = callback.upgrade() {
+                    cb();
+                }
             }
         }
 
@@ -312,7 +342,35 @@ impl BinderAdapter for BinderAdapterImpl {
 
 #[async_trait]
 impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
-    async fn unregister(&self) {}
+    async fn unregister(mut self: Box<Self>) {
+        self.unregister_impl();
+    }
+}
+
+impl Drop for AvailabilityCallbackRegistrationImpl {
+    fn drop(&mut self) {
+        self.unregister_impl();
+    }
+}
+
+impl AvailabilityCallbackRegistrationImpl {
+    fn unregister_impl(&mut self) {
+        let availability_callbacks = mem::take(&mut self.availability_callbacks);
+        let mut availability_callbacks_lock = availability_callbacks.lock();
+        let Some(callbacks) = availability_callbacks_lock.get_mut(&self.service_name) else {
+            return;
+        };
+        let Some(callback_index) = callbacks
+            .iter()
+            .position(|each| each.upgrade().is_some_and(|cb| Arc::ptr_eq(&cb, &self.callback)))
+        else {
+            return;
+        };
+        callbacks.swap_remove(callback_index);
+        if callbacks.is_empty() {
+            availability_callbacks_lock.remove(&self.service_name);
+        }
+    }
 }
 
 #[async_trait]
@@ -695,5 +753,61 @@ mod tests {
             .publisher_entries
             .lock()
             .contains_key(SERVICE_NAME));
+    }
+
+    #[tokio::test]
+    async fn register_availability_callback_success() {
+        let registry = ConfigurablePublisherRegistry::new();
+        let callback1 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
+        let callback2 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
+
+        let _reg1 =
+            registry.register_availability_callback(SERVICE_NAME, &callback1).await.unwrap();
+        let _reg2 =
+            registry.register_availability_callback(SERVICE_NAME, &callback2).await.unwrap();
+
+        // Verify the callbacks are stored
+        let callbacks = registry.availability_callbacks.lock();
+        let registered_callbacks =
+            callbacks.get(SERVICE_NAME).expect("Service should be registered");
+
+        assert_eq!(registered_callbacks.len(), 2, "Expected 2 callbacks registered");
+
+        // Check that the stored callbacks are weak references to the originals
+        assert!(Arc::ptr_eq(&callback1, &registered_callbacks[0].upgrade().unwrap()));
+        assert!(Arc::ptr_eq(&callback2, &registered_callbacks[1].upgrade().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn unregister_availability_callback_success() {
+        let registry = ConfigurablePublisherRegistry::new();
+        let callback1 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
+        let callback2 = Arc::new(|| {}) as Arc<dyn Fn() + Send + Sync>;
+
+        let reg1 = registry.register_availability_callback(SERVICE_NAME, &callback1).await.unwrap();
+        let reg2 = registry.register_availability_callback(SERVICE_NAME, &callback2).await.unwrap();
+
+        // Unregister the first callback
+        reg1.unregister().await;
+
+        // Verify only the second callback remains
+        {
+            let callbacks = registry.availability_callbacks.lock();
+            let remaining_callbacks =
+                callbacks.get(SERVICE_NAME).expect("Service should still be registered");
+
+            assert_eq!(remaining_callbacks.len(), 1, "Expected only 1 callback remaining");
+            assert!(Arc::ptr_eq(&callback2, &remaining_callbacks[0].upgrade().unwrap()));
+        }
+
+        // Unregister the second callback
+        reg2.unregister().await;
+
+        // Verify the service entry is removed after all callbacks are unregistered
+        let callbacks = registry.availability_callbacks.lock();
+        assert!(
+            !callbacks.contains_key(SERVICE_NAME),
+            "Service entry should be removed when no callbacks are left"
+        );
     }
 }

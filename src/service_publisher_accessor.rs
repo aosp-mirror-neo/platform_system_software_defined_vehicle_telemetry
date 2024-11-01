@@ -53,7 +53,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
 #[async_trait]
 pub trait AvailabilityCallbackRegistration: Send + Sync {
     /// Unregisters the callback.
-    async fn unregister(&self);
+    async fn unregister(self: Box<Self>);
 }
 
 /// Provides messages from a Service Publisher.

@@ -131,7 +131,7 @@ impl Publisher for ServicePublisher {
             state
         } else {
             info!(
-                "Publisher {} activation wasn't able to discover the service.\
+                "Publisher {} activation wasn't able to discover the service. \
                 Subscribing to availability notifications",
                 self.get_name()
             );
