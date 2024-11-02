@@ -12,7 +12,9 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
-use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition, UnitType};
+use sdv_comms::sd::{
+    ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitType,
+};
 use sdv_comms::ContextRef;
 use sdv_status_rs::SdvStatusCode;
 use std::collections::hash_map::Entry;
@@ -53,7 +55,9 @@ pub struct DataTunnelSubscription {
     _subscription_drop_guard: DropGuard,
 }
 
-struct AvailabilityCallbackRegistrationImpl {}
+struct AvailabilityCallbackRegistrationImpl {
+    _availability_callback_drop_guard: DropGuard,
+}
 
 #[derive(Eq, PartialEq, Hash, Debug)]
 enum ServiceName {
@@ -223,11 +227,58 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
 
     async fn register_availability_callback(
         &self,
-        _service_name: &str,
-        _callback: &Arc<dyn Fn() + Send + Sync>,
+        service_name: &str,
+        callback: &Arc<dyn Fn() + Send + Sync>,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
-        // TODO(b/361105719): Implement availability notifications.
-        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {})))
+        let Ok(service_name) = ServiceName::parse(service_name) else {
+            return Ok(None);
+        };
+
+        let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
+        let (event_stream, unit_name) = match service_name {
+            ServiceName::UnitTypeBased { unit_type, unit_name } => {
+                let event_stream = sd
+                    .subscribe_service_unit_change_by_type(&unit_type)
+                    .await
+                    .with_context(|| "Failed to subscribe to changes for unit type {unit_type}")?;
+                (event_stream, unit_name)
+            }
+            ServiceName::FqinBased { fqin: _, unit_name: _ } => {
+                // TODO(b/361105719): Parse fqin with regexp and call subscribe_service_unit_change_by_name.
+                return Ok(None);
+            }
+        };
+
+        let mut event_stream = event_stream
+            .filter(move |event| {
+                let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
+                    OptionExtension::is_none_or(&unit_name, |unit_name| {
+                        service_unit.get_unit_identifier().get_unit_name() == unit_name
+                    })
+                } else {
+                    false
+                };
+
+                future::ready(res)
+            })
+            .boxed();
+
+        let callback_clone = Arc::clone(callback);
+        let cancellation_token = CancellationToken::new();
+        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
+        tokio::spawn(async move {
+            while let Some(_event) = select! {
+                biased;
+                _ = cancellation_token.cancelled() => None,
+                event = event_stream.next() => event,
+            } {
+                callback_clone();
+            }
+        });
+
+        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {
+            _availability_callback_drop_guard: availability_callback_drop_guard,
+        })))
     }
 }
 
