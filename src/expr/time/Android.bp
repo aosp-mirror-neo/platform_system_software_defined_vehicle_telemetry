@@ -45,7 +45,6 @@ rust_test {
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
-        "general-tests",
         // keep-sorted end
     ],
     auto_gen_config: true,
@@ -89,7 +88,6 @@ rust_test {
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
-        "general-tests",
         // keep-sorted end
     ],
     auto_gen_config: true,
