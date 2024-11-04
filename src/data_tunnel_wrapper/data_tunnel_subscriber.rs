@@ -13,7 +13,8 @@ use protobuf::{Message, MessageDyn};
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::{
-    ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitType,
+    ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitNameDiscoveryArgs,
+    UnitType,
 };
 use sdv_comms::ContextRef;
 use sdv_status_rs::SdvStatusCode;
@@ -235,33 +236,54 @@ impl ServicePublisherAccessor for DataTunnelSubscriber {
         };
 
         let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
-        let (event_stream, unit_name) = match service_name {
-            ServiceName::UnitTypeBased { unit_type, unit_name } => {
-                let event_stream = sd
-                    .subscribe_service_unit_change_by_type(&unit_type)
+        let mut event_stream = match service_name {
+            ServiceName::UnitTypeBased { unit_type, unit_name } => sd
+                .subscribe_service_unit_change_by_type(&unit_type)
+                .await
+                .with_context(|| "Failed to subscribe to changes for unit type {unit_type}")?
+                .filter(move |event| {
+                    let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
+                        OptionExtension::is_none_or(&unit_name, |unit_name| {
+                            service_unit.get_unit_identifier().get_unit_name() == unit_name
+                        })
+                    } else {
+                        false
+                    };
+
+                    future::ready(res)
+                })
+                .boxed(),
+            ServiceName::FqinBased { fqin, unit_name } => {
+                let name_args = UnitNameDiscoveryArgs::new_builder()
+                    .set_sdv_package_name(fqin.get_sdv_package_name())
+                    .set_service_bundle_name(fqin.get_service_bundle_name())
+                    .set_service_unit_name(unit_name)
+                    .set_sdv_vm_name(fqin.get_sdv_vm_name())
+                    .build()
+                    .with_context(|| {
+                        "Failed to build UnitNameDiscoveryArgs for {fqin}|{unit_name}"
+                    })?;
+                sd.subscribe_service_unit_change_by_name(&name_args)
                     .await
-                    .with_context(|| "Failed to subscribe to changes for unit type {unit_type}")?;
-                (event_stream, unit_name)
-            }
-            ServiceName::FqinBased { fqin: _, unit_name: _ } => {
-                // TODO(b/361105719): Parse fqin with regexp and call subscribe_service_unit_change_by_name.
-                return Ok(None);
+                    .with_context(|| {
+                        "Failed to subscribe to changes for service {fqin}|{unit_name}"
+                    })?
+                    .filter(move |event| {
+                        let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
+                            service_unit
+                                .get_service_bundle_identity()
+                                .get_fqin()
+                                .get_service_instance_name()
+                                == fqin.get_service_instance_name()
+                        } else {
+                            false
+                        };
+
+                        future::ready(res)
+                    })
+                    .boxed()
             }
         };
-
-        let mut event_stream = event_stream
-            .filter(move |event| {
-                let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
-                    OptionExtension::is_none_or(&unit_name, |unit_name| {
-                        service_unit.get_unit_identifier().get_unit_name() == unit_name
-                    })
-                } else {
-                    false
-                };
-
-                future::ready(res)
-            })
-            .boxed();
 
         let callback_clone = Arc::clone(callback);
         let cancellation_token = CancellationToken::new();
