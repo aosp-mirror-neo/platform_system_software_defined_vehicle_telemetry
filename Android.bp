@@ -83,10 +83,11 @@ rust_library {
     crate_name: "sdv_telemetry_configurable_publisher",
 }
 
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_defaults
 rust_defaults {
     name: "telemetry_dt_wrapper_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
-    srcs: ["src/data_tunnel_wrapper/lib.rs"],
+    srcs: ["src/comms_stack_wrapper/lib.rs"],
     rustlibs: [
         // keep-sorted start
         "libanyhow",
@@ -119,12 +120,14 @@ rust_defaults {
     vendor_available: true,
 }
 
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper
 rust_library {
     name: "libsdv_telemetry_dt_wrapper",
     crate_name: "sdv_telemetry_dt_wrapper",
     defaults: ["telemetry_dt_wrapper_defaults"],
 }
 
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_tests_defaults
 rust_defaults {
     name: "telemetry_dt_wrapper_tests_defaults",
     defaults: ["telemetry_dt_wrapper_defaults"],
@@ -164,6 +167,7 @@ rust_defaults {
     auto_gen_config: true,
 }
 
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_unit_tests
 rust_test {
     name: "libsdv_telemetry_dt_wrapper_unit_tests",
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
@@ -176,6 +180,7 @@ rust_test {
     require_root: true,
 }
 
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_integration_tests
 rust_test {
     name: "libsdv_telemetry_dt_wrapper_integration_tests",
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
