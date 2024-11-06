@@ -564,7 +564,7 @@ mod integration_tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
     #[tokio::test]
     async fn create_multiple_subscription_success() {
         let ctx = test_utils::make_context(0).await;
@@ -611,7 +611,7 @@ mod integration_tests {
         assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
     #[tokio::test]
     async fn create_repeated_subscriptions_and_read_messages_success() {
         let ctx = test_utils::make_context(0).await;
