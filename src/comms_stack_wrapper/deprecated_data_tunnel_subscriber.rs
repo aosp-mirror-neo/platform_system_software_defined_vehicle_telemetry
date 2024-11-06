@@ -66,7 +66,7 @@ pub struct DeprecatedDataTunnelSubscriber {
 }
 
 /// Struct for subscription of DT topic.
-pub struct DataTunnelSubscription {
+struct DataTunnelSubscription {
     _subscription_descriptor: Arc<SubscriptionDescriptor>,
 
     topic_name: String,

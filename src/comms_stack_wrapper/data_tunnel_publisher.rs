@@ -121,7 +121,7 @@ mod tests {
     use std::str::FromStr;
     use tokio::sync::OnceCell;
 
-    const UNIT_NAME: &str = "default";
+    use crate::test_utils::UNIT_NAME;
 
     async fn make_context() -> ContextRef {
         static CONTEXT_REF: OnceCell<ContextRef> = OnceCell::const_new();
