@@ -12,7 +12,7 @@ use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMet
 use sdv_telemetry_test_utils::unique_dt_topic_name;
 use std::str::FromStr;
 
-use crate::comms_stack_accessor::ServiceName;
+use crate::service_name::ServiceName;
 
 pub(super) const UNIT_NAME: &str = "default";
 

@@ -10,10 +10,8 @@ use log::{error, info};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
-use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::{
     ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitNameDiscoveryArgs,
-    UnitType,
 };
 use sdv_comms::ContextRef;
 use sdv_status_rs::SdvStatusCode;
@@ -27,13 +25,12 @@ use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, option_extension::OptionExtension,
 };
 use std::collections::{hash_map::Entry, HashMap};
-use std::fmt;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::{select, sync::Mutex as AsyncMutex};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber::DataTunnelSubscriber;
+use crate::service_name::ServiceName;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 pub struct CommsStackAccessor {
@@ -43,50 +40,6 @@ pub struct CommsStackAccessor {
 
     /// Hashmap to store service names and their `MessageDescriptor`s.
     service_message_descriptors: AsyncMutex<HashMap<ServiceName, MessageDescriptor>>,
-}
-
-#[derive(Eq, PartialEq, Hash, Debug)]
-pub(super) enum ServiceName {
-    UnitTypeBased { unit_type: UnitType, unit_name: Option<String> },
-    FqinBased { fqin: ServiceFqin, unit_name: String },
-}
-
-impl ServiceName {
-    pub(super) fn parse(input: &str) -> anyhow::Result<Self> {
-        if input.contains(':') {
-            let (fqin, unit_name) = input.rsplit_once("|").ok_or(anyhow!(
-                "Missing `|` in input '{input}' to divide the FQIN from the Service Unit Name."
-            ))?;
-            ServiceFqin::from_str(fqin)
-                .with_context(|| "Failed to parse FQIN.")
-                .map(|fqin| Self::FqinBased { fqin, unit_name: unit_name.to_owned() })
-        } else {
-            let (unit_type, unit_name) = input
-                .rsplit_once("|")
-                .map(|(unit_type, unit_name)| (unit_type, Some(unit_name.to_owned())))
-                .unwrap_or((input, None));
-            UnitType::from_str(unit_type)
-                .with_context(|| "Failed to parse Unit Type.")
-                .map(|unit_type| Self::UnitTypeBased { unit_type, unit_name })
-        }
-    }
-}
-
-impl fmt::Display for ServiceName {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::UnitTypeBased { unit_type, unit_name } => {
-                write!(
-                    f,
-                    "UnitTypeBased(unit_type: {unit_type}, unit_name: {})",
-                    unit_name.as_deref().unwrap_or("N/A")
-                )
-            }
-            Self::FqinBased { fqin, unit_name } => {
-                write!(f, "FqinBased(fqin: {fqin}, unit_name: {unit_name})")
-            }
-        }
-    }
 }
 
 struct AvailabilityCallbackRegistrationImpl {
@@ -322,68 +275,6 @@ impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
     async fn unregister(self: Box<Self>) {}
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use googletest::prelude::*;
-    use sdv_telemetry_test_utils::parameterized_test;
-
-    parameterized_test!(
-        service_name_parser,
-
-        |input, expected| {
-            assert_that!(ServiceName::parse(input), expected);
-        },
-
-        unsupported_service_name_fails: (
-            "hello",
-            err(anything()),
-        ),
-        multiple_pipes_fails: (
-            "vm:com.google.sdv.telemetry.tests.Blah/instance|the-unit-name|another-thing",
-            err(anything()),
-        ),
-        fqin_fails: (
-            "vm:com.google.sdv.telemetry.tests.Blah/instance",
-            err(anything()),
-        ),
-        fqin_with_unit_name_success: (
-            "vm:com.google.sdv.telemetry.tests.Blah/instance|the-unit-name",
-            ok(
-                eq(
-                    ServiceName::FqinBased{
-                        fqin: ServiceFqin::from_str("vm:com.google.sdv.telemetry.tests.Blah/instance").unwrap(),
-                        unit_name: "the-unit-name".to_owned()
-                    }
-                )
-            ),
-        ),
-        unit_type_without_unit_name_success: (
-            "com.google.sdv.telemetry.tests.Blah#Blubb",
-            ok(
-                eq(
-                    ServiceName::UnitTypeBased{
-                        unit_type: UnitType::from_str("com.google.sdv.telemetry.tests.Blah#Blubb").unwrap(),
-                        unit_name: None,
-                    }
-                )
-            ),
-        ),
-        unit_type_with_unit_name_success: (
-            "com.google.sdv.telemetry.tests.Blah#Blubb|the-unit-name",
-            ok(
-                eq(
-                    ServiceName::UnitTypeBased{
-                        unit_type: UnitType::from_str("com.google.sdv.telemetry.tests.Blah#Blubb").unwrap(),
-                        unit_name: Some("the-unit-name".to_owned())
-                    }
-                )
-            ),
-        ),
-    );
-}
-
 #[cfg(all(test, integration_tests))]
 mod integration_tests {
     use super::*;
@@ -391,8 +282,10 @@ mod integration_tests {
     use futures::FutureExt;
     use protobuf::{reflect::ReflectValueRef, MessageFull};
     use sdv_comms::dt;
+    use sdv_comms::id::ServiceFqin;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
     use sdv_telemetry_utils::conversions::u32_into_usize;
+    use std::str::FromStr;
     use std::time::Duration;
     use tokio::{sync::mpsc, time::Instant};
 
