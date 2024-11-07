@@ -11,7 +11,8 @@ use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_comms::sd::{
-    ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitNameDiscoveryArgs,
+    ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitMetadata,
+    UnitNameDiscoveryArgs,
 };
 use sdv_comms::ContextRef;
 use sdv_status_rs::SdvStatusCode;
@@ -30,6 +31,7 @@ use tokio::{select, sync::Mutex as AsyncMutex};
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber::DataTunnelSubscriber;
+use crate::sdv_rpc_client::SdvRpcClient;
 use crate::service_name::ServiceName;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
@@ -40,6 +42,8 @@ pub struct CommsStackAccessor {
 
     /// Hashmap to store service names and their `MessageDescriptor`s.
     service_message_descriptors: AsyncMutex<HashMap<ServiceName, MessageDescriptor>>,
+
+    sdv_rpc_client: SdvRpcClient,
 }
 
 struct AvailabilityCallbackRegistrationImpl {
@@ -84,7 +88,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn create_subscription(
         &self,
         service_name: &str,
-        _configuration: Option<&Any>,
+        configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
@@ -103,14 +107,29 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 .with_context(|| format!("Metadata not found for service '{service_name}'."))?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
-        self.data_tunnel_subscriber
-            .create_subscription(
-                unit_identifier,
-                sub_sampling_interval,
-                message_descriptor,
-                callback,
-            )
-            .await
+
+        match service_unit_definition.get_unit_metadata() {
+            UnitMetadata::Publisher(_) => {
+                self.data_tunnel_subscriber
+                    .create_subscription(
+                        unit_identifier,
+                        sub_sampling_interval,
+                        message_descriptor,
+                        callback,
+                    )
+                    .await
+            }
+            UnitMetadata::Server(_) => {
+                self.sdv_rpc_client
+                    .create_subscription(
+                        unit_identifier,
+                        configuration,
+                        message_descriptor,
+                        callback,
+                    )
+                    .await
+            }
+        }
     }
 
     async fn register_availability_callback(
@@ -195,7 +214,13 @@ impl CommsStackAccessor {
     /// Creates a new instance of the Comms Stack Accessor.
     pub fn new(ctx: future::Shared<BoxFuture<'static, ContextRef>>) -> Self {
         let data_tunnel_subscriber = DataTunnelSubscriber::new(ctx.clone());
-        Self { ctx, data_tunnel_subscriber, service_message_descriptors: HashMap::new().into() }
+        let sdv_rpc_client = SdvRpcClient::new(ctx.clone());
+        Self {
+            ctx,
+            data_tunnel_subscriber,
+            service_message_descriptors: HashMap::new().into(),
+            sdv_rpc_client,
+        }
     }
 
     async fn discover_service(&self, service_name: &ServiceName) -> Option<ServiceUnitDefinition> {

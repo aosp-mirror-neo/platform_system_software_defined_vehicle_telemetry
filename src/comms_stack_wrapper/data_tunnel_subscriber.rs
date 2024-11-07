@@ -27,7 +27,7 @@ pub struct DataTunnelSubscriber {
 }
 
 /// Struct for subscription of DT topic.
-pub struct DataTunnelSubscription {
+struct DataTunnelSubscription {
     _subscription_drop_guard: DropGuard,
 }
 
@@ -101,7 +101,7 @@ impl DataTunnelSubscriber {
                 for message_bytes in messages {
                     match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
                         Ok(msg) => {
-                            (callback)(msg.clone());
+                            (callback)(msg);
                         }
                         Err(err) => error!(
                             "Failed to convert bytes to protobuf for service unit '{}': {err:?}",
@@ -132,7 +132,7 @@ impl DataTunnelSubscriber {
 
         let message = message_descriptor
             .parse_from(&mut is)
-            .with_context(|| "Failed to parse the protobuf messagw.")?;
+            .with_context(|| "Failed to parse the protobuf message.")?;
         Ok(message)
     }
 
