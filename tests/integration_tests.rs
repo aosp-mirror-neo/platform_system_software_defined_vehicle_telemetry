@@ -375,6 +375,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/frequent_reports.textproto",
             "./samples/sample_protos/journey_summary.textproto",
             "./samples/sample_protos/processing_frequent_data.textproto",
+            "./samples/sample_protos/sdv_configurable_publisher.textproto",
             "./samples/sample_protos/sudden_tire_pressure_drop.textproto",
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto"
