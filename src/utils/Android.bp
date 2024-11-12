@@ -47,6 +47,7 @@ rust_test {
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
+        "general-tests",
         // keep-sorted end
     ],
     target: {
