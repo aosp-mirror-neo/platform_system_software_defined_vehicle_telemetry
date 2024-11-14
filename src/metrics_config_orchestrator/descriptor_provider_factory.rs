@@ -68,14 +68,20 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
                         .ok_or(DescriptorProviderFactoryError::InvalidAggregationPublisher {
                             pub_name: publisher.name.clone(),
                         })?;
-                    let descriptor = fds
-                        .iter()
-                        .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
-                        .ok_or(DescriptorProviderFactoryError::MissingMessageDescriptor {
-                            pub_name: publisher.name.clone(),
-                            msg_type: message_builder.message_type.clone(),
-                        })?;
-                    Some(descriptor)
+                    // Skip message type lookup if it doesn't start with a dot because
+                    // message_by_full_name will panic.
+                    if message_builder.message_type.starts_with(".") {
+                        let descriptor = fds
+                            .iter()
+                            .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
+                            .ok_or(DescriptorProviderFactoryError::MissingMessageDescriptor {
+                                pub_name: publisher.name.clone(),
+                                msg_type: message_builder.message_type.clone(),
+                            })?;
+                        Some(descriptor)
+                    } else {
+                        None
+                    }
                 }
                 // Skip unknown publisher types.
                 _ => continue,
@@ -267,5 +273,26 @@ mod tests {
             descriptor_provider.get_descriptor(PUBLISHER_2).unwrap().unwrap().proto(),
             TestNestedMessage::descriptor().proto()
         );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_descriptor_aggregation_publisher_skips_invalid_message_type_name() {
+        let publisher =
+            create_aggregation_publisher_with_msg_type(PUBLISHER_1, "INVALID_MESSAGE_TYPE");
+
+        let descriptor_provider_factory = DescriptorProviderFactoryImpl;
+        let descriptor_provider = descriptor_provider_factory
+            .create(
+                get_test_file_descriptors(),
+                &[publisher],
+                &create_default_service_publisher_accessor(),
+            )
+            .await
+            .unwrap();
+
+        let res = descriptor_provider.get_descriptor(PUBLISHER_1).unwrap();
+
+        assert!(res.is_none(), "Unexpected result: {:?}", res);
     }
 }
