@@ -257,7 +257,7 @@ impl CommsStackAccessor {
                     if err.status_code() == SdvStatusCode::NotFound {
                         info!("Could not find service for {service_name}.");
                     } else {
-                        error!("Failed to query service discovery for {service_name}: {err:?}");
+                        error!("Failed to query service discovery for {service_name}: {err}");
                     }
                 })
                 .ok(),
@@ -279,7 +279,7 @@ impl CommsStackAccessor {
             publisher_metadata.descriptor_protos,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )
-        .map_err(|e| anyhow!("Invalid Descriptor Protos: {:?}", e))?;
+        .map_err(|e| anyhow!("Invalid Descriptor Protos: {}", e))?;
 
         // Iterate through all `file_descriptors` and find `MessageDescriptor` for the given
         // `message_type_name`. `message_by_full_name()` function requires the name to start
