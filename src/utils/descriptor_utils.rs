@@ -6,6 +6,7 @@ use protobuf::{reflect::FileDescriptor, well_known_types};
 lazy_static! {
     /// An array of file descriptors for well known protobuf types.
     pub static ref WELL_KNOWN_FILE_DESCRIPTORS: Vec<FileDescriptor> = vec![
+        protobuf::descriptor::file_descriptor().clone(),
         well_known_types::any::file_descriptor().clone(),
         well_known_types::api::file_descriptor().clone(),
         well_known_types::duration::file_descriptor().clone(),
