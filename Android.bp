@@ -108,7 +108,6 @@ rust_defaults {
         "libthiserror",
         "libtokio",
         "libtokio_util",
-        "libweak_table",
         // keep-sorted end
     ],
     proc_macros: [
