@@ -3,8 +3,9 @@
 #![cfg(test)]
 
 use anyhow::anyhow;
-use log::info;
+use log::{debug, info};
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
+use protobuf::well_known_types::wrappers::Int32Value;
 use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
@@ -32,6 +33,8 @@ use tokio::sync::{mpsc, OnceCell};
 
 const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
+const VSOMEIP_SERVER_BINARY: &str = "/vendor/bin/sdv_vsomeip_group_tester";
+const VSOMEIP_CONFIG_FILE: &str = "/vendor/etc/vsomeip/group_tester.json";
 
 async fn make_context() -> ContextRef {
     static CONTEXT_REF: OnceCell<ContextRef> = OnceCell::const_new();
@@ -327,6 +330,49 @@ async fn telemetry_service_vector_aggregation_with_fqin() {
     run_vector_aggregation_test(publisher, format!("{}|{UNIT_NAME}", ctx.get_self_fqin())).await;
 }
 
+#[sdv_telemetry_test_utils_macros::timeout(100_000)]
+#[tokio::test]
+async fn telemetry_service_someip() {
+    setup_once();
+
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status_code, status_msg| {
+                info!("Received status message {status_code}: {status_msg}");
+            },
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
+            },
+        )
+        .await
+        .unwrap();
+
+    let serialized_config =
+        metrics_config_reader_utils::read(Path::new("tests/someip.textproto")).unwrap();
+    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
+    service.add_metrics_config(&serialized_config).await.unwrap();
+    service.activate_metrics_config(&config.uuid).await.unwrap();
+
+    let mut server =
+        sdv_someip_integration_test::run_vsomeip_server(VSOMEIP_SERVER_BINARY, VSOMEIP_CONFIG_FILE);
+
+    let report_info = report_ready_rx.recv().await.unwrap();
+
+    service.remove_metrics_config(&config.uuid).await.unwrap();
+    let _ = server.kill();
+    service.finish().unwrap();
+
+    let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
+    debug!("Report received: {metrics_report:?}");
+
+    assert_eq!(report_info.metrics_config_uuid, config.uuid);
+    assert_eq!(metrics_report.metrics_config_uuid, report_info.metrics_config_uuid);
+    assert_eq!(metrics_report.report_data.unpack::<Int32Value>().unwrap().unwrap().value, 42);
+}
+
 fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     let mut result = vec![];
     if dir.is_dir() {
@@ -378,7 +424,8 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/sdv_configurable_publisher.textproto",
             "./samples/sample_protos/sudden_tire_pressure_drop.textproto",
             "./tests/aggregation_config.textproto",
-            "./tests/config.textproto"
+            "./tests/config.textproto",
+            "./tests/someip.textproto",
         ]
     );
 

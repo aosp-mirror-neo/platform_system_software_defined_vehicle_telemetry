@@ -1,0 +1,36 @@
+# Copyright 2024 Google LLC
+uuid: "d3456chu-8fde-436a-9f29-c12f16z10c102505"
+version: 01
+
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "someip_publisher"
+    field_names: "sample_int"
+  }
+}
+
+publishers {
+  name: "someip_publisher"
+  service_publisher {
+    service_name: "com.sdv.someip.SomeIpBroker#SecondPart"
+  }
+}
+
+triggers {
+  name: "someip_publisher_trigger"
+  data_trigger {
+    publisher_name: "someip_publisher"
+  }
+}
+
+metrics_report_configs {
+  name: "someip_report"
+  trigger_names: "someip_publisher_trigger"
+  message_builder {
+    message_type: "google.protobuf.Int32Value"
+    field_assignments {
+      field_name: "value"
+      no_aggregation { expression_node_index: 0 }
+    }
+  }
+}
