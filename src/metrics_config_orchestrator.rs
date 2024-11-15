@@ -396,7 +396,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
                 // Deactivate metrics report generators.
                 for generator in &config.metrics_report_generators {
-                    Arc::clone(generator).deactivate(ReportReason::INCOMPLETE_FINISHED).await;
+                    generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
                 }
             }
             state => {
@@ -901,7 +901,7 @@ mod tests {
             }
         }
 
-        async fn deactivate(self: Arc<Self>, reason: ReportReason) {
+        async fn deactivate(&self, reason: ReportReason) {
             if let Some(expected_reason) = &self.expected_reason {
                 assert_eq!(&reason, expected_reason);
             }

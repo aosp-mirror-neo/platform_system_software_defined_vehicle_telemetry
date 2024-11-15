@@ -22,7 +22,7 @@ use crate::metrics_config_orchestrator::Trigger;
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait MetricsReportGenerator: Send + Sync {
     async fn activate(self: Arc<Self>);
-    async fn deactivate(self: Arc<Self>, reason: ReportReason);
+    async fn deactivate(&self, reason: ReportReason);
 }
 
 #[cfg(test)]
@@ -67,7 +67,7 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         *is_active = true;
     }
 
-    async fn deactivate(self: Arc<Self>, reason: ReportReason) {
+    async fn deactivate(&self, reason: ReportReason) {
         let mut is_active = self.is_active.lock().await;
         assert!(*is_active, "Unable to deactivate metrics report generator: it's already inactive");
 
@@ -80,10 +80,7 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         if self.report_incomplete {
             let res =
                 Arc::clone(&self.message_builder).build(&Arc::new(NodeEvaluationContext::new()));
-            let self_clone = Arc::clone(&self);
-            tokio::spawn(async move {
-                self_clone.generate_report(res, reason, None).await;
-            });
+            self.generate_report(res, reason, None).await;
         }
 
         *is_active = false;
