@@ -7,6 +7,7 @@ use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
 };
+use sdv_telemetry_utils::descriptor_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -68,20 +69,17 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
                         .ok_or(DescriptorProviderFactoryError::InvalidAggregationPublisher {
                             pub_name: publisher.name.clone(),
                         })?;
-                    // Skip message type lookup if it doesn't start with a dot because
-                    // message_by_full_name will panic.
-                    if message_builder.message_type.starts_with(".") {
-                        let descriptor = fds
-                            .iter()
-                            .find_map(|fd| fd.message_by_full_name(&message_builder.message_type))
-                            .ok_or(DescriptorProviderFactoryError::MissingMessageDescriptor {
-                                pub_name: publisher.name.clone(),
-                                msg_type: message_builder.message_type.clone(),
-                            })?;
-                        Some(descriptor)
-                    } else {
-                        None
-                    }
+                    let descriptor = descriptor_utils::find_message_by_full_name(
+                        fds,
+                        &message_builder.message_type,
+                    )
+                    .ok_or(
+                        DescriptorProviderFactoryError::MissingMessageDescriptor {
+                            pub_name: publisher.name.clone(),
+                            msg_type: message_builder.message_type.clone(),
+                        },
+                    )?;
+                    Some(descriptor)
                 }
                 // Skip unknown publisher types.
                 _ => continue,
@@ -277,9 +275,11 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn get_descriptor_aggregation_publisher_skips_invalid_message_type_name() {
-        let publisher =
-            create_aggregation_publisher_with_msg_type(PUBLISHER_1, "INVALID_MESSAGE_TYPE");
+    async fn get_descriptor_aggregation_publisher_no_leading_dot_success() {
+        let publisher = create_aggregation_publisher_with_msg_type(
+            PUBLISHER_1,
+            TEST_MESSAGE_TYPE_NAME.strip_prefix('.').unwrap(),
+        );
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let descriptor_provider = descriptor_provider_factory
@@ -291,8 +291,8 @@ mod tests {
             .await
             .unwrap();
 
-        let res = descriptor_provider.get_descriptor(PUBLISHER_1).unwrap();
+        let res = descriptor_provider.get_descriptor(PUBLISHER_1).unwrap().unwrap();
 
-        assert!(res.is_none(), "Unexpected result: {:?}", res);
+        assert_eq!(res.proto(), TestMessage::descriptor().proto());
     }
 }

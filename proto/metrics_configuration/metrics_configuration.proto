@@ -281,8 +281,7 @@ message MetricsReport {
 // message is specified by the list of field assignments.
 message ProtoMessageBuilder {
   // Required.
-  // Type name of protobuf message that is created by the builder.
-  // Must start with a dot.
+  // Fully qualified name of the protobuf message that is created by the builder.
   string message_type = 1;
 
   // Instruction on how to set a single field.

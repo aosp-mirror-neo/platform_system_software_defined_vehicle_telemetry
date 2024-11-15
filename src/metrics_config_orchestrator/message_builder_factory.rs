@@ -6,6 +6,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     ProtoMessageBuilder,
 };
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
+use sdv_telemetry_utils::descriptor_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
@@ -48,8 +49,6 @@ pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub(crate) enum MessageBuilderFactoryError {
-    #[error("Message type {message_type} must start with a dot")]
-    InvalidMessageType { message_type: String },
     #[error("Message {message_type} is not found in the provided file descriptor protos")]
     MessageNotFound { message_type: String },
     #[error("Field {field_name} not found in message {message_type}")]
@@ -181,16 +180,7 @@ impl MessageBuilderFactoryImpl {
         file_descriptors: &[FileDescriptor],
         message_type: &str,
     ) -> Result<MessageDescriptor, MessageBuilderFactoryError> {
-        if !message_type.starts_with(".") {
-            return Err(MessageBuilderFactoryError::InvalidMessageType {
-                message_type: message_type.to_string(),
-            });
-        }
-
-        // iterate through all file_descriptors, find MessageDescriptor for the given message_type
-        // message_by_full_name() method requires the name to start with dot, it returns a clone
-        // of the MessageDescriptor, so we can return it as-is without cloning again
-        file_descriptors.iter().find_map(|fd| fd.message_by_full_name(message_type)).ok_or(
+        descriptor_utils::find_message_by_full_name(file_descriptors, message_type).ok_or(
             MessageBuilderFactoryError::MessageNotFound { message_type: message_type.to_string() },
         )
     }
@@ -252,7 +242,6 @@ mod tests {
 
     // Package and message name are in to src/test_utils/test_message.proto
     const INT_FIELD_NAME: &str = "int_field";
-    const INVALID_MESSAGE_TYPE: &str = "INVALID_MESSAGE_TYPE";
     const TEST_MESSAGE_FULL_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
 
     fn create_message_builder_factory() -> MessageBuilderFactoryImpl {
@@ -296,6 +285,19 @@ mod tests {
     }
 
     #[test]
+    fn validate_name_without_leading_dot_ok() {
+        let factory = create_message_builder_factory();
+        let fds = create_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME.strip_prefix('.').unwrap(),
+            vec![create_field_assignment_proto(INT_FIELD_NAME)],
+        );
+
+        assert!(factory.validate(&proto_message_builder, &context).is_ok());
+    }
+
+    #[test]
     fn validate_no_aggregated_field_value_fails() {
         let factory = create_message_builder_factory();
         let fds = create_test_file_descriptors();
@@ -315,22 +317,6 @@ mod tests {
         assert!(
             matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
             "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_invalid_message_type_fails() {
-        let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
-        let proto_message_builder = create_proto_message_builder(INVALID_MESSAGE_TYPE, vec![]);
-
-        let err = factory.validate(&proto_message_builder, &context).unwrap_err();
-
-        assert!(
-            matches!(&err, MessageBuilderFactoryError::InvalidMessageType { message_type } if message_type == INVALID_MESSAGE_TYPE),
-            "Unexpected error: {:?}",
             err
         );
     }
@@ -438,6 +424,19 @@ mod tests {
     }
 
     #[test]
+    fn create_name_without_leading_dot_ok() {
+        let factory = create_message_builder_factory();
+        let fds = create_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let proto_message_builder = create_proto_message_builder(
+            TEST_MESSAGE_FULL_NAME.strip_prefix('.').unwrap(),
+            vec![create_field_assignment_proto(INT_FIELD_NAME)],
+        );
+
+        factory.create(String::default(), &proto_message_builder, &context).unwrap();
+    }
+
+    #[test]
     fn create_no_aggregated_field_value_fails() {
         let factory = create_message_builder_factory();
         let fds = create_test_file_descriptors();
@@ -458,23 +457,6 @@ mod tests {
         assert!(
             matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
             "Unexpected error: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn create_invalid_message_type_fails() {
-        let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
-        let proto_message_builder = create_proto_message_builder(INVALID_MESSAGE_TYPE, vec![]);
-
-        let err =
-            factory.create(String::default(), &proto_message_builder, &context).err().unwrap();
-
-        assert!(
-            matches!(&err, MessageBuilderFactoryError::InvalidMessageType { message_type } if message_type == INVALID_MESSAGE_TYPE),
-            "Unexpected error: {:?}",
             err
         );
     }
