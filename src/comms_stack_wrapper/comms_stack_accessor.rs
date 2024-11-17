@@ -22,6 +22,7 @@ use sdv_telemetry::service_publisher_accessor::{
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
+use sdv_telemetry_utils::descriptor_utils;
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, option_extension::OptionExtension,
 };
@@ -281,17 +282,14 @@ impl CommsStackAccessor {
         )
         .map_err(|e| anyhow!("Invalid Descriptor Protos: {}", e))?;
 
-        // Iterate through all `file_descriptors` and find `MessageDescriptor` for the given
-        // `message_type_name`. `message_by_full_name()` function requires the name to start
-        // with a dot. The function returns a clone of the `MessageDescriptor`, so we can
-        // return it as-is without cloning again.
-        file_descriptors
-            .iter()
-            .find_map(|fd| fd.message_by_full_name(&publisher_metadata.message_type_name))
-            .ok_or(anyhow!(
-                "Message Name {} not found in descriptor",
-                publisher_metadata.message_type_name
-            ))
+        descriptor_utils::find_message_by_full_name(
+            &file_descriptors,
+            &publisher_metadata.message_type_name,
+        )
+        .ok_or(anyhow!(
+            "Message Name {} not found in descriptor",
+            publisher_metadata.message_type_name
+        ))
     }
 }
 
