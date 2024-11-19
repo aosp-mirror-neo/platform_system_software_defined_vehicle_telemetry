@@ -100,7 +100,9 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
         match service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => Ok(GetMessageProviderOutcome::GetNotSupported),
+            UnitMetadata::Publisher(_) => self
+                .data_tunnel_subscriber
+                .get_message_provider(unit_identifier, message_descriptor),
             UnitMetadata::Server(_) => {
                 self.sdv_rpc_client.get_message_provider(unit_identifier, message_descriptor).await
             }
@@ -734,6 +736,57 @@ mod integration_tests {
             matches!(&value, ReflectValueRef::I32(val) if *val == msg.value),
             "Unexpected value: {value:?}"
         );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_dt_message_provider_not_registered_success() {
+        let ctx = test_utils::make_context(0).await;
+
+        let service_name = test_utils::make_unique_service_name();
+
+        let subscriber = create_accessor(ctx);
+        assert!(matches!(
+            subscriber.get_message_provider(&service_name).await.unwrap(),
+            GetMessageProviderOutcome::NotRegistered
+        ));
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_dt_message_provider_and_read_messages_success() {
+        let ctx = test_utils::make_context(0).await;
+
+        let service_name = test_utils::make_unique_service_name();
+
+        let publisher = test_utils::register_topic(
+            ctx,
+            &service_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
+                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        let subscriber = create_accessor(ctx);
+        let GetMessageProviderOutcome::Success(provider) =
+            subscriber.get_message_provider(&service_name).await.unwrap()
+        else {
+            panic!("Unexpected outcome");
+        };
+
+        let message1 = provider.get_latest_message(None).await;
+
+        write_message(&publisher, TestMessage { int_field: 2, ..Default::default() });
+        let message2 = provider.get_latest_message(None).await;
+        let message3 = provider.get_latest_message(None).await;
+
+        assert!(matches!(message1, Ok(None)));
+        assert_eq!(get_int_field_value(message2.unwrap().unwrap()), 2);
+        assert_eq!(get_int_field_value(message3.unwrap().unwrap()), 2);
     }
 
     // Unit Type -> 0 matches

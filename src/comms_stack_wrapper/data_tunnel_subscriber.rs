@@ -8,12 +8,14 @@ use futures::future::{self, BoxFuture};
 use futures::StreamExt;
 use log::{error, info};
 use protobuf::reflect::MessageDescriptor;
+use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMessageProvider,
+    ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::conversions::u32_into_usize;
@@ -116,6 +118,49 @@ impl DataTunnelSubscriber {
             Box::new(DataTunnelSubscription { _subscription_drop_guard: subscription_drop_guard });
 
         Ok(CreateSubscriptionOutcome::Subscribed(data_tunnel_subscription))
+    }
+
+    pub fn get_message_provider(
+        &self,
+        unit_identifier: UnitIdentifier,
+        message_descriptor: MessageDescriptor,
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
+        struct ServicePublisherMessageProviderImpl {
+            ctx: future::Shared<BoxFuture<'static, ContextRef>>,
+            unit_identifier: UnitIdentifier,
+            message_descriptor: MessageDescriptor,
+        }
+
+        #[async_trait]
+        impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            async fn get_latest_message(
+                &self,
+                _configuration: Option<&Any>,
+            ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+                let Ok(message_bytes) = dt::InstantReader::get_last_message(
+                    self.ctx.clone().await,
+                    &self.unit_identifier,
+                )
+                .await
+                else {
+                    // TODO - b/380258890: It is not currently possible for us to distinguish
+                    // between no message being available and the call failing. Therefore, we treat
+                    // any error as no message being available for now.
+                    return Ok(None);
+                };
+
+                Ok(Some(DataTunnelSubscriber::read_length_delimited_proto(
+                    &message_bytes,
+                    &self.message_descriptor,
+                )?))
+            }
+        }
+
+        Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
+            ctx: self.ctx.clone(),
+            unit_identifier,
+            message_descriptor,
+        })))
     }
 
     fn read_length_delimited_proto(
