@@ -127,7 +127,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         Ok(metadata)
     }
 
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
@@ -576,7 +576,7 @@ mod tests {
     async fn get_message_provider_incorrect_service_name_returns_none() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap();
+        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.unwrap();
 
         assert!(res.is_none());
     }
@@ -588,7 +588,7 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap();
+        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.unwrap();
 
         assert!(res.is_none());
     }
@@ -603,8 +603,11 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        let message_provider =
-            configurable_publisher_registry.get_message_provider(SERVICE_NAME).unwrap().unwrap();
+        let message_provider = configurable_publisher_registry
+            .get_message_provider(SERVICE_NAME)
+            .await
+            .unwrap()
+            .unwrap();
         let res = message_provider
             .get_latest_message(Some(&Any::pack(&config).unwrap()))
             .await

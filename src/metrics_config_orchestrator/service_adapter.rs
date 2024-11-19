@@ -22,7 +22,7 @@ use crate::sub_sampling_interval::SubSamplingInterval;
 #[async_trait]
 pub(crate) trait ServiceAdapter {
     /// Returns provider of messages from the publisher specified by the service name.
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>>;
@@ -134,7 +134,7 @@ impl ServiceSubscriptionType {
 
 #[async_trait]
 impl ServiceAdapter for ServiceAdapterImpl {
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
@@ -152,7 +152,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             }
         }
 
-        let res = self.service_publisher_accessor.get_message_provider(service_name)?.map(
+        let res = self.service_publisher_accessor.get_message_provider(service_name).await?.map(
             |service_publisher_message_provider| {
                 Box::new(ServiceMessageProviderImpl { service_publisher_message_provider })
                     as Box<dyn ServiceMessageProvider>
@@ -393,14 +393,15 @@ pub(super) mod tests {
         }
     }
 
-    #[test]
-    fn get_message_provider_accessor_returns_error_fails() {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_message_provider_accessor_returns_error_fails() {
         let accessor =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let err = service_adapter.get_message_provider(SERVICE_NAME).err().unwrap();
+        let err = service_adapter.get_message_provider(SERVICE_NAME).await.err().unwrap();
 
         assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
@@ -415,6 +416,7 @@ pub(super) mod tests {
 
         let provider = service_adapter
             .get_message_provider(SERVICE_NAME)
+            .await
             .unwrap()
             .expect("Provider should be available");
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
@@ -436,6 +438,7 @@ pub(super) mod tests {
 
         let message_provider = service_adapter
             .get_message_provider(SERVICE_NAME)
+            .await
             .unwrap()
             .expect("Provider should be available");
 

@@ -25,7 +25,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     /// Returns provider of messages from the publisher specified by the service name.
     /// Returns None if the service publisher is not registered
     /// or is not able to provide the latest message without subscription.
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>>;
