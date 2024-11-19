@@ -13,7 +13,8 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome,
+    GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
     ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
@@ -25,7 +26,7 @@ pub(crate) trait ServiceAdapter {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>>;
+    ) -> anyhow::Result<GetMessageProviderOutcome>;
 
     /// Subscribe to new messages from the service with the specified name
     /// using specified configuration.
@@ -137,7 +138,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
         struct ServiceMessageProviderImpl {
             service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
         }
@@ -152,13 +153,20 @@ impl ServiceAdapter for ServiceAdapterImpl {
             }
         }
 
-        let res = self.service_publisher_accessor.get_message_provider(service_name).await?.map(
-            |service_publisher_message_provider| {
-                Box::new(ServiceMessageProviderImpl { service_publisher_message_provider })
-                    as Box<dyn ServiceMessageProvider>
-            },
-        );
-        Ok(res)
+        Ok(match self.service_publisher_accessor.get_message_provider(service_name).await? {
+            AccessorGetMessageProviderOutcome::NotRegistered => {
+                GetMessageProviderOutcome::NotRegistered
+            }
+            AccessorGetMessageProviderOutcome::GetNotSupported => {
+                GetMessageProviderOutcome::GetNotSupported
+            }
+            AccessorGetMessageProviderOutcome::Success(service_publisher_message_provider) => {
+                GetMessageProviderOutcome::Success(Box::new(ServiceMessageProviderImpl {
+                    service_publisher_message_provider,
+                })
+                    as Box<dyn ServiceMessageProvider>)
+            }
+        })
     }
 
     async fn subscribe(
@@ -350,6 +358,31 @@ impl ServiceAdapterImpl {
     }
 }
 
+/// Successful result of getting a message provider.
+pub(crate) enum GetMessageProviderOutcome {
+    /// Service is available and supports Get.
+    Success(Box<dyn ServiceMessageProvider>),
+    /// Service is available, but does not support Get.
+    GetNotSupported,
+    /// Service is not available.
+    NotRegistered,
+}
+
+#[cfg(test)]
+impl std::fmt::Debug for GetMessageProviderOutcome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Success(_) => "Success(<provider>)",
+                Self::GetNotSupported => "GetNotSupported",
+                Self::NotRegistered => "NotRegistered",
+            }
+        )
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod mock;
 
@@ -409,16 +442,31 @@ pub(super) mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
+    async fn get_message_provider_get_not_supported_success() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_get_not_supported());
+        let service_adapter =
+            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+
+        let outcome = service_adapter.get_message_provider(SERVICE_NAME).await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
+            "Unexpected outcome: {outcome:?}"
+        );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
     async fn get_message_provider_accessor_latest_message_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let provider = service_adapter
-            .get_message_provider(SERVICE_NAME)
-            .await
-            .unwrap()
-            .expect("Provider should be available");
+        let GetMessageProviderOutcome::Success(provider) =
+            service_adapter.get_message_provider(SERVICE_NAME).await.unwrap()
+        else {
+            panic!("Provider should be available");
+        };
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
         let err = provider.get_latest_message(None).await.err().unwrap();
 
@@ -436,11 +484,10 @@ pub(super) mod tests {
         let service_adapter =
             ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
 
-        let message_provider = service_adapter
-            .get_message_provider(SERVICE_NAME)
-            .await
-            .unwrap()
-            .expect("Provider should be available");
+        let outcome = service_adapter.get_message_provider(SERVICE_NAME).await;
+        let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
+            panic!("Unexpected outcome: {outcome:?}");
+        };
 
         let latest_message = message_provider
             .get_latest_message(None)

@@ -28,8 +28,12 @@ struct MockServicePublisherAccessorData {
     next_error: Option<anyhow::Error>,
     /// When set, the message will be returned on the next call to get_latest_message.
     next_latest_message: Option<Box<dyn MessageDyn>>,
-    /// When set to true, the next call to create_subscription will return a not found result.
+    /// When set to true, the next call to create_subscription or get_message_provider will return a
+    /// not found result.
     next_not_available: bool,
+    /// When set to true, the next call to get_message_provider will return a get not supported
+    /// result.
+    next_get_not_supported: bool,
     /// The number of times get latest message function of the mock was called.
     num_get_message_provider_calls: u32,
     /// The number of times get metadata function of the mock was called.
@@ -77,17 +81,23 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
         let mut data = self.data.lock();
         data.num_get_message_provider_calls += 1;
         data.check_next_error()?;
 
         if data.next_not_available {
             data.next_not_available = false;
-            return Ok(None);
+            return Ok(GetMessageProviderOutcome::NotRegistered);
+        }
+        if data.next_get_not_supported {
+            data.next_get_not_supported = false;
+            return Ok(GetMessageProviderOutcome::GetNotSupported);
         }
 
-        Ok(Some(Box::new(MockServicePublisherMessageProvider { data: Arc::downgrade(&self.data) })))
+        Ok(GetMessageProviderOutcome::Success(Box::new(MockServicePublisherMessageProvider {
+            data: Arc::downgrade(&self.data),
+        })))
     }
 
     async fn create_subscription(
@@ -150,6 +160,7 @@ impl MockServicePublisherAccessor {
             next_error: None,
             next_latest_message: None,
             next_not_available: false,
+            next_get_not_supported: false,
             num_get_message_provider_calls: 0,
             num_get_metadata_calls: 0,
             num_subscribe_calls: 0,
@@ -227,6 +238,11 @@ impl MockServicePublisherAccessor {
 
     pub(crate) fn with_next_not_available(self) -> Self {
         self.data.lock().next_not_available = true;
+        self
+    }
+
+    pub(crate) fn with_next_get_not_supported(self) -> Self {
+        self.data.lock().next_get_not_supported = true;
         self
     }
 }

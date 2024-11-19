@@ -223,7 +223,7 @@ mod tests {
 
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::service_adapter::{
-        ServiceMessageProvider, ServiceSubscription,
+        GetMessageProviderOutcome, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
     use crate::service_publisher_accessor::AvailabilityCallbackRegistration;
@@ -240,7 +240,7 @@ mod tests {
         async fn get_message_provider(
             &self,
             _service_name: &str,
-        ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
+        ) -> anyhow::Result<GetMessageProviderOutcome> {
             unreachable!()
         }
 

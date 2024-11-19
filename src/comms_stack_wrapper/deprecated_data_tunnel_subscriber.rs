@@ -21,7 +21,7 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 
 use sdv_telemetry::service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherMessageProvider,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
     ServicePublisherMetadata, ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
@@ -97,8 +97,8 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
-        Ok(None)
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
+        Ok(GetMessageProviderOutcome::GetNotSupported)
     }
 
     async fn create_subscription(
@@ -653,11 +653,15 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn get_message_provider_success() -> anyhow::Result<()> {
+    async fn get_message_provider_success() {
         let subscriber = DeprecatedDataTunnelSubscriber::new();
-        assert!(subscriber.get_message_provider("service-name").await?.is_none());
 
-        Ok(())
+        let outcome = subscriber.get_message_provider("service-name").await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
+            "Unexpected outcome: {outcome:?}"
+        );
     }
 }
 

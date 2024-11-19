@@ -18,8 +18,9 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry::binder_adapter::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome,GetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
+    ServicePublisherSubscription
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -119,22 +120,19 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
         let provider = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             if entry.supports_get {
-                Some((
-                    entry.message_descriptor.clone(),
-                    binder::Strong::downgrade(&entry.publisher),
-                ))
+                GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
+                    message_descriptor: entry.message_descriptor.clone(),
+                    publisher: binder::Strong::downgrade(&entry.publisher),
+                })
+                    as Box<dyn ServicePublisherMessageProvider>)
             } else {
-                None
+                GetMessageProviderOutcome::GetNotSupported
             }
         })
-        .flatten()
-        .map(|(message_descriptor, publisher)| {
-            Box::new(ServicePublisherMessageProviderImpl { message_descriptor, publisher })
-                as Box<dyn ServicePublisherMessageProvider>
-        });
+        .unwrap_or(GetMessageProviderOutcome::NotRegistered);
         Ok(provider)
     }
 
@@ -550,24 +548,30 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn get_message_provider_incorrect_service_name_returns_none() {
+    async fn get_message_provider_incorrect_service_name_success() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.unwrap();
+        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
 
-        assert!(res.is_none());
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
+            "Unexpected outcome: {outcome:?}"
+        );
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn get_message_provider_get_not_supported_returns_none() {
+    async fn get_message_provider_get_not_supported_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        let res = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.unwrap();
+        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
 
-        assert!(res.is_none());
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
+            "Unexpected outcome: {outcome:?}"
+        );
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -580,11 +584,10 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        let message_provider = configurable_publisher_registry
-            .get_message_provider(SERVICE_NAME)
-            .await
-            .unwrap()
-            .unwrap();
+        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
+        let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
+            panic!("Unexpected outcome: {outcome:?}")
+        };
         let res = message_provider
             .get_latest_message(Some(&Any::pack(&config).unwrap()))
             .await

@@ -22,6 +22,7 @@ pub(crate) struct MockServiceAdapter {
     message_provider_returned_sender: Mutex<Option<oneshot::Sender<()>>>,
     next_error: Mutex<Option<anyhow::Error>>,
     next_message_provider: Mutex<Option<MockServiceMessageProvider>>,
+    next_message_provider_get_not_supported: Mutex<bool>,
     num_get_message_provider_calls: AtomicU32,
     num_subscribe_calls: AtomicU32,
     num_unsubscribe_calls: AtomicU32,
@@ -47,11 +48,17 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServiceMessageProvider>>> {
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
         self.num_get_message_provider_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(error) = self.next_error.lock().take() {
             return Err(error);
+        }
+
+        let mut get_not_supported = self.next_message_provider_get_not_supported.lock();
+        if *get_not_supported {
+            *get_not_supported = false;
+            return Ok(GetMessageProviderOutcome::GetNotSupported);
         }
 
         if let Some(message_provider) = self.next_message_provider.lock().take() {
@@ -60,9 +67,9 @@ impl ServiceAdapter for MockServiceAdapter {
                 let _ = sender.send(());
             }
 
-            Ok(Some(Box::new(message_provider)))
+            Ok(GetMessageProviderOutcome::Success(Box::new(message_provider)))
         } else {
-            Ok(None)
+            Ok(GetMessageProviderOutcome::NotRegistered)
         }
     }
 
@@ -149,6 +156,7 @@ impl MockServiceAdapter {
             message_provider_returned_sender: None.into(),
             next_error: None.into(),
             next_message_provider: None.into(),
+            next_message_provider_get_not_supported: false.into(),
             new_message_callback: None.into(),
             notify_subscribing: Notify::new().into(),
             notify_unsubscribing: Notify::new().into(),
@@ -212,6 +220,11 @@ impl MockServiceAdapter {
 
     pub(crate) fn with_next_error(self, error: anyhow::Error) -> Self {
         self.next_error.lock().replace(error);
+        self
+    }
+
+    pub(crate) fn with_next_message_provider_get_not_supported(self) -> Self {
+        *self.next_message_provider_get_not_supported.lock() = true;
         self
     }
 }

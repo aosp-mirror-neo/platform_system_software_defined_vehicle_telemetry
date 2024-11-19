@@ -9,8 +9,8 @@ use protobuf::{well_known_types::any::Any, MessageDyn};
 use std::sync::Arc;
 
 use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherMetadata,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherMetadata,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -51,16 +51,22 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
-        for accessor in &self.service_publisher_registry {
-            let provider = accessor.get_message_provider(service_name).await?;
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
+        let mut get_not_supported = false;
 
-            if provider.is_some() {
-                return Ok(provider);
+        for accessor in &self.service_publisher_registry {
+            match accessor.get_message_provider(service_name).await? {
+                outcome @ GetMessageProviderOutcome::Success(_) => return Ok(outcome),
+                GetMessageProviderOutcome::NotRegistered => {}
+                GetMessageProviderOutcome::GetNotSupported => get_not_supported = true,
             }
         }
 
-        Ok(None)
+        Ok(if get_not_supported {
+            GetMessageProviderOutcome::GetNotSupported
+        } else {
+            GetMessageProviderOutcome::NotRegistered
+        })
     }
 
     async fn create_subscription(
@@ -189,7 +195,12 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await.unwrap().unwrap();
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::Success(_))),
+            "Unexpected outcome: {outcome:?}"
+        );
 
         assert_eq!(service_publisher.get_num_get_message_provider_calls(), 1);
     }
@@ -212,16 +223,55 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn get_message_provider_no_match_returns_none() {
+    async fn get_message_provider_no_match_success() {
         let service_publisher =
             Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
         let service_publishers =
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.unwrap();
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await;
 
-        assert!(res.is_none());
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
+            "Unexpected outcome: {outcome:?}"
+        );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_message_provider_get_not_supported_success() {
+        let service_publisher =
+            Arc::new(MockServicePublisherAccessor::new().with_next_get_not_supported());
+        let service_publishers =
+            vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
+            "Unexpected outcome: {outcome:?}"
+        );
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_message_provider_multiple_accessors_get_not_supported_success() {
+        let service_publishers = vec![
+            Arc::new(MockServicePublisherAccessor::new().with_next_get_not_supported())
+                as Arc<dyn ServicePublisherAccessor>,
+            Arc::new(MockServicePublisherAccessor::new().with_next_not_available())
+                as Arc<dyn ServicePublisherAccessor>,
+        ];
+        let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
+
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
+            "Unexpected outcome: {outcome:?}"
+        );
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

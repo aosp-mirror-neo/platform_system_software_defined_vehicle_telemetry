@@ -20,7 +20,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::service_adapter::{
-    ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
+    GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
 use crate::service_publisher_accessor::AvailabilityCallbackRegistration;
 use crate::sub_sampling_interval::SubSamplingInterval;
@@ -381,61 +381,69 @@ impl ServicePublisher {
 
     /// Attempts to activate service publisher and returns the new state if activation was successful.
     async fn try_activate(self: &Arc<Self>) -> anyhow::Result<Option<ServicePublisherState>> {
-        let maybe_message_provider = match self.connection_type {
+        let outcome = match self.connection_type {
             ConnectionType::Getter => self
                 .service_adapter
                 .get_message_provider(&self.service_name)
                 .await
                 .with_context(|| "Service adapter failed to create message provider")?,
-            ConnectionType::Subscription => None,
+            ConnectionType::Subscription => GetMessageProviderOutcome::GetNotSupported,
         };
 
-        let new_state = if let Some(message_provider) = maybe_message_provider {
-            // Don't subscribe to the service adapter and store message provider to get the latest
-            // message.
-            Some(ServicePublisherState::ActiveGetter { message_provider: message_provider.into() })
-        } else {
-            // Subscribe to the service adapter.
-            let (sender, receiver) = mpsc::unbounded_channel();
-            let maybe_subscription = self
-                .service_adapter
-                .subscribe(
-                    &self.service_name,
-                    self.configuration.as_ref(),
-                    &self.sub_sampling_interval,
-                    Box::new(move |msg| {
-                        sender
-                            .send(Arc::clone(msg))
-                            .expect("Callback should only receive messages when subscribed")
-                    }),
-                )
-                .await
-                .with_context(|| "Service adapter failed to process subscription request")?;
-
-            struct ServicePublisherHandler {
-                service_publisher: Weak<ServicePublisher>,
+        let new_state = match outcome {
+            GetMessageProviderOutcome::Success(message_provider) => {
+                // Don't subscribe to the service adapter and store message provider to get the
+                // latest message.
+                Some(ServicePublisherState::ActiveGetter {
+                    message_provider: message_provider.into(),
+                })
             }
+            GetMessageProviderOutcome::NotRegistered => None,
+            GetMessageProviderOutcome::GetNotSupported => {
+                // Subscribe to the service adapter.
+                let (sender, receiver) = mpsc::unbounded_channel();
+                let maybe_subscription = self
+                    .service_adapter
+                    .subscribe(
+                        &self.service_name,
+                        self.configuration.as_ref(),
+                        &self.sub_sampling_interval,
+                        Box::new(move |msg| {
+                            sender
+                                .send(Arc::clone(msg))
+                                .expect("Callback should only receive messages when subscribed")
+                        }),
+                    )
+                    .await
+                    .with_context(|| "Service adapter failed to process subscription request")?;
 
-            #[async_trait]
-            impl AsyncEventHandler<Arc<dyn MessageDyn>> for ServicePublisherHandler {
-                async fn handle(&mut self, message: Arc<dyn MessageDyn>) {
-                    self.service_publisher
-                        .upgrade()
-                        .expect("Handler should only be called when service publisher is active")
-                        .on_new_message(message)
-                        .await;
+                struct ServicePublisherHandler {
+                    service_publisher: Weak<ServicePublisher>,
                 }
-            }
 
-            let event_processor = AsyncEventProcessor::new(
-                receiver,
-                ServicePublisherHandler { service_publisher: Arc::downgrade(self) },
-            );
-            maybe_subscription.map(|subscription| ServicePublisherState::ActiveSubscribed {
-                callback_map: HashMap::new(),
-                _event_processor: event_processor,
-                service_subscription: Some(subscription),
-            })
+                #[async_trait]
+                impl AsyncEventHandler<Arc<dyn MessageDyn>> for ServicePublisherHandler {
+                    async fn handle(&mut self, message: Arc<dyn MessageDyn>) {
+                        self.service_publisher
+                            .upgrade()
+                            .expect(
+                                "Handler should only be called when service publisher is active",
+                            )
+                            .on_new_message(message)
+                            .await;
+                    }
+                }
+
+                let event_processor = AsyncEventProcessor::new(
+                    receiver,
+                    ServicePublisherHandler { service_publisher: Arc::downgrade(self) },
+                );
+                maybe_subscription.map(|subscription| ServicePublisherState::ActiveSubscribed {
+                    callback_map: HashMap::new(),
+                    _event_processor: event_processor,
+                    service_subscription: Some(subscription),
+                })
+            }
         };
         Ok(new_state)
     }
@@ -582,7 +590,8 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn activate_getter_falls_back_to_subscription() {
-        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_message_provider_get_not_supported());
         service_adapter.set_next_subscribe_successful();
         let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
 
@@ -615,7 +624,7 @@ mod tests {
             *state
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
-        assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
@@ -656,7 +665,7 @@ mod tests {
             "Unexpected number of get_message_provider calls: {}",
             service_adapter.get_num_get_message_provider_calls()
         );
-        assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }
@@ -684,7 +693,7 @@ mod tests {
         let state = publisher.state.lock().await;
         assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
-        assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }

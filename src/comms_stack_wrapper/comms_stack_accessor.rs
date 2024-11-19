@@ -17,8 +17,8 @@ use sdv_comms::sd::{
 use sdv_comms::ContextRef;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherMetadata,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherMetadata,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
@@ -82,15 +82,15 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
+    ) -> anyhow::Result<GetMessageProviderOutcome> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
-            return Ok(None);
+            return Ok(GetMessageProviderOutcome::NotRegistered);
         };
 
         info!("Creating getter for comms stack service '{service_name}'.");
 
         let Some(service_unit_definition) = self.discover_service(&service_name).await else {
-            return Ok(None);
+            return Ok(GetMessageProviderOutcome::NotRegistered);
         };
 
         let message_descriptor =
@@ -100,7 +100,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
         match service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => Ok(None),
+            UnitMetadata::Publisher(_) => Ok(GetMessageProviderOutcome::GetNotSupported),
             UnitMetadata::Server(_) => {
                 self.sdv_rpc_client.get_message_provider(unit_identifier, message_descriptor).await
             }
@@ -422,14 +422,26 @@ mod integration_tests {
     #[tokio::test]
     async fn get_message_provider_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
-        assert!(accessor.get_message_provider(INVALID_SERVICE_NAME).await.unwrap().is_none());
+
+        let outcome = accessor.get_message_provider(INVALID_SERVICE_NAME).await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
+            "Unexpected outcome: {outcome:?}"
+        );
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
         let accessor = create_accessor_with_context(0);
-        assert!(accessor.get_message_provider(VALID_SERVICE_NAME).await.unwrap().is_none());
+
+        let outcome = accessor.get_message_provider(VALID_SERVICE_NAME).await;
+
+        assert!(
+            matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
+            "Unexpected outcome: {outcome:?}"
+        );
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

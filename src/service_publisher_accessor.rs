@@ -7,6 +7,7 @@ use async_trait::async_trait;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
+use std::fmt;
 use std::sync::Arc;
 
 use crate::sub_sampling_interval::SubSamplingInterval;
@@ -28,7 +29,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>>;
+    ) -> anyhow::Result<GetMessageProviderOutcome>;
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
@@ -80,6 +81,30 @@ pub enum CreateSubscriptionOutcome {
     Subscribed(Box<dyn ServicePublisherSubscription>),
     /// The service with the specified service name is not registered.
     NotRegistered(Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>),
+}
+
+/// Successful result of getting a message provider.
+pub enum GetMessageProviderOutcome {
+    /// Service publisher is available and supports Get.
+    Success(Box<dyn ServicePublisherMessageProvider>),
+    /// Service publisher is available, but does not support Get.
+    GetNotSupported,
+    /// Service publisher is not available.
+    NotRegistered,
+}
+
+impl fmt::Debug for GetMessageProviderOutcome {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                Self::Success(_) => "Success(<provider>)",
+                Self::GetNotSupported => "GetNotSupported",
+                Self::NotRegistered => "NotRegistered",
+            }
+        )
+    }
 }
 
 /// Interface of the Service Publisher subscription.
