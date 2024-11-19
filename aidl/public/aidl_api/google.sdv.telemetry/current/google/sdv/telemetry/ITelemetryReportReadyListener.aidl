@@ -18,6 +18,8 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry;
+
+@VintfStability
 interface ITelemetryReportReadyListener {
     oneway void onReady(in @utf8InCpp String metricsConfigUuid,
             in @utf8InCpp String metricsReportConfigName, in int reportNumber);

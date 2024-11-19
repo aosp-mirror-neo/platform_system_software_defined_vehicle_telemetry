@@ -21,6 +21,7 @@ rust_defaults {
         "libtokio",
         // keep-sorted end
     ],
+    product_available: true,
     vendor_available: true,
 }
 

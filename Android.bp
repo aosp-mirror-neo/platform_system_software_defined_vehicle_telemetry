@@ -228,12 +228,11 @@ rust_defaults {
         "libasync_trait",
         // keep-sorted end
     ],
-    vendor: true,
-}
-
-vintf_fragment {
-    name: "google.sdv.telemetry.configurable_publisher-service.xml",
-    src: "google.sdv.telemetry.configurable_publisher-service.xml",
+    vintf_fragment_modules: [
+        // keep-sorted start
+        "google.sdv.telemetry-service.xml",
+        // keep-sorted end
+    ],
     vendor: true,
 }
 

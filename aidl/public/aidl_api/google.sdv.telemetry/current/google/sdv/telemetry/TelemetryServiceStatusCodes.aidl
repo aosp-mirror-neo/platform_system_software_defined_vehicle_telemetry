@@ -18,7 +18,9 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry;
+
 @Backing(type="int")
+@VintfStability
 enum TelemetryServiceStatusCodes {
     TELEMETRY_SERVICE_API_CALL_SUCCESS = 200,
     METRICS_CONFIG_INVALID_CONFIG_UUID = 400,

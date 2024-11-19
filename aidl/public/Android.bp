@@ -12,7 +12,10 @@ aidl_interface {
     srcs: [
         "google/sdv/telemetry/*.aidl",
     ],
+    product_available: true,
     vendor_available: true,
+    always_use_unfrozen: true,
+    stability: "vintf",
     owner: "google",
     backend: {
         java: {
@@ -25,4 +28,10 @@ aidl_interface {
             enabled: true,
         },
     },
+}
+
+vintf_fragment {
+    name: "google.sdv.telemetry-service.xml",
+    src: "google.sdv.telemetry-service.xml",
+    vendor: true,
 }
