@@ -302,15 +302,19 @@ impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
 mod integration_tests {
     use super::*;
 
-    use futures::FutureExt;
-    use protobuf::{reflect::ReflectValueRef, MessageFull};
+    use futures::{stream, FutureExt};
+    use protobuf::reflect::ReflectValueRef;
+    use protobuf::well_known_types::wrappers::{self, Int32Value};
+    use protobuf::MessageFull;
     use sdv_comms::dt;
     use sdv_comms::id::ServiceFqin;
+    use sdv_comms::rpc;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::str::FromStr;
     use std::time::Duration;
-    use tokio::{sync::mpsc, time::Instant};
+    use tokio::sync::{mpsc, oneshot};
+    use tokio::time::Instant;
 
     use crate::test_utils::{self, UNIT_NAME};
 
@@ -648,6 +652,55 @@ mod integration_tests {
             let min_elapsed = notification_interval.as_duration().mul_f64(0.8);
             assert!(elapsed >= min_elapsed, "Elapsed time before notification should be at least {min_elapsed:?}, but was {elapsed:?}");
         }
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn create_rpc_subscription_success() {
+        let ctx = test_utils::make_context(0).await;
+        let service_name = test_utils::make_unique_service_name();
+        let msg = Int32Value { value: 42, ..Default::default() };
+        let msg_bytes = msg.write_to_bytes().expect("Message should be successfully serialized");
+        let _server = test_utils::register_server(
+            ctx,
+            &service_name,
+            TelemetryPublisherMetadata {
+                descriptor_protos: vec![wrappers::file_descriptor().proto().clone()],
+                message_type_name: Int32Value::descriptor().full_name().to_owned(),
+                ..Default::default()
+            },
+            "CreateSubscription".to_owned(),
+            rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
+                future::ready(Ok(stream::once(future::ready(Ok(msg_bytes.clone()))).boxed()))
+                    .boxed()
+            })),
+        )
+        .await
+        .unwrap();
+
+        let subscriber = create_accessor(ctx);
+        let (sender, receiver) = oneshot::channel();
+        let mut sender = Some(sender);
+        let outcome = subscriber
+            .create_subscription(
+                &service_name,
+                None,
+                &SubSamplingInterval::ZERO,
+                Box::new(move |msg| {
+                    sender.take().expect("Callback should only be called once").send(msg).unwrap();
+                }),
+            )
+            .await
+            .unwrap();
+        let received_msg = receiver.await.unwrap();
+
+        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+        let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();
+        let value = value_field.get_singular(received_msg.as_ref()).unwrap();
+        assert!(
+            matches!(&value, ReflectValueRef::I32(val) if *val == msg.value),
+            "Unexpected value: {value:?}"
+        );
     }
 
     // Unit Type -> 0 matches

@@ -5,12 +5,15 @@
 use protobuf::Message;
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
-use sdv_comms::sd::{PublisherUnitMetadata, UnitMetadata, UnitRegistrationArgs, UnitType};
+use sdv_comms::rpc;
+use sdv_comms::sd::{
+    PublisherUnitMetadata, ServerUnitMetadata, UnitMetadata, UnitRegistrationArgs, UnitType,
+};
 use sdv_comms::ContextRef;
 use sdv_status_rs::SdvResult;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
-use std::str::FromStr;
+use std::{collections::HashMap, str::FromStr};
 
 use crate::service_name::ServiceName;
 
@@ -57,6 +60,43 @@ pub(super) async fn register_topic(
     service_name: &str,
     publisher_metadata: TelemetryPublisherMetadata,
 ) -> SdvResult<dt::Publisher> {
+    let mut unit_registration_args = create_registration_args(service_name, publisher_metadata);
+
+    let mut publisher_unit_metadata = PublisherUnitMetadata::new();
+    publisher_unit_metadata.set_message_size(3);
+    publisher_unit_metadata.set_message_count(2);
+    unit_registration_args.set_unit_metadata(&UnitMetadata::Publisher(publisher_unit_metadata));
+
+    dt::Publisher::create(ctx, unit_registration_args).await
+}
+
+pub(super) async fn register_server(
+    ctx: ContextRef,
+    service_name: &str,
+    publisher_metadata: TelemetryPublisherMetadata,
+    method_name: String,
+    method_fn: rpc::RpcMethod,
+) -> SdvResult<rpc::Server> {
+    let mut unit_registration_args = create_registration_args(service_name, publisher_metadata);
+
+    let mut server_unit_metadata = ServerUnitMetadata::new();
+    server_unit_metadata.set_version(1);
+    unit_registration_args.set_unit_metadata(&UnitMetadata::Server(server_unit_metadata));
+
+    let methods_map = HashMap::from([(method_name, method_fn)]);
+    rpc::Server::create_with_generic_handlers(
+        ctx,
+        unit_registration_args,
+        methods_map,
+        &rpc::ServerOptions::default(),
+    )
+    .await
+}
+
+fn create_registration_args(
+    service_name: &str,
+    publisher_metadata: TelemetryPublisherMetadata,
+) -> UnitRegistrationArgs {
     let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
         ServiceName::parse(service_name).unwrap()
     else {
@@ -67,14 +107,9 @@ pub(super) async fn register_topic(
     unit_registration_args.set_unit_type(&unit_type);
     unit_registration_args.set_unit_name(&unit_name);
 
-    let mut publisher_unit_metadata = PublisherUnitMetadata::new();
-    publisher_unit_metadata.set_message_size(3);
-    publisher_unit_metadata.set_message_count(2);
-    unit_registration_args.set_unit_metadata(&UnitMetadata::Publisher(publisher_unit_metadata));
-
-    let mut app_metadata = vec![];
-    publisher_metadata.write_to_vec(&mut app_metadata).unwrap();
+    let app_metadata =
+        publisher_metadata.write_to_bytes().expect("Metadata serialization should succeed");
     unit_registration_args.set_application_metadata(&app_metadata);
 
-    dt::Publisher::create(ctx, unit_registration_args).await
+    unit_registration_args
 }
