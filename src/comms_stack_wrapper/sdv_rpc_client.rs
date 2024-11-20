@@ -14,7 +14,7 @@ use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::ContextRef;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -30,6 +30,14 @@ struct SdvRpcSubscription {
 impl SdvRpcClient {
     pub(super) fn new(ctx: future::Shared<BoxFuture<'static, ContextRef>>) -> Self {
         Self { ctx }
+    }
+
+    pub(super) async fn get_message_provider(
+        &self,
+        _unit_identifier: UnitIdentifier,
+        _message_descriptor: MessageDescriptor,
+    ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
+        Ok(None)
     }
 
     pub(super) async fn create_subscription(
