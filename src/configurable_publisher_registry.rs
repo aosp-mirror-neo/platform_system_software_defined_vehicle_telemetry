@@ -3,7 +3,7 @@
 // External dependencies.
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
-use binder::{BinderFeatures, IBinder};
+use binder::BinderFeatures;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::IConfigurablePublisher,
     IConfigurablePublisherSubscription::IConfigurablePublisherSubscription,
@@ -16,6 +16,7 @@ use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
+use sdv_telemetry::binder_adapter::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry::service_publisher_accessor::{AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription};
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry::ServicePublisherAccessor;
@@ -37,7 +38,7 @@ const TOKIO_CHANNEL_CAPACITY: usize = 32;
 pub struct ConfigurablePublisherRegistry {
     availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
     /// Adapter to make calls into Binder library.
-    binder_adapter: Box<dyn BinderAdapter>,
+    binder_adapter: Box<dyn BinderAdapter<dyn IConfigurablePublisher>>,
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
     publisher_entries: Arc<Mutex<HashMap<String, PublisherEntry>>>,
 }
@@ -67,20 +68,6 @@ pub enum ConfigurablePublisherRegistryRegisterError {
     #[error("Service with name {service_name} is already registered")]
     ServiceAlreadyRegistered { service_name: String },
 }
-
-/// Adapter interface in order to fake certain binder API calls that are only implemented
-/// for remote binders in tests, which use local binders.
-trait BinderAdapter: Send + Sync {
-    /// Subscribe to death notifications from the publisher.
-    /// Subscription is removed when the returned death recipient is dropped.
-    fn link_to_death(
-        &self,
-        publisher: &binder::Strong<dyn IConfigurablePublisher>,
-        callback: Box<dyn Fn() + Send + Sync>,
-    ) -> Result<binder::DeathRecipient, binder::StatusCode>;
-}
-
-struct BinderAdapterImpl {}
 
 struct AvailabilityCallbackRegistrationImpl {
     availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
@@ -328,18 +315,6 @@ impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription 
     }
 }
 
-impl BinderAdapter for BinderAdapterImpl {
-    fn link_to_death(
-        &self,
-        publisher: &binder::Strong<dyn IConfigurablePublisher>,
-        callback: Box<dyn Fn() + Send + Sync>,
-    ) -> Result<binder::DeathRecipient, binder::StatusCode> {
-        let mut death_recipient = binder::DeathRecipient::new(callback);
-        publisher.as_binder().link_to_death(&mut death_recipient)?;
-        Ok(death_recipient)
-    }
-}
-
 #[async_trait]
 impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
     async fn unregister(mut self: Box<Self>) {
@@ -501,10 +476,10 @@ mod tests {
         callback: Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>,
     }
 
-    impl BinderAdapter for MockBinderAdapter {
+    impl<T: binder::FromIBinder + ?Sized> BinderAdapter<T> for MockBinderAdapter {
         fn link_to_death(
             &self,
-            _publisher: &binder::Strong<dyn IConfigurablePublisher>,
+            _binder: &binder::Strong<T>,
             callback: Box<dyn Fn() + Send + Sync>,
         ) -> Result<binder::DeathRecipient, binder::StatusCode> {
             self.callback.lock().replace(callback);

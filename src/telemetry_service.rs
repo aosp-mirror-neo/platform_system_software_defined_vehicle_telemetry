@@ -2,6 +2,7 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
+pub mod binder_adapter;
 mod expr;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
