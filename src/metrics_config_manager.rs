@@ -110,13 +110,13 @@ impl MetricsConfigManagerImpl {
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        misc_error_callback: impl Fn(StatusCodes, String) + Send + Sync + 'static,
+        misc_error_callback: impl Fn(StatusCodes, &str) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
-        let handle_file_io_error = |misc_error_callback: &dyn Fn(StatusCodes, String),
+        let handle_file_io_error = |misc_error_callback: &dyn Fn(StatusCodes, &str),
                                     err_code: StatusCodes,
                                     err_msg: &str| {
             error!("{}", err_msg);
-            misc_error_callback(err_code, err_msg.to_string());
+            misc_error_callback(err_code, err_msg);
         };
 
         let config_manager = Arc::new_cyclic(
@@ -777,7 +777,7 @@ mod tests {
             |_| {},
             move |status_code, status_msg| {
                 let mut maybe_sender = sender_clone.lock();
-                maybe_sender.take().unwrap().send((status_code, status_msg)).unwrap();
+                maybe_sender.take().unwrap().send((status_code, status_msg.to_owned())).unwrap();
             },
         )
         .await

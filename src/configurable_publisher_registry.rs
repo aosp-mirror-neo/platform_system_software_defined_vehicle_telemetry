@@ -17,9 +17,11 @@ use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry::binder_adapter::{BinderAdapter, BinderAdapterImpl};
-use sdv_telemetry::service_publisher_accessor::{AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription};
+use sdv_telemetry::service_publisher_accessor::{
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessor,
+    ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription
+};
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
-use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::mem;

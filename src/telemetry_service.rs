@@ -2,11 +2,13 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
-pub mod binder_adapter;
 mod expr;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
+mod status_listener;
+
+pub mod binder_adapter;
 pub mod service_publisher_accessor;
 pub mod service_publisher_manager;
 pub mod sub_sampling_interval;
@@ -22,9 +24,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     ITelemetryService::ITelemetryServiceAsyncServer,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
-use google_sdv_telemetry::binder::{Interface, Result as BinderResult, Strong};
 use log::{error, info, warn};
-use parking_lot::Mutex;
 use protobuf::Message;
 use std::marker::{Send, Sync};
 use std::ops::Deref;
@@ -32,15 +32,14 @@ use std::sync::Arc;
 use tracing::instrument;
 
 // Child module dependencies.
-pub use service_publisher_accessor::ServicePublisherAccessor;
-
 use metrics_config_manager::MetricsConfigManager;
 use metrics_config_manager::{
     MetricsConfigManagerError as ConfigManagerError, MetricsConfigManagerImpl,
 };
-
 use metrics_config_orchestrator::MetricsConfigOrchestratorError as ConfigOrchestratorError;
 use metrics_report_listener::MetricsReportListener;
+use service_publisher_accessor::ServicePublisherAccessor;
+use status_listener::{StatusListener, StatusListenerImpl};
 
 const ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
 const INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -110,19 +109,15 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
 
 /// This struct is defined to implement ITelemetryService AIDL interface.
 pub struct SdvTelemetryService {
-    /// Instance of Metrics Configuration Manager.
+    /// Instance of Metrics Configuration Manager
     metrics_config_manager: Arc<dyn MetricsConfigManager + Send + Sync>,
     /// Report Ready listener to inform the client when a report is ready
     metrics_report_listener: Arc<MetricsReportListener>,
-    /// Status Listener to send back status to client
-    api_status_listener: Mutex<Option<Strong<dyn ITelemetryApiStatusListener>>>,
-    /// Misc Status Listener to send back status to client
-    misc_status_listener: Mutex<Option<Strong<dyn ITelemetryMiscStatusListener>>>,
-    /// Store for miscellaneous errors
-    misc_error_store: Arc<Mutex<Vec<(StatusCodes, String)>>>,
+    /// Listener of status events
+    status_listener: Arc<dyn StatusListener>,
 }
 
-impl Interface for SdvTelemetryService {}
+impl binder::Interface for SdvTelemetryService {}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
@@ -145,8 +140,8 @@ impl SdvTelemetryService {
         let report_listener = Arc::new(MetricsReportListener::new());
         let report_listener_clone = Arc::clone(&report_listener);
 
-        let misc_error_store = Arc::new(Mutex::new(Vec::new()));
-        let misc_error_store_clone = Arc::clone(&misc_error_store);
+        let status_listener = Arc::new(StatusListenerImpl::new());
+        let status_listener_clone = Arc::clone(&status_listener);
 
         let config_manager_res = MetricsConfigManagerImpl::new(
             active_data_dir,
@@ -155,8 +150,7 @@ impl SdvTelemetryService {
             service_publisher_manager,
             move |report| report_listener.on_report_ready(report),
             move |status_code, status_message| {
-                let mut vec = misc_error_store_clone.lock();
-                vec.push((status_code, status_message))
+                status_listener_clone.send_misc_status(status_code, status_message)
             },
         )
         .await;
@@ -172,53 +166,19 @@ impl SdvTelemetryService {
         Some(SdvTelemetryService {
             metrics_config_manager: config_manager,
             metrics_report_listener: report_listener_clone,
-            api_status_listener: Mutex::new(None),
-            misc_status_listener: Mutex::new(None),
-            misc_error_store,
+            status_listener,
         })
-    }
-
-    /// Uses the listener object set by the telemetry service cpp client to send back status codes
-    /// and error messages for API calls
-    pub fn send_status(
-        &self,
-        api_call_id: i32,
-        status_code: StatusCodes,
-        status_message: &str,
-    ) -> BinderResult<()> {
-        if let Some(listener_ref) = self.api_status_listener.lock().as_ref() {
-            if let Err(e) =
-                listener_ref.deref().sendStatus(api_call_id, status_code, status_message)
-            {
-                warn!(
-                    "Error when sending status code {:?} for API call {} to the client: {:?}",
-                    status_code, api_call_id, e
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Uses the global listener object set by the client to send back status codes
-    /// and error messages for API calls
-    pub fn send_misc_status(
-        &self,
-        status_code: StatusCodes,
-        status_message: &str,
-    ) -> BinderResult<()> {
-        if let Some(listener_ref) = self.misc_status_listener.lock().as_ref() {
-            if let Err(e) = listener_ref.deref().sendStatus(status_code, status_message) {
-                warn!("Error when sending status code {:?} to the client: {:?}", status_code, e);
-            }
-        }
-        Ok(())
     }
 }
 
 #[async_trait]
 impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     #[instrument(skip(self, metrics_config))]
-    async fn addMetricsConfig(&self, api_call_id: i32, metrics_config: &[u8]) -> BinderResult<()> {
+    async fn addMetricsConfig(
+        &self,
+        api_call_id: i32,
+        metrics_config: &[u8],
+    ) -> binder::Result<()> {
         // Add metrics config and report any errors to client
         let metrics_config_uuid =
             match self.metrics_config_manager.add_metrics_config(metrics_config).await {
@@ -226,15 +186,17 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 Err(e) => {
                     error!("Invalid Metric Config");
                     let (err_code, err_msg) = get_error_code_and_message(e);
-                    return self.send_status(api_call_id, err_code, &err_msg);
+                    self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
+                    return Ok(());
                 }
             };
 
-        return self.send_status(
+        self.status_listener.send_api_status(
             api_call_id,
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             &metrics_config_uuid,
         );
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -242,21 +204,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         api_call_id: i32,
         metrics_config_uuid: &str,
-    ) -> BinderResult<()> {
+    ) -> binder::Result<()> {
         // Activate metrics config and report any errors to client
         if let Err(e) =
             self.metrics_config_manager.activate_metrics_config(metrics_config_uuid).await
         {
             error!("Unable to activate Metric Config Err: {:?}", e);
             let (err_code, err_msg) = get_error_code_and_message(e);
-            return self.send_status(api_call_id, err_code, &err_msg);
+            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
+            return Ok(());
         }
 
-        self.send_status(
+        self.status_listener.send_api_status(
             api_call_id,
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             metrics_config_uuid,
-        )
+        );
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -264,21 +228,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         api_call_id: i32,
         metrics_config_uuid: &str,
-    ) -> BinderResult<()> {
+    ) -> binder::Result<()> {
         // Deactivate metrics config and report any errors to client
         if let Err(e) =
             self.metrics_config_manager.deactivate_metrics_config(metrics_config_uuid).await
         {
             error!("Unable to deactivate Metric Config Err: {:?}", e);
             let (err_code, err_msg) = get_error_code_and_message(e);
-            return self.send_status(api_call_id, err_code, &err_msg);
+            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
+            return Ok(());
         }
 
-        self.send_status(
+        self.status_listener.send_api_status(
             api_call_id,
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             metrics_config_uuid,
-        )
+        );
+        Ok(())
     }
 
     #[instrument(skip(self))]
@@ -286,43 +252,47 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         api_call_id: i32,
         metrics_config_uuid: &str,
-    ) -> BinderResult<()> {
+    ) -> binder::Result<()> {
         // Remove metrics config and report any errors to client
         if let Err(e) = self.metrics_config_manager.remove_metrics_config(metrics_config_uuid).await
         {
             error!("Unable to remove Metric Config Err: {:?}", e);
             let (err_code, err_msg) = get_error_code_and_message(e);
-            return self.send_status(api_call_id, err_code, &err_msg);
+            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
+            return Ok(());
         }
 
-        self.send_status(
+        self.status_listener.send_api_status(
             api_call_id,
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             metrics_config_uuid,
-        )
+        );
+        Ok(())
     }
 
     #[instrument(skip(self))]
-    async fn removeAllMetricsConfigs(&self, api_call_id: i32) -> BinderResult<()> {
+    async fn removeAllMetricsConfigs(&self, api_call_id: i32) -> binder::Result<()> {
         // Remove all metrics config and report any errors to client
         if let Err(e) = self.metrics_config_manager.remove_all_metrics_configs().await {
             error!("Unable to remove all metric configs Err: {:?}", e);
             let (err_code, err_msg) = get_error_code_and_message(e);
-            return self.send_status(api_call_id, err_code, &err_msg);
+            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
+            return Ok(());
         }
 
-        self.send_status(
+        self.status_listener.send_api_status(
             api_call_id,
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
             "successfully Removed All Configs",
-        )
+        );
+        Ok(())
     }
 
     #[instrument(skip(self, config_list_listener))]
     async fn getActiveMetricsConfigUuids(
         &self,
-        config_list_listener: &Strong<dyn ITelemetryConfigListListener>,
-    ) -> BinderResult<()> {
+        config_list_listener: &binder::Strong<dyn ITelemetryConfigListListener>,
+    ) -> binder::Result<()> {
         info!("getActiveMetricsConfigUuids");
 
         let config_list = self.metrics_config_manager.get_active_metrics_config_uuids().await;
@@ -340,8 +310,8 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     #[instrument(skip(self, config_list_listener))]
     async fn getInactiveMetricsConfigUuids(
         &self,
-        config_list_listener: &Strong<dyn ITelemetryConfigListListener>,
-    ) -> BinderResult<()> {
+        config_list_listener: &binder::Strong<dyn ITelemetryConfigListListener>,
+    ) -> binder::Result<()> {
         info!("getInactiveMetricsConfigUuids");
         let config_list = self.metrics_config_manager.get_inactive_metrics_config_uuids().await;
         if let Err(e) = config_list_listener.deref().sendConfigList(
@@ -359,8 +329,8 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     async fn registerReportReadyListener(
         &self,
         api_call_id: i32,
-        listener: &Strong<dyn ITelemetryReportReadyListener>,
-    ) -> BinderResult<()> {
+        listener: &binder::Strong<dyn ITelemetryReportReadyListener>,
+    ) -> binder::Result<()> {
         info!("registerReportReadyListener");
         let (status_code, status_message) =
             self.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
@@ -377,47 +347,25 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                     )
                 },
             );
-        self.send_status(api_call_id, status_code, status_message)
+        self.status_listener.send_api_status(api_call_id, status_code, status_message);
+        Ok(())
     }
 
     #[instrument(skip(self))]
     async fn registerApiStatusListener(
         &self,
-        listener: &Strong<dyn ITelemetryApiStatusListener>,
-    ) -> BinderResult<()> {
-        *self.api_status_listener.lock() = Some(listener.clone());
-        Ok(())
+        new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
+    ) -> binder::Result<()> {
+        self.status_listener.set_api_status_listener(new_listener)
     }
 
     #[instrument(skip(self))]
     async fn registerMiscStatusListener(
         &self,
         api_call_id: i32,
-        listener: &Strong<dyn ITelemetryMiscStatusListener>,
-    ) -> BinderResult<()> {
-        let (status_code, status_message) = {
-            let mut guard = self.misc_status_listener.lock();
-            if guard.is_none() {
-                *guard = Some(listener.clone());
-                (
-                    StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-                    "Status listener successfully added",
-                )
-            } else {
-                (
-                    StatusCodes::SET_MISC_STATUS_LISTENER_FAILED,
-                    "Misc Status listener already exists",
-                )
-            }
-        };
-        self.send_status(api_call_id, status_code, status_message).unwrap();
-
-        let misc_errors = self.misc_error_store.lock();
-
-        for (status_code, status_message) in misc_errors.iter() {
-            self.send_misc_status(*status_code, status_message).unwrap();
-        }
-
+        new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
+    ) -> binder::Result<()> {
+        self.status_listener.set_misc_status_listener(api_call_id, new_listener);
         Ok(())
     }
 
@@ -427,8 +375,8 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         metrics_config_uuid: &str,
         report_config_name: &str,
         report_number: i32,
-        report_listener: &Strong<dyn ITelemetryReportListener>,
-    ) -> BinderResult<()> {
+        report_listener: &binder::Strong<dyn ITelemetryReportListener>,
+    ) -> binder::Result<()> {
         info!("getMetricsReport: {}", metrics_config_uuid);
         if let Ok(metrics_report) = self.metrics_report_listener.get_metrics_report(
             metrics_config_uuid,
@@ -455,23 +403,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     }
 
     #[instrument(skip(self))]
-    async fn unregisterReportReadyListener(&self) -> BinderResult<()> {
+    async fn unregisterReportReadyListener(&self) -> binder::Result<()> {
         info!("unregisterReportReadyListener");
         self.metrics_report_listener.clear_report_ready_listener().unwrap();
         Ok(())
     }
 
     #[instrument(skip(self))]
-    async fn unregisterApiStatusListener(&self) -> BinderResult<()> {
+    async fn unregisterApiStatusListener(&self) -> binder::Result<()> {
         info!("unregisterApiStatusListener");
-        *self.api_status_listener.lock() = None;
+        self.status_listener.clear_api_status_listener();
         Ok(())
     }
 
     #[instrument(skip(self))]
-    async fn unregisterMiscStatusListener(&self) -> BinderResult<()> {
+    async fn unregisterMiscStatusListener(&self) -> binder::Result<()> {
         info!("unregisterMiscStatusListener");
-        *self.misc_status_listener.lock() = None;
+        self.status_listener.clear_misc_status_listener();
         Ok(())
     }
 }
@@ -488,6 +436,7 @@ mod tests {
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
     };
+    use parking_lot::Mutex;
     use protobuf::Message;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
@@ -509,7 +458,7 @@ mod tests {
         metrics_config_list: Arc<Mutex<Option<Vec<String>>>>,
     }
 
-    impl Interface for MockTelemetryConfigListListener {}
+    impl binder::Interface for MockTelemetryConfigListListener {}
 
     impl MockTelemetryConfigListListener {
         fn new() -> Self {
@@ -539,7 +488,7 @@ mod tests {
             status_code: StatusCodes,
             _status_message: &str,
             config_list: &[String],
-        ) -> BinderResult<()> {
+        ) -> binder::Result<()> {
             let mut mut_status_code = self.status_code.lock();
             *mut_status_code = status_code;
             let mut num_send_config_calls = self.num_send_config_calls.lock();
@@ -562,7 +511,7 @@ mod tests {
         metrics_report: Arc<Mutex<Option<MetricsReport>>>,
     }
 
-    impl Interface for MockTelemetryReportListener {}
+    impl binder::Interface for MockTelemetryReportListener {}
 
     impl MockTelemetryReportListener {
         fn new() -> Self {
@@ -603,7 +552,7 @@ mod tests {
             status_code: StatusCodes,
             status_message: &str,
             serialized_report: &[u8],
-        ) -> BinderResult<()> {
+        ) -> binder::Result<()> {
             // bytes now contains the contents of the file
             let metrics_report: MetricsReport =
                 match protobuf::Message::parse_from_bytes(serialized_report) {
@@ -637,7 +586,7 @@ mod tests {
         uuid: Arc<Mutex<String>>,
     }
 
-    impl Interface for MockTelemetryReportReadyListener {}
+    impl binder::Interface for MockTelemetryReportReadyListener {}
 
     impl MockTelemetryReportReadyListener {
         fn new() -> Self {
@@ -667,7 +616,7 @@ mod tests {
             metrics_config_uuid: &str,
             _report_config_name: &str,
             metrics_report_number: i32,
-        ) -> BinderResult<()> {
+        ) -> binder::Result<()> {
             let mut num_calls = self.num_on_ready_report_calls.lock();
             *num_calls += 1;
             let mut report_number = self.report_number.lock();
@@ -682,22 +631,14 @@ mod tests {
     /// testing purposes
     #[derive(Clone)]
     struct MockTelemetryApiStatusListener {
-        num_send_status_calls: Arc<Mutex<i32>>,
         status: Arc<Mutex<StatusCodes>>,
     }
 
-    impl Interface for MockTelemetryApiStatusListener {}
+    impl binder::Interface for MockTelemetryApiStatusListener {}
 
     impl MockTelemetryApiStatusListener {
         fn new() -> Self {
-            Self {
-                num_send_status_calls: Arc::new(Mutex::new(0)),
-                status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
-            }
-        }
-
-        pub fn get_num_send_status_calls(&self) -> i32 {
-            *self.num_send_status_calls.lock()
+            Self { status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)) }
         }
 
         pub fn get_status_code(&self) -> StatusCodes {
@@ -711,12 +652,8 @@ mod tests {
             _api_call_id: i32,
             status_code: StatusCodes,
             _status_msg: &str,
-        ) -> BinderResult<()> {
-            let mut num_calls = self.num_send_status_calls.lock();
-            *num_calls += 1;
-
-            let mut mut_status = self.status.lock();
-            *mut_status = status_code;
+        ) -> binder::Result<()> {
+            *self.status.lock() = status_code;
 
             Ok(())
         }
@@ -724,32 +661,63 @@ mod tests {
 
     /// This struct is defined to implement ITelemetryMiscStatusListener AIDL interface for unit
     /// testing purposes
-    #[derive(Clone)]
-    struct MockTelemetryMiscStatusListener {
-        num_send_status_calls: Arc<Mutex<i32>>,
-        status: Arc<Mutex<StatusCodes>>,
+    struct MockTelemetryMiscStatusListener {}
+
+    impl binder::Interface for MockTelemetryMiscStatusListener {}
+
+    impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
+        fn sendStatus(&self, _status_code: StatusCodes, _status_msg: &str) -> binder::Result<()> {
+            Ok(())
+        }
     }
 
-    impl Interface for MockTelemetryMiscStatusListener {}
+    struct MockStatusListener {
+        api_listener: Arc<Mutex<Option<binder::Strong<dyn ITelemetryApiStatusListener>>>>,
+        misc_listener: Arc<Mutex<Option<(i32, binder::Strong<dyn ITelemetryMiscStatusListener>)>>>,
+    }
 
-    impl MockTelemetryMiscStatusListener {
+    impl MockStatusListener {
         fn new() -> Self {
             Self {
-                num_send_status_calls: Arc::new(Mutex::new(0)),
-                status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
+                api_listener: Arc::new(Mutex::new(None)),
+                misc_listener: Arc::new(Mutex::new(None)),
             }
         }
     }
 
-    impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
-        fn sendStatus(&self, status_code: StatusCodes, _status_msg: &str) -> BinderResult<()> {
-            let mut num_calls = self.num_send_status_calls.lock();
-            *num_calls += 1;
+    impl StatusListener for MockStatusListener {
+        fn send_api_status(
+            &self,
+            _api_call_id: i32,
+            _status_code: StatusCodes,
+            _status_message: &str,
+        ) {
+        }
 
-            let mut mut_status = self.status.lock();
-            *mut_status = status_code;
+        fn send_misc_status(&self, _status_code: StatusCodes, _status_message: &str) {}
 
+        fn clear_api_status_listener(&self) {
+            *self.api_listener.lock() = None;
+        }
+
+        fn clear_misc_status_listener(&self) {
+            *self.misc_listener.lock() = None;
+        }
+
+        fn set_api_status_listener(
+            &self,
+            new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
+        ) -> binder::Result<()> {
+            self.api_listener.lock().replace(new_listener.clone());
             Ok(())
+        }
+
+        fn set_misc_status_listener(
+            &self,
+            api_call_id: i32,
+            new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
+        ) {
+            self.misc_listener.lock().replace((api_call_id, new_listener.clone()));
         }
     }
 
@@ -1301,123 +1269,89 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn set_api_status_listener_and_check_status_code() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "set_status_listener";
-        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-
-        let api_status_listener = MockTelemetryApiStatusListener::new();
-
-        let binder_listener = BnTelemetryApiStatusListener::new_binder(
-            api_status_listener.clone(),
-            BinderFeatures::default(),
-        );
-
-        let serialized_config = create_serialized_config(UUID1);
-        test_environment.service.registerApiStatusListener(&binder_listener).await.unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR,
-            api_status_listener.get_status_code()
-        );
-
-        test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
-            .await
-            .unwrap();
-
-        assert_eq!(1, api_status_listener.get_num_send_status_calls());
-    }
-
-    #[sdv_telemetry_test_utils_macros::timeout]
-    #[tokio::test]
-    async fn set_misc_status_listener_and_check_status_code() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "set_status_listener";
-        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-
-        let api_status_listener = MockTelemetryApiStatusListener::new();
-
-        let binder_listener = BnTelemetryApiStatusListener::new_binder(
-            api_status_listener.clone(),
-            BinderFeatures::default(),
-        );
-
-        test_environment.service.registerApiStatusListener(&binder_listener).await.unwrap();
-
-        let misc_status_listener = MockTelemetryMiscStatusListener::new();
-
-        let binder_listener = BnTelemetryMiscStatusListener::new_binder(
-            misc_status_listener.clone(),
-            BinderFeatures::default(),
-        );
-
-        test_environment
-            .service
-            .registerMiscStatusListener(DUMMY_API_CALL_ID, &binder_listener)
-            .await
-            .unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            api_status_listener.get_status_code()
-        );
-    }
-
-    #[sdv_telemetry_test_utils_macros::timeout]
-    #[tokio::test]
-    async fn set_multiple_misc_status_listener_fails() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "set_multiple_status_listener";
-        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-
-        let api_status_listener = MockTelemetryApiStatusListener::new();
-
-        let binder_listener = BnTelemetryApiStatusListener::new_binder(
-            api_status_listener.clone(),
-            BinderFeatures::default(),
-        );
-
-        test_environment.service.registerApiStatusListener(&binder_listener).await.unwrap();
-
-        let misc_status_listener = MockTelemetryMiscStatusListener::new();
-
-        let binder_listener = BnTelemetryMiscStatusListener::new_binder(
-            misc_status_listener.clone(),
-            BinderFeatures::default(),
-        );
-
-        test_environment
-            .service
-            .registerMiscStatusListener(DUMMY_API_CALL_ID, &binder_listener)
-            .await
-            .unwrap();
-        test_environment
-            .service
-            .registerMiscStatusListener(DUMMY_API_CALL_ID, &binder_listener)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            StatusCodes::SET_MISC_STATUS_LISTENER_FAILED,
-            api_status_listener.get_status_code()
-        );
-    }
-
-    #[sdv_telemetry_test_utils_macros::timeout]
-    #[tokio::test]
-    async fn clear_misc_status_listener() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "clear_misc_status_listener";
+    async fn register_api_status_listener_success() {
+        const ROOT_PATH: &str = "register_api_status_listener";
         let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let status_listener = Arc::new(MockStatusListener::new());
+        test_environment.service.status_listener =
+            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+        let mock_api_listener = BnTelemetryApiStatusListener::new_binder(
+            MockTelemetryApiStatusListener::new(),
+            BinderFeatures::default(),
+        );
 
-        let result = test_environment.service.unregisterApiStatusListener().await;
-        assert!(result.is_ok());
-        assert!(test_environment.service.api_status_listener.lock().is_none());
+        test_environment.service.registerApiStatusListener(&mock_api_listener).await.unwrap();
+
+        assert!(status_listener.api_listener.lock().is_some());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn register_misc_status_listener_success() {
+        const ROOT_PATH: &str = "register_misc_status_listener";
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        let status_listener = Arc::new(MockStatusListener::new());
+        test_environment.service.status_listener =
+            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+
+        let misc_status_listener = MockTelemetryMiscStatusListener {};
+        let binder_listener = BnTelemetryMiscStatusListener::new_binder(
+            misc_status_listener,
+            BinderFeatures::default(),
+        );
+
+        test_environment.service.registerMiscStatusListener(123, &binder_listener).await.unwrap();
+
+        let listener = status_listener.misc_listener.lock();
+        assert!(listener.is_some());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn unregister_api_status_listener_success() {
+        const ROOT_PATH: &str = "unregister_api_status_listener";
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        let status_listener = Arc::new(MockStatusListener::new());
+        test_environment.service.status_listener =
+            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+
+        let api_status_listener = MockTelemetryApiStatusListener::new();
+        let binder_listener = BnTelemetryApiStatusListener::new_binder(
+            api_status_listener,
+            BinderFeatures::default(),
+        );
+
+        // Register the listener first
+        test_environment.service.registerApiStatusListener(&binder_listener).await.unwrap();
+
+        // Then unregister
+        test_environment.service.unregisterApiStatusListener().await.unwrap();
+
+        assert!(status_listener.api_listener.lock().is_none());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn unregister_misc_status_listener_success() {
+        const ROOT_PATH: &str = "unregister_misc_status_listener";
+        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+        let status_listener = Arc::new(MockStatusListener::new());
+        test_environment.service.status_listener =
+            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+
+        let misc_status_listener = MockTelemetryMiscStatusListener {};
+        let binder_listener = BnTelemetryMiscStatusListener::new_binder(
+            misc_status_listener,
+            BinderFeatures::default(),
+        );
+
+        // Register the listener first
+        test_environment.service.registerMiscStatusListener(123, &binder_listener).await.unwrap();
+
+        // Then unregister
+        test_environment.service.unregisterMiscStatusListener().await.unwrap();
+
+        assert!(status_listener.misc_listener.lock().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

@@ -7,8 +7,8 @@ mod telemetry_setup;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherRegistry::{
     BnConfigurablePublisherRegistry, BpConfigurablePublisherRegistry, IConfigurablePublisherRegistry,
 };
+use sdv_telemetry::service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
-use sdv_telemetry::ServicePublisherAccessor;
 use sdv_telemetry_dt_wrapper::comms_stack_accessor::CommsStackAccessor;
 use sdv_telemetry_dt_wrapper::deprecated_data_tunnel_subscriber::DeprecatedDataTunnelSubscriber;
 use sdv_telemetry_configurable_publisher::{
