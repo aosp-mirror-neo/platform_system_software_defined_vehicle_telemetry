@@ -15,7 +15,7 @@ import google.sdv.telemetry.ITelemetryReportReadyListener;
  * the Data logger
  *
  */
-
+@VintfStability
 interface ITelemetryService {
     /**
      * Adds telemetry MetricsConfigs to TelemetryService.

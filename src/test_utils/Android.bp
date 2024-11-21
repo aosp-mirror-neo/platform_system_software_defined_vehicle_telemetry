@@ -30,6 +30,7 @@ rust_defaults {
         "librand",
         // keep-sorted end
     ],
+    product_available: true,
     vendor_available: true,
 }
 

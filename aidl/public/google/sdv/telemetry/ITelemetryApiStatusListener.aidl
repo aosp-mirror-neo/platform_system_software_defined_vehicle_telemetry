@@ -7,7 +7,7 @@ import google.sdv.telemetry.TelemetryServiceStatusCodes;
 /**
  * Enables clients to receive status codes and messages for API calls
  */
-
+@VintfStability
 oneway interface ITelemetryApiStatusListener {
     /**
      * Called by telemetry service to send back status codes and messages for APIs

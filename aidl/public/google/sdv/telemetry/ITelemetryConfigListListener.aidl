@@ -7,7 +7,7 @@ import google.sdv.telemetry.TelemetryServiceStatusCodes;
 /**
  * Enables clients to receive list of active or inactive configs currently part of the service.
  */
-
+@VintfStability
 oneway interface ITelemetryConfigListListener {
     /**
      * Called by telemetry service to send back list of configs to client

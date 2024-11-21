@@ -6,7 +6,7 @@ package google.sdv.telemetry;
  * Exhaustive list of all status codes supported by the telemetry service.
  */
 @Backing(type="int")
-
+@VintfStability
 enum TelemetryServiceStatusCodes {
 
     /**

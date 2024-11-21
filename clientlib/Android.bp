@@ -53,6 +53,7 @@ cc_library {
         "libsdv_telemetry_proto_cpp",
         // keep-sorted end
     ],
+    product_available: true,
     vendor_available: true,
 }
 
@@ -66,6 +67,7 @@ rust_bindgen {
         "libtelemetry_c",
         // keep-sorted end
     ],
+    product_available: true,
     vendor_available: true,
 }
 
@@ -102,6 +104,7 @@ rust_bindgen {
     wrapper_src: "export/status_codes.h",
     cpp_std: "gnu++17",
     source_stem: "bindings",
+    product_available: true,
     vendor_available: true,
 }
 
@@ -162,6 +165,7 @@ rust_library {
     name: "libsdv_telemetry_rust_wrapper",
     defaults: ["libsdv_telemetry_rust_wrapper_defaults"],
     crate_name: "sdv_telemetry_rust_wrapper",
+    product_available: true,
     vendor_available: true,
     visibility: ["//visibility:public"],
 }

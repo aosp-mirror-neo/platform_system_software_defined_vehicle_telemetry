@@ -26,3 +26,9 @@ aidl_interface {
         },
     },
 }
+
+vintf_fragment {
+    name: "google.sdv.telemetry.configurable_publisher-service.xml",
+    src: "google.sdv.telemetry.configurable_publisher-service.xml",
+    vendor: true,
+}

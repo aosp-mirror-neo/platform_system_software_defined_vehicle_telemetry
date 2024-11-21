@@ -107,7 +107,7 @@ android_app {
 rust_binary {
     name: "telemetry_rust_c_client",
     defaults: ["telemetry_rust_c_client_defaults"],
-    vendor: true,
+    product_specific: true,
 }
 
 rust_protobuf {
@@ -369,13 +369,14 @@ rust_defaults {
         "libsdv_telemetry_proto_rust",
         // keep-sorted end
     ],
-    vendor: true,
 }
 
 rust_library {
     name: "libsdv_telemetry_sample_utils",
     defaults: ["libsdv_telemetry_sample_utils_defaults"],
     crate_name: "sdv_telemetry_sample_utils",
+    product_available: true,
+    vendor_available: true,
 }
 
 rust_test {

@@ -27,6 +27,7 @@ cc_library {
         type: "full",
     },
     shared_libs: ["libprotobuf-cpp-full"],
+    product_available: true,
     vendor_available: true,
     system_ext_specific: true,
 }
@@ -57,6 +58,7 @@ rust_protobuf {
         "-I .",
     ],
     source_stem: "sdv_telemetry_proto_rust_source",
+    product_available: true,
     vendor_available: true,
     system_ext_specific: true,
     visibility: ["//visibility:public"],

@@ -7,7 +7,7 @@ import google.sdv.telemetry.TelemetryServiceStatusCodes;
 /**
  * Interface implemented by Data logger to receive telemetry reports.
  */
-
+@VintfStability
 oneway interface ITelemetryReportListener {
     /**
      * Method called by telemetry service during getMetricsReport() API call to send metrics report
