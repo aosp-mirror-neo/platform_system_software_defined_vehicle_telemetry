@@ -81,9 +81,30 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
     async fn get_message_provider(
         &self,
-        _service_name: &str,
+        service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
-        Ok(None)
+        let Ok(service_name) = ServiceName::parse(service_name) else {
+            return Ok(None);
+        };
+
+        info!("Creating getter for comms stack service '{service_name}'.");
+
+        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+            return Ok(None);
+        };
+
+        let message_descriptor =
+            Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
+                .with_context(|| format!("Metadata not found for service '{service_name}'."))?;
+
+        let unit_identifier = service_unit_definition.get_unit_identifier();
+
+        match service_unit_definition.get_unit_metadata() {
+            UnitMetadata::Publisher(_) => Ok(None),
+            UnitMetadata::Server(_) => {
+                self.sdv_rpc_client.get_message_provider(unit_identifier, message_descriptor).await
+            }
+        }
     }
 
     async fn create_subscription(
