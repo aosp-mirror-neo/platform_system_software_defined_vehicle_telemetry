@@ -24,6 +24,12 @@ rust_test_host {
         "libprotobuf",
         // keep-sorted end
     ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
     test_options: {
         unit_test: true,
     },
