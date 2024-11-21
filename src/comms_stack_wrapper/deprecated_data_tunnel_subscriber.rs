@@ -94,7 +94,7 @@ impl ServicePublisherAccessor for DeprecatedDataTunnelSubscriber {
         self.get_metadata_impl(topic_name)
     }
 
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
@@ -651,10 +651,11 @@ impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
 mod tests {
     use super::*;
 
-    #[test]
-    fn get_message_provider_success() -> anyhow::Result<()> {
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_message_provider_success() -> anyhow::Result<()> {
         let subscriber = DeprecatedDataTunnelSubscriber::new();
-        assert!(subscriber.get_message_provider("service-name")?.is_none());
+        assert!(subscriber.get_message_provider("service-name").await?.is_none());
 
         Ok(())
     }

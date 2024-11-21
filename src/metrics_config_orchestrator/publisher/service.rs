@@ -385,6 +385,7 @@ impl ServicePublisher {
             ConnectionType::Getter => self
                 .service_adapter
                 .get_message_provider(&self.service_name)
+                .await
                 .with_context(|| "Service adapter failed to create message provider")?,
             ConnectionType::Subscription => None,
         };

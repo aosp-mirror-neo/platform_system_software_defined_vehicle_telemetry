@@ -48,12 +48,12 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         Ok(None)
     }
 
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
         for accessor in &self.service_publisher_registry {
-            let provider = accessor.get_message_provider(service_name)?;
+            let provider = accessor.get_message_provider(service_name).await?;
 
             if provider.is_some() {
                 return Ok(provider);
@@ -189,7 +189,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        service_publisher_manager_impl.get_message_provider(SERVICE_NAME).unwrap().unwrap();
+        service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await.unwrap().unwrap();
 
         assert_eq!(service_publisher.get_num_get_message_provider_calls(), 1);
     }
@@ -204,7 +204,8 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let err = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).err().unwrap();
+        let err =
+            service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.err().unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
     }
@@ -218,7 +219,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).unwrap();
+        let res = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.unwrap();
 
         assert!(res.is_none());
     }

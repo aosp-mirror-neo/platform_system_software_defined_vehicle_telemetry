@@ -74,7 +74,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         Ok(metadata)
     }
 
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {

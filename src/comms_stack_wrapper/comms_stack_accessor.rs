@@ -79,7 +79,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
 
-    fn get_message_provider(
+    async fn get_message_provider(
         &self,
         _service_name: &str,
     ) -> anyhow::Result<Option<Box<dyn ServicePublisherMessageProvider>>> {
@@ -401,14 +401,14 @@ mod integration_tests {
     #[tokio::test]
     async fn get_message_provider_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
-        assert!(accessor.get_message_provider(INVALID_SERVICE_NAME).unwrap().is_none());
+        assert!(accessor.get_message_provider(INVALID_SERVICE_NAME).await.unwrap().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
         let accessor = create_accessor_with_context(0);
-        assert!(accessor.get_message_provider(VALID_SERVICE_NAME).unwrap().is_none());
+        assert!(accessor.get_message_provider(VALID_SERVICE_NAME).await.unwrap().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
