@@ -127,6 +127,13 @@ int32_t get_metrics_report(ServiceHolder* holder, const char* metrics_config_uui
     });
 }
 
+int32_t get_ready_reports_info(ServiceHolder* holder, void* listener,
+                               ReadyReportsInfoCallbackFunction cbFunc) {
+    return callClient("getReadyReportsInfo", holder, [&](auto& client) {
+        return client.get_ready_reports_info(listener, cbFunc);
+    });
+}
+
 int32_t set_misc_status_listener(ServiceHolder* holder, void* status_listener,
                                  StatusCallbackFunction statusCbFunc, void* api_listener,
                                  StatusCallbackFunction apiCbFunc,

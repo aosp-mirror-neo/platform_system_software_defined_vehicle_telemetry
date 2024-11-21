@@ -36,6 +36,7 @@ cc_library {
         "src/config_list_listener_impl.cpp",
         "src/lib.cpp",
         "src/misc_status_listener_impl.cpp",
+        "src/ready_reports_info_listener_impl.cpp",
         "src/report_listener_impl.cpp",
         "src/report_ready_listener_impl.cpp",
         "src/telemetry_service_client.cpp",

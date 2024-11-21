@@ -107,10 +107,20 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     let report_info = report_ready_rx.recv().await.unwrap();
     assert_eq!(report_info.metrics_config_uuid, config.uuid);
 
+    info!("Reading metrics reports info");
+    let ready_reports_info = service.get_ready_reports_info().await.unwrap();
+    assert_eq!(ready_reports_info.len(), 1);
+    assert_eq!(ready_reports_info[0].metrics_config_uuid, report_info.metrics_config_uuid);
+    assert_eq!(ready_reports_info[0].report_config_name, report_info.report_config_name);
+    assert_eq!(ready_reports_info[0].report_number, report_info.report_number);
+
     info!("Retrieving metrics report");
     let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
     info!("Report received: {metrics_report:?}");
     assert_eq!(report_info.metrics_config_uuid, metrics_report.metrics_config_uuid);
+
+    let ready_reports_info = service.get_ready_reports_info().await.unwrap();
+    assert!(ready_reports_info.is_empty());
 
     info!("Removing metrics config");
     service.remove_metrics_config(&config.uuid).await.unwrap();

@@ -16,6 +16,18 @@ extern "C" {
 // Opaque Pointer holding an instance of the telemetry_service.
 typedef struct ServiceHolder ServiceHolder;
 
+// Information of telemetry metrics reports
+typedef struct MetricsReportInfo {
+    // uuid of the metrics configuration
+    const char* metrics_config_uuid;
+
+    // name of the metrics report config
+    const char* report_config_name;
+
+    // report number of the report
+    const int32_t report_number;
+} MetricsReportInfo;
+
 /**
  * The status callback function relays the status of the API call back
  * to the client it was associated with.
@@ -52,6 +64,22 @@ typedef void (*ReportReadyCallbackFunction)(void*, const char*, const char*, int
  *
  */
 typedef void (*GetSerializedDataCallbackFunction)(void*, int, const char*, const uint8_t*, size_t);
+
+/**
+ * The get ready reports info callback function relays the status of the get_ready_reports_info API
+ call.
+ * If the API call was successful it also sends info of the ready reports.
+ *
+ * @param void* Pointer to the callback object associated with the callback function.
+ * @param int32_t status code indicating the outcome of the API call
+ * @param const char* status message adding more context to the outcome of the API call.
+ * @param const MetricsReportInfo* pointer to the array of MetricsReportInfo containing info of
+   ready metrics reports.
+ * @param size_t number of ready reports.
+ *
+ */
+typedef void (*ReadyReportsInfoCallbackFunction)(void*, int, const char*, const MetricsReportInfo*,
+                                                 size_t);
 
 /**
  * The get config list callback function relays the status of the
@@ -261,6 +289,21 @@ int32_t clear_report_ready_listener(ServiceHolder* holder, void** outPreviousRep
 int32_t get_metrics_report(ServiceHolder* holder, const char* metrics_config_uuid,
                            const char* report_config_name, int32_t report_number, void* listener,
                            GetSerializedDataCallbackFunction cbFunc);
+
+/**
+ * Tells the telemetry service to send information of metrics reports which are ready.
+ * The IDs are sent back to the client using the callback function, along with the
+ * ready reports info listener object.
+ *
+ * @param holder An opaque pointer holding a reference to the telemetry_service.
+ * @param listener Reference to ready reports info listener object.
+ * @param cbFunc pointer to callback function. Callback function is used to send the IDs of metrics
+ * report.
+ *
+ * @return an integer status code that validates the parameters provided to the API
+ */
+int32_t get_ready_reports_info(ServiceHolder* holder, void* listener,
+                               ReadyReportsInfoCallbackFunction cbFunc);
 
 /**
  * Sets a status listener that receives status codes and messages for misc errors related

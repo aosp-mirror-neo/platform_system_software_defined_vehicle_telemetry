@@ -77,6 +77,10 @@ impl MetricsReportListener {
         Ok(metrics_report)
     }
 
+    pub(crate) fn get_ready_reports_info(&self) -> Vec<(String, String, i32)> {
+        self.metrics_report_store.lock().keys().cloned().collect()
+    }
+
     pub(crate) fn set_report_ready_listener(
         &self,
         listener: &Strong<dyn ITelemetryReportReadyListener>,

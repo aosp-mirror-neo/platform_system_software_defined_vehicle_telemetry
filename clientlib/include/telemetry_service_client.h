@@ -78,6 +78,9 @@ public:
                               int32_t reportNumber, void* metricsReportCbData,
                               GetSerializedDataCallbackFunction metricsReportCb);
 
+    Status get_ready_reports_info(void* readyReportsInfoCbData,
+                                  ReadyReportsInfoCallbackFunction readyReportsInfoCb);
+
     Status set_misc_status_listener(void* miscStatusCbData, StatusCallbackFunction miscStatusCb,
                                     void* statusCbData, StatusCallbackFunction statusCb,
                                     void** outPreviousMiscStatusCbData);

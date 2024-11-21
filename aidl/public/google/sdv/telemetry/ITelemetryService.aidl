@@ -5,6 +5,7 @@ package google.sdv.telemetry;
 import google.sdv.telemetry.ITelemetryApiStatusListener;
 import google.sdv.telemetry.ITelemetryConfigListListener;
 import google.sdv.telemetry.ITelemetryMiscStatusListener;
+import google.sdv.telemetry.ITelemetryReadyReportsInfoListener;
 import google.sdv.telemetry.ITelemetryReportListener;
 import google.sdv.telemetry.ITelemetryReportReadyListener;
 
@@ -94,6 +95,13 @@ interface ITelemetryService {
     void getMetricsReport(in @utf8InCpp String metricsConfigUuid,
             in @utf8InCpp String metricsReportConfigName, in int reportNumber,
             in ITelemetryReportListener listener);
+
+    /**
+     * Sends finished telemetry reports info: metricsConfigUuid, reportConfigName and reportNumber
+     *
+     * @param listener Listener that is used to send IDs of ready reports
+     */
+    void getReadyReportsInfo(in ITelemetryReadyReportsInfoListener listener);
 
     /**
      * Registers a listener for receiving notifications when a metrics report is ready. If a

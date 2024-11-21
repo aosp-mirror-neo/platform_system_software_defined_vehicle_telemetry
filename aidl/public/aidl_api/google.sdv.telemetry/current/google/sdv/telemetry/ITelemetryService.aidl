@@ -32,6 +32,7 @@ interface ITelemetryService {
     void getMetricsReport(in @utf8InCpp String metricsConfigUuid,
             in @utf8InCpp String metricsReportConfigName, in int reportNumber,
             in google.sdv.telemetry.ITelemetryReportListener listener);
+    void getReadyReportsInfo(in google.sdv.telemetry.ITelemetryReadyReportsInfoListener listener);
     void registerReportReadyListener(
             in int apiCallId, in google.sdv.telemetry.ITelemetryReportReadyListener listener);
     void registerApiStatusListener(in google.sdv.telemetry.ITelemetryApiStatusListener listener);
