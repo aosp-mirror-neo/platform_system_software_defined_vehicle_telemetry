@@ -356,7 +356,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
     ) -> binder::Result<()> {
-        self.status_listener.set_api_status_listener(new_listener)
+        Arc::clone(&self.status_listener).set_api_status_listener(new_listener)
     }
 
     #[instrument(skip(self))]
@@ -365,8 +365,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         api_call_id: i32,
         new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
     ) -> binder::Result<()> {
-        self.status_listener.set_misc_status_listener(api_call_id, new_listener);
-        Ok(())
+        Arc::clone(&self.status_listener).set_misc_status_listener(api_call_id, new_listener)
     }
 
     #[instrument(skip(self, report_listener))]
@@ -629,32 +628,17 @@ mod tests {
 
     /// This struct is defined to implement ITelemetryApiStatusListener AIDL interface for unit
     /// testing purposes
-    #[derive(Clone)]
-    struct MockTelemetryApiStatusListener {
-        status: Arc<Mutex<StatusCodes>>,
-    }
+    struct MockTelemetryApiStatusListener {}
 
     impl binder::Interface for MockTelemetryApiStatusListener {}
-
-    impl MockTelemetryApiStatusListener {
-        fn new() -> Self {
-            Self { status: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)) }
-        }
-
-        pub fn get_status_code(&self) -> StatusCodes {
-            *self.status.lock()
-        }
-    }
 
     impl ITelemetryApiStatusListener for MockTelemetryApiStatusListener {
         fn sendStatus(
             &self,
             _api_call_id: i32,
-            status_code: StatusCodes,
+            _status_code: StatusCodes,
             _status_msg: &str,
         ) -> binder::Result<()> {
-            *self.status.lock() = status_code;
-
             Ok(())
         }
     }
@@ -672,6 +656,7 @@ mod tests {
     }
 
     struct MockStatusListener {
+        api_status_code: Arc<Mutex<Option<StatusCodes>>>,
         api_listener: Arc<Mutex<Option<binder::Strong<dyn ITelemetryApiStatusListener>>>>,
         misc_listener: Arc<Mutex<Option<(i32, binder::Strong<dyn ITelemetryMiscStatusListener>)>>>,
     }
@@ -679,6 +664,7 @@ mod tests {
     impl MockStatusListener {
         fn new() -> Self {
             Self {
+                api_status_code: Arc::new(Mutex::new(None)),
                 api_listener: Arc::new(Mutex::new(None)),
                 misc_listener: Arc::new(Mutex::new(None)),
             }
@@ -689,9 +675,10 @@ mod tests {
         fn send_api_status(
             &self,
             _api_call_id: i32,
-            _status_code: StatusCodes,
+            status_code: StatusCodes,
             _status_message: &str,
         ) {
+            self.api_status_code.lock().replace(status_code);
         }
 
         fn send_misc_status(&self, _status_code: StatusCodes, _status_message: &str) {}
@@ -705,7 +692,7 @@ mod tests {
         }
 
         fn set_api_status_listener(
-            &self,
+            self: Arc<Self>,
             new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
         ) -> binder::Result<()> {
             self.api_listener.lock().replace(new_listener.clone());
@@ -713,17 +700,18 @@ mod tests {
         }
 
         fn set_misc_status_listener(
-            &self,
+            self: Arc<Self>,
             api_call_id: i32,
             new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
-        ) {
+        ) -> binder::Result<()> {
             self.misc_listener.lock().replace((api_call_id, new_listener.clone()));
+            Ok(())
         }
     }
 
     struct TestEnvironment {
         service: SdvTelemetryService,
-        api_status_listener: Option<MockTelemetryApiStatusListener>,
+        status_listener: Arc<MockStatusListener>,
         metrics_config_manager: Arc<MockMetricsConfigManager>,
         num_add_metrics_config_calls: Arc<Mutex<i32>>,
         num_activate_metrics_config_calls: Arc<Mutex<i32>>,
@@ -766,9 +754,12 @@ mod tests {
                 metrics_config_manager::mock::MockMetricsConfigManager,
             >::clone(&metrics_config_manager);
 
+            let status_listener = Arc::new(MockStatusListener::new());
+            service.status_listener = Arc::<MockStatusListener>::clone(&status_listener);
+
             TestEnvironment {
                 service,
-                api_status_listener: None,
+                status_listener,
                 metrics_config_manager,
                 num_add_metrics_config_calls: Arc::clone(&num_add_metrics_config_calls),
                 num_activate_metrics_config_calls: Arc::clone(&num_activate_metrics_config_calls),
@@ -782,22 +773,8 @@ mod tests {
             }
         }
 
-        pub async fn set_mock_api_status_listener(&mut self) {
-            let api_status_listener = MockTelemetryApiStatusListener::new();
-
-            let binder_status_listener = BnTelemetryApiStatusListener::new_binder(
-                api_status_listener.clone(),
-                BinderFeatures::default(),
-            );
-
-            self.service.registerApiStatusListener(&binder_status_listener).await.unwrap();
-            self.api_status_listener = Some(api_status_listener);
-
-            assert_eq!(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, self.get_status_code());
-        }
-
         pub fn get_status_code(&self) -> StatusCodes {
-            self.api_status_listener.as_ref().unwrap().get_status_code()
+            self.status_listener.api_status_code.lock().expect("Status code should be set")
         }
 
         pub fn get_num_add_metrics_config_calls(&self) -> i32 {
@@ -847,8 +824,7 @@ mod tests {
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
 
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID1);
@@ -872,8 +848,7 @@ mod tests {
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
 
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID1);
@@ -904,8 +879,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config = create_serialized_config(UUID1);
         test_environment
@@ -928,8 +902,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(
@@ -945,8 +918,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config = create_serialized_config(UUID1);
         test_environment
@@ -973,10 +945,10 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
+
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
             test_environment.get_status_code()
@@ -990,8 +962,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config = create_serialized_config(UUID1);
         test_environment
@@ -1018,10 +989,10 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
+
         assert_eq!(
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
             test_environment.get_status_code()
@@ -1035,8 +1006,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_all_metrics_configs";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config1 = create_serialized_config(UUID1);
         let serialized_config2 = create_serialized_config(UUID2);
@@ -1069,11 +1039,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_active_metrics_config_uuids";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let config_list_listener = MockTelemetryConfigListListener::new();
-
         let binder_config_list_listener = BnTelemetryConfigListListener::new_binder(
             config_list_listener.clone(),
             BinderFeatures::default(),
@@ -1105,9 +1072,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_inactive_metrics_config_uuids";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let config_list_listener = MockTelemetryConfigListListener::new();
 
         let binder_config_list_listener = BnTelemetryConfigListListener::new_binder(
@@ -1141,11 +1106,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "clear_report_ready_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let report_ready_listener = MockTelemetryReportReadyListener::new();
-
         let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
             report_ready_listener.clone(),
             BinderFeatures::default(),
@@ -1177,11 +1139,8 @@ mod tests {
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "set_report_ready_listener";
 
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let report_ready_listener = MockTelemetryReportReadyListener::new();
-
         let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
             report_ready_listener.clone(),
             BinderFeatures::default(),
@@ -1205,11 +1164,8 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "check_on_ready_calls";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let report_ready_listener = MockTelemetryReportReadyListener::new();
-
         let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
             report_ready_listener.clone(),
             BinderFeatures::default(),
@@ -1237,9 +1193,7 @@ mod tests {
     #[tokio::test]
     async fn set_multiple_report_ready_listener_fails() {
         const ROOT_PATH: &str = "set_multiple_report_ready_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
-
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let report_listener = BnTelemetryReportReadyListener::new_binder(
             MockTelemetryReportReadyListener::new(),
             BinderFeatures::default(),
@@ -1271,28 +1225,22 @@ mod tests {
     #[tokio::test]
     async fn register_api_status_listener_success() {
         const ROOT_PATH: &str = "register_api_status_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        let status_listener = Arc::new(MockStatusListener::new());
-        test_environment.service.status_listener =
-            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
         let mock_api_listener = BnTelemetryApiStatusListener::new_binder(
-            MockTelemetryApiStatusListener::new(),
+            MockTelemetryApiStatusListener {},
             BinderFeatures::default(),
         );
 
         test_environment.service.registerApiStatusListener(&mock_api_listener).await.unwrap();
 
-        assert!(status_listener.api_listener.lock().is_some());
+        assert!(test_environment.status_listener.api_listener.lock().is_some());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn register_misc_status_listener_success() {
         const ROOT_PATH: &str = "register_misc_status_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        let status_listener = Arc::new(MockStatusListener::new());
-        test_environment.service.status_listener =
-            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let misc_status_listener = MockTelemetryMiscStatusListener {};
         let binder_listener = BnTelemetryMiscStatusListener::new_binder(
@@ -1302,7 +1250,7 @@ mod tests {
 
         test_environment.service.registerMiscStatusListener(123, &binder_listener).await.unwrap();
 
-        let listener = status_listener.misc_listener.lock();
+        let listener = test_environment.status_listener.misc_listener.lock();
         assert!(listener.is_some());
     }
 
@@ -1310,12 +1258,9 @@ mod tests {
     #[tokio::test]
     async fn unregister_api_status_listener_success() {
         const ROOT_PATH: &str = "unregister_api_status_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        let status_listener = Arc::new(MockStatusListener::new());
-        test_environment.service.status_listener =
-            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        let api_status_listener = MockTelemetryApiStatusListener::new();
+        let api_status_listener = MockTelemetryApiStatusListener {};
         let binder_listener = BnTelemetryApiStatusListener::new_binder(
             api_status_listener,
             BinderFeatures::default(),
@@ -1327,17 +1272,14 @@ mod tests {
         // Then unregister
         test_environment.service.unregisterApiStatusListener().await.unwrap();
 
-        assert!(status_listener.api_listener.lock().is_none());
+        assert!(test_environment.status_listener.api_listener.lock().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unregister_misc_status_listener_success() {
         const ROOT_PATH: &str = "unregister_misc_status_listener";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        let status_listener = Arc::new(MockStatusListener::new());
-        test_environment.service.status_listener =
-            Arc::clone(&status_listener) as Arc<dyn StatusListener>;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let misc_status_listener = MockTelemetryMiscStatusListener {};
         let binder_listener = BnTelemetryMiscStatusListener::new_binder(
@@ -1351,7 +1293,7 @@ mod tests {
         // Then unregister
         test_environment.service.unregisterMiscStatusListener().await.unwrap();
 
-        assert!(status_listener.misc_listener.lock().is_none());
+        assert!(test_environment.status_listener.misc_listener.lock().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -1360,8 +1302,7 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_metrics_report";
-        let mut test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
-        test_environment.set_mock_api_status_listener().await;
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         // Setting Report Ready Listener
 
