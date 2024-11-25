@@ -8,10 +8,6 @@ use sdv_comms::sd::{PublisherUnitMetadata, UnitMetadata, UnitRegistrationArgs, U
 use sdv_comms::ContextRef;
 use sdv_telemetry_utils::conversions::u32_into_usize;
 
-/// The old, deprecated implementation of a data tunnel publisher for the DT API v0.
-pub type DeprecatedDataTunnelPublisher =
-    crate::deprecated_data_tunnel_publisher::DeprecatedDataTunnelPublisher;
-
 /// Represents the data publisher side of a data tunnel.
 pub struct DataTunnelPublisher {
     dt_publisher: dt::Publisher,

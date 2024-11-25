@@ -220,14 +220,14 @@ rust_binary {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
-        "libcxx",
-        "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
         "librand",
         "libsample_publisher_proto",
-        "libsdv_dt_rust",
+        "libsdv_comms_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
         "libsdv_telemetry_dt_wrapper",
         "libsdv_telemetry_metadata_proto_rust",
         "libsdv_telemetry_utils",
@@ -244,8 +244,6 @@ rust_binary {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
-        "libcxx",
-        "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
@@ -284,8 +282,6 @@ rust_binary {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
-        "libcxx",
-        "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
@@ -323,9 +319,7 @@ rust_binary {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
-        "libcxx",
         "liberror_report_publisher_proto",
-        "liblibc",
         "liblog_rust",
         "liblogger",
         "libprotobuf",

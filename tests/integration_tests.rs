@@ -13,9 +13,7 @@ use sdv_comms::ContextRef;
 use sdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader::{publisher, TireSensorsReader};
 use sdv_mw_rs_sdv_comms::SdvComms;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::{
-    DataTunnelPublisher, DeprecatedDataTunnelPublisher,
-};
+use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsConfig,
@@ -123,58 +121,19 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Successfully finished service");
 }
 
-enum Publisher {
-    Deprecated(DeprecatedDataTunnelPublisher),
-    Current(DataTunnelPublisher),
-}
-
-impl Publisher {
-    pub fn publish_length_delimited_proto<M: protobuf::Message>(
-        &self,
-        message: &M,
-    ) -> anyhow::Result<()> {
-        match self {
-            Self::Deprecated(publisher) => publisher.publish_length_delimited_proto(message),
-            Self::Current(publisher) => publisher.publish_length_delimited_proto(message),
-        }
-    }
-}
-
-async fn create_deprecated_publisher(
-    topic_name: &str,
-    publisher_metadata: TelemetryPublisherMetadata,
-) -> anyhow::Result<Publisher> {
-    let publisher_metadata = {
-        let mut vec = vec![];
-        publisher_metadata.write_to_vec(&mut vec)?;
-        vec
-    };
-    let publisher =
-        DeprecatedDataTunnelPublisher::register_topic(topic_name, 100, 100, publisher_metadata)?;
-    Ok(Publisher::Deprecated(publisher))
-}
-
 async fn create_publisher(
     ctx: ContextRef,
     unit_type: &UnitType,
     unit_name: &str,
     publisher_metadata: TelemetryPublisherMetadata,
-) -> anyhow::Result<Publisher> {
+) -> anyhow::Result<DataTunnelPublisher> {
     let publisher_metadata = {
         let mut vec = vec![];
         publisher_metadata.write_to_vec(&mut vec)?;
         vec
     };
-    let publisher = DataTunnelPublisher::register_topic(
-        ctx,
-        unit_type,
-        unit_name,
-        100,
-        100,
-        publisher_metadata,
-    )
-    .await?;
-    Ok(Publisher::Current(publisher))
+    DataTunnelPublisher::register_topic(ctx, unit_type, unit_name, 100, 100, publisher_metadata)
+        .await
 }
 
 fn get_int_field_value(message: &dyn MessageDyn, name: &str) -> i32 {
@@ -200,7 +159,7 @@ fn get_int_vector_field_value(message: &dyn MessageDyn, name: &str) -> Vec<i32> 
         .collect()
 }
 
-async fn run_vector_aggregation_test(publisher: Publisher, service_name: String) {
+async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_name: String) {
     // Publish a few messages _before_ subscribing.
     for i in -3..=-1 {
         publisher
@@ -272,26 +231,6 @@ async fn run_vector_aggregation_test(publisher: Publisher, service_name: String)
     eprintln!("{result:?}");
 
     assert_eq!(result, (1..=70).collect::<Vec<_>>());
-}
-
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
-#[tokio::test]
-async fn telemetry_service_vector_aggregation_deprecated_publisher() {
-    setup_once();
-
-    let topic_name = unique_dt_topic_name();
-    let publisher = create_deprecated_publisher(
-        &topic_name,
-        TelemetryPublisherMetadata {
-            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
-            ..Default::default()
-        },
-    )
-    .await
-    .unwrap();
-
-    run_vector_aggregation_test(publisher, topic_name).await;
 }
 
 #[sdv_telemetry_test_utils_macros::timeout(30_000)]

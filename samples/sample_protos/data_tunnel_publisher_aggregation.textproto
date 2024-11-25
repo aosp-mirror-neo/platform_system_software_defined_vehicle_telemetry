@@ -45,7 +45,7 @@ descriptor_protos {
 publishers {
   name: "TestPublisher"
   service_publisher {
-    service_name: "DataTunnelSampleService"
+    service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherSample#Sample|default"
   }
 }
 publishers {

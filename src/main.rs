@@ -10,7 +10,6 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 use sdv_telemetry::service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry_dt_wrapper::comms_stack_accessor::CommsStackAccessor;
-use sdv_telemetry_dt_wrapper::deprecated_data_tunnel_subscriber::DeprecatedDataTunnelSubscriber;
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistryService,
 };
@@ -50,13 +49,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create Configurable Publishers
     let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
     let comms_stack_accessor = Arc::new(CommsStackAccessor::new(ctx_future));
-    let deprecated_data_tunnel_subscriber = Arc::new(DeprecatedDataTunnelSubscriber::new());
 
     // Add all service publishers to the manager in order of priority
     let service_publishers = vec![
         Arc::clone(&configurable_publisher_registry) as Arc<dyn ServicePublisherAccessor>,
         comms_stack_accessor as Arc<dyn ServicePublisherAccessor>,
-        deprecated_data_tunnel_subscriber as Arc<dyn ServicePublisherAccessor>,
     ];
 
     // Create Service Publisher Manager
