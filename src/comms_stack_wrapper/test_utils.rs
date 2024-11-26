@@ -10,8 +10,8 @@ use sdv_comms::sd::{
     PublisherUnitMetadata, ServerUnitMetadata, UnitMetadata, UnitRegistrationArgs, UnitType,
 };
 use sdv_comms::ContextRef;
+use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvResult;
-use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
 use std::{collections::HashMap, str::FromStr};
 
@@ -58,7 +58,7 @@ pub(super) fn make_unique_unit_type() -> UnitType {
 pub(super) async fn register_topic(
     ctx: ContextRef,
     service_name: &str,
-    publisher_metadata: TelemetryPublisherMetadata,
+    publisher_metadata: MessageMetadata,
 ) -> SdvResult<dt::Publisher> {
     let mut unit_registration_args = create_registration_args(service_name, publisher_metadata);
 
@@ -73,7 +73,7 @@ pub(super) async fn register_topic(
 pub(super) async fn register_server(
     ctx: ContextRef,
     service_name: &str,
-    publisher_metadata: TelemetryPublisherMetadata,
+    publisher_metadata: MessageMetadata,
     method_name: String,
     method_fn: rpc::RpcMethod,
 ) -> SdvResult<rpc::Server> {
@@ -95,7 +95,7 @@ pub(super) async fn register_server(
 
 fn create_registration_args(
     service_name: &str,
-    publisher_metadata: TelemetryPublisherMetadata,
+    publisher_metadata: MessageMetadata,
 ) -> UnitRegistrationArgs {
     let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
         ServiceName::parse(service_name).unwrap()

@@ -11,8 +11,8 @@ use sample_publisher_proto::sample_publisher::{self, SampleMessage};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::{ServerUnitMetadata, UnitMetadata, UnitRegistrationArgs, UnitType};
 use sdv_comms::{rpc, ContextRef};
+use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvResult;
-use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::logging;
 use std::collections::HashMap;
 use std::future;
@@ -58,9 +58,11 @@ async fn create_server(
     unit_type: &UnitType,
     unit_name: &str,
 ) -> anyhow::Result<rpc::Server> {
-    let mut server_metadata = TelemetryPublisherMetadata::new();
-    server_metadata.descriptor_protos = vec![sample_publisher::file_descriptor().proto().clone()];
-    server_metadata.message_type_name = format!(".{}", SampleMessage::descriptor().full_name());
+    let server_metadata = MessageMetadata {
+        file_descriptors: vec![sample_publisher::file_descriptor().proto().clone()],
+        message_full_name: format!(".{}", SampleMessage::descriptor().full_name()),
+        ..Default::default()
+    };
 
     let mut server_unit_metadata = ServerUnitMetadata::new();
     server_unit_metadata.set_version(1);

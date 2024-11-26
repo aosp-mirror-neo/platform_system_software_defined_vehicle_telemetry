@@ -11,9 +11,9 @@ use protobuf::{Message, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
+use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
-use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::str::FromStr;
 use std::time::Duration;
@@ -48,11 +48,11 @@ async fn create_dt_publisher(
     unit_type: &UnitType,
     unit_name: &str,
 ) -> anyhow::Result<DataTunnelPublisher> {
-    let mut publisher_metadata = TelemetryPublisherMetadata::new();
-    publisher_metadata.descriptor_protos =
-        vec![tire_pressure_publisher::file_descriptor().proto().clone()];
-    publisher_metadata.message_type_name =
-        format!(".{}", TirePressureData::descriptor().full_name());
+    let publisher_metadata = MessageMetadata {
+        file_descriptors: vec![tire_pressure_publisher::file_descriptor().proto().clone()],
+        message_full_name: format!(".{}", TirePressureData::descriptor().full_name()),
+        ..Default::default()
+    };
 
     DataTunnelPublisher::register_topic(
         ctx,

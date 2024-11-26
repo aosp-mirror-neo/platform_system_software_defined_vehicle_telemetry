@@ -6,11 +6,6 @@ filegroup {
 }
 
 filegroup {
-    name: "sdv_telemetry_metadata_proto_srcs",
-    srcs: ["metadata_protos/*.proto"],
-}
-
-filegroup {
     name: "sdv_telemetry_simulator_proto_srcs",
     srcs: ["simulator/*.proto"],
 }
@@ -62,19 +57,6 @@ rust_protobuf {
     vendor_available: true,
     system_ext_specific: true,
     visibility: ["//visibility:public"],
-}
-
-rust_protobuf {
-    name: "libsdv_telemetry_metadata_proto_rust",
-    crate_name: "sdv_telemetry_metadata_proto_rust",
-    protos: [":sdv_telemetry_metadata_proto_srcs"],
-    proto_flags: [
-        "-I external/protobuf/src",
-        "-I .",
-    ],
-    source_stem: "sdv_telemetry_metadata_proto_rust_source",
-    vendor_available: true,
-    system_ext_specific: true,
 }
 
 rust_protobuf {

@@ -12,9 +12,9 @@ use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
 use sdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader::{publisher, TireSensorsReader};
 use sdv_mw_rs_sdv_comms::SdvComms;
+use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
-use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsConfig,
 };
@@ -125,7 +125,7 @@ async fn create_publisher(
     ctx: ContextRef,
     unit_type: &UnitType,
     unit_name: &str,
-    publisher_metadata: TelemetryPublisherMetadata,
+    publisher_metadata: MessageMetadata,
 ) -> anyhow::Result<DataTunnelPublisher> {
     let publisher_metadata = {
         let mut vec = vec![];
@@ -246,9 +246,9 @@ async fn telemetry_service_vector_aggregation() {
         ctx,
         &unit_type,
         UNIT_NAME,
-        TelemetryPublisherMetadata {
-            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+        MessageMetadata {
+            file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+            message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
             ..Default::default()
         },
     )
@@ -271,9 +271,9 @@ async fn telemetry_service_vector_aggregation_with_fqin() {
         ctx,
         &unit_type,
         UNIT_NAME,
-        TelemetryPublisherMetadata {
-            descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-            message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+        MessageMetadata {
+            file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+            message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
             ..Default::default()
         },
     )

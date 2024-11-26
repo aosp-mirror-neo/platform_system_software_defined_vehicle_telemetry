@@ -15,13 +15,13 @@ use sdv_comms::sd::{
     UnitNameDiscoveryArgs,
 };
 use sdv_comms::ContextRef;
+use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
     ServicePublisherAccessor, ServicePublisherMetadata,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
-use sdv_telemetry_metadata_proto_rust::publisher_metadata::TelemetryPublisherMetadata;
 use sdv_telemetry_utils::descriptor_utils;
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, option_extension::OptionExtension,
@@ -293,25 +293,25 @@ impl CommsStackAccessor {
         service_unit_definition: &ServiceUnitDefinition,
     ) -> anyhow::Result<MessageDescriptor> {
         let app_metadata = service_unit_definition.get_application_metadata();
-        let publisher_metadata =
-            TelemetryPublisherMetadata::parse_from_bytes(app_metadata.as_slice()).with_context(
-                || format!("Failed to parse publisher app metadata for service '{service_name}'."),
-            )?;
+        let publisher_metadata = MessageMetadata::parse_from_bytes(app_metadata.as_slice())
+            .with_context(|| {
+                format!("Failed to parse publisher app metadata for service '{service_name}'.")
+            })?;
 
         // Build the provided proto file descriptors.
         let file_descriptors = FileDescriptor::new_dynamic_fds(
-            publisher_metadata.descriptor_protos,
+            publisher_metadata.file_descriptors,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )
         .map_err(|e| anyhow!("Invalid Descriptor Protos: {}", e))?;
 
         descriptor_utils::find_message_by_full_name(
             &file_descriptors,
-            &publisher_metadata.message_type_name,
+            &publisher_metadata.message_full_name,
         )
         .ok_or(anyhow!(
             "Message Name {} not found in descriptor",
-            publisher_metadata.message_type_name
+            publisher_metadata.message_full_name
         ))
     }
 }
@@ -401,9 +401,9 @@ mod integration_tests {
         let _publisher = test_utils::register_topic(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -495,9 +495,9 @@ mod integration_tests {
         let _publisher = test_utils::register_topic(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -529,9 +529,9 @@ mod integration_tests {
         let _publisher = test_utils::register_topic(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -576,9 +576,9 @@ mod integration_tests {
         let publisher = test_utils::register_topic(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -635,9 +635,9 @@ mod integration_tests {
         let publisher = test_utils::register_topic(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -699,9 +699,9 @@ mod integration_tests {
         let _server = test_utils::register_server(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![wrappers::file_descriptor().proto().clone()],
-                message_type_name: Int32Value::descriptor().full_name().to_owned(),
+            MessageMetadata {
+                file_descriptors: vec![wrappers::file_descriptor().proto().clone()],
+                message_full_name: Int32Value::descriptor().full_name().to_owned(),
                 ..Default::default()
             },
             "CreateSubscription".to_owned(),
@@ -762,9 +762,9 @@ mod integration_tests {
         let publisher = test_utils::register_topic(
             ctx,
             &service_name,
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -815,9 +815,9 @@ mod integration_tests {
         let _publisher1 = test_utils::register_topic(
             ctx,
             &format!("{unit_type}|{UNIT_NAME}"),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -826,9 +826,9 @@ mod integration_tests {
         let _publisher2 = test_utils::register_topic(
             ctx,
             &format!("{}|another-unit-name", test_utils::make_unique_unit_type()),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -855,9 +855,9 @@ mod integration_tests {
         let _publisher1 = test_utils::register_topic(
             ctx2,
             &format!("{unit_type}|first-unit-name"),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -866,9 +866,9 @@ mod integration_tests {
         let _publisher2 = test_utils::register_topic(
             ctx3,
             &format!("{unit_type}|second-unit-name"),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -911,9 +911,9 @@ mod integration_tests {
         let _publisher1 = test_utils::register_topic(
             ctx,
             &format!("{unit_type}|{UNIT_NAME}"),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -922,9 +922,9 @@ mod integration_tests {
         let _publisher2 = test_utils::register_topic(
             ctx,
             &format!("{unit_type}|another-unit-name"),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -986,11 +986,11 @@ mod integration_tests {
                         let _publisher = test_utils::register_topic(
                             ctx,
                             &service_name,
-                            TelemetryPublisherMetadata {
-                                descriptor_protos: vec![test_message::file_descriptor()
+                            MessageMetadata {
+                                file_descriptors: vec![test_message::file_descriptor()
                                     .proto()
                                     .clone()],
-                                message_type_name: format!(
+                                message_full_name: format!(
                                     ".{}",
                                     TestMessage::descriptor().full_name()
                                 ),
@@ -1095,9 +1095,9 @@ mod integration_tests {
         let _publisher1 = test_utils::register_topic(
             ctx,
             &format!("{}|{UNIT_NAME}", test_utils::make_unique_unit_type()),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
@@ -1106,9 +1106,9 @@ mod integration_tests {
         let publisher2 = test_utils::register_topic(
             ctx,
             &format!("{}|{UNIT_NAME}", test_utils::make_unique_unit_type()),
-            TelemetryPublisherMetadata {
-                descriptor_protos: vec![test_message::file_descriptor().proto().clone()],
-                message_type_name: format!(".{}", TestMessage::descriptor().full_name()),
+            MessageMetadata {
+                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
                 ..Default::default()
             },
         )
