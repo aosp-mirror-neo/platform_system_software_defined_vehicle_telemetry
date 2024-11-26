@@ -1,0 +1,40 @@
+// Copyright 2024 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+filegroup {
+    name: "sdv_telemetry_simulator_proto_srcs",
+    srcs: ["*.proto"],
+}
+
+rust_protobuf {
+    name: "libsdv_telemetry_proto_simulation_publisher",
+    crate_name: "sdv_telemetry_proto_simulation_publisher",
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    protos: [":sdv_telemetry_simulator_proto_srcs"],
+    source_stem: "sdv_telemetry_proto_simulation_publisher_source",
+    vendor_available: true,
+}
+
+python_library_host {
+    name: "libsdv_telemetry_proto_simulation_publisher_python",
+    version: {
+        py3: {
+            enabled: true,
+        },
+    },
+    srcs: [":sdv_telemetry_simulator_proto_srcs"],
+    proto: {
+        canonical_path_from_root: true,
+        include_dirs: [
+            "external/protobuf/src",
+            ".",
+        ],
+    },
+}
