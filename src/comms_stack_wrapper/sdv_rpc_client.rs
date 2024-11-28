@@ -9,12 +9,13 @@ use futures::StreamExt;
 use log::error;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::{any::Any, empty::Empty};
-use protobuf::MessageDyn;
+use protobuf::{Message, MessageDyn};
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::ContextRef;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMessageProvider,
+    ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -34,10 +35,55 @@ impl SdvRpcClient {
 
     pub(super) async fn get_message_provider(
         &self,
-        _unit_identifier: UnitIdentifier,
-        _message_descriptor: MessageDescriptor,
+        unit_identifier: UnitIdentifier,
+        message_descriptor: MessageDescriptor,
     ) -> anyhow::Result<GetMessageProviderOutcome> {
-        Ok(GetMessageProviderOutcome::GetNotSupported)
+        let client = rpc::Client::create(
+            self.ctx.clone().await,
+            unit_identifier.clone(),
+            &rpc::ClientOptions::default(),
+        )
+        .await
+        .with_context(|| {
+            format!(
+                "Failed to connect to rpc server with unit identifier {}.",
+                Self::to_debug_string(&unit_identifier)
+            )
+        })?;
+
+        struct ServicePublisherMessageProviderImpl {
+            client: rpc::Client,
+            message_descriptor: MessageDescriptor,
+        }
+
+        #[async_trait]
+        impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            async fn get_latest_message(
+                &self,
+                configuration: Option<&Any>,
+            ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+                let configuration_bytes = SdvRpcClient::serialize_configuration(configuration);
+                let response_bytes = self
+                    .client
+                    .unary_call("GetLatestMessage", &configuration_bytes)
+                    .await
+                    .with_context(|| "Failed to make RPC call")?;
+                if response_bytes.is_empty() {
+                    return Ok(None);
+                }
+
+                let response = self
+                    .message_descriptor
+                    .parse_from_bytes(&response_bytes)
+                    .with_context(|| "Failed to convert bytes to protobuf message")?;
+                Ok(Some(response))
+            }
+        }
+
+        Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
+            client,
+            message_descriptor,
+        })))
     }
 
     pub(super) async fn create_subscription(
@@ -60,14 +106,7 @@ impl SdvRpcClient {
             )
         })?;
 
-        let configuration: Box<dyn MessageDyn> = if let Some(conf_msg) = configuration {
-            Box::new(conf_msg.to_owned())
-        } else {
-            Box::new(Empty::default())
-        };
-        let configuration_bytes = configuration
-            .write_to_bytes_dyn()
-            .expect("Configuration serialization should be successful");
+        let configuration_bytes = Self::serialize_configuration(configuration);
         let mut response_stream = client
             .server_streaming_call("CreateSubscription", &configuration_bytes)
             .await
@@ -103,6 +142,15 @@ impl SdvRpcClient {
             Box::new(SdvRpcSubscription { _subscription_drop_guard: subscription_drop_guard });
 
         Ok(CreateSubscriptionOutcome::Subscribed(subscription))
+    }
+
+    fn serialize_configuration(configuration: Option<&Any>) -> Vec<u8> {
+        if let Some(conf_msg) = configuration {
+            conf_msg.write_to_bytes()
+        } else {
+            Empty::default_instance().write_to_bytes()
+        }
+        .expect("Configuration serialization should be successful")
     }
 
     fn to_debug_string(unit_identifier: &UnitIdentifier) -> String {

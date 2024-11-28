@@ -789,6 +789,51 @@ mod integration_tests {
         assert_eq!(get_int_field_value(message3.unwrap().unwrap()), 2);
     }
 
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_rpc_message_provider_success() {
+        let ctx = test_utils::make_context(0).await;
+        let service_name = test_utils::make_unique_service_name();
+        let msg = Int32Value { value: 42, ..Default::default() };
+        let msg_bytes = msg.write_to_bytes().expect("Message should be successfully serialized");
+        let _server = test_utils::register_server(
+            ctx,
+            &service_name,
+            MessageMetadata {
+                file_descriptors: vec![wrappers::file_descriptor().proto().clone()],
+                message_full_name: Int32Value::descriptor().full_name().to_owned(),
+                ..Default::default()
+            },
+            "GetLatestMessage".to_owned(),
+            rpc::RpcMethod::Unary(Arc::new(move |_, _| {
+                future::ready(Ok(msg_bytes.clone())).boxed()
+            })),
+        )
+        .await
+        .unwrap();
+
+        let subscriber = create_accessor(ctx);
+        let outcome = subscriber
+            .get_message_provider(&service_name)
+            .await
+            .expect("Message provider retrieval should be successful");
+        let GetMessageProviderOutcome::Success(provider) = outcome else {
+            panic!("Unexpected outcome: {outcome:?}");
+        };
+        let received_msg = provider
+            .get_latest_message(None)
+            .await
+            .expect("Latest message retrieval should be successful")
+            .expect("Latest message should exist");
+
+        let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();
+        let value = value_field.get_singular(received_msg.as_ref()).unwrap();
+        assert!(
+            matches!(&value, ReflectValueRef::I32(val) if *val == msg.value),
+            "Unexpected value: {value:?}"
+        );
+    }
+
     // Unit Type -> 0 matches
     #[sdv_telemetry_test_utils_macros::timeout(5_000)]
     #[tokio::test]
