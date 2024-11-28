@@ -112,11 +112,10 @@ impl Publisher for AggregationPublisher {
                     Arc<NodeEvaluationContext>,
                 ),
             ) {
-                self.aggregation_publisher
-                    .upgrade()
-                    .expect("Handler should only be called when aggregation publisher is active")
-                    .on_new_message(build_result, context)
-                    .await;
+                let Some(aggregation_publisher) = self.aggregation_publisher.upgrade() else {
+                    return;
+                };
+                aggregation_publisher.on_new_message(build_result, context).await;
             }
         }
 
@@ -239,11 +238,7 @@ impl AggregationPublisher {
         let mut state_lock = self.state.lock().await;
 
         let AggregationPublisherState::Active { callback_map, .. } = &mut *state_lock else {
-            panic!(
-                "Publisher {} received callback when it was in the {} state",
-                self.get_name(),
-                state_lock
-            );
+            return;
         };
 
         let message = match build_result.into_future().await {

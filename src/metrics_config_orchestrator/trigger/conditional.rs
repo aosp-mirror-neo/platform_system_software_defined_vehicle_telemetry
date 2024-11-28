@@ -110,9 +110,10 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     Arc<NodeEvaluationContext>,
                 ),
             ) {
-                self.conditional_trigger
-                    .upgrade()
-                    .expect("Handler should only be called when conditional trigger is active")
+                let Some(conditional_trigger) = self.conditional_trigger.upgrade() else {
+                    return;
+                };
+                conditional_trigger
                     .on_new_message(
                         self.activation_id,
                         evaluation_result,

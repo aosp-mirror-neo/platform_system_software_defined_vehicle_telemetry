@@ -5,8 +5,8 @@
 use anyhow::anyhow;
 use log::{debug, info};
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
-use protobuf::well_known_types::wrappers::Int32Value;
-use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
+use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
+use protobuf::{text_format::parse_from_str, EnumOrUnknown, Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
@@ -15,8 +15,13 @@ use sdv_mw_rs_sdv_comms::SdvComms;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_proto_rust::expression::{
+    constant_leaf_node::Node_value, node::Node_type, ConstantLeafNode, Node,
+};
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    metrics_report::ReportReason, MetricsConfig,
+    conditional_trigger::ConditionType, metrics_report::ReportReason, publisher::Publisher_type,
+    trigger::Trigger_type, AggregationPublisher, ConditionalTrigger, MetricsConfig,
+    MetricsReportConfig, PeriodicTrigger, ProtoMessageBuilder, Publisher, Trigger,
 };
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
 use sdv_telemetry_sample_middleware_proto::tire::TirePressure;
@@ -30,6 +35,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::{Arc, Once};
+use std::time::Duration;
 use tokio::sync::{mpsc, OnceCell};
 
 const CONFIG_PATH: &str = "tests/config.textproto";
@@ -121,6 +127,208 @@ async fn telemetry_service_simple_config_end_to_end_test() {
 
     let ready_reports_info = service.get_ready_reports_info().await.unwrap();
     assert!(ready_reports_info.is_empty());
+
+    info!("Removing metrics config");
+    service.remove_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Finishing service");
+    service.finish().unwrap();
+
+    info!("Successfully finished service");
+}
+
+/// Test for b/382231226.
+///
+/// Creates a bunch of aggregation publishers that are all triggered by a periodic trigger with a
+/// very small interval (1ns). This test verifies that there is no race condition caused by a
+/// aggregation publisher being triggered when it is being deactivated.
+///
+/// The test is not perfect, and failures usually only show up when running it multiple times.
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_no_aggregation_publisher_race_condition_during_metrics_config_deactivation(
+) {
+    setup_once();
+
+    const NUM_PUBLISHERS: usize = 500;
+
+    let config = MetricsConfig {
+        uuid: "77619dc5-b19b-436c-89d7-b7b9d7619275".to_owned(),
+
+        triggers: vec![
+            Trigger {
+                name: "periodic_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_nanos(1).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "finish_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_secs(1).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ],
+
+        publishers: (0..NUM_PUBLISHERS)
+            .map(|i| Publisher {
+                name: format!("publisher_{i}"),
+                publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+                    trigger_names: vec!["periodic_trigger".to_owned()],
+                    message_builder: Some(ProtoMessageBuilder {
+                        message_type: Empty::descriptor().full_name().to_owned(),
+                        ..Default::default()
+                    })
+                    .into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>(),
+
+        finish_trigger_name: "finish_trigger".to_owned(),
+        metrics_report_configs: vec![MetricsReportConfig {
+            name: "some_metrics_report_config".to_owned(),
+            report_incomplete: true,
+            message_builder: Some(ProtoMessageBuilder {
+                message_type: Empty::descriptor().full_name().to_owned(),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    run_race_condition_test(config).await;
+}
+
+/// Test for b/382231226.
+///
+/// Creates a bunch of conditional triggers and aggregation publishers that are all triggered by a
+/// periodic trigger with a very small interval (1ns). This test verifies that there is no race
+/// condition caused by a conditional trigger being triggered when it is being deactivated.
+///
+/// The test is not perfect, and failures usually only show up when running it multiple times.
+#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_no_conditional_trigger_race_condition_during_metrics_config_deactivation(
+) {
+    setup_once();
+
+    const NUM_ENTITIES: usize = 500;
+
+    let config = MetricsConfig {
+        uuid: "78619dc5-b19b-436c-89d7-b7b9d7619275".to_owned(),
+
+        triggers: [
+            Trigger {
+                name: "periodic_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_nanos(1).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "finish_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_secs(1).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ]
+        .into_iter()
+        .chain((0..NUM_ENTITIES).map(|i| Trigger {
+            name: format!("conditional_trigger_{i}"),
+            trigger_type: Some(Trigger_type::ConditionalTrigger(ConditionalTrigger {
+                trigger_names: vec!["periodic_trigger".to_owned()],
+                selector_node_index: Some(0),
+                condition_type: EnumOrUnknown::new(ConditionType::IS_TRUE),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }))
+        .collect::<Vec<_>>(),
+
+        publishers: (0..NUM_ENTITIES)
+            .map(|i| Publisher {
+                name: format!("publisher_{i}"),
+                publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+                    trigger_names: vec![format!("conditional_trigger_{i}")],
+                    message_builder: Some(ProtoMessageBuilder {
+                        message_type: Empty::descriptor().full_name().to_owned(),
+                        ..Default::default()
+                    })
+                    .into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>(),
+
+        expression_nodes: vec![Node {
+            node_type: Some(Node_type::ConstantLeafNode(ConstantLeafNode {
+                node_value: Some(Node_value::BoolValue(true)),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }],
+
+        finish_trigger_name: "finish_trigger".to_owned(),
+        metrics_report_configs: vec![MetricsReportConfig {
+            name: "some_metrics_report_config".to_owned(),
+            report_incomplete: true,
+            message_builder: Some(ProtoMessageBuilder {
+                message_type: Empty::descriptor().full_name().to_owned(),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    run_race_condition_test(config).await;
+}
+
+async fn run_race_condition_test(config: MetricsConfig) {
+    let serialized_config = config.write_to_bytes().unwrap();
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    info!("Initializing service");
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status_code, status_msg| {
+                info!("Received status message {status_code:?}: {status_msg}");
+            },
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
+            },
+        )
+        .await
+        .unwrap();
+
+    info!("Adding config");
+    service.add_metrics_config(&serialized_config).await.unwrap();
+
+    info!("Activating config");
+    service.activate_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Waiting for metrics report ready notification");
+    let report_info = report_ready_rx.recv().await.unwrap();
+    assert_eq!(report_info.metrics_config_uuid, config.uuid);
+
+    info!("Retrieving metrics report");
+    let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
+    info!("Report received: {metrics_report:?}");
+    assert_eq!(report_info.metrics_config_uuid, metrics_report.metrics_config_uuid);
 
     info!("Removing metrics config");
     service.remove_metrics_config(&config.uuid).await.unwrap();

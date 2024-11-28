@@ -424,13 +424,10 @@ impl ServicePublisher {
                 #[async_trait]
                 impl AsyncEventHandler<Arc<dyn MessageDyn>> for ServicePublisherHandler {
                     async fn handle(&mut self, message: Arc<dyn MessageDyn>) {
-                        self.service_publisher
-                            .upgrade()
-                            .expect(
-                                "Handler should only be called when service publisher is active",
-                            )
-                            .on_new_message(message)
-                            .await;
+                        let Some(service_publisher) = self.service_publisher.upgrade() else {
+                            return;
+                        };
+                        service_publisher.on_new_message(message).await;
                     }
                 }
 
@@ -460,11 +457,7 @@ impl ServicePublisher {
         let mut state_lock = self.state.lock().await;
 
         let ServicePublisherState::ActiveSubscribed { callback_map, .. } = &mut *state_lock else {
-            panic!(
-                "Publisher {} received callback when it was in the {} state",
-                self.get_name(),
-                state_lock
-            );
+            return;
         };
 
         self.base.set_new_message(message, &context, callback_map);
