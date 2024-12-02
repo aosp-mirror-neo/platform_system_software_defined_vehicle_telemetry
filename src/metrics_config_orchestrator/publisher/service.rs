@@ -17,7 +17,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor,
+    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
@@ -435,7 +435,7 @@ impl ServicePublisher {
                 }
 
                 let event_processor = AsyncEventProcessor::new(
-                    receiver,
+                    AsyncReceiver::Unbounded(receiver),
                     ServicePublisherHandler { service_publisher: Arc::downgrade(self) },
                 );
                 maybe_subscription.map(|subscription| ServicePublisherState::ActiveSubscribed {

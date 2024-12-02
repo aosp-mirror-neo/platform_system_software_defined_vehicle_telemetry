@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor,
+    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
@@ -121,7 +121,7 @@ impl Publisher for AggregationPublisher {
         }
 
         let event_processor = AsyncEventProcessor::new(
-            receiver,
+            AsyncReceiver::Unbounded(receiver),
             AggregationPublisherHandler { aggregation_publisher: Arc::downgrade(&self) },
         );
 

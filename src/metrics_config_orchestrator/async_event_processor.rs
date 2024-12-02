@@ -1,8 +1,24 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
+
+pub(super) enum AsyncReceiver<T> {
+    #[allow(dead_code)]
+    Bounded(Receiver<T>),
+    Unbounded(UnboundedReceiver<T>),
+}
+
+impl<T> AsyncReceiver<T> {
+    async fn recv(&mut self) -> Option<T> {
+        match self {
+            AsyncReceiver::Bounded(ref mut receiver) => receiver.recv().await,
+            AsyncReceiver::Unbounded(ref mut receiver) => receiver.recv().await,
+        }
+    }
+}
 
 /// Receives and processes events asynchronously in a background task.
 pub(super) struct AsyncEventProcessor {
@@ -20,7 +36,7 @@ impl AsyncEventProcessor {
     ///
     /// The background task is cancelled and the receiver is dropped when the processor is dropped.
     pub(super) fn new<TEvent: Send + 'static>(
-        mut receiver: UnboundedReceiver<TEvent>,
+        mut receiver: AsyncReceiver<TEvent>,
         mut handler: impl AsyncEventHandler<TEvent> + Send + 'static,
     ) -> Self {
         let cancellation_token = CancellationToken::new();
@@ -82,11 +98,26 @@ mod tests {
     async fn process_events_success() {
         let (tx, rx) = mpsc::unbounded_channel();
         let handler = TestEventHandler::new();
-        let _processor = AsyncEventProcessor::new(rx, handler.clone());
+        let _processor = AsyncEventProcessor::new(AsyncReceiver::Unbounded(rx), handler.clone());
 
         tx.send(()).unwrap();
         tx.send(()).unwrap();
         tx.send(()).unwrap();
+        tokio::task::yield_now().await;
+
+        assert_eq!(handler.get_event_count(), 3);
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn process_events_with_bounded_receiver_success() {
+        let (tx, rx) = mpsc::channel(2);
+        let handler = TestEventHandler::new();
+        let _processor = AsyncEventProcessor::new(AsyncReceiver::Bounded(rx), handler.clone());
+
+        tx.send(()).await.unwrap();
+        tx.send(()).await.unwrap();
+        tx.send(()).await.unwrap();
         tokio::task::yield_now().await;
 
         assert_eq!(handler.get_event_count(), 3);
@@ -99,7 +130,8 @@ mod tests {
         let handler = TestEventHandler::new();
 
         {
-            let _processor = AsyncEventProcessor::new(rx, handler.clone());
+            let _processor =
+                AsyncEventProcessor::new(AsyncReceiver::Unbounded(rx), handler.clone());
             // `processor` is dropped here, so the background task should be cancelled.
         }
         // Before task is cancelled, send should be successful, but the event should not get processed.

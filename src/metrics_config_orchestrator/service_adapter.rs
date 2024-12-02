@@ -10,7 +10,7 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor,
+    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome,
@@ -272,7 +272,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             let callback_container = Arc::new(AsyncMutex::new(callbacks));
                             let callback_container_clone = Arc::clone(&callback_container);
                             let event_queue = AsyncEventProcessor::new(
-                                receiver,
+                                AsyncReceiver::Unbounded(receiver),
                                 ServiceAdapterHandler {
                                     callback_container: callback_container_clone,
                                 },

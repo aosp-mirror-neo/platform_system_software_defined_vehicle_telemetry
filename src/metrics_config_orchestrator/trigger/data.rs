@@ -9,7 +9,7 @@ use super::base::{BaseTrigger, TriggerState};
 use super::Trigger;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor,
+    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_orchestrator::subscription_manager::Activatable;
 use crate::metrics_config_orchestrator::trigger::{TriggerCallbackFn, TriggerSubscriber};
@@ -82,8 +82,10 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for DataTrigger 
             }
         }
 
-        let event_processor =
-            AsyncEventProcessor::new(receiver, DataTriggerHandler { callback_map });
+        let event_processor = AsyncEventProcessor::new(
+            AsyncReceiver::Unbounded(receiver),
+            DataTriggerHandler { callback_map },
+        );
 
         // Set the new state and release the mutex.
         *state_lock = TriggerState::Active { _event_processor: event_processor };

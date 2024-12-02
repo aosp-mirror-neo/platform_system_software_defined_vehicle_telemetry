@@ -16,7 +16,7 @@ use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor,
+    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_orchestrator::subscription_manager::Activatable;
 
@@ -128,7 +128,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         }
 
         let event_processor = AsyncEventProcessor::new(
-            receiver,
+            AsyncReceiver::Unbounded(receiver),
             ConditionalTriggerHandler {
                 callback_map,
                 conditional_trigger: Arc::downgrade(&self),
