@@ -5,9 +5,8 @@ use async_trait::async_trait;
 use log::error;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 use sdv_telemetry_utils::operation_result::OperationResult;
-use std::collections::HashMap;
 use std::sync::{Arc, Weak};
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio::sync::mpsc;
 
 use super::base::{BaseTrigger, TriggerState};
 use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
@@ -18,7 +17,7 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
-use crate::metrics_config_orchestrator::subscription_manager::Activatable;
+use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 
 pub(crate) enum ConditionType {
     RisingEdge,
@@ -59,10 +58,7 @@ impl Trigger for ConditionalTrigger {
 
 #[async_trait]
 impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalTrigger {
-    async fn activate(
-        self: Arc<Self>,
-        callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-    ) {
+    async fn activate(self: Arc<Self>, activation_id: ActivationId) {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.base.state.lock().await;
         assert!(
@@ -95,7 +91,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         }
 
         struct ConditionalTriggerHandler {
-            callback_map: Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
+            activation_id: ActivationId,
             conditional_trigger: Weak<ConditionalTrigger>,
             maybe_previous_value: Option<NodeValue>,
         }
@@ -118,8 +114,8 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     .upgrade()
                     .expect("Handler should only be called when conditional trigger is active")
                     .on_new_message(
+                        self.activation_id,
                         evaluation_result,
-                        &self.callback_map,
                         context,
                         &mut self.maybe_previous_value,
                     )
@@ -130,7 +126,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         let event_processor = AsyncEventProcessor::new(
             AsyncReceiver::Unbounded(receiver),
             ConditionalTriggerHandler {
-                callback_map,
+                activation_id,
                 conditional_trigger: Arc::downgrade(&self),
                 maybe_previous_value: None,
             },
@@ -255,8 +251,8 @@ impl ConditionalTrigger {
     /// a fire event from conditional trigger's associated parent trigger.
     async fn on_new_message(
         &self,
+        activation_id: ActivationId,
         evaluation_result: OperationResult<'static, NodeValue, NodeError>,
-        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
         context: Arc<NodeEvaluationContext>,
         maybe_previous_value: &mut Option<NodeValue>,
     ) {
@@ -282,29 +278,30 @@ impl ConditionalTrigger {
                 panic!("Failed to perform comparison for trigger {}: {}", self.get_name(), err)
             });
         if condition_result {
-            BaseTrigger::fire_trigger(self.get_name(), callback_map, &context).await;
+            self.base.fire_trigger(activation_id, context).await;
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use futures::FutureExt;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
-    use std::collections::HashMap;
     use std::future;
-    use tokio::sync::oneshot;
-    use tokio::sync::Mutex as AsyncMutex;
 
-    use super::*;
     use crate::expr::mock::MockMessageProvider;
     use crate::expr::node::Node;
-    use crate::metrics_config_orchestrator::trigger::mock::{MockCallbackListener, MockTrigger};
+    use crate::metrics_config_orchestrator::trigger::mock::{
+        MockCallbackListener, MockSubscriptionManager, MockTrigger,
+    };
 
     const TRIGGER_NAME: &str = "trigger";
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
+    const ACTIVATION_ID: ActivationId = ActivationId::new(3);
 
     fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {
         Node::FieldLeaf {
@@ -335,19 +332,50 @@ mod tests {
         (trigger, message_provider, parent_trigger)
     }
 
+    fn create_valid_conditional_trigger_with_mock_subscription_manager(
+        condition_type: ConditionType,
+        parent_trigger: Option<Arc<MockTrigger>>,
+    ) -> (
+        Arc<ConditionalTrigger>,
+        Arc<MockMessageProvider>,
+        Arc<MockTrigger>,
+        MockSubscriptionManager,
+    ) {
+        let (trigger, message_provider, parent_trigger) =
+            create_valid_conditional_trigger(condition_type, parent_trigger);
+
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        let subscription_manager = MockSubscriptionManager::new();
+        trigger.base.subscription_manager = Box::new(subscription_manager.clone());
+
+        (Arc::new(trigger), message_provider, parent_trigger, subscription_manager)
+    }
+
     async fn setup_active_conditional_trigger(
         condition_type: ConditionType,
     ) -> (
         Arc<ConditionalTrigger>,
         Arc<MockMessageProvider>,
         Arc<MockTrigger>,
-        Arc<MockCallbackListener<Arc<NodeEvaluationContext>>>,
+        Arc<MockCallbackListener<(ActivationId, Arc<NodeEvaluationContext>)>>,
     ) {
         let (trigger, message_provider, parent_trigger) =
             create_valid_conditional_trigger(condition_type, None);
 
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        let subscription_manager = MockSubscriptionManager::new();
+        trigger.base.subscription_manager = Box::new(subscription_manager.clone());
+        let trigger = Arc::new(trigger);
+
         let callback_listener = Arc::new(MockCallbackListener::new());
-        Arc::clone(&trigger).activate(callback_listener.create_callback_map()).await;
+        subscription_manager
+            .subscribe_for_test(
+                TriggerSubscriber::MetricsConfigStart,
+                callback_listener.create_callback(),
+            )
+            .await;
+
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
 
         (trigger, message_provider, parent_trigger, callback_listener)
     }
@@ -373,9 +401,19 @@ mod tests {
             ],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
         );
-        let callback_listener = Arc::new(MockCallbackListener::new());
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        let subscription_manager = MockSubscriptionManager::new();
+        trigger.base.subscription_manager = Box::new(subscription_manager.clone());
+        let trigger = Arc::new(trigger);
 
-        Arc::clone(&trigger).activate(callback_listener.create_callback_map()).await;
+        let callback_listener = Arc::new(MockCallbackListener::new());
+        subscription_manager
+            .subscribe_for_test(
+                TriggerSubscriber::MetricsConfigStart,
+                callback_listener.create_callback(),
+            )
+            .await;
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
 
         let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
         let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
@@ -397,7 +435,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
-    async fn activate_shares_context_across_subscribers() {
+    async fn shares_context_across_subscribers() {
         let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
@@ -410,18 +448,16 @@ mod tests {
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
         );
-        let callback_listener = Arc::new(MockCallbackListener::new());
-        let callback_map = callback_listener.create_callback_map();
 
-        // Add a second callback to `callback_map`.
-        let (child_context1_tx, child_context1_rx) = oneshot::channel();
-        let mut child_context1_tx = Some(child_context1_tx);
-        callback_map.lock().await.insert(
-            TriggerSubscriber::AggregationPublisher { name: "publisher-name".to_owned() },
-            Box::new(move |context| child_context1_tx.take().unwrap().send(context).unwrap()),
-        );
+        let callback_listener1 = Arc::new(MockCallbackListener::new());
+        let callback_listener2 = Arc::new(MockCallbackListener::new());
 
-        Arc::clone(&trigger).activate(callback_map).await;
+        Arc::clone(&trigger)
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, callback_listener1.create_callback())
+            .await;
+        Arc::clone(&trigger)
+            .subscribe(&TriggerSubscriber::MetricsConfigEnd, callback_listener2.create_callback())
+            .await;
 
         message_provider.set_next_sync_result(Ok(Some(Arc::new(Int32Value {
             value: 1,
@@ -429,10 +465,11 @@ mod tests {
         }))));
         parent_trigger.fire_with_context(Arc::clone(&parent_context)).await;
 
-        let child_context1 = child_context1_rx.await.unwrap();
-        let child_context2 = callback_listener.wait_for_callback_fired().await;
+        let child_context1 = callback_listener1.wait_for_callback_fired().await;
+        let child_context2 = callback_listener2.wait_for_callback_fired().await;
 
-        assert_eq!(callback_listener.get_fired_count(), 1);
+        assert_eq!(callback_listener1.get_fired_count(), 1);
+        assert_eq!(callback_listener2.get_fired_count(), 1);
         assert!(Arc::ptr_eq(&parent_context, &child_context1));
         assert!(Arc::ptr_eq(&parent_context, &child_context2));
     }
@@ -457,8 +494,9 @@ mod tests {
         parent_trigger.fire().await;
 
         // Wait for trigger to fire once.
-        callback_listener.wait_for_callback_fired().await;
+        let (activation_id, _context) = callback_listener.wait_for_callback_fired().await;
 
+        assert_eq!(activation_id, ACTIVATION_ID);
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
@@ -722,7 +760,7 @@ mod tests {
         let (trigger, _, _, _) = setup_active_conditional_trigger(ConditionType::AllChanges).await;
 
         // Activate the trigger again.
-        trigger.activate(Arc::new(AsyncMutex::new(HashMap::new()))).await;
+        trigger.activate(ActivationId::new(1)).await;
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -736,13 +774,13 @@ mod tests {
         let callback_listener_clone = Arc::clone(&callback_listener);
         parent_trigger
             .set_unsubscribe_callback(move |_| callback_listener_clone.on_callback_fired(()));
-        let (trigger, _, _) = create_valid_conditional_trigger(
+        let (trigger, _, _, _) = create_valid_conditional_trigger_with_mock_subscription_manager(
             ConditionType::AllChanges,
             Some(Arc::new(parent_trigger)),
         );
 
         // Activate the trigger.
-        Arc::clone(&trigger).activate(Arc::new(AsyncMutex::new(HashMap::new()))).await;
+        Arc::clone(&trigger).activate(ActivationId::new(1)).await;
 
         // Deactivate the trigger.
         trigger.deactivate().await;
@@ -755,7 +793,10 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn deactivate_inactive_panics() {
-        let (trigger, _, _) = create_valid_conditional_trigger(ConditionType::AllChanges, None);
+        let (trigger, _, _, _) = create_valid_conditional_trigger_with_mock_subscription_manager(
+            ConditionType::AllChanges,
+            None,
+        );
 
         // Deactivate the trigger.
         trigger.deactivate().await;

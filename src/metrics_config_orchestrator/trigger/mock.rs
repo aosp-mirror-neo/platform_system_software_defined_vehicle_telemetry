@@ -4,14 +4,13 @@ use super::*;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::metrics_config_orchestrator::subscription_manager::SubscriptionManager;
+use crate::metrics_config_orchestrator::subscription_manager::{ActivationId, SubscriptionManager};
 
 /// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {
@@ -118,16 +117,9 @@ impl<T: Send + 'static> MockCallbackListener<T> {
         self.fired_count.load(Ordering::Acquire)
     }
 
-    // Creates a map with a callback that is handled by this listener instance.
-    pub(super) fn create_callback_map(
-        self: &Arc<Self>,
-    ) -> Arc<AsyncMutex<HashMap<TriggerSubscriber, CallbackFn<T>>>> {
+    pub(super) fn create_callback(self: &Arc<Self>) -> CallbackFn<T> {
         let self_clone = Arc::clone(self);
-        let callback: CallbackFn<T> = Box::new(move |data| self_clone.on_callback_fired(data));
-        Arc::new(AsyncMutex::new(HashMap::from([(
-            TriggerSubscriber::MetricsConfigStart,
-            callback,
-        )])))
+        Box::new(move |data| self_clone.on_callback_fired(data))
     }
 
     /// Increases fired count and triggers the notify.
@@ -145,6 +137,7 @@ impl<T: Send + 'static> MockCallbackListener<T> {
 pub(super) struct MockSubscriptionManager {
     pub(super) key: Arc<Mutex<Option<TriggerSubscriber>>>,
     pub(super) callback: Arc<Mutex<Option<TriggerCallbackFn>>>,
+    activation_id: Arc<Mutex<Option<ActivationId>>>,
 }
 
 #[async_trait]
@@ -159,6 +152,14 @@ impl SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>
     async fn unsubscribe(&self, key: &TriggerSubscriber) {
         self.key.lock().replace(key.to_owned());
     }
+
+    async fn notify(&self, activation_id: ActivationId, arg: Arc<NodeEvaluationContext>) {
+        let mut callback_lock = self.callback.lock();
+        *self.activation_id.lock() = Some(activation_id);
+        if let Some(callback) = &mut *callback_lock {
+            callback(arg);
+        }
+    }
 }
 
 impl MockSubscriptionManager {
@@ -166,6 +167,19 @@ impl MockSubscriptionManager {
         MockSubscriptionManager {
             key: Arc::new(Mutex::new(None)),
             callback: Arc::new(Mutex::new(None)),
+            activation_id: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Just like `subscribe`, but also passes the `ActivationId` of the notification to the
+    /// callback.
+    pub(super) async fn subscribe_for_test(
+        &self,
+        key: TriggerSubscriber,
+        mut callback: CallbackFn<(ActivationId, Arc<NodeEvaluationContext>)>,
+    ) {
+        let activation_id = Arc::clone(&self.activation_id);
+        self.subscribe(key, Box::new(move |arg| callback((activation_id.lock().unwrap(), arg))))
+            .await;
     }
 }

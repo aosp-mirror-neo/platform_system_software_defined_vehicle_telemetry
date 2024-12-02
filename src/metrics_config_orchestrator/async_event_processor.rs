@@ -6,7 +6,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_util::sync::CancellationToken;
 
 pub(super) enum AsyncReceiver<T> {
-    #[allow(dead_code)]
     Bounded(Receiver<T>),
     Unbounded(UnboundedReceiver<T>),
 }

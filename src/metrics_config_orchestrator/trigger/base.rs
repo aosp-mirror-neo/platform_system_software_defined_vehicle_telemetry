@@ -1,16 +1,15 @@
 // Copyright 2024 Google LLC
 
 use log::trace;
-use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::AsyncEventProcessor;
 use crate::metrics_config_orchestrator::subscription_manager::{
-    Activatable, SubscriptionManager, SubscriptionManagerImpl,
+    Activatable, ActivationId, SubscriptionManager, SubscriptionManagerImpl,
 };
-use crate::metrics_config_orchestrator::trigger::{TriggerCallbackFn, TriggerSubscriber};
+use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 
 pub(super) struct BaseTrigger {
     name: String,
@@ -50,27 +49,12 @@ impl BaseTrigger {
     }
 
     /// Fires the trigger by invoking provided callback.
-    /// The operation is performed after asynchronously awaiting on the mutex.
     pub(super) async fn fire_trigger(
-        trigger_name: &str,
-        callback_map: &Arc<AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>>,
-        context: &Arc<NodeEvaluationContext>,
+        &self,
+        activation_id: ActivationId,
+        context: Arc<NodeEvaluationContext>,
     ) {
-        // Retrieve callbacks.
-        let mut callbacks = callback_map.lock().await;
-
-        // Verify that the map hasn't been cleared.
-        if callbacks.is_empty() {
-            return;
-        }
-
-        trace!("Trigger {} is firing", trigger_name);
-
-        // Synchronously invoke callbacks.
-        // The loop needs to wait before they finish to release the mutex lock when they're
-        // done because they're allowed to mutate themselves.
-        for callback in callbacks.values_mut() {
-            callback(Arc::clone(context));
-        }
+        trace!("Trigger {} is firing", self.name);
+        self.subscription_manager.notify(activation_id, context).await;
     }
 }

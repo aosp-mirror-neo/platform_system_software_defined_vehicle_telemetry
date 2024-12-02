@@ -284,6 +284,7 @@ rust_test {
     rustlibs: [
         // keep-sorted start
         "liblazy_static",
+        "libmockall",
         "librand",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_proto",

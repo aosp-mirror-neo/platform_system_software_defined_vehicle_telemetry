@@ -7,6 +7,7 @@
 //! object is responsible for performing the actual work associated with the subscription.
 
 use async_trait::async_trait;
+use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::sync::{Arc, Weak};
 use std::{collections::HashMap, fmt::Display, hash::Hash};
@@ -14,9 +15,21 @@ use tokio::sync::Mutex as AsyncMutex;
 
 pub(crate) type CallbackFn<TCallbackArg> = Box<dyn FnMut(TCallbackArg) + Send + Sync>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ActivationId(SequenceNumberType);
+
+#[cfg(test)]
+impl ActivationId {
+    pub const fn new(n: SequenceNumberType) -> Self {
+        Self(n)
+    }
+}
+
 #[async_trait]
-pub(crate) trait SubscriptionManager<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>:
-    Send + Sync
+pub(crate) trait SubscriptionManager<
+    TKey: Display + Eq + Hash + Send + Sync,
+    TCallbackArg: Clone + Send,
+>: Send + Sync
 {
     /// Adds a new subscription that is associated with the specified unique key
     /// and activates underlying activatable if it's not active.
@@ -25,18 +38,19 @@ pub(crate) trait SubscriptionManager<TKey: Display + Eq + Hash + Send + Sync, TC
     /// Removes a subscription that is associated with the specified key
     /// and deactivates underlying activatable if this was the last subscription.
     async fn unsubscribe(&self, key: &TKey);
+
+    /// Notifies all subscribers with the provided callback argument, if the provided
+    /// `activation_id` matches that of the most recent activation. Otherwise does nothing.
+    async fn notify(&self, activation_id: ActivationId, arg: TCallbackArg);
 }
 
 /// Trait of an object that can be activated.
 #[async_trait]
 pub(crate) trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
-    /// Activates the object.
-    /// The function will only be called for an inactive object
-    /// that is not going through state transition.
-    async fn activate(
-        self: Arc<Self>,
-        callback_map: Arc<AsyncMutex<HashMap<TKey, CallbackFn<TCallbackArg>>>>,
-    );
+    /// Activates the object. The function will only be called for an inactive object that is not
+    /// going through state transition. The `activation_id` must be passed to (async) calls to
+    /// `SubscriptionManager::notify` triggered by this activation.
+    async fn activate(self: Arc<Self>, activation_id: ActivationId);
 
     /// Deactivates the object.
     /// The function will only be called for an active object
@@ -46,28 +60,30 @@ pub(crate) trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
 
 /// Manages subscriptions to a specific type of event.
 pub(crate) struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> {
+    /// Generator for the next activation ID.
+    activation_id_generator: SequenceNumber,
+
     /// Reference to the underlying activatable object.
     activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>,
 
     /// The callback map stores the callbacks associated with the unique subscription keys.
-    /// It is initialized with a new Arc when the first subscription is added.
+    /// It is initialized with a new activation id and hashmap when the first subscription is added.
     /// It is cleared and set to None when the last subscription is removed.
-    maybe_callback_map:
-        AsyncMutex<Option<Arc<AsyncMutex<HashMap<TKey, CallbackFn<TCallbackArg>>>>>>,
+    maybe_callback_map: AsyncMutex<Option<(ActivationId, HashMap<TKey, CallbackFn<TCallbackArg>>)>>,
 }
 
 #[async_trait]
-impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> SubscriptionManager<TKey, TCallbackArg>
-    for SubscriptionManagerImpl<TKey, TCallbackArg>
+impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg: Clone + Send>
+    SubscriptionManager<TKey, TCallbackArg> for SubscriptionManagerImpl<TKey, TCallbackArg>
 {
     async fn subscribe(&self, key: TKey, callback: CallbackFn<TCallbackArg>) {
         let mut maybe_callback_map_lock = self.maybe_callback_map.lock().await;
 
         // Retrieve the callback map, creating a new one if necessary.
-        if let Some(callback_map) = maybe_callback_map_lock.as_ref() {
+        if let Some((_, callback_map)) = maybe_callback_map_lock.as_mut() {
             // Underlying activatable is already activated.
             // Add the callback to the callback map.
-            callback_map.lock().await.try_insert_value(key, callback).unwrap_or_else(|entry| {
+            callback_map.try_insert_value(key, callback).unwrap_or_else(|entry| {
                 panic!("Key {} is already present in the callback map.", entry.key())
             });
         } else {
@@ -77,9 +93,9 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> SubscriptionManager<
                 .activatable_reference
                 .upgrade()
                 .expect("Subscribe shouldn't be called after activatable is freed");
-            let callback_map = Arc::new(AsyncMutex::new(HashMap::from([(key, callback)])));
-            Arc::clone(&activatable).activate(Arc::clone(&callback_map)).await;
-            maybe_callback_map_lock.replace(callback_map);
+            let activation_id = ActivationId(self.activation_id_generator.next());
+            maybe_callback_map_lock.replace((activation_id, HashMap::from([(key, callback)])));
+            Arc::clone(&activatable).activate(activation_id).await;
         };
     }
 
@@ -88,16 +104,15 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> SubscriptionManager<
 
         let is_last_subscription = {
             // Remove the callback from the callback map.
-            let callback_map = maybe_callback_map_lock
-                .as_ref()
+            let (_, callback_map) = maybe_callback_map_lock
+                .as_mut()
                 .expect("Unsubscribe shouldn't be called when there are no subscriptions.");
-            let mut callback_map_lock = callback_map.lock().await;
             assert!(
-                callback_map_lock.remove(key).is_some(),
+                callback_map.remove(key).is_some(),
                 "Key {} isn't present in the callback map.",
                 key
             );
-            callback_map_lock.is_empty()
+            callback_map.is_empty()
         };
 
         if is_last_subscription {
@@ -110,6 +125,17 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> SubscriptionManager<
             maybe_callback_map_lock.take();
         }
     }
+
+    async fn notify(&self, activation_id: ActivationId, arg: TCallbackArg) {
+        let mut maybe_callback_map_lock = self.maybe_callback_map.lock().await;
+        if let Some((stored_activation_id, callback_map)) = maybe_callback_map_lock.as_mut() {
+            if stored_activation_id == &activation_id {
+                for callback in callback_map.values_mut() {
+                    callback(arg.clone());
+                }
+            }
+        }
+    }
 }
 
 impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
@@ -118,7 +144,11 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
     /// Creates a new instance of the callback manager that activates the specified activatable
     /// on first subscription and deactivates it on last unsubscription.
     pub(crate) fn new(activatable_reference: Weak<dyn Activatable<TKey, TCallbackArg>>) -> Self {
-        SubscriptionManagerImpl { activatable_reference, maybe_callback_map: None.into() }
+        SubscriptionManagerImpl {
+            activation_id_generator: SequenceNumber::new(),
+            activatable_reference,
+            maybe_callback_map: None.into(),
+        }
     }
 }
 
@@ -126,58 +156,36 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
 mod tests {
     use super::*;
 
-    use parking_lot::Mutex;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use mockall::predicate::eq;
+    use tokio::sync::oneshot;
 
     const KEY: &str = "test_key";
     const KEY2: &str = "test_key2";
 
-    struct MockActivatable {
-        callback_map: Mutex<Option<Arc<AsyncMutex<HashMap<String, CallbackFn<()>>>>>>,
-        num_activate_calls: AtomicU32,
-        num_deactivate_calls: AtomicU32,
-    }
+    mockall::mock! {
+        ActivatableImpl {}
 
-    impl MockActivatable {
-        fn new() -> Self {
-            Self {
-                callback_map: None.into(),
-                num_activate_calls: 0.into(),
-                num_deactivate_calls: 0.into(),
-            }
-        }
-
-        fn get_num_activate_calls(&self) -> u32 {
-            self.num_activate_calls.load(Ordering::Acquire)
-        }
-
-        fn get_num_deactivate_calls(&self) -> u32 {
-            self.num_deactivate_calls.load(Ordering::Acquire)
+        #[async_trait]
+        impl Activatable<String, u64> for ActivatableImpl {
+            async fn activate(self: Arc<Self>, activation_id: ActivationId);
+            async fn deactivate(&self);
         }
     }
 
-    #[async_trait]
-    impl Activatable<String, ()> for MockActivatable {
-        async fn activate(
-            self: Arc<Self>,
-            callback_map: Arc<AsyncMutex<HashMap<String, CallbackFn<()>>>>,
-        ) {
-            self.num_activate_calls.fetch_add(1, Ordering::AcqRel);
-            self.callback_map.lock().replace(callback_map);
-        }
-
-        async fn deactivate(&self) {
-            self.num_deactivate_calls.fetch_add(1, Ordering::AcqRel);
-        }
+    fn create_subscription_manager(
+        mock_setup: impl FnOnce(&mut MockActivatableImpl),
+    ) -> (SubscriptionManagerImpl<String, u64>, Arc<MockActivatableImpl>) {
+        let mut activatable = MockActivatableImpl::new();
+        mock_setup(&mut activatable);
+        let activatable = Arc::new(activatable);
+        (
+            SubscriptionManagerImpl::new(Arc::<MockActivatableImpl>::downgrade(&activatable)),
+            // Return the `Arc` so that it is not dropped.
+            activatable,
+        )
     }
 
-    fn create_subscription_manager() -> (SubscriptionManagerImpl<String, ()>, Arc<MockActivatable>)
-    {
-        let activatable = Arc::new(MockActivatable::new());
-        (SubscriptionManagerImpl::new(Arc::<MockActivatable>::downgrade(&activatable)), activatable)
-    }
-
-    fn create_empty_fn_box() -> CallbackFn<()> {
+    fn create_empty_fn_box() -> CallbackFn<u64> {
         Box::new(|_| {})
     }
 
@@ -185,7 +193,9 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
-        let (manager, _) = create_subscription_manager();
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            activatable.expect_activate().once().return_const(());
+        });
 
         // Subscribe twice with the same key.
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
@@ -195,35 +205,35 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_twice_activates_once() {
-        let (manager, activatable) = create_subscription_manager();
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            activatable.expect_activate().with(eq(ActivationId(0))).once().return_const(());
+        });
 
         // Subscribe twice with different keys.
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
         manager.subscribe(KEY2.to_owned(), create_empty_fn_box()).await;
-
-        // Verify that activate was called once and deactivate wasn't called.
-        assert_eq!(activatable.get_num_activate_calls(), 1);
-        assert_eq!(activatable.get_num_deactivate_calls(), 0);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn subscribe_adds_callback() {
-        let (manager, activatable) = create_subscription_manager();
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            activatable.expect_activate().once().return_const(());
+        });
 
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
 
         // Verify that the map contains a callback for the specified key.
-        let callback_map = activatable.callback_map.lock().take().unwrap();
-        let callback_map_lock = callback_map.lock().await;
-        assert!(callback_map_lock.contains_key(KEY));
+        let maybe_callback_map_lock = manager.maybe_callback_map.lock().await;
+        let (_, callback_map) = maybe_callback_map_lock.as_ref().unwrap();
+        assert!(callback_map.contains_key(KEY));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
-        let (manager, _) = create_subscription_manager();
+        let (manager, _activatable) = create_subscription_manager(|_activatable| {});
 
         // Try to unsubscribe using a key that wasn't subscribed.
         manager.unsubscribe(&KEY.to_owned()).await;
@@ -232,7 +242,16 @@ mod tests {
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_twice_deactivates_once() {
-        let (manager, activatable) = create_subscription_manager();
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            let mut seq = mockall::Sequence::new();
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(0)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+        });
 
         // Subscribe twice with different keys.
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
@@ -241,24 +260,100 @@ mod tests {
         // Unsubscribe from these keys.
         manager.unsubscribe(&KEY.to_owned()).await;
         manager.unsubscribe(&KEY2.to_owned()).await;
-
-        // Verify that deactivate was called once and activate wasn't called.
-        assert_eq!(activatable.get_num_deactivate_calls(), 1);
-        assert_eq!(activatable.get_num_activate_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]
     async fn unsubscribe_removes_callback() {
-        let (manager, activatable) = create_subscription_manager();
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            let mut seq = mockall::Sequence::new();
+            activatable.expect_activate().once().in_sequence(&mut seq).return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+        });
 
         // Subscribe and then immediately unsubscribe.
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
         manager.unsubscribe(&KEY.to_owned()).await;
 
-        // Verify that the callback was removed from the map.
-        let callback_map = activatable.callback_map.lock().take().unwrap();
-        let callback_map_lock = callback_map.lock().await;
-        assert!(!callback_map_lock.contains_key(KEY));
+        // Verify that the callback map was cleared.
+        let maybe_callback_map_lock = manager.maybe_callback_map.lock().await;
+        assert!(maybe_callback_map_lock.is_none());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn subscribe_unsubscribe_subscribe_unsubscribe_increments_activation_id() {
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            let mut seq = mockall::Sequence::new();
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(0)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(1)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+        });
+
+        manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
+        manager.unsubscribe(&KEY.to_owned()).await;
+        manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
+        manager.unsubscribe(&KEY.to_owned()).await;
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn notify_notifies_only_callback_with_current_activation_id() {
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            let mut seq = mockall::Sequence::new();
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(0)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(1)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+        });
+
+        manager
+            .subscribe(
+                KEY.to_owned(),
+                Box::new(|_| panic!("Callback set in previous activation should not be called.")),
+            )
+            .await;
+        manager.unsubscribe(&KEY.to_owned()).await;
+
+        let (tx, rx) = oneshot::channel();
+        let mut maybe_tx = Some(tx);
+        manager
+            .subscribe(
+                KEY.to_owned(),
+                Box::new(move |value| maybe_tx.take().unwrap().send(value).unwrap()),
+            )
+            .await;
+
+        manager.notify(ActivationId(1), 123).await;
+
+        assert_eq!(123, rx.await.unwrap());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn notify_can_be_called_without_subscribers() {
+        let (manager, _activatable) = create_subscription_manager(|_activatable| {});
+
+        manager.notify(ActivationId(0), 123).await;
     }
 }
