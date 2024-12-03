@@ -293,6 +293,14 @@ impl TelemetryServiceHolder {
         metrics_report_manager::get_metrics_report(self, report_info).await
     }
 
+    /// Tells the telemetry service to send info of the reports which are ready.
+    ///
+    /// @return in case of success, a list of ReportInfo objects containing metrics config uuid, metrics config
+    /// report name and report_number, or an error code and error message in case of failure
+    pub async fn get_ready_reports_info(&self) -> TelemetryResult<Vec<ReportInfo>> {
+        metrics_report_manager::get_ready_reports_info(self).await
+    }
+
     /// Sets a status listener that receives status codes and messages for misc errors (such as file
     /// IO errors) related to the telemetry service. API calls which do not take a listener and
     /// callback function also send their status back to the client using the status listener.
@@ -428,6 +436,8 @@ mod test {
             report_config_name: "".to_owned(),
             report_number: 0,
         }));
+
+        assert_send_sync(service.get_ready_reports_info());
     }
 
     #[test]

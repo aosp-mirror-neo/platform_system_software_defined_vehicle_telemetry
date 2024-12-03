@@ -1,6 +1,9 @@
 // Copyright 2023 Google LLC
 
-use crate::callbacks::{call_api_with_metrics_report_callback, call_api_with_status_callback};
+use crate::callbacks::{
+    call_api_with_metrics_report_callback, call_api_with_ready_reports_info_callback,
+    call_api_with_status_callback,
+};
 use crate::{ReportInfo, SendSyncPtr, TelemetryError, TelemetryResult, TelemetryServiceHolder};
 
 use log::info;
@@ -158,6 +161,17 @@ pub async fn get_metrics_report(
                 callback,
             )
         }
+    })
+    .await
+}
+
+pub async fn get_ready_reports_info(
+    service: &TelemetryServiceHolder,
+) -> TelemetryResult<Vec<ReportInfo>> {
+    call_api_with_ready_reports_info_callback(move |callback_data, callback| {
+        // SAFETY: the caller has provided pointers that are used to safely get the info of ready metrics reports
+        // from the telemetry service. The validity of `callback_data` and `callback` is ensured by `call_api_with_ready_reports_info_callback`.
+        unsafe { rust_to_c::get_ready_reports_info(service.0, callback_data, callback) }
     })
     .await
 }

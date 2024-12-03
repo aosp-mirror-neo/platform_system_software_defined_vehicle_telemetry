@@ -8,12 +8,14 @@ use std::slice;
 use tokio::sync::oneshot;
 
 use crate::{
-    status_codes, MetricsReport, TelemetryError, TelemetryResult, TelemetryServiceStatusCodes,
+    status_codes, MetricsReport, ReportInfo, TelemetryError, TelemetryResult,
+    TelemetryServiceStatusCodes,
 };
 
 type OnStatusReceivedResult = TelemetryResult<String>;
 type OnConfigListReceivedResult = TelemetryResult<Vec<String>>;
 type OnReportReceivedResult = TelemetryResult<MetricsReport>;
+type OnReadyReportsInfoReceivedResult = TelemetryResult<Vec<ReportInfo>>;
 
 /// This function abstracts the complexity of calling an async C API.
 ///
@@ -213,4 +215,84 @@ where
     F: FnOnce(*mut c_void, rust_to_c::GetSerializedDataCallbackFunction) -> i32,
 {
     call_async_c_api(call_api, Some(on_report_received)).await
+}
+
+/// Callback used to send ready reports info back to client.
+///
+/// # Safety
+///
+/// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
+///    `call_api_with_ready_reports_info_callback` API call. It will not be valid after the function
+///    completes.
+/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
+/// * `ready_reports_info` must point to a valid pointer array of MetricsReportInfo with
+///   `metrics_report_uuid` and `report_config_name` fields as C raw strings that satisfy `CStr::from_ptr` safety
+///   requirements.
+/// * `ready_reports_info_size` must contain the length of the byte array that can be parsed from `ready_reports_info`.
+unsafe extern "C" fn on_ready_reports_info_received(
+    sender: *mut c_void,
+    status_code: TelemetryServiceStatusCodes,
+    status_msg: *const c_char,
+    ready_reports_info: *const rust_to_c::MetricsReportInfo,
+    ready_reports_info_size: usize,
+) {
+    // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
+    // global allocator using Box::new(). For more info check
+    // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
+    let sender =
+        unsafe { Box::from_raw(sender as *mut oneshot::Sender<OnReadyReportsInfoReceivedResult>) };
+
+    // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
+    // requirements.
+    let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
+
+    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+        error!("Error in receiving metrics report: {}", msg);
+        sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
+        return;
+    }
+
+    info!("Ready reports info received: {msg}");
+
+    // SAFETY: The caller has provided pointers that satisfy `slice::from_raw_parts` safety
+    // requirements.
+    let ready_reports_info =
+        unsafe { slice::from_raw_parts(ready_reports_info, ready_reports_info_size) };
+    let ready_reports_info = ready_reports_info
+        .iter()
+        .map(|info| {
+            ReportInfo {
+                // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+                // safety requirements
+                metrics_config_uuid: unsafe { CStr::from_ptr(info.metrics_config_uuid) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+                // safety requirements
+                report_config_name: unsafe { CStr::from_ptr(info.report_config_name) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                report_number: info.report_number,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    sender.send(Ok(ready_reports_info)).unwrap();
+}
+
+/// Safely call a C API that returns data through a `ReadyReportsInfoCallbackFunction` callback.
+/// This wrapper ensures that the correct callback function (`on_ready_reports_info_received`) is
+/// used for these calls.
+///
+/// The return type of this function MUST match the type used in the `oneshot::Sender` typecast in
+/// `on_ready_reports_info_received`.
+pub(super) async fn call_api_with_ready_reports_info_callback<F>(
+    call_api: F,
+) -> OnReadyReportsInfoReceivedResult
+where
+    F: FnOnce(*mut c_void, rust_to_c::ReadyReportsInfoCallbackFunction) -> i32,
+{
+    call_async_c_api(call_api, Some(on_ready_reports_info_received)).await
 }

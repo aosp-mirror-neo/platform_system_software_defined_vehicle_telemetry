@@ -19,9 +19,10 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     ITelemetryApiStatusListener::ITelemetryApiStatusListener,
     ITelemetryConfigListListener::ITelemetryConfigListListener,
     ITelemetryMiscStatusListener::ITelemetryMiscStatusListener,
+    ITelemetryReadyReportsInfoListener::ITelemetryReadyReportsInfoListener,
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
-    ITelemetryService::ITelemetryServiceAsyncServer,
+    ITelemetryService::ITelemetryServiceAsyncServer, MetricsReportInfo::MetricsReportInfo,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
 use log::{error, info, warn};
@@ -401,6 +402,33 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         Ok(())
     }
 
+    #[instrument(skip(self, report_listener))]
+    async fn getReadyReportsInfo(
+        &self,
+        report_listener: &binder::Strong<dyn ITelemetryReadyReportsInfoListener>,
+    ) -> binder::Result<()> {
+        info!("getReadyReportsInfo");
+        let ready_reports_info = self
+            .metrics_report_listener
+            .get_ready_reports_info()
+            .into_iter()
+            .map(|(uuid, report_config_name, report_number)| MetricsReportInfo {
+                metricsConfigUuid: uuid,
+                reportConfigName: report_config_name,
+                reportNumber: report_number,
+            })
+            .collect::<Vec<_>>();
+
+        if let Err(e) = report_listener.deref().sendReadyReportsInfo(
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+            format!("Number of ready reports: {}", ready_reports_info.len()).as_str(),
+            &ready_reports_info,
+        ) {
+            warn!("Unable to send info of ready reports to the client: {:?}", e);
+        }
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     async fn unregisterReportReadyListener(&self) -> binder::Result<()> {
         info!("unregisterReportReadyListener");
@@ -428,12 +456,14 @@ mod tests {
     use super::*;
 
     use binder::BinderFeatures;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReadyReportsInfoListener::BnTelemetryReadyReportsInfoListener;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::{
         ITelemetryApiStatusListener::BnTelemetryApiStatusListener,
         ITelemetryConfigListListener::BnTelemetryConfigListListener,
         ITelemetryMiscStatusListener::BnTelemetryMiscStatusListener,
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
+        MetricsReportInfo::MetricsReportInfo,
     };
     use parking_lot::Mutex;
     use protobuf::Message;
@@ -571,6 +601,67 @@ mod tests {
             *uuid = metrics_report.clone().metrics_config_uuid;
             let mut report = self.metrics_report.lock();
             *report = Some(metrics_report);
+
+            Ok(())
+        }
+    }
+
+    /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
+    #[derive(Clone)]
+    struct MockTelemetryReadyReportsInfoListener {
+        status_code: Arc<Mutex<StatusCodes>>,
+        status_message: Arc<Mutex<String>>,
+        num_on_ready_reports_info_calls: Arc<Mutex<i32>>,
+        ready_reports_info: Arc<Mutex<Vec<MetricsReportInfo>>>,
+    }
+
+    impl binder::Interface for MockTelemetryReadyReportsInfoListener {}
+
+    impl MockTelemetryReadyReportsInfoListener {
+        fn new() -> Self {
+            Self {
+                status_code: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
+                status_message: Arc::new(Mutex::new(String::new())),
+                num_on_ready_reports_info_calls: Arc::new(Mutex::new(0)),
+                ready_reports_info: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn get_status_code(&self) -> StatusCodes {
+            *self.status_code.lock()
+        }
+
+        fn get_status_message(&self) -> String {
+            self.status_message.lock().to_string()
+        }
+
+        fn get_num_on_ready_reports_info_calls(&self) -> i32 {
+            *self.num_on_ready_reports_info_calls.lock()
+        }
+
+        fn get_ready_reports_info(&self) -> Vec<MetricsReportInfo> {
+            self.ready_reports_info.lock().clone()
+        }
+    }
+
+    impl ITelemetryReadyReportsInfoListener for MockTelemetryReadyReportsInfoListener {
+        fn sendReadyReportsInfo(
+            &self,
+            status_code: StatusCodes,
+            status_message: &str,
+            ready_reports_info: &[MetricsReportInfo],
+        ) -> binder::Result<()> {
+            let mut mut_status_code = self.status_code.lock();
+            *mut_status_code = status_code;
+
+            let mut mut_status_message = self.status_message.lock();
+            *mut_status_message = status_message.to_string();
+
+            let mut num_on_ready_reports_info_calls = self.num_on_ready_reports_info_calls.lock();
+            *num_on_ready_reports_info_calls += 1;
+
+            let mut mut_ready_reports_info = self.ready_reports_info.lock();
+            *mut_ready_reports_info = ready_reports_info.to_vec();
 
             Ok(())
         }
@@ -1355,5 +1446,88 @@ mod tests {
         assert_eq!(1, report_listener.get_num_on_result_calls());
         assert_eq!(UUID1, report_listener.get_uuid());
         assert_eq!(REPORT_NUMBER, report_listener.get_report_number());
+    }
+
+    #[sdv_telemetry_test_utils_macros::timeout]
+    #[tokio::test]
+    async fn get_ready_reports_info() {
+        // Creating a separate directory for each unit test to avoid overlapping file
+        // IO operations in the same directories which can cause test flakiness.
+        const ROOT_PATH: &str = "get_ready_reports_info";
+        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
+
+        // Setting Report Ready Listener
+        let report_ready_listener = MockTelemetryReportReadyListener::new();
+        let binder_report_ready_listener = BnTelemetryReportReadyListener::new_binder(
+            report_ready_listener.clone(),
+            BinderFeatures::default(),
+        );
+        test_environment
+            .service
+            .registerReportReadyListener(DUMMY_API_CALL_ID, &binder_report_ready_listener)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+            test_environment.get_status_code()
+        );
+
+        // Setting Ready Report Ids Listener
+        let ready_reports_info_listener = MockTelemetryReadyReportsInfoListener::new();
+        let binder_ready_reports_info_listener = BnTelemetryReadyReportsInfoListener::new_binder(
+            ready_reports_info_listener.clone(),
+            BinderFeatures::default(),
+        );
+
+        // Send report to metric report listener
+        let mut report = MetricsReport::new();
+        report.metrics_config_uuid = UUID1.to_string();
+        report.report_number = REPORT_NUMBER;
+        test_environment.service.metrics_report_listener.on_report_ready(report);
+
+        // Validate sent report readiness
+        test_environment
+            .service
+            .getReadyReportsInfo(&binder_ready_reports_info_listener)
+            .await
+            .unwrap();
+        assert_eq!(
+            ready_reports_info_listener.get_status_code(),
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS
+        );
+        assert_eq!(ready_reports_info_listener.get_status_message(), "Number of ready reports: 1");
+        assert_eq!(ready_reports_info_listener.get_num_on_ready_reports_info_calls(), 1);
+        let ready_reports_info = ready_reports_info_listener.get_ready_reports_info();
+        assert_eq!(ready_reports_info.len(), 1);
+        assert_eq!(ready_reports_info[0].metricsConfigUuid, UUID1);
+        assert_eq!(ready_reports_info[0].reportNumber, REPORT_NUMBER);
+
+        // Setting Report Listener
+        let report_listener = MockTelemetryReportListener::new();
+        let binder_report_listener = BnTelemetryReportListener::new_binder(
+            report_listener.clone(),
+            BinderFeatures::default(),
+        );
+        // Extract the report
+        test_environment
+            .service
+            .getMetricsReport(UUID1, &String::default(), REPORT_NUMBER, &binder_report_listener)
+            .await
+            .unwrap();
+
+        // Validate no reports are ready
+        test_environment
+            .service
+            .getReadyReportsInfo(&binder_ready_reports_info_listener)
+            .await
+            .unwrap();
+        assert_eq!(
+            ready_reports_info_listener.get_status_code(),
+            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS
+        );
+        assert_eq!(ready_reports_info_listener.get_status_message(), "Number of ready reports: 0");
+        assert_eq!(ready_reports_info_listener.get_num_on_ready_reports_info_calls(), 2);
+        assert!(ready_reports_info_listener.get_ready_reports_info().is_empty());
     }
 }

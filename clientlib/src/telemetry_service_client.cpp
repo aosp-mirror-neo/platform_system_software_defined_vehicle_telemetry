@@ -4,6 +4,7 @@
 
 #include "callback_container.h"
 #include "callback_functions.h"
+#include "ready_reports_info_listener_impl.h"
 
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <android-base/expected.h>
@@ -226,6 +227,16 @@ Status TelemetryServiceClient::get_metrics_report(
     ndk::ScopedAStatus status =
             mBinderService->getMetricsReport(metricsConfigUuid, reportConfigName, reportNumber,
                                              mReportListener);
+    return Status::fromBinderStatus(status);
+}
+
+Status TelemetryServiceClient::get_ready_reports_info(
+        void* readyReportsInfoCbData, ReadyReportsInfoCallbackFunction readyReportsInfoCb) {
+    std::shared_ptr<ReadyReportsInfoListenerImpl> mReportListener =
+            ndk::SharedRefBase::make<ReadyReportsInfoListenerImpl>(
+                    Callback<ReadyReportsInfoCallbackFunction>(readyReportsInfoCbData,
+                                                               std::move(readyReportsInfoCb)));
+    ndk::ScopedAStatus status = mBinderService->getReadyReportsInfo(mReportListener);
     return Status::fromBinderStatus(status);
 }
 
