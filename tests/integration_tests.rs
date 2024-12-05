@@ -85,7 +85,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     service
         .init(
             move |status_code, status_msg| {
-                info!("Received status message {status_code}: {status_msg}");
+                info!("Received status message {status_code:?}: {status_msg}");
             },
             move |report_info| {
                 report_ready_tx.send(report_info).unwrap();
@@ -185,7 +185,7 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
     service
         .init(
             move |status_code, status_msg| {
-                info!("Received status message {status_code}: {status_msg}");
+                info!("Received status message {status_code:?}: {status_msg}");
             },
             move |report_info| report_ready_tx.send(report_info).unwrap(),
         )
@@ -304,7 +304,7 @@ async fn telemetry_service_someip() {
     service
         .init(
             move |status_code, status_msg| {
-                info!("Received status message {status_code}: {status_msg}");
+                info!("Received status message {status_code:?}: {status_msg}");
             },
             move |report_info| {
                 report_ready_tx.send(report_info).unwrap();
@@ -359,7 +359,7 @@ async fn telemetry_service_middleware() {
     service
         .init(
             move |status_code, status_msg| {
-                info!("Received status message {status_code}: {status_msg}");
+                info!("Received status message {status_code:?}: {status_msg}");
             },
             move |report_info| report_ready_tx.send(report_info).unwrap(),
         )

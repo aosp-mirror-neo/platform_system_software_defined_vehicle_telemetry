@@ -8,8 +8,7 @@ use std::slice;
 use tokio::sync::oneshot;
 
 use crate::{
-    status_codes, MetricsReport, ReportInfo, TelemetryError, TelemetryResult,
-    TelemetryServiceStatusCodes,
+    MetricsReport, ReportInfo, TelemetryError, TelemetryResult, TelemetryServiceStatusCodes,
 };
 
 type OnStatusReceivedResult = TelemetryResult<String>;
@@ -30,7 +29,8 @@ where
     let result_tx = Box::into_raw(Box::new(result_tx));
 
     let status_code = call_api(result_tx as *mut c_void, callback);
-    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+    let status_code = TelemetryServiceStatusCodes(status_code);
+    if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         // Release memory in case of API call failure.
         //
         // SAFETY: Safe to call since `result_tx` was created using `Box::into_raw` and is
@@ -59,6 +59,7 @@ unsafe extern "C" fn on_status_received(
     status_code: i32,
     status_msg: *const std::ffi::c_char,
 ) {
+    let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the sender passed by the caller was originally allocated using a
     // global allocator using Box::new().
     let sender = unsafe { Box::from_raw(sender as *mut oneshot::Sender<OnStatusReceivedResult>) };
@@ -67,9 +68,7 @@ unsafe extern "C" fn on_status_received(
     // requirements.
     let status_message = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
-    let result = if status_code
-        == status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
-    {
+    let result = if status_code == TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         Ok(status_message)
     } else {
         Err(TelemetryError { status: status_code, message: status_message })
@@ -108,6 +107,7 @@ unsafe extern "C" fn on_config_list_received(
     config_list: *mut *const c_char,
     config_list_size: usize,
 ) {
+    let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the `listener` passed by the caller was originally allocated using a
     // global allocator using Box::new().
     let sender =
@@ -117,7 +117,7 @@ unsafe extern "C" fn on_config_list_received(
     // requirements.
     let status_msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
-    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+    if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving config list: {}", status_msg);
         sender.send(Err(TelemetryError { status: status_code, message: status_msg })).unwrap();
         return;
@@ -163,11 +163,12 @@ where
 /// * `report_size` must contain the length of the byte array that can be parsed from `report`.
 unsafe extern "C" fn on_report_received(
     sender: *mut c_void,
-    status_code: TelemetryServiceStatusCodes,
+    status_code: i32,
     status_msg: *const c_char,
     report: *const u8,
     report_size: usize,
 ) {
+    let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
     // global allocator using Box::new(). For more info check
     // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
@@ -177,7 +178,7 @@ unsafe extern "C" fn on_report_received(
     // requirements.
     let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
-    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+    if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving metrics report: {}", msg);
         sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
         return;
@@ -231,11 +232,12 @@ where
 /// * `ready_reports_info_size` must contain the length of the byte array that can be parsed from `ready_reports_info`.
 unsafe extern "C" fn on_ready_reports_info_received(
     sender: *mut c_void,
-    status_code: TelemetryServiceStatusCodes,
+    status_code: i32,
     status_msg: *const c_char,
     ready_reports_info: *const rust_to_c::MetricsReportInfo,
     ready_reports_info_size: usize,
 ) {
+    let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
     // global allocator using Box::new(). For more info check
     // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
@@ -246,7 +248,7 @@ unsafe extern "C" fn on_ready_reports_info_received(
     // requirements.
     let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
-    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+    if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving metrics report: {}", msg);
         sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
         return;

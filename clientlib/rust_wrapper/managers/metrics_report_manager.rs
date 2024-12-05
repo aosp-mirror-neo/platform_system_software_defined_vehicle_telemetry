@@ -4,12 +4,14 @@ use crate::callbacks::{
     call_api_with_metrics_report_callback, call_api_with_ready_reports_info_callback,
     call_api_with_status_callback,
 };
-use crate::{ReportInfo, SendSyncPtr, TelemetryError, TelemetryResult, TelemetryServiceHolder};
+use crate::{
+    ReportInfo, SendSyncPtr, TelemetryError, TelemetryResult, TelemetryServiceHolder,
+    TelemetryServiceStatusCodes,
+};
 
 use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_status_codes_bindgen as status_codes;
 use std::ffi::{c_char, c_void, CStr, CString};
 
 /// Callback that handles report ready event.
@@ -118,13 +120,14 @@ pub fn clear_report_ready_listener(service: &TelemetryServiceHolder) -> Telemetr
             (&mut previous_raw_listener) as *mut *mut _ as *mut *mut c_void,
         )
     };
+    let status_code = TelemetryServiceStatusCodes(status_code);
     if !previous_raw_listener.is_null() {
         // SAFETY: If `clear_report_ready_listener` sets this pointer to a non-null value, it is
         // guaranteed to point to a `MetricsReportReadyListener` set in a previous call to
         // `set_report_ready_listener`. Therefore, it is safe to reclaim the memory.
         let _ = unsafe { Box::from_raw(previous_raw_listener) };
     }
-    if status_code != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS {
+    if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         return Err(TelemetryError { status: status_code, message: String::default() });
     }
     Ok(())

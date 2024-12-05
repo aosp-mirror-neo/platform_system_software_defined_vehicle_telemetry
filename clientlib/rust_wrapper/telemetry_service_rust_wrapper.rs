@@ -5,13 +5,13 @@
 mod callbacks;
 mod managers;
 
+pub use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
+
 use crate::rust_to_c::ServiceHolder;
 use callbacks::call_api_with_status_callback;
 use log::{error, info};
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_status_codes_bindgen as status_codes;
-pub use status_codes::*;
 use std::ffi::{c_void, CStr};
 
 use managers::metrics_config_manager;
@@ -19,9 +19,9 @@ use managers::metrics_report_manager;
 
 /// Represents an error with an error code and error message.
 #[derive(thiserror::Error, Debug)]
-#[error("{status}: {message}")]
+#[error("{status:?}: {message}")]
 pub struct TelemetryError {
-    status: i32,
+    status: TelemetryServiceStatusCodes,
     message: String,
 }
 
@@ -97,6 +97,8 @@ unsafe extern "C" fn on_status(
     status_code: i32,
     status_msg: *const std::ffi::c_char,
 ) {
+    let status_code = TelemetryServiceStatusCodes(status_code);
+
     // SAFETY: The caller sends back the reference to `StatusListener` that was originally sent to
     // the caller as part of the `set_misc_status_listener` API call.
     //
@@ -108,18 +110,18 @@ unsafe extern "C" fn on_status(
     // requirements.
     let status_msg = unsafe { CStr::from_ptr(status_msg).to_str().unwrap().to_string() };
 
-    info!("Status code: {} status message: {}", status_code, status_msg);
+    info!("Status code: {status_code:?} status message: {status_msg}");
 
     (status_listener.callback)(status_code, status_msg);
 }
 
 /// Struct used to wrap `callback` received from client.
 struct MiscStatusListener {
-    callback: Box<dyn Fn(i32, String) + Send + Sync>,
+    callback: Box<dyn Fn(TelemetryServiceStatusCodes, String) + Send + Sync>,
 }
 
 impl MiscStatusListener {
-    fn new(callback: Box<dyn Fn(i32, String) + Send + Sync>) -> Self {
+    fn new(callback: Box<dyn Fn(TelemetryServiceStatusCodes, String) + Send + Sync>) -> Self {
         Self { callback }
     }
 }
@@ -139,7 +141,7 @@ impl TelemetryServiceHolder {
         let service = unsafe { rust_to_c::get_telemetry_service() };
         if service.is_null() {
             return Err(TelemetryError {
-                status: status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_UNKNOWN_ERROR,
+                status: TelemetryServiceStatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR,
                 message: "Unable to get telemetry service".to_owned(),
             });
         }
@@ -153,8 +155,8 @@ impl TelemetryServiceHolder {
     /// This method must be called only once at the start of the application.
     ///
     /// @param `misc_status_callback` function closure that gets called every time a status catering
-    /// to telemetry service needs to be shared with the client. The `misc_status_callback` takes an
-    /// i32 status_code and a String status_message as params.
+    /// to telemetry service needs to be shared with the client. The `misc_status_callback` takes a
+    /// `TelemetryServiceStatusCodes` status_code and a `String` status_message as params.
     ///
     /// @param `report_ready_callback` function closure gets called when a report is ready. The
     /// `report_ready_callback` takes String, String and i32 that specify metrics config uuid,
@@ -163,7 +165,7 @@ impl TelemetryServiceHolder {
     /// @return an error code and error message in case of incorrect parameters
     pub async fn init(
         &self,
-        misc_status_callback: impl Fn(i32, String) + Send + Sync + 'static,
+        misc_status_callback: impl Fn(TelemetryServiceStatusCodes, String) + Send + Sync + 'static,
         report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
     ) -> TelemetryResult<()> {
         info!("Initializing telemetry service");
@@ -307,12 +309,12 @@ impl TelemetryServiceHolder {
     ///
     /// @param `misc_status_callback` function closure that gets called every time a status catering
     /// to telemetry service needs to be shared with the client. The `misc_status_callback` takes an
-    /// i32 status_code and a String status_message as params.
+    /// `TelemetryServiceStatusCodes` status_code and a `String` status_message as params.
     ///
     /// @return an error code and error message in case of incorrect parameters
     async fn set_misc_status_listener(
         &self,
-        misc_status_callback: impl Fn(i32, String) + Send + Sync + 'static,
+        misc_status_callback: impl Fn(TelemetryServiceStatusCodes, String) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
         let raw_listener = SendSyncPtr(Box::into_raw(Box::new(MiscStatusListener::new(Box::new(
             misc_status_callback,
@@ -378,9 +380,8 @@ impl TelemetryServiceHolder {
             // `set_misc_status_listener`. Therefore, it is safe to reclaim the memory.
             let _ = unsafe { Box::from_raw(previous_raw_listener) };
         }
-        if status_code
-            != status_codes::TelemetryServiceStatusCodes_TELEMETRY_SERVICE_API_CALL_SUCCESS
-        {
+        let status_code = TelemetryServiceStatusCodes(status_code);
+        if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
             return Err(TelemetryError {
                 status: status_code,
                 message: "Error while clearing misc status listener".to_owned(),

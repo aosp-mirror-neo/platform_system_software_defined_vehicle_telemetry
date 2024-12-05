@@ -91,8 +91,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
     task::spawn(async move {
         while let Some((status_code, status_msg)) = misc_status_rx.recv().await {
             info!(
-                "Received misc status from service: status code: {} status msg: {}",
-                status_code, status_msg
+                "Received misc status from service: status code: {status_code:?} status msg: {status_msg}",
             );
         }
     });
