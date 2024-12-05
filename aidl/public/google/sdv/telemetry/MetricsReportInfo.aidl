@@ -6,7 +6,7 @@ package google.sdv.telemetry;
  * Information of telemetry metrics reports
  */
 
-@RustDerive(Clone=true)
+@RustDerive(Clone=true, Hash=true, PartialEq=true, Eq=true)
 @VintfStability
 parcelable MetricsReportInfo {
     // UUID of the Metrics Config
@@ -15,6 +15,7 @@ parcelable MetricsReportInfo {
     // Name of the Metrics Report Config
     @utf8InCpp String reportConfigName;
 
-    // Report number of the finished report
+    // Report number of the finished report. Reports are numbered using a monotonously increasing id
+    // number that is independent for each metrics UUID
     int reportNumber;
 }

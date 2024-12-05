@@ -1,6 +1,9 @@
 // Copyright 2023 Google LLC
 
-use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::{
+    ITelemetryReportReadyListener::ITelemetryReportReadyListener,
+    MetricsReportInfo::MetricsReportInfo,
+};
 use google_sdv_telemetry::binder::Strong;
 use log::warn;
 use parking_lot::Mutex;
@@ -13,7 +16,7 @@ use thiserror::Error;
 
 pub(crate) struct MetricsReportListener {
     /// Hashmap to store the MetricsReport until the client asks for it.
-    metrics_report_store: Mutex<HashMap<(String, String, i32), MetricsReport>>,
+    metrics_report_store: Mutex<HashMap<MetricsReportInfo, MetricsReport>>,
     /// Report Ready listener to inform the client when a report is ready
     report_ready_listener: Mutex<Option<Strong<dyn ITelemetryReportReadyListener>>>,
 }
@@ -36,21 +39,21 @@ impl MetricsReportListener {
     }
 
     pub(crate) fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
-        let metrics_config_uuid = metrics_report.metrics_config_uuid.clone();
-        let report_config_name = metrics_report.report_config_name.clone();
-        let report_number = metrics_report.report_number;
+        let report_info = MetricsReportInfo {
+            metricsConfigUuid: metrics_report.metrics_config_uuid.clone(),
+            reportConfigName: metrics_report.report_config_name.clone(),
+            reportNumber: metrics_report.report_number,
+        };
 
-        let report_key = (metrics_config_uuid.clone(), report_config_name.clone(), report_number);
         // Insert the report and panic if report with the same key already exists.
-        self.metrics_report_store.lock().try_insert_value(report_key, metrics_report).unwrap();
+        self.metrics_report_store
+            .lock()
+            .try_insert_value(report_info.clone(), metrics_report)
+            .unwrap();
 
         let listener = self.report_ready_listener.lock();
         if let Some(listener_ref) = listener.as_ref() {
-            if let Err(e) = listener_ref.deref().onReady(
-                &metrics_config_uuid,
-                &report_config_name,
-                report_number,
-            ) {
+            if let Err(e) = listener_ref.deref().onReady(&report_info) {
                 warn!("Error when trying to notify client about a new report: {:?}", e);
             }
         }
@@ -58,17 +61,11 @@ impl MetricsReportListener {
 
     pub(crate) fn get_metrics_report(
         &self,
-        metrics_config_uuid: &str,
-        report_config_name: &str,
-        report_number: i32,
+        report_info: &MetricsReportInfo,
     ) -> Result<MetricsReport, MetricsReportListenerError> {
         let report = {
             let mut report_container = self.metrics_report_store.lock();
-            report_container.remove(&(
-                metrics_config_uuid.to_owned(),
-                report_config_name.to_owned(),
-                report_number,
-            ))
+            report_container.remove(report_info)
         };
         let Some(metrics_report) = report else {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
@@ -77,7 +74,7 @@ impl MetricsReportListener {
         Ok(metrics_report)
     }
 
-    pub(crate) fn get_ready_reports_info(&self) -> Vec<(String, String, i32)> {
+    pub(crate) fn get_ready_reports_info(&self) -> Vec<MetricsReportInfo> {
         self.metrics_report_store.lock().keys().cloned().collect()
     }
 

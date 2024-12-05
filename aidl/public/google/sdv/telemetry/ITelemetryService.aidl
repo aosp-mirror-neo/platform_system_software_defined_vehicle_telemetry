@@ -8,6 +8,7 @@ import google.sdv.telemetry.ITelemetryMiscStatusListener;
 import google.sdv.telemetry.ITelemetryReadyReportsInfoListener;
 import google.sdv.telemetry.ITelemetryReportListener;
 import google.sdv.telemetry.ITelemetryReportReadyListener;
+import google.sdv.telemetry.MetricsReportInfo;
 
 /**
  * Telemetry system for software defined vehicle has three main components: Telemetry service, Data
@@ -82,19 +83,13 @@ interface ITelemetryService {
     void getInactiveMetricsConfigUuids(in ITelemetryConfigListListener listener);
 
     /**
-     * Sends finished telemetry report with the specified metricsConfigUuid,
-     * metricsReportConfigName and reportNumber, or errors associated with it using the specified
+     * Sends finished telemetry report with the specified metrics report info.
      *
-     * @param metricsConfigUuid uuid of the Metrics Config for which the generated report is
-     *         requested.
-     * @param metricsReportConfigName the name of the Metrics Report Config for which the
-     *         generated report is requested.
-     * @param reportNumber report number of the metrics report requested.
-     * @param listener Listener that is called when the requested report is ready
+     * @param metricsReportInfo info of the generated report which is requested
+     * @param listener listener that is called when the requested report is ready
      */
-    void getMetricsReport(in @utf8InCpp String metricsConfigUuid,
-            in @utf8InCpp String metricsReportConfigName, in int reportNumber,
-            in ITelemetryReportListener listener);
+    void getMetricsReport(
+            in MetricsReportInfo metricsReportInfo, in ITelemetryReportListener listener);
 
     /**
      * Sends finished telemetry reports info: metricsConfigUuid, reportConfigName and reportNumber
