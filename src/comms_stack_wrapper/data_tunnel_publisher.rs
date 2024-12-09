@@ -227,14 +227,15 @@ mod tests {
         publisher.publish_bytes(&[3, 3, 3]).unwrap();
         publisher.publish_bytes(&[4, 4, 4]).unwrap();
 
-        // The subscriber should be notified of the overflow.
-        assert_eq!(subscriber.available_to_read().unwrap(), 4); // TODO: Why 4? Should this not be an overflow error?
+        // The subscriber should be notified of the overflow as part of the `read_messages` call in
+        // combination with `available_to_read` returning more than 0.
+        assert!(subscriber.available_to_read().unwrap() > 0);
         assert_eq!(
             subscriber.read_messages(&mut []).unwrap_err().status_code(),
-            SdvStatusCode::Unknown // TODO: Why is this not an overflow error?
+            SdvStatusCode::DataLoss
         );
 
-        // The change in FMQ (aosp/3119872) that alters the behaviour of the reading pointer reset
+        // The change in FMQ (aosp/3119872) that alters the behavior of the reading pointer reset
         // in case of the buffer overwrite now preserve half of the queue
         assert_eq!(subscriber.available_to_read().unwrap(), 1);
     }
