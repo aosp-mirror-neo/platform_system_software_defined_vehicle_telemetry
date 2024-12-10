@@ -105,6 +105,9 @@ rust_bindgen {
     wrapper_src: "export/status_codes.h",
     cpp_std: "gnu++17",
     source_stem: "bindings",
+    bindgen_flags: [
+        "--default-enum-style=newtype",
+    ],
     product_available: true,
     vendor_available: true,
 }
