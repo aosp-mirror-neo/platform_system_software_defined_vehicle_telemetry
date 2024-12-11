@@ -17,6 +17,7 @@ use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry::binder_adapter::{BinderAdapter, BinderAdapterImpl};
+use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome,GetMessageProviderOutcome,
     ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
@@ -142,7 +143,9 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         configuration: Option<&Any>,
         // TODO: b/373332101 - Not yet implemented.
         _sub_sampling_interval: &SubSamplingInterval,
-        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
@@ -156,7 +159,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
 
         let join_handle = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
-                (callback)(message);
+                (callback)(Ok(message));
             }
         });
 
@@ -380,12 +383,16 @@ mod tests {
     use protobuf::{Message, MessageFull};
     use sample_publisher_proto::sample_publisher;
     use sample_publisher_proto::sample_publisher::SampleMessage;
-    use sdv_telemetry_test_utils::create_empty_fn_box;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
 
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
+
+    fn create_empty_fn_box(
+    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
+        Box::new(|_| {})
+    }
 
     #[derive(Clone)]
     struct MockConfigurablePublisher {

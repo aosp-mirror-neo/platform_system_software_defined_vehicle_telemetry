@@ -6,13 +6,14 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
-use log::{error, info};
+use log::info;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
+use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMessageProvider,
     ServicePublisherSubscription,
@@ -45,7 +46,9 @@ impl DataTunnelSubscriber {
         unit_identifier: UnitIdentifier,
         sub_sampling_interval: &SubSamplingInterval,
         message_descriptor: MessageDescriptor,
-        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut subscriber_stream =
             dt::SubscriberStream::create(
@@ -77,13 +80,16 @@ impl DataTunnelSubscriber {
                 _ = cancellation_token.cancelled() => None,
                 result = subscriber_stream.next() => result,
             } {
-                let Ok((number_of_messages, buffer)) = result.inspect_err(|err| {
-                    error!(
-                        "Data Tunnel message stream of service unit '{}' returned an intermittent error: {err:?}",
-                        Self::to_debug_string(&unit_identifier))
-                }) else {
-                    continue;
+                let (number_of_messages, buffer) = match result
+                    .with_context(|| "Data Tunnel message stream produced an intermittent error")
+                {
+                    Ok(result) => result,
+                    Err(err) => {
+                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(err)));
+                        continue;
+                    }
                 };
+
                 let messages: Box<dyn Iterator<Item = _>> = {
                     let all_messages = buffer
                         .chunks(u32_into_usize(message_size))
@@ -101,15 +107,10 @@ impl DataTunnelSubscriber {
                     Self::to_debug_string(&unit_identifier)
                 );
                 for message_bytes in messages {
-                    match Self::read_length_delimited_proto(message_bytes, &message_descriptor) {
-                        Ok(msg) => {
-                            (callback)(msg);
-                        }
-                        Err(err) => error!(
-                            "Failed to convert bytes to protobuf for service unit '{}': {err:?}",
-                            Self::to_debug_string(&unit_identifier)
-                        ),
-                    };
+                    let message =
+                        Self::read_length_delimited_proto(message_bytes, &message_descriptor)
+                            .map_err(ServiceRuntimeError::MessageParsingError);
+                    (callback)(message);
                 }
             }
         });

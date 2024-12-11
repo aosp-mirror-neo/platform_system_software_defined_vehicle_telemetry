@@ -10,6 +10,7 @@ use protobuf::MessageDyn;
 use std::fmt;
 use std::sync::Arc;
 
+use crate::metrics_config_runtime_error::ServiceRuntimeError;
 use crate::sub_sampling_interval::SubSamplingInterval;
 
 /// Interface of an entity that provides access to Service Publishers.
@@ -38,7 +39,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome>;
 
     /// Registers a callback that will be called when a service with the specified string
@@ -80,7 +81,7 @@ pub enum CreateSubscriptionOutcome {
     /// Service publisher is available and a subscription was successfully created.
     Subscribed(Box<dyn ServicePublisherSubscription>),
     /// The service with the specified service name is not registered.
-    NotRegistered(Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>),
+    NotRegistered(Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>),
 }
 
 /// Successful result of getting a message provider.

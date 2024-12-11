@@ -3,13 +3,7 @@
 //! Utility functions for unit tests.
 
 use log::trace;
-use protobuf::MessageDyn;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
-
-/// Creates a Box with a callback that accepts a message and does nothing.
-pub fn create_empty_fn_box() -> Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync> {
-    Box::new(|_| {})
-}
 
 /// Generate a unique Data Tunnel topic name for testing.
 ///

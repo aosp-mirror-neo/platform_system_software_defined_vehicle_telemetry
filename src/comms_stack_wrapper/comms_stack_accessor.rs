@@ -17,6 +17,7 @@ use sdv_comms::sd::{
 use sdv_comms::ContextRef;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
+use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
     ServicePublisherAccessor, ServicePublisherMetadata,
@@ -114,7 +115,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
@@ -587,7 +588,8 @@ mod integration_tests {
 
         let subscriber = create_accessor(ctx);
 
-        let (tx1, mut rx1) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
+        let (tx1, mut rx1) =
+            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServiceRuntimeError>>();
         let outcome1 = subscriber
             .create_subscription(
                 &service_name,
@@ -598,7 +600,8 @@ mod integration_tests {
             .await
             .unwrap();
 
-        let (tx2, mut rx2) = mpsc::unbounded_channel::<Box<dyn MessageDyn>>();
+        let (tx2, mut rx2) =
+            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServiceRuntimeError>>();
         let outcome2 = subscriber
             .create_subscription(
                 &service_name,
@@ -615,11 +618,11 @@ mod integration_tests {
         assert!(matches!(outcome1, CreateSubscriptionOutcome::Subscribed(_)));
         assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
 
-        assert_eq!(get_int_field_value(rx1.recv().await.unwrap()), 1);
-        assert_eq!(get_int_field_value(rx1.recv().await.unwrap()), 2);
+        assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap()), 1);
+        assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap()), 2);
 
-        assert_eq!(get_int_field_value(rx2.recv().await.unwrap()), 1);
-        assert_eq!(get_int_field_value(rx2.recv().await.unwrap()), 2);
+        assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap()), 1);
+        assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap()), 2);
     }
 
     #[sdv_telemetry_test_utils_macros::timeout(10_000)]
@@ -665,9 +668,9 @@ mod integration_tests {
         write_message(&publisher, TestMessage { int_field: 3, ..Default::default() });
         let (message3_received_at, message3) = rx.recv().await.unwrap();
 
-        assert_eq!(get_int_field_value(message1), 1);
+        assert_eq!(get_int_field_value(message1.unwrap()), 1);
         // Message 2 should be silently discarded.
-        assert_eq!(get_int_field_value(message3), 3);
+        assert_eq!(get_int_field_value(message3.unwrap()), 3);
         assert!(
             matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
             "The channel should be empty."
@@ -727,7 +730,7 @@ mod integration_tests {
             )
             .await
             .unwrap();
-        let received_msg = receiver.await.unwrap();
+        let received_msg = receiver.await.unwrap().unwrap();
 
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
         let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();

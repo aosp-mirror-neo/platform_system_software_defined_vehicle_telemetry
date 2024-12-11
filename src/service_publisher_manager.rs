@@ -8,6 +8,7 @@ use futures::future;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use std::sync::Arc;
 
+use crate::metrics_config_runtime_error::ServiceRuntimeError;
 use crate::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
     ServicePublisherAccessor, ServicePublisherMetadata,
@@ -74,7 +75,9 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         for accessor in &self.service_publisher_registry {
             callback = match accessor
@@ -135,7 +138,6 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::MessageFull;
-    use sdv_telemetry_test_utils::create_empty_fn_box;
     use std::sync::Arc;
 
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
@@ -143,6 +145,11 @@ mod tests {
     const ERROR_MESSAGE: &str = "ERROR_MESSAGE";
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
+
+    fn create_empty_fn_box(
+    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
+        Box::new(|_| {})
+    }
 
     #[sdv_telemetry_test_utils_macros::timeout]
     #[tokio::test]

@@ -18,8 +18,10 @@ pub(crate) struct MockServicePublisherAccessor {
 
 struct MockServicePublisherAccessorData {
     /// The map of subscribed callbacks, keyed by service name and sub-sampling interval.
-    callbacks:
-        HashMap<(String, SubSamplingInterval), Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>>,
+    callbacks: HashMap<
+        (String, SubSamplingInterval),
+        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+    >,
     /// The last configuration message that was passed to create_subscription.
     last_configuration: Option<Any>,
     /// When set, the descriptor will be returned on the next call to get_metadata.
@@ -105,7 +107,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let mut data = self.data.lock();
         data.last_configuration = configuration.cloned();
@@ -205,7 +207,7 @@ impl MockServicePublisherAccessor {
         data_lock
             .callbacks
             .get_mut(&(service_name.to_owned(), sub_sampling_interval.to_owned()))
-            .unwrap()(message);
+            .unwrap()(Ok(message))
     }
 
     pub(crate) fn set_next_error(&self, error: anyhow::Error) {

@@ -41,6 +41,7 @@ use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
+use crate::StatusCodes;
 
 // Child module dependencies.
 use descriptor_provider_factory::{
@@ -516,10 +517,16 @@ impl MetricsConfigOrchestratorImpl {
             + Sync
             + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
+        _misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
-        let service_adapter =
-            Arc::new(ServiceAdapterImpl::new(Arc::clone(&service_publisher_manager)));
+        let service_adapter = Arc::new(ServiceAdapterImpl::new(
+            Arc::clone(&service_publisher_manager),
+            Arc::new(move |err| {
+                error!("Metrics config runtime error: {err}");
+                // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{err}"));
+            }),
+        ));
         Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),

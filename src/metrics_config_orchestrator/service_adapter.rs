@@ -12,6 +12,7 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
+use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
 use crate::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome,
     GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
@@ -115,6 +116,7 @@ pub(crate) struct ServiceAdapterImpl {
             ),
         >,
     >,
+    error_callback: Arc<dyn Fn(MetricsConfigRuntimeError) + Send + Sync>,
 }
 
 impl ServiceSubscriptionType {
@@ -177,6 +179,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
     ) -> anyhow::Result<Option<ServiceSubscription>> {
         let maybe_subscription_type = if configuration.is_some() {
+            let error_callback = Arc::clone(&self.error_callback);
+            let service_name_clone = service_name.to_owned();
             // Subscription has configuration, so it can't be shared.
             let create_subscription_outcome = self
                 .service_publisher_accessor
@@ -184,7 +188,15 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     service_name,
                     configuration,
                     sub_sampling_interval,
-                    Box::new(move |msg| new_message_callback(&msg.into())),
+                    Box::new(move |msg| match msg {
+                        Ok(msg) => new_message_callback(&msg.into()),
+                        Err(err) => {
+                            (error_callback)(MetricsConfigRuntimeError::Service {
+                                service_name: service_name_clone.clone(),
+                                error: err,
+                            });
+                        }
+                    }),
                 )
                 .await?;
 
@@ -217,6 +229,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 }
                 Entry::Vacant(v) => {
                     // If there is no active subscription, create a new one and store it.
+                    let error_callback = Arc::clone(&self.error_callback);
                     let (sender, receiver) = mpsc::unbounded_channel();
                     let service_name_clone = service_name.to_owned();
                     let create_subscription_outcome = self
@@ -225,11 +238,19 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             service_name,
                             None,
                             sub_sampling_interval,
-                            Box::new(move |msg| {
-                                if sender.send(msg).is_err() {
-                                    // This means that `receiver` was dropped - which should
-                                    // never happen, since it is only dropped when unsubscribing.
-                                    error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
+                            Box::new(move |msg| match msg {
+                                Ok(msg) => {
+                                    if sender.send(msg).is_err() {
+                                        // This means that `receiver` was dropped - which should
+                                        // never happen, since it is only dropped when unsubscribing.
+                                        error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
+                                    }
+                                }
+                                Err(err) => {
+                                    (error_callback)(MetricsConfigRuntimeError::Service {
+                                        service_name: service_name_clone.clone(),
+                                        error: err,
+                                    });
                                 }
                             }),
                         )
@@ -349,11 +370,15 @@ impl ServiceAdapter for ServiceAdapterImpl {
 }
 
 impl ServiceAdapterImpl {
-    pub(super) fn new(service_publisher_manager: Arc<dyn ServicePublisherAccessor>) -> Self {
+    pub(super) fn new(
+        service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
+        error_callback: Arc<dyn Fn(MetricsConfigRuntimeError) + Send + Sync>,
+    ) -> Self {
         Self {
             next_subscription_id: SequenceNumber::new(),
             service_publisher_accessor: service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
+            error_callback,
         }
     }
 }
@@ -412,8 +437,13 @@ pub(super) mod tests {
         Box::new(|_| {})
     }
 
-    fn create_default_service_adapter() -> ServiceAdapterImpl {
-        ServiceAdapterImpl::new(Arc::new(MockServicePublisherAccessor::new()))
+    fn create_service_adapter(accessor: Arc<MockServicePublisherAccessor>) -> ServiceAdapterImpl {
+        ServiceAdapterImpl::new(
+            accessor,
+            Arc::new(|err| {
+                panic!("Unexpected error: {err:?}");
+            }),
+        )
     }
 
     fn create_invalid_subscription() -> ServiceSubscription {
@@ -431,8 +461,7 @@ pub(super) mod tests {
     async fn get_message_provider_accessor_returns_error_fails() {
         let accessor =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let err = service_adapter.get_message_provider(SERVICE_NAME).await.err().unwrap();
 
@@ -444,8 +473,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn get_message_provider_get_not_supported_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_get_not_supported());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let outcome = service_adapter.get_message_provider(SERVICE_NAME).await;
 
@@ -459,8 +487,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn get_message_provider_accessor_latest_message_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let GetMessageProviderOutcome::Success(provider) =
             service_adapter.get_message_provider(SERVICE_NAME).await.unwrap()
@@ -481,8 +508,7 @@ pub(super) mod tests {
         message.value = 42;
         let accessor =
             Arc::new(MockServicePublisherAccessor::new().with_latest_message(message.clone()));
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let outcome = service_adapter.get_message_provider(SERVICE_NAME).await;
         let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
@@ -503,8 +529,7 @@ pub(super) mod tests {
     async fn subscribe_configured_accessor_returns_error_fails() {
         let accessor =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let err = service_adapter
             .subscribe(
@@ -525,8 +550,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_configured_accessor_returns_not_available_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let res = service_adapter
             .subscribe(
@@ -545,8 +569,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
@@ -577,8 +600,7 @@ pub(super) mod tests {
     async fn subscribe_shared_accessor_returns_error_fails() {
         let accessor =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE)));
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let err = service_adapter
             .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
@@ -594,8 +616,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_shared_accessor_returns_not_available_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let res = service_adapter
             .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
@@ -610,8 +631,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_shared_different_services_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
         let (tx, mut rx) = mpsc::channel(1);
         let mut msg1 = Box::new(Int32Value::new());
         msg1.value = 1;
@@ -658,8 +678,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_shared_same_service_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
@@ -704,8 +723,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn subscribe_shared_same_service_different_sub_sampling_interval_subscribes_twice() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
         let (tx, mut rx) = mpsc::channel(2);
         let mut msg = Box::new(Int32Value::new());
         msg.value = 1;
@@ -757,8 +775,12 @@ pub(super) mod tests {
         // Run this multiple times, because the erroneous behavior does not always manifest.
         for _ in 1..=100 {
             let accessor = Arc::new(MockServicePublisherAccessor::new());
-            let service_adapter =
-                ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+            let service_adapter = ServiceAdapterImpl::new(
+                Arc::<MockServicePublisherAccessor>::clone(&accessor),
+                Arc::new(|err| {
+                    panic!("Unexpected error: {err:?}");
+                }),
+            );
             let (tx, mut rx) = mpsc::unbounded_channel();
 
             service_adapter
@@ -791,7 +813,7 @@ pub(super) mod tests {
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
-        let service_adapter = create_default_service_adapter();
+        let service_adapter = create_service_adapter(Arc::new(MockServicePublisherAccessor::new()));
 
         // Create subscription for a different service.
         service_adapter
@@ -807,8 +829,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_configured_accessor_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
             .subscribe(
@@ -831,8 +852,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
             .subscribe(
@@ -854,8 +874,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_shared_accessor_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
@@ -873,8 +892,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_shared_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
@@ -891,8 +909,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_shared_not_called_unless_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
@@ -916,8 +933,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn unsubscribe_shared_called_after_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
             .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
@@ -942,8 +958,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn register_availability_callback_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_availability_callback());
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         service_adapter
             .register_availability_callback(SERVICE_NAME, Box::new(|| ()))
@@ -960,8 +975,7 @@ pub(super) mod tests {
         let accessor = Arc::new(
             MockServicePublisherAccessor::new().with_next_error(anyhow!(ERROR_MESSAGE.to_owned())),
         );
-        let service_adapter =
-            ServiceAdapterImpl::new(Arc::<MockServicePublisherAccessor>::clone(&accessor));
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let err = service_adapter
             .register_availability_callback(SERVICE_NAME, Box::new(|| ()))

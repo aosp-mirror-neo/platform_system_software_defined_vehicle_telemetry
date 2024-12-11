@@ -6,13 +6,13 @@ use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
-use log::error;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::{any::Any, empty::Empty};
 use protobuf::{Message, MessageDyn};
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::ContextRef;
+use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
     CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMessageProvider,
     ServicePublisherSubscription,
@@ -91,7 +91,9 @@ impl SdvRpcClient {
         unit_identifier: UnitIdentifier,
         configuration: Option<&Any>,
         message_descriptor: MessageDescriptor,
-        mut callback: Box<dyn FnMut(Box<dyn MessageDyn>) + Send + Sync>,
+        mut callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
     ) -> anyhow::Result<CreateSubscriptionOutcome> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
@@ -121,20 +123,21 @@ impl SdvRpcClient {
                 _ = cancellation_token.cancelled() => None,
                 result = response_stream.next() => result,
             } {
-                let Ok(buffer) = result.inspect_err(|err| error!("Server stream of service unit '{}' returned an intermittent error: {err:?}", Self::to_debug_string(&unit_identifier))) else {
-                    continue;
+                let buffer = match result
+                    .with_context(|| "RPC server stream produced an intermittent error")
+                {
+                    Ok(buffer) => buffer,
+                    Err(err) => {
+                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(err)));
+                        continue;
+                    }
                 };
 
-                let res = message_descriptor.parse_from_bytes(&buffer);
-                match res {
-                    Ok(msg) => {
-                        (callback)(msg);
-                    }
-                    Err(err) => error!(
-                        "Failed to convert bytes to protobuf for service unit '{}': {err:?}",
-                        Self::to_debug_string(&unit_identifier)
-                    ),
-                };
+                let message = message_descriptor
+                    .parse_from_bytes(&buffer)
+                    .with_context(|| "Failed to parse the protobuf message")
+                    .map_err(ServiceRuntimeError::MessageParsingError);
+                (callback)(message);
             }
         });
 

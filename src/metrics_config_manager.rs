@@ -112,9 +112,9 @@ impl MetricsConfigManagerImpl {
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
         misc_error_callback: impl Fn(StatusCodes, &str) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
-        let handle_file_io_error = |misc_error_callback: &dyn Fn(StatusCodes, &str),
-                                    err_code: StatusCodes,
-                                    err_msg: &str| {
+        let misc_error_callback =
+            Arc::new(misc_error_callback) as Arc<dyn Fn(StatusCodes, &str) + Send + Sync>;
+        let handle_file_io_error = |err_code: StatusCodes, err_msg: &str| {
             error!("{}", err_msg);
             misc_error_callback(err_code, err_msg);
         };
@@ -145,6 +145,7 @@ impl MetricsConfigManagerImpl {
                         }
                     },
                     report_ready_callback,
+                    Arc::clone(&misc_error_callback),
                 ));
 
                 MetricsConfigManagerImpl {
@@ -179,11 +180,7 @@ impl MetricsConfigManagerImpl {
 
                         Err(e) => {
                             let err = format!("Error {} in reading file {:?} from disk", e, entry);
-                            handle_file_io_error(
-                                &misc_error_callback,
-                                StatusCodes::FILE_IO_ERROR,
-                                &err,
-                            );
+                            handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
                             continue;
                         }
                     };
@@ -196,11 +193,7 @@ impl MetricsConfigManagerImpl {
                                 "Error {} in parsing metric config {:?} read from disk",
                                 e, entry
                             );
-                            handle_file_io_error(
-                                &misc_error_callback,
-                                StatusCodes::METRICS_CONFIG_PARSE_ERROR,
-                                &err,
-                            );
+                            handle_file_io_error(StatusCodes::METRICS_CONFIG_PARSE_ERROR, &err);
                             continue;
                         }
                     };
@@ -222,11 +215,7 @@ impl MetricsConfigManagerImpl {
                                 "Error {} in initializing metric config {:?} read from disk",
                                 e, entry
                             );
-                            handle_file_io_error(
-                                &misc_error_callback,
-                                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED,
-                                &err,
-                            );
+                            handle_file_io_error(StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED, &err);
 
                             file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
                                 error!("An error occurred in removing corrupt config: {}", e)
@@ -243,7 +232,7 @@ impl MetricsConfigManagerImpl {
                 }
                 Err(e) => {
                     let err = format!("Error {} in creating active config directory", e);
-                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR, &err);
+                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
                 }
             };
         }
@@ -264,11 +253,7 @@ impl MetricsConfigManagerImpl {
                     num_inactive_configs += 1;
                 } else {
                     let err = format!("Metric config corrupted {:?}", entry);
-                    handle_file_io_error(
-                        &misc_error_callback,
-                        StatusCodes::METRICS_CONFIG_CORRUPTED,
-                        &err,
-                    );
+                    handle_file_io_error(StatusCodes::METRICS_CONFIG_CORRUPTED, &err);
 
                     // remove corrupt inactive config
                     file_io_utils::remove_file(&entry.path()).await.unwrap_or_else(|e| {
@@ -284,7 +269,7 @@ impl MetricsConfigManagerImpl {
                 }
                 Err(e) => {
                     let err = format!("Error {} in creating active config directory", e);
-                    handle_file_io_error(&misc_error_callback, StatusCodes::FILE_IO_ERROR, &err);
+                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
                 }
             };
         }

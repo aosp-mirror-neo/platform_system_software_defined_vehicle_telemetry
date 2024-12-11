@@ -9,6 +9,7 @@ mod metrics_report_listener;
 mod status_listener;
 
 pub mod binder_adapter;
+pub mod metrics_config_runtime_error;
 pub mod service_publisher_accessor;
 pub mod service_publisher_manager;
 pub mod sub_sampling_interval;

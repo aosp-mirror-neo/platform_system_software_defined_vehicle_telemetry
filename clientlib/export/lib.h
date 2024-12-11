@@ -34,8 +34,8 @@ typedef struct MetricsReportInfo {
  *
  * @param void* Pointer to the callback object associated with the callback function.
  * @param int32_t status code indicating the outcome of the API call
- * @param const char* status message adding more context to the outcome of the API call.
- *
+ * @param const char* status message adding more context to the outcome of the API call. These
+ * status messages are not guaranteed to be stable and may change or be removed at any point.
  */
 typedef void (*StatusCallbackFunction)(void*, int32_t, const char*);
 

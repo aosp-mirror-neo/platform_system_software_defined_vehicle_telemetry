@@ -17,7 +17,8 @@ use std::ffi::{c_void, CStr};
 use managers::metrics_config_manager;
 use managers::metrics_report_manager;
 
-/// Represents an error with an error code and error message.
+/// Represents an error with an error code and error message. The messages are not guaranteed to be
+/// stable and may change or be removed at any point.
 #[derive(thiserror::Error, Debug)]
 #[error("{status:?}: {message}")]
 pub struct TelemetryError {
