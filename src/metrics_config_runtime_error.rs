@@ -2,7 +2,9 @@
 
 //! This module represents runtime errors of a metrics config.
 
-use crate::metrics_config_orchestrator::message_builder::MessageBuilderError;
+use crate::{
+    expr::node_error::NodeError, metrics_config_orchestrator::message_builder::MessageBuilderError,
+};
 
 /// Runtime errors of a metrics config.
 #[derive(thiserror::Error, Debug)]
@@ -26,6 +28,15 @@ pub(crate) enum MetricsConfigRuntimeError {
         metrics_config_uuid: String,
         /// Aggregation publisher error.
         error: AggregationPublisherRuntimeError,
+    },
+
+    /// Runtime errors related to conditional triggers.
+    #[error("Conditional trigger error for metrics config {metrics_config_uuid}: {error}")]
+    ConditionalTrigger {
+        /// UUID of the metrics config.
+        metrics_config_uuid: String,
+        /// Conditional trigger error.
+        error: ConditionalTriggerRuntimeError,
     },
 
     /// Runtime errors related to metrics config generation.
@@ -65,4 +76,14 @@ pub(crate) struct AggregationPublisherRuntimeError {
 
     /// Message builder error.
     pub(crate) message_builder_error: MessageBuilderError,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Conditional trigger '{trigger_name}' failed to evaluate condition: {node_error}")]
+pub(crate) struct ConditionalTriggerRuntimeError {
+    /// Name of the conditional trigger.
+    pub(crate) trigger_name: String,
+
+    /// Condition evaluation error.
+    pub(crate) node_error: NodeError,
 }
