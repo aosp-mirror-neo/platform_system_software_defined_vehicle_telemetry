@@ -16,6 +16,7 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
 use crate::metrics_config_orchestrator::{
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
 };
+use crate::metrics_config_runtime_error::MetricsReportGeneratorError;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait MetricsReportGeneratorFactory: Send + Sync {
@@ -74,11 +75,15 @@ pub(crate) enum MetricsReportGeneratorFactoryError {
 
 pub(crate) struct MetricsReportGeneratorFactoryImpl {
     pub(super) message_builder_factory: Arc<dyn MessageBuilderFactory>,
+    error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
 }
 
 impl MetricsReportGeneratorFactoryImpl {
-    pub(crate) fn new(message_builder_factory: Arc<dyn MessageBuilderFactory>) -> Self {
-        Self { message_builder_factory }
+    pub(crate) fn new(
+        message_builder_factory: Arc<dyn MessageBuilderFactory>,
+        error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+    ) -> Self {
+        Self { message_builder_factory, error_callback }
     }
 }
 
@@ -131,6 +136,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             Arc::clone(context.report_ready_callback),
             triggers,
             message_builder.into(),
+            Arc::clone(&self.error_callback),
         )))
     }
 
@@ -272,7 +278,12 @@ mod tests {
     }
 
     fn create_factory() -> MetricsReportGeneratorFactoryImpl {
-        MetricsReportGeneratorFactoryImpl::new(Arc::new(MockMessageBuilderFactory::new()))
+        MetricsReportGeneratorFactoryImpl::new(
+            Arc::new(MockMessageBuilderFactory::new()),
+            Arc::new(|err| {
+                panic!("Unexpected error: {err:?}");
+            }),
+        )
     }
 
     fn create_config_with_invalid_name() -> MetricsReportConfig {
@@ -358,7 +369,12 @@ mod tests {
     fn create_proto_message_builder_factory_returns_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
         message_builder_factory.fail_create();
-        let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
+        let factory = MetricsReportGeneratorFactoryImpl::new(
+            Arc::new(message_builder_factory),
+            Arc::new(|err| {
+                panic!("Unexpected error: {err:?}");
+            }),
+        );
         let config = create_valid_config();
         let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), Duration::ZERO);
 
@@ -452,7 +468,12 @@ mod tests {
     fn validate_proto_message_builder_factory_returns_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
         message_builder_factory.fail_validate();
-        let factory = MetricsReportGeneratorFactoryImpl::new(Arc::new(message_builder_factory));
+        let factory = MetricsReportGeneratorFactoryImpl::new(
+            Arc::new(message_builder_factory),
+            Arc::new(|err| {
+                panic!("Unexpected error: {err:?}");
+            }),
+        );
         let config = create_valid_config();
 
         let err = factory

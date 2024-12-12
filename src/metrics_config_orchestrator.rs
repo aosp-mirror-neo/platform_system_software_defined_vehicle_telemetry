@@ -3,7 +3,7 @@
 mod async_event_processor;
 mod descriptor_provider;
 mod descriptor_provider_factory;
-mod message_builder;
+pub(crate) mod message_builder;
 mod message_builder_factory;
 mod message_provider;
 mod metrics_report_generator;
@@ -40,6 +40,7 @@ use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
+use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
 use crate::service_publisher_accessor::ServicePublisherAccessor;
 use crate::StatusCodes;
 
@@ -153,6 +154,10 @@ pub(super) struct MetricsConfigOrchestratorImpl {
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
+
+    /// The function that is used to report misc errors.
+    #[allow(dead_code)]
+    misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
 }
 
 pub(super) struct MetricsConfig {
@@ -517,7 +522,7 @@ impl MetricsConfigOrchestratorImpl {
             + Sync
             + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        _misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
+        misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
@@ -532,6 +537,11 @@ impl MetricsConfigOrchestratorImpl {
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
             metrics_report_generator_factory: Box::new(MetricsReportGeneratorFactoryImpl::new(
                 Arc::<MessageBuilderFactoryImpl>::clone(&message_builder_factory),
+                Arc::new(move |err| {
+                    let err = MetricsConfigRuntimeError::MetricsReportGenerator(err);
+                    error!("Metrics config runtime error: {err}");
+                    // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{err}"));
+                }),
             )),
             node_factory: Box::new(NodeFactoryImpl::new()),
             publisher_factory: Box::new(PublisherFactoryImpl::new(
@@ -541,6 +551,7 @@ impl MetricsConfigOrchestratorImpl {
             trigger_factory: Box::new(TriggerFactoryImpl::new()),
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),
+            misc_error_callback,
             service_publisher_manager,
         }
     }
@@ -1178,6 +1189,7 @@ mod tests {
                 trigger_factory: Box::new(MockTriggerFactory::new()),
                 finish_trigger_fired_callback: Arc::new(|_, _| {}),
                 report_ready_callback: Arc::new(|_| {}),
+                misc_error_callback: Arc::new(|_, _| {}),
                 service_publisher_manager: Arc::new(
                     MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
                 ),

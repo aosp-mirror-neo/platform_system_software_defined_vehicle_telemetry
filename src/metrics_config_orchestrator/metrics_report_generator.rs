@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use log::{debug, error};
+use log::debug;
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
 use protobuf::MessageDyn;
 use sdv_telemetry_proto_rust::metrics_configuration::{
@@ -17,6 +17,7 @@ use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
+use crate::metrics_config_runtime_error::MetricsReportGeneratorError;
 
 #[async_trait]
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
@@ -41,6 +42,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     report_number: AtomicI32,
     subscriber: TriggerSubscriber,
     message_builder: Arc<dyn MessageBuilder>,
+    error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
 }
 
 #[async_trait]
@@ -95,6 +97,7 @@ impl MetricsReportGeneratorImpl {
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
         triggers: Vec<Arc<dyn Trigger>>,
         message_builder: Arc<dyn MessageBuilder>,
+        error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
     ) -> Self {
         let subscriber =
             TriggerSubscriber::MetricsReportGenerator { name: metrics_report_config.name.clone() };
@@ -109,6 +112,7 @@ impl MetricsReportGeneratorImpl {
             report_number: 1.into(),
             subscriber,
             message_builder,
+            error_callback,
         }
     }
 
@@ -140,8 +144,12 @@ impl MetricsReportGeneratorImpl {
 
                 (self.report_ready_callback)(report);
             }
-            Err(e) => {
-                error!("Unable to build report due to an error in MessageBuilder: {e:?}");
+            Err(message_builder_error) => {
+                (self.error_callback)(MetricsReportGeneratorError {
+                    metrics_config_uuid: self.config_uuid.clone(),
+                    metrics_report_name: self.name.clone(),
+                    message_builder_error,
+                });
             }
         }
     }
@@ -200,6 +208,9 @@ mod test {
             Arc::new(|_| {}),
             vec![],
             message_builder,
+            Arc::new(|err| {
+                panic!("Unexpected error: {err:?}");
+            }),
         )
     }
 
