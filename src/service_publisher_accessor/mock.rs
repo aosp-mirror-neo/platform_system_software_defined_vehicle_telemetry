@@ -69,10 +69,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn get_metadata(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
         let mut data = self.data.lock();
         data.num_get_metadata_calls += 1;
-        data.check_next_error()?;
+        data.check_next_error().map_err(GetMetadataError::FailedToParseMetadata)?;
 
         let metadata = data.next_descriptor.take().map(|message_descriptor| {
             ServicePublisherMetadata { supports_get: false, message_descriptor }
@@ -83,10 +83,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         let mut data = self.data.lock();
         data.num_get_message_provider_calls += 1;
-        data.check_next_error()?;
+        data.check_next_error().map_err(GetMessageProviderError::FailedToParseMetadata)?;
 
         if data.next_not_available {
             data.next_not_available = false;
@@ -108,11 +108,11 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
-    ) -> anyhow::Result<CreateSubscriptionOutcome> {
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let mut data = self.data.lock();
         data.last_configuration = configuration.cloned();
         data.num_subscribe_calls += 1;
-        data.check_next_error()?;
+        data.check_next_error().map_err(CreateSubscriptionError::FailedToParseMetadata)?;
 
         if data.next_not_available {
             data.next_not_available = false;

@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use either::Either;
 use futures::FutureExt;
 use log::{debug, error, info, warn};
 use parking_lot::Mutex;
@@ -22,7 +23,9 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
-use crate::service_publisher_accessor::AvailabilityCallbackRegistration;
+use crate::service_publisher_accessor::{
+    AvailabilityCallbackRegistration, CreateSubscriptionError, GetMessageProviderError,
+};
 use crate::sub_sampling_interval::SubSamplingInterval;
 
 pub(crate) enum ConnectionType {
@@ -380,13 +383,18 @@ impl ServicePublisher {
     }
 
     /// Attempts to activate service publisher and returns the new state if activation was successful.
-    async fn try_activate(self: &Arc<Self>) -> anyhow::Result<Option<ServicePublisherState>> {
+    async fn try_activate(
+        self: &Arc<Self>,
+    ) -> Result<
+        Option<ServicePublisherState>,
+        Either<GetMessageProviderError, CreateSubscriptionError>,
+    > {
         let outcome = match self.connection_type {
             ConnectionType::Getter => self
                 .service_adapter
                 .get_message_provider(&self.service_name)
                 .await
-                .with_context(|| "Service adapter failed to create message provider")?,
+                .map_err(Either::Left)?,
             ConnectionType::Subscription => GetMessageProviderOutcome::GetNotSupported,
         };
 
@@ -415,7 +423,7 @@ impl ServicePublisher {
                         }),
                     )
                     .await
-                    .with_context(|| "Service adapter failed to process subscription request")?;
+                    .map_err(Either::Right)?;
 
                 struct ServicePublisherHandler {
                     service_publisher: Weak<ServicePublisher>,
@@ -557,7 +565,7 @@ mod tests {
 
         assert_eq!(
             err.chain().map(|err| err.to_string()).collect::<Vec<_>>(),
-            vec!["Service adapter failed to create message provider", ERROR_MESSAGE]
+            vec![format!("failed to parse metadata: {ERROR_MESSAGE}")]
         );
     }
 

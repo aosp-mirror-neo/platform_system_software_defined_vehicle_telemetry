@@ -14,9 +14,9 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
 use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome,
-    GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherSubscription,
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
+    GetMessageProviderError, GetMessageProviderOutcome as AccessorGetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -27,7 +27,7 @@ pub(crate) trait ServiceAdapter {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome>;
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError>;
 
     /// Subscribe to new messages from the service with the specified name
     /// using specified configuration.
@@ -38,7 +38,7 @@ pub(crate) trait ServiceAdapter {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-    ) -> anyhow::Result<Option<ServiceSubscription>>;
+    ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError>;
 
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
@@ -140,7 +140,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         struct ServiceMessageProviderImpl {
             service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
         }
@@ -177,7 +177,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-    ) -> anyhow::Result<Option<ServiceSubscription>> {
+    ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
         let maybe_subscription_type = if configuration.is_some() {
             let error_callback = Arc::clone(&self.error_callback);
             let service_name_clone = service_name.to_owned();

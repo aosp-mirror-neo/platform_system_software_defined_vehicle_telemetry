@@ -14,8 +14,8 @@ use sdv_comms::rpc;
 use sdv_comms::ContextRef;
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMessageProvider,
-    ServicePublisherSubscription,
+    CreateSubscriptionError, CreateSubscriptionOutcome, GetMessageProviderError,
+    GetMessageProviderOutcome, ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -37,19 +37,14 @@ impl SdvRpcClient {
         &self,
         unit_identifier: UnitIdentifier,
         message_descriptor: MessageDescriptor,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
             unit_identifier.clone(),
             &rpc::ClientOptions::default(),
         )
         .await
-        .with_context(|| {
-            format!(
-                "Failed to connect to rpc server with unit identifier {}.",
-                Self::to_debug_string(&unit_identifier)
-            )
-        })?;
+        .map_err(GetMessageProviderError::RpcFailedToConnect)?;
 
         struct ServicePublisherMessageProviderImpl {
             client: rpc::Client,
@@ -94,25 +89,20 @@ impl SdvRpcClient {
         mut callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-    ) -> anyhow::Result<CreateSubscriptionOutcome> {
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
             unit_identifier.clone(),
             &rpc::ClientOptions::default(),
         )
         .await
-        .with_context(|| {
-            format!(
-                "Failed to connect to rpc server with unit identifier {}.",
-                Self::to_debug_string(&unit_identifier)
-            )
-        })?;
+        .map_err(CreateSubscriptionError::RpcFailedToConnect)?;
 
         let configuration_bytes = Self::serialize_configuration(configuration);
         let mut response_stream = client
             .server_streaming_call("CreateSubscription", &configuration_bytes)
             .await
-            .with_context(|| "Failed to make server streaming call")?;
+            .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
 
         let cancellation_token = CancellationToken::new();
         let subscription_drop_guard = cancellation_token.clone().drop_guard();
@@ -154,10 +144,6 @@ impl SdvRpcClient {
             Empty::default_instance().write_to_bytes()
         }
         .expect("Configuration serialization should be successful")
-    }
-
-    fn to_debug_string(unit_identifier: &UnitIdentifier) -> String {
-        format!("{}|{}", unit_identifier.get_sid(), unit_identifier.get_unit_name())
     }
 }
 

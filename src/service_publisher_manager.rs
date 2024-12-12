@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 use crate::metrics_config_runtime_error::ServiceRuntimeError;
 use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
-    ServicePublisherAccessor, ServicePublisherMetadata,
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
+    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
+    ServicePublisherMetadata,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -37,7 +38,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
         for accessor in &self.service_publisher_registry {
             let metadata = accessor.get_metadata(service_name).await?;
 
@@ -52,7 +53,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         let mut get_not_supported = false;
 
         for accessor in &self.service_publisher_registry {
@@ -78,7 +79,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         mut callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-    ) -> anyhow::Result<CreateSubscriptionOutcome> {
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         for accessor in &self.service_publisher_registry {
             callback = match accessor
                 .create_subscription(service_name, configuration, sub_sampling_interval, callback)
@@ -178,7 +179,7 @@ mod tests {
 
         let err = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.err().unwrap();
 
-        assert_eq!(err.to_string(), ERROR_MESSAGE);
+        assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -225,7 +226,7 @@ mod tests {
         let err =
             service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.err().unwrap();
 
-        assert_eq!(err.to_string(), ERROR_MESSAGE);
+        assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -326,7 +327,7 @@ mod tests {
             .err()
             .unwrap();
 
-        assert_eq!(err.to_string(), ERROR_MESSAGE);
+        assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

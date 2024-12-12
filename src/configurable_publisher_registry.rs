@@ -21,7 +21,7 @@ use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome,GetMessageProviderOutcome,
     ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription
+    ServicePublisherSubscription, GetMetadataError, GetMessageProviderError, CreateSubscriptionError,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -107,7 +107,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
         let maybe_metadata = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.supports_get)
         });
@@ -121,7 +121,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         let provider = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             if entry.supports_get {
                 GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
@@ -146,7 +146,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         mut callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-    ) -> anyhow::Result<CreateSubscriptionOutcome> {
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
         });
@@ -170,8 +170,9 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         );
 
         let configuration_bytes = configuration.map(serialize_configuration);
-        let subscription =
-            publisher.createSubscription(&listener_wrapper, configuration_bytes.as_deref())?;
+        let subscription = publisher
+            .createSubscription(&listener_wrapper, configuration_bytes.as_deref())
+            .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
 
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
             ConfigurablePublisherRegistrySubscription {

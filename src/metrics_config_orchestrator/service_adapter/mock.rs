@@ -48,11 +48,11 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         self.num_get_message_provider_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(error) = self.next_error.lock().take() {
-            return Err(error);
+            return Err(GetMessageProviderError::FailedToParseMetadata(error));
         }
 
         let mut get_not_supported = self.next_message_provider_get_not_supported.lock();
@@ -79,7 +79,7 @@ impl ServiceAdapter for MockServiceAdapter {
         configuration: Option<&Any>,
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-    ) -> anyhow::Result<Option<ServiceSubscription>> {
+    ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
         self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(configuration) = configuration {
@@ -87,7 +87,7 @@ impl ServiceAdapter for MockServiceAdapter {
         }
 
         if let Some(error) = self.next_error.lock().take() {
-            return Err(error);
+            return Err(CreateSubscriptionError::FailedToParseMetadata(error));
         }
 
         if self.block_subscribe {

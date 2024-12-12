@@ -19,8 +19,9 @@ use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
-    ServicePublisherAccessor, ServicePublisherMetadata,
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
+    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
+    ServicePublisherMetadata,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils;
@@ -57,7 +58,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<ServicePublisherMetadata>> {
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(None);
         };
@@ -71,7 +72,8 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                     };
 
                     let message_descriptor =
-                        Self::parse_telemetry_metadata(v.key(), &service_unit_definition)?;
+                        Self::parse_telemetry_metadata(v.key(), &service_unit_definition)
+                            .map_err(GetMetadataError::FailedToParseMetadata)?;
                     v.insert(message_descriptor.clone());
                     message_descriptor
                 }
@@ -83,7 +85,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(GetMessageProviderOutcome::NotRegistered);
         };
@@ -96,7 +98,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         let message_descriptor =
             Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .with_context(|| format!("Metadata not found for service '{service_name}'."))?;
+                .map_err(GetMessageProviderError::FailedToParseMetadata)?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
@@ -116,7 +118,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
-    ) -> anyhow::Result<CreateSubscriptionOutcome> {
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
         };
@@ -129,7 +131,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         let message_descriptor =
             Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .with_context(|| format!("Metadata not found for service '{service_name}'."))?;
+                .map_err(CreateSubscriptionError::FailedToParseMetadata)?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
 

@@ -15,8 +15,8 @@ use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherMessageProvider,
-    ServicePublisherSubscription,
+    CreateSubscriptionError, CreateSubscriptionOutcome, GetMessageProviderError,
+    GetMessageProviderOutcome, ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::conversions::u32_into_usize;
@@ -49,20 +49,15 @@ impl DataTunnelSubscriber {
         mut callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-    ) -> anyhow::Result<CreateSubscriptionOutcome> {
-        let mut subscriber_stream =
-            dt::SubscriberStream::create(
-                self.ctx.clone().await,
-                &unit_identifier,
-                sub_sampling_interval.as_duration(),
-                dt::SubscriberOptions { fetch_last_message: false }
-            )
-            .await
-            .with_context(
-                || format!(
-                    "Failed to subscribe to unit identifier {} with sub-sampling interval {sub_sampling_interval:?}.",
-                    Self::to_debug_string(&unit_identifier))
-            )?;
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+        let mut subscriber_stream = dt::SubscriberStream::create(
+            self.ctx.clone().await,
+            &unit_identifier,
+            sub_sampling_interval.as_duration(),
+            dt::SubscriberOptions { fetch_last_message: false },
+        )
+        .await
+        .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
 
         let cancellation_token = CancellationToken::new();
         let subscription_drop_guard = cancellation_token.clone().drop_guard();
@@ -125,7 +120,7 @@ impl DataTunnelSubscriber {
         &self,
         unit_identifier: UnitIdentifier,
         message_descriptor: MessageDescriptor,
-    ) -> anyhow::Result<GetMessageProviderOutcome> {
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
         struct ServicePublisherMessageProviderImpl {
             ctx: future::Shared<BoxFuture<'static, ContextRef>>,
             unit_identifier: UnitIdentifier,

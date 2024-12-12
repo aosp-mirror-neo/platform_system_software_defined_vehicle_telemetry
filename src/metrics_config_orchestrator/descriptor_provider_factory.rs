@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::expr::node_factory::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
-use crate::service_publisher_accessor::ServicePublisherAccessor;
+use crate::service_publisher_accessor::{GetMetadataError, ServicePublisherAccessor};
 
 #[async_trait]
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
@@ -36,10 +36,10 @@ pub(crate) enum DescriptorProviderFactoryError {
     use missing message descriptor of type {msg_type}"
     )]
     MissingMessageDescriptor { pub_name: String, msg_type: String },
-    #[error("Error when calling ServicePublisherManager: {error:#}")]
+    #[error("Error when calling ServicePublisherManager: {error}")]
     ServicePublisherManagerError {
         #[from]
-        error: anyhow::Error,
+        error: GetMetadataError,
     },
 }
 

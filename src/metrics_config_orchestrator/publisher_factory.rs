@@ -229,7 +229,9 @@ mod tests {
         GetMessageProviderOutcome, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
-    use crate::service_publisher_accessor::AvailabilityCallbackRegistration;
+    use crate::service_publisher_accessor::{
+        AvailabilityCallbackRegistration, CreateSubscriptionError, GetMessageProviderError,
+    };
 
     const INTERVAL: Duration = Duration::from_millis(42);
     const PUBLISHER_NAME: &str = "publisher";
@@ -243,7 +245,7 @@ mod tests {
         async fn get_message_provider(
             &self,
             _service_name: &str,
-        ) -> anyhow::Result<GetMessageProviderOutcome> {
+        ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
             unreachable!()
         }
 
@@ -253,7 +255,7 @@ mod tests {
             _configuration: Option<&Any>,
             _sub_sampling_interval: &SubSamplingInterval,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        ) -> anyhow::Result<Option<ServiceSubscription>> {
+        ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
             unreachable!()
         }
 

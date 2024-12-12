@@ -7,11 +7,45 @@ use async_trait::async_trait;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
+use sdv_status_rs::SdvStatus;
 use std::fmt;
 use std::sync::Arc;
 
 use crate::metrics_config_runtime_error::ServiceRuntimeError;
 use crate::sub_sampling_interval::SubSamplingInterval;
+
+/// get_metadata error.
+#[derive(Debug, thiserror::Error)]
+pub enum GetMetadataError {
+    /// Failed to parse metadata.
+    #[error("failed to parse metadata: {0:#}")]
+    FailedToParseMetadata(anyhow::Error),
+}
+
+/// get_message_provider error.
+#[derive(Debug, thiserror::Error)]
+pub enum GetMessageProviderError {
+    /// Failed to parse metadata.
+    #[error("failed to parse metadata: {0:#}")]
+    FailedToParseMetadata(anyhow::Error),
+    /// Failed to connect to RPC client.
+    #[error("failed to connect to RPC client: {0}")]
+    RpcFailedToConnect(SdvStatus),
+}
+
+/// create_subscription error.
+#[derive(Debug, thiserror::Error)]
+pub enum CreateSubscriptionError {
+    /// Failed to parse metadata.
+    #[error("failed to parse metadata: {0:#}")]
+    FailedToParseMetadata(anyhow::Error),
+    /// Failed to connect to RPC client.
+    #[error("failed to connect to RPC client: {0}")]
+    RpcFailedToConnect(SdvStatus),
+    /// Failed to subscribe.
+    #[error("failed to subscribe: {0:#}")]
+    FailedToSubscribe(anyhow::Error),
+}
 
 /// Interface of an entity that provides access to Service Publishers.
 #[async_trait]
@@ -22,7 +56,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<Option<ServicePublisherMetadata>>;
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError>;
 
     /// Returns provider of messages from the publisher specified by the service name.
     /// Returns None if the service publisher is not registered
@@ -30,7 +64,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> anyhow::Result<GetMessageProviderOutcome>;
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError>;
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
@@ -40,7 +74,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
-    ) -> anyhow::Result<CreateSubscriptionOutcome>;
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError>;
 
     /// Registers a callback that will be called when a service with the specified string
     /// service_name becomes available.
