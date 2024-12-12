@@ -21,6 +21,7 @@ use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPubli
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
+use crate::metrics_config_runtime_error::AggregationPublisherRuntimeError;
 use crate::sub_sampling_interval::SubSamplingInterval;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
@@ -49,6 +50,7 @@ pub(crate) struct PublisherFactoryCreateContext<'a> {
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
     pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
+    pub error_callback: Arc<dyn Fn(AggregationPublisherRuntimeError) + Send + Sync>,
 }
 
 pub(crate) struct PublisherFactoryValidateContext<'a> {
@@ -165,6 +167,7 @@ impl PublisherFactoryImpl {
             message_builder.into(),
             aggregation_publisher_proto.reset_on_get,
             triggers,
+            Arc::clone(&context.error_callback),
         );
         Ok(Box::new(publisher))
     }
@@ -361,6 +364,9 @@ mod tests {
                 nodes: &nodes,
                 node_types: &node_types,
                 triggers: &triggers,
+                error_callback: Arc::new(|err| {
+                    panic!("Unexpected error: {err:?}");
+                }),
             };
             self.create(publisher_proto, &context)
         }
