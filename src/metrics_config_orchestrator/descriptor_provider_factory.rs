@@ -14,7 +14,10 @@ use thiserror::Error;
 
 use crate::expr::node_factory::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
-use crate::service_publisher_accessor::{GetMetadataError, ServicePublisherAccessor};
+use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
+use crate::service_publisher_accessor::{
+    GetMetadataError, ServiceDiscoveryError, ServicePublisherAccessor,
+};
 
 #[async_trait]
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
@@ -23,6 +26,7 @@ pub(crate) trait DescriptorProviderFactory: Send + Sync {
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
         service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
+        error_callback: Arc<dyn Fn(String, ServiceDiscoveryError) + Send + Sync>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError>;
 }
 
@@ -52,15 +56,22 @@ impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
         fds: &[FileDescriptor],
         publishers: &[PublisherProto],
         service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
+        error_callback: Arc<dyn Fn(String, ServiceDiscoveryError) + Send + Sync>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         let mut publisher_message_descriptor = HashMap::new();
         for publisher in publishers {
             let descriptor = match &publisher.publisher_type {
                 Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
-                    service_publisher_manager
+                    let (metadata, service_discovery_errors) = service_publisher_manager
                         .get_metadata(&service_publisher_proto.service_name)
-                        .await?
-                        .map(|metadata| metadata.message_descriptor)
+                        .await;
+                    for service_discovery_error in service_discovery_errors {
+                        (error_callback)(
+                            service_publisher_proto.service_name.to_owned(),
+                            service_discovery_error,
+                        );
+                    }
+                    metadata?.map(|metadata| metadata.message_descriptor)
                 }
                 Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
                     let message_builder = aggregation_publisher_proto
@@ -169,6 +180,9 @@ mod tests {
                 get_test_file_descriptors(),
                 &[publisher],
                 &(service_publisher_manager as Arc<dyn ServicePublisherAccessor>),
+                Arc::new(|err, service_name| {
+                    panic!("Unexpected error for '{service_name}': {err:?}")
+                }),
             )
             .await
             .err()
@@ -192,6 +206,9 @@ mod tests {
                 get_test_file_descriptors(),
                 &[publisher],
                 &create_default_service_publisher_accessor(),
+                Arc::new(|err, service_name| {
+                    panic!("Unexpected error for '{service_name}': {err:?}")
+                }),
             )
             .await
             .err()
@@ -209,7 +226,14 @@ mod tests {
     async fn get_descriptor_invalid_publisher_name_fails() {
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let descriptor_provider = descriptor_provider_factory
-            .create(get_test_file_descriptors(), &[], &create_default_service_publisher_accessor())
+            .create(
+                get_test_file_descriptors(),
+                &[],
+                &create_default_service_publisher_accessor(),
+                Arc::new(|err, service_name| {
+                    panic!("Unexpected error for '{service_name}': {err:?}")
+                }),
+            )
             .await
             .unwrap();
 
@@ -235,6 +259,9 @@ mod tests {
                 get_test_file_descriptors(),
                 &[publisher],
                 &create_service_publisher_accessor(TestMessage::descriptor()),
+                Arc::new(|err, service_name| {
+                    panic!("Unexpected error for '{service_name}': {err:?}")
+                }),
             )
             .await
             .unwrap();
@@ -259,6 +286,9 @@ mod tests {
                 get_test_file_descriptors(),
                 &[publisher_1, publisher_2],
                 &create_default_service_publisher_accessor(),
+                Arc::new(|err, service_name| {
+                    panic!("Unexpected error for '{service_name}': {err:?}")
+                }),
             )
             .await
             .unwrap();
@@ -287,6 +317,9 @@ mod tests {
                 get_test_file_descriptors(),
                 &[publisher],
                 &create_default_service_publisher_accessor(),
+                Arc::new(|err, service_name| {
+                    panic!("Unexpected error for '{service_name}': {err:?}")
+                }),
             )
             .await
             .unwrap();

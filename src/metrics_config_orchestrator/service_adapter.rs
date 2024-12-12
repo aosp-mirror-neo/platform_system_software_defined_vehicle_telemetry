@@ -155,7 +155,16 @@ impl ServiceAdapter for ServiceAdapterImpl {
             }
         }
 
-        Ok(match self.service_publisher_accessor.get_message_provider(service_name).await? {
+        let (message_provider, service_discovery_errors) =
+            self.service_publisher_accessor.get_message_provider(service_name).await;
+        for service_discovery_error in service_discovery_errors {
+            (self.error_callback)(MetricsConfigRuntimeError::ServiceDiscovery {
+                metrics_config_uuid: None,
+                service_name: service_name.to_owned(),
+                error: service_discovery_error,
+            })
+        }
+        Ok(match message_provider? {
             AccessorGetMessageProviderOutcome::NotRegistered => {
                 GetMessageProviderOutcome::NotRegistered
             }
@@ -182,7 +191,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             let error_callback = Arc::clone(&self.error_callback);
             let service_name_clone = service_name.to_owned();
             // Subscription has configuration, so it can't be shared.
-            let create_subscription_outcome = self
+            let (create_subscription_outcome, service_discovery_errors) = self
                 .service_publisher_accessor
                 .create_subscription(
                     service_name,
@@ -198,9 +207,16 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         }
                     }),
                 )
-                .await?;
+                .await;
+            for service_discovery_error in service_discovery_errors {
+                (self.error_callback)(MetricsConfigRuntimeError::ServiceDiscovery {
+                    metrics_config_uuid: None,
+                    service_name: service_name.to_owned(),
+                    error: service_discovery_error,
+                })
+            }
 
-            match create_subscription_outcome {
+            match create_subscription_outcome? {
                 CreateSubscriptionOutcome::Subscribed(subscription) => {
                     Some(ServiceSubscriptionType::new_configured(subscription))
                 }
@@ -232,8 +248,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     let error_callback = Arc::clone(&self.error_callback);
                     let (sender, receiver) = mpsc::unbounded_channel();
                     let service_name_clone = service_name.to_owned();
-                    let create_subscription_outcome = self
-                        .service_publisher_accessor
+                    let (create_subscription_outcome, service_discovery_errors) = self
+                    .service_publisher_accessor
                         .create_subscription(
                             service_name,
                             None,
@@ -254,9 +270,16 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                 }
                             }),
                         )
-                        .await?;
+                        .await;
+                    for service_discovery_error in service_discovery_errors {
+                        (self.error_callback)(MetricsConfigRuntimeError::ServiceDiscovery {
+                            metrics_config_uuid: None,
+                            service_name: service_name.to_owned(),
+                            error: service_discovery_error,
+                        })
+                    }
 
-                    match create_subscription_outcome {
+                    match create_subscription_outcome? {
                         CreateSubscriptionOutcome::Subscribed(subscription) => {
                             struct ServiceAdapterHandler {
                                 callback_container: Arc<

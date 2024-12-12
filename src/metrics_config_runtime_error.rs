@@ -8,6 +8,7 @@ use crate::{
     expr::node_error::NodeError, metrics_config_orchestrator::message_builder::MessageBuilderError,
     service_publisher_accessor::CreateSubscriptionError,
     service_publisher_accessor::GetMessageProviderError,
+    service_publisher_accessor::ServiceDiscoveryError,
 };
 
 /// Runtime errors of a metrics config.
@@ -41,6 +42,20 @@ pub(crate) enum MetricsConfigRuntimeError {
         metrics_config_uuid: String,
         /// Service publisher error.
         error: ServicePublisherRuntimeError,
+    },
+
+    /// Failure during service discovery.
+    #[error(
+        "Service discovery error for {uuid_message} service name '{service_name}': {error}",
+        uuid_message = .metrics_config_uuid.as_ref().map_or("".to_owned(), |uuid| format!("metrics config {uuid} and"))
+    )]
+    ServiceDiscovery {
+        /// UUID of the metrics config, if applicable.
+        metrics_config_uuid: Option<String>,
+        /// Name of the service.
+        service_name: String,
+        /// Service discovery error
+        error: ServiceDiscoveryError,
     },
 
     /// Runtime errors related to conditional triggers.

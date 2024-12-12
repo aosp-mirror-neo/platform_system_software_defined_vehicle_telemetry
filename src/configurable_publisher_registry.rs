@@ -19,9 +19,10 @@ use protobuf::{Message, MessageDyn};
 use sdv_telemetry::binder_adapter::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome,GetMessageProviderOutcome,
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
+    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServiceDiscoveryError,
     ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription, GetMetadataError, GetMessageProviderError, CreateSubscriptionError,
+    ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -107,7 +108,8 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+    ) -> (Result<Option<ServicePublisherMetadata>, GetMetadataError>, Vec<ServiceDiscoveryError>)
+    {
         let maybe_metadata = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.supports_get)
         });
@@ -115,13 +117,14 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         let metadata = maybe_metadata.map(|(message_descriptor, supports_get)| {
             ServicePublisherMetadata { message_descriptor, supports_get }
         });
-        Ok(metadata)
+        (Ok(metadata), vec![])
     }
 
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> (Result<GetMessageProviderOutcome, GetMessageProviderError>, Vec<ServiceDiscoveryError>)
+    {
         let provider = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             if entry.supports_get {
                 GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
@@ -134,7 +137,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             }
         })
         .unwrap_or(GetMessageProviderOutcome::NotRegistered);
-        Ok(provider)
+        (Ok(provider), vec![])
     }
 
     async fn create_subscription(
@@ -146,40 +149,45 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         mut callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
-        let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
-            (entry.message_descriptor.clone(), entry.publisher.clone())
-        });
+    ) -> (Result<CreateSubscriptionOutcome, CreateSubscriptionError>, Vec<ServiceDiscoveryError>)
+    {
+        let result = (async {
+            let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
+                (entry.message_descriptor.clone(), entry.publisher.clone())
+            });
 
-        let Some((message_descriptor, publisher)) = result else {
-            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
-        };
+            let Some((message_descriptor, publisher)) = result else {
+                return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+            };
 
-        let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
+            let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
 
-        let join_handle = tokio::spawn(async move {
-            while let Some(message) = rx.recv().await {
-                (callback)(Ok(message));
-            }
-        });
+            let join_handle = tokio::spawn(async move {
+                while let Some(message) = rx.recv().await {
+                    (callback)(Ok(message));
+                }
+            });
 
-        let listener_wrapper = BnSubscriber::new_async_binder(
-            SubscriberService::new(message_descriptor, tx),
-            TokioRuntime(tokio::runtime::Handle::current()),
-            BinderFeatures::default(),
-        );
+            let listener_wrapper = BnSubscriber::new_async_binder(
+                SubscriberService::new(message_descriptor, tx),
+                TokioRuntime(tokio::runtime::Handle::current()),
+                BinderFeatures::default(),
+            );
 
-        let configuration_bytes = configuration.map(serialize_configuration);
-        let subscription = publisher
-            .createSubscription(&listener_wrapper, configuration_bytes.as_deref())
-            .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
+            let configuration_bytes = configuration.map(serialize_configuration);
+            let subscription = publisher
+                .createSubscription(&listener_wrapper, configuration_bytes.as_deref())
+                .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
 
-        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
-            ConfigurablePublisherRegistrySubscription {
-                join_handle,
-                configurable_publisher_subscription: subscription,
-            },
-        )))
+            Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
+                ConfigurablePublisherRegistrySubscription {
+                    join_handle,
+                    configurable_publisher_subscription: subscription,
+                },
+            )))
+        })
+        .await;
+        (result, vec![])
     }
 
     async fn register_availability_callback(
@@ -535,7 +543,7 @@ mod tests {
     async fn get_metadata_incorrect_service_name_returns_none() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap();
+        let res = configurable_publisher_registry.get_metadata(SERVICE_NAME).await.0.unwrap();
 
         assert!(res.is_none());
     }
@@ -548,7 +556,7 @@ mod tests {
             create_configurable_publisher_registry(configurable_publisher).await;
 
         let res =
-            configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
+            configurable_publisher_registry.get_metadata(SERVICE_NAME).await.0.unwrap().unwrap();
 
         assert!(res.supports_get);
         assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
@@ -559,7 +567,7 @@ mod tests {
     async fn get_message_provider_incorrect_service_name_success() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
 
-        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
+        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.0;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
@@ -574,7 +582,7 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
+        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.0;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
@@ -592,7 +600,7 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
+        let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await.0;
         let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
             panic!("Unexpected outcome: {outcome:?}")
         };
@@ -644,6 +652,7 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
+            .0
             .unwrap();
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
@@ -666,6 +675,7 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
+            .0
             .unwrap();
 
         assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
@@ -686,6 +696,7 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
+            .0
             .unwrap()
             .unwrap();
         subscription.unsubscribe().await.unwrap();
@@ -708,6 +719,7 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
+            .0
             .unwrap()
             .unwrap();
         configurable_publisher_registry.unregister_publisher(SERVICE_NAME).await.unwrap();
@@ -736,6 +748,7 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
+            .0
             .unwrap()
             .unwrap();
         configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await.unwrap();

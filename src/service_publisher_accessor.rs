@@ -47,6 +47,18 @@ pub enum CreateSubscriptionError {
     FailedToSubscribe(anyhow::Error),
 }
 
+/// Errors that occur during service discovery but are more treated as warnings, since other service
+/// publisher accessors might be able to find the service.
+#[derive(Debug, thiserror::Error)]
+pub enum ServiceDiscoveryError {
+    /// More than one service matches the criteria.
+    #[error("more than one service found, service_name is ambiguous")]
+    AmbiguousServiceName,
+    /// An internal error occurred while attempting to discover services.
+    #[error("internal service discovery error: {0}")]
+    InternalError(SdvStatus),
+}
+
 /// Interface of an entity that provides access to Service Publishers.
 #[async_trait]
 pub trait ServicePublisherAccessor: Send + Sync {
@@ -56,7 +68,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError>;
+    ) -> (Result<Option<ServicePublisherMetadata>, GetMetadataError>, Vec<ServiceDiscoveryError>);
 
     /// Returns provider of messages from the publisher specified by the service name.
     /// Returns None if the service publisher is not registered
@@ -64,7 +76,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError>;
+    ) -> (Result<GetMessageProviderOutcome, GetMessageProviderError>, Vec<ServiceDiscoveryError>);
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
@@ -74,7 +86,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError>;
+    ) -> (Result<CreateSubscriptionOutcome, CreateSubscriptionError>, Vec<ServiceDiscoveryError>);
 
     /// Registers a callback that will be called when a service with the specified string
     /// service_name becomes available.
