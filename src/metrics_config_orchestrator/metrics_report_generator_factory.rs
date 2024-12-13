@@ -74,7 +74,7 @@ pub(crate) enum MetricsReportGeneratorFactoryError {
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryImpl {
-    pub(super) message_builder_factory: Arc<dyn MessageBuilderFactory>,
+    message_builder_factory: Arc<dyn MessageBuilderFactory>,
     error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
 }
 
