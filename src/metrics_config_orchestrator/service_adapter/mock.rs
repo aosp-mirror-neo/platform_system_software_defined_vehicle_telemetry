@@ -234,9 +234,9 @@ impl ServiceMessageProvider for MockServiceMessageProvider {
     async fn get_latest_message(
         &self,
         _configuration: Option<&Any>,
-    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
         if let Some(err) = self.next_error.lock().take() {
-            Err(err)
+            Err(GetLatestMessageError::MessageParsingError(err))
         } else if let Some(message_provider) = &self.message_provider {
             Ok(Some(message_provider()))
         } else {

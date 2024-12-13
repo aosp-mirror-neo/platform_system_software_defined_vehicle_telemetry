@@ -133,7 +133,7 @@ pub enum MetricsConfigOrchestratorError {
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
     #[error("End trigger cannot be set if start trigger is not set")]
     NoStartTriggerDefined,
-    #[error("Unable to activate publisher {publisher_name}: {error}")]
+    #[error("Unable to activate publisher {publisher_name}: {error:#}")]
     UnableToActivatePublisher { publisher_name: String, error: anyhow::Error },
 }
 

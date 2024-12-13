@@ -53,6 +53,7 @@ mod tests {
 
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::MetricsConfigState;
+    use crate::service_publisher_accessor::GetLatestMessageError;
 
     const ERROR_MESSAGE: &str = "error message";
     const PUBLISHER_NAME: &str = "publisher";
@@ -114,7 +115,9 @@ mod tests {
     #[test]
     fn get_message_propagates_publisher_error() {
         let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned());
-        publisher.set_latest_message_error(anyhow!(ERROR_MESSAGE));
+        publisher.set_latest_message_error(GetLatestMessageError::MessageParsingError(anyhow!(
+            ERROR_MESSAGE
+        )));
         let mut metrics_config = create_metrics_config();
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
         let message_provider = create_message_provider(metrics_config);
@@ -122,7 +125,7 @@ mod tests {
         let err = message_provider.get_message(PUBLISHER_NAME).unwrap_sync().err().unwrap();
 
         assert!(
-            matches!(&err, MessageProviderError::MessageRetrievalError { e } if e.to_string() == ERROR_MESSAGE),
+            matches!(&err, MessageProviderError::MessageRetrievalError { e } if e.to_string() == format!("failed to parse message: {ERROR_MESSAGE}")),
             "Unexpected error: {err:?}"
         );
     }

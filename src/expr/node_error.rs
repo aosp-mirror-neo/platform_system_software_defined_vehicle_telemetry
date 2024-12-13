@@ -6,6 +6,8 @@ use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as Node
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::service_publisher_accessor::GetLatestMessageError;
+
 #[derive(Error, Debug)]
 #[non_exhaustive]
 #[allow(missing_docs)]
@@ -102,10 +104,10 @@ pub enum MessageProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
-    #[error("Error when trying to retrieve latest message: {e:?}")]
+    #[error("Error when trying to retrieve latest message: {e}")]
     MessageRetrievalError {
         #[from]
-        e: anyhow::Error,
+        e: GetLatestMessageError,
     },
 }
 

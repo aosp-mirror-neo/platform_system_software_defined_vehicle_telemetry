@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 // External dependencies.
+use anyhow::Context;
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
 use binder::BinderFeatures;
@@ -19,10 +20,7 @@ use protobuf::{Message, MessageDyn};
 use sdv_telemetry::binder_adapter::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServiceDiscoveryError,
-    ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription,
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError, GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServiceDiscoveryError, ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -365,12 +363,21 @@ impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
     async fn get_latest_message(
         &self,
         configuration: Option<&Any>,
-    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
-        let publisher = self.publisher.upgrade()?;
+    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+        let publisher = self
+            .publisher
+            .upgrade()
+            .with_context(|| "Publisher is no longer registered.")
+            .map_err(GetLatestMessageError::FailedToRetrieveMessage)?;
         let configuration_bytes = configuration.map(serialize_configuration);
         let message = publisher
-            .getLatestMessage(configuration_bytes.as_deref())?
-            .map(|data| self.message_descriptor.parse_from_bytes(&data))
+            .getLatestMessage(configuration_bytes.as_deref())
+            .map_err(|err| GetLatestMessageError::FailedToRetrieveMessage(err.into()))?
+            .map(|data| {
+                self.message_descriptor
+                    .parse_from_bytes(&data)
+                    .map_err(|err| GetLatestMessageError::MessageParsingError(err.into()))
+            })
             .transpose()?;
         Ok(message)
     }

@@ -10,6 +10,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use super::Publisher;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::publisher::CallbackFn;
+use crate::service_publisher_accessor::GetLatestMessageError;
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
@@ -18,7 +19,7 @@ pub(crate) struct MockPublisher {
     name: String,
     activate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
     deactivate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
-    latest_message_error: Mutex<Option<anyhow::Error>>,
+    latest_message_error: Mutex<Option<GetLatestMessageError>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
@@ -35,7 +36,7 @@ impl Publisher for MockPublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError> {
         if let Some(err) = self.latest_message_error.lock().take() {
             return Err(err).into();
         }
@@ -113,7 +114,7 @@ impl MockPublisher {
         self.deactivate_callback.replace(Box::new(callback));
     }
 
-    pub(crate) fn set_latest_message_error(&self, error: anyhow::Error) {
+    pub(crate) fn set_latest_message_error(&self, error: GetLatestMessageError) {
         self.latest_message_error.lock().replace(error);
     }
 

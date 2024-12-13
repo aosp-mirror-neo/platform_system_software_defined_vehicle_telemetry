@@ -15,8 +15,9 @@ use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionError, CreateSubscriptionOutcome, GetMessageProviderError,
-    GetMessageProviderOutcome, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError,
+    GetMessageProviderError, GetMessageProviderOutcome, ServicePublisherMessageProvider,
+    ServicePublisherSubscription,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::conversions::u32_into_usize;
@@ -132,7 +133,7 @@ impl DataTunnelSubscriber {
             async fn get_latest_message(
                 &self,
                 _configuration: Option<&Any>,
-            ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+            ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
                 let Ok(message_bytes) = dt::InstantReader::get_last_message(
                     self.ctx.clone().await,
                     &self.unit_identifier,
@@ -145,10 +146,13 @@ impl DataTunnelSubscriber {
                     return Ok(None);
                 };
 
-                Ok(Some(DataTunnelSubscriber::read_length_delimited_proto(
-                    &message_bytes,
-                    &self.message_descriptor,
-                )?))
+                Ok(Some(
+                    DataTunnelSubscriber::read_length_delimited_proto(
+                        &message_bytes,
+                        &self.message_descriptor,
+                    )
+                    .map_err(GetLatestMessageError::MessageParsingError)?,
+                ))
             }
         }
 

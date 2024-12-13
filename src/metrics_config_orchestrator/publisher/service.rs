@@ -27,7 +27,8 @@ use crate::metrics_config_runtime_error::{
     ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
 };
 use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, GetMessageProviderError,
+    AvailabilityCallbackRegistration, CreateSubscriptionError, GetLatestMessageError,
+    GetMessageProviderError,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -98,7 +99,7 @@ impl Publisher for ServicePublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError> {
         if let Some(message) = self.base.get_latest_message() {
             return Ok(Some(message)).into();
         }

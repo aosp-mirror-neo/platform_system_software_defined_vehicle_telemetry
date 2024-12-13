@@ -7,6 +7,7 @@ use std::marker::{Send, Sync};
 use std::sync::Arc;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::service_publisher_accessor::GetLatestMessageError;
 
 mod base;
 
@@ -29,7 +30,7 @@ pub(crate) trait Publisher: Send + Sync {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error>;
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError>;
 
     async fn activate(self: Arc<Self>) -> anyhow::Result<()>;
     async fn deactivate(&self) -> anyhow::Result<()>;

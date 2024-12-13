@@ -47,6 +47,17 @@ pub enum CreateSubscriptionError {
     FailedToSubscribe(anyhow::Error),
 }
 
+/// get_latest_message error.
+#[derive(Debug, thiserror::Error)]
+pub enum GetLatestMessageError {
+    /// Failed to retrieve the message.
+    #[error("failed to retrieve message: {0:#}")]
+    FailedToRetrieveMessage(anyhow::Error),
+    /// Failed to parse the message.
+    #[error("failed to parse message: {0:#}")]
+    MessageParsingError(anyhow::Error),
+}
+
 /// Errors that occur during service discovery but are more treated as warnings, since other service
 /// publisher accessors might be able to find the service.
 #[derive(Debug, thiserror::Error)]
@@ -111,7 +122,7 @@ pub trait ServicePublisherMessageProvider: Send + Sync {
     async fn get_latest_message(
         &self,
         configuration: Option<&Any>,
-    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
+    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError>;
 }
 
 /// Service publisher metadata.

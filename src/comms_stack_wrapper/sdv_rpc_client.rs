@@ -14,8 +14,9 @@ use sdv_comms::rpc;
 use sdv_comms::ContextRef;
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
-    CreateSubscriptionError, CreateSubscriptionOutcome, GetMessageProviderError,
-    GetMessageProviderOutcome, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError,
+    GetMessageProviderError, GetMessageProviderOutcome, ServicePublisherMessageProvider,
+    ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -56,13 +57,13 @@ impl SdvRpcClient {
             async fn get_latest_message(
                 &self,
                 configuration: Option<&Any>,
-            ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+            ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
                 let configuration_bytes = SdvRpcClient::serialize_configuration(configuration);
                 let response_bytes = self
                     .client
                     .unary_call("GetLatestMessage", &configuration_bytes)
                     .await
-                    .with_context(|| "Failed to make RPC call")?;
+                    .map_err(|err| GetLatestMessageError::FailedToRetrieveMessage(err.into()))?;
                 if response_bytes.is_empty() {
                     return Ok(None);
                 }
@@ -70,7 +71,7 @@ impl SdvRpcClient {
                 let response = self
                     .message_descriptor
                     .parse_from_bytes(&response_bytes)
-                    .with_context(|| "Failed to convert bytes to protobuf message")?;
+                    .map_err(|err| GetLatestMessageError::MessageParsingError(err.into()))?;
                 Ok(Some(response))
             }
         }

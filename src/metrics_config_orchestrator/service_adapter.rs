@@ -15,8 +15,9 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
 use crate::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetMessageProviderError, GetMessageProviderOutcome as AccessorGetMessageProviderOutcome,
-    ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    GetLatestMessageError, GetMessageProviderError,
+    GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -58,7 +59,7 @@ pub(crate) trait ServiceMessageProvider: Send + Sync {
     async fn get_latest_message(
         &self,
         configuration: Option<&Any>,
-    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>>;
+    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError>;
 }
 
 /// Stores details about a service subscription.
@@ -150,7 +151,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             async fn get_latest_message(
                 &self,
                 configuration: Option<&Any>,
-            ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+            ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
                 self.service_publisher_message_provider.get_latest_message(configuration).await
             }
         }

@@ -17,6 +17,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 use crate::metrics_config_runtime_error::AggregationPublisherRuntimeError;
+use crate::service_publisher_accessor::GetLatestMessageError;
 
 pub(crate) struct AggregationPublisher {
     pub(crate) reset_on_get: bool,
@@ -58,7 +59,7 @@ impl Publisher for AggregationPublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, anyhow::Error> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError> {
         let latest_message = self.base.get_latest_message();
         if self.reset_on_get {
             self.base.reset_latest_message();

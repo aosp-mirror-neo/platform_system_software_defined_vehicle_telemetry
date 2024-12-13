@@ -288,10 +288,10 @@ impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
     async fn get_latest_message(
         &self,
         _configuration: Option<&Any>,
-    ) -> anyhow::Result<Option<Box<dyn MessageDyn>>> {
+    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
         let data_reference = self.data.upgrade().unwrap();
         let mut data = data_reference.lock();
-        data.check_next_error()?;
+        data.check_next_error().map_err(GetLatestMessageError::MessageParsingError)?;
 
         Ok(data.next_latest_message.take())
     }
