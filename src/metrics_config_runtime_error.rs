@@ -19,15 +19,6 @@ pub(crate) enum MetricsConfigRuntimeError {
         error: ServiceRuntimeError,
     },
 
-    /// Runtime errors related to aggregation publishers.
-    #[error("Aggregation publisher error for metrics config {metrics_config_uuid}: {error}")]
-    AggregationPublisher {
-        /// UUID of the metrics config.
-        metrics_config_uuid: String,
-        /// Aggregation publisher error.
-        error: AggregationPublisherRuntimeError,
-    },
-
     /// Runtime errors related to metrics config generation.
     #[error("Failed to generate metrics report: {0}")]
     MetricsReportGenerator(MetricsReportGeneratorError),
@@ -53,16 +44,4 @@ pub enum ServiceRuntimeError {
     /// Failure to parse a retrieved message.
     #[error("Message parsing error: {0:#}")]
     MessageParsingError(anyhow::Error),
-}
-
-#[derive(thiserror::Error, Debug)]
-#[error(
-    "Aggregation publisher '{publisher_name}' failed to build message: {message_builder_error}"
-)]
-pub(crate) struct AggregationPublisherRuntimeError {
-    /// Name of the aggregation publisher.
-    pub(crate) publisher_name: String,
-
-    /// Message builder error.
-    pub(crate) message_builder_error: MessageBuilderError,
 }

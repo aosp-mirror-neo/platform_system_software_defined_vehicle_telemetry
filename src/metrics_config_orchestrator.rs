@@ -224,21 +224,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             config_proto,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
             |publisher_proto, triggers| {
-                let uuid = config_proto.uuid.clone();
-                let _misc_error_callback = Arc::clone(&self.misc_error_callback);
                 let context = PublisherFactoryCreateContext {
                     file_descriptors: &file_descriptors,
                     nodes: &expression_nodes,
                     node_types: &node_types,
                     triggers,
-                    error_callback: Arc::new(move |error| {
-                        let error = MetricsConfigRuntimeError::AggregationPublisher {
-                            metrics_config_uuid: uuid.clone(),
-                            error,
-                        };
-                        error!("Metrics config runtime error: {error}");
-                        // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{error}"));
-                    }),
                 };
                 ordered_publisher_names.push(publisher_proto.name.clone());
                 self.publisher_factory.create(publisher_proto, &context).map_err(|factory_error| {
