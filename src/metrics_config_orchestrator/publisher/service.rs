@@ -4,7 +4,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use either::Either;
 use futures::FutureExt;
-use log::{debug, info, warn};
+use log::{debug, error, info, warn};
 use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_utils::{
@@ -22,9 +22,6 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
-};
-use crate::metrics_config_runtime_error::{
-    ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
 };
 use crate::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionError, GetLatestMessageError,
@@ -46,7 +43,6 @@ pub(crate) struct ServicePublisher {
     base: BasePublisher,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     state: AsyncMutex<ServicePublisherState>,
-    error_callback: Arc<dyn Fn(ServicePublisherRuntimeError) + Send + Sync>,
 }
 
 #[derive(strum_macros::Display)]
@@ -299,7 +295,6 @@ impl ServicePublisher {
         sub_sampling_interval: SubSamplingInterval,
         connection_type: ConnectionType,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-        error_callback: Arc<dyn Fn(ServicePublisherRuntimeError) + Send + Sync>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name),
@@ -309,7 +304,6 @@ impl ServicePublisher {
             service_adapter,
             service_name,
             state: ServicePublisherState::Inactive.into(),
-            error_callback,
         }
     }
 
@@ -370,10 +364,10 @@ impl ServicePublisher {
                         );
                     }
                     Err(err) => {
-                        (self.error_callback)(ServicePublisherRuntimeError {
-                            publisher_name: self.get_name().to_owned(),
-                            error: ServicePublisherRuntimeErrorKind::RetryActivationFailed(err)
-                        });
+                        error!(
+                            "Publisher {} activation retry failed: {:?}",
+                            self.get_name(), err
+                        );
                     }
                 }
             },
@@ -508,7 +502,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             service_adapter,
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ))
     }
 
@@ -522,7 +515,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ))
     }
 
@@ -650,7 +642,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -692,7 +683,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -722,7 +712,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -780,7 +769,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -838,7 +826,6 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         let err = Arc::clone(&publisher).activate().await.err().unwrap();

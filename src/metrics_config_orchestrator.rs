@@ -232,16 +232,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     node_types: &node_types,
                     triggers,
                     error_callback: Arc::new(move |error| {
-                        let error = error.either(
-                            |error| MetricsConfigRuntimeError::ServicePublisher {
-                                metrics_config_uuid: uuid.clone(),
-                                error,
-                            },
-                            |error| MetricsConfigRuntimeError::AggregationPublisher {
-                                metrics_config_uuid: uuid.clone(),
-                                error,
-                            },
-                        );
+                        let error = MetricsConfigRuntimeError::AggregationPublisher {
+                            metrics_config_uuid: uuid.clone(),
+                            error,
+                        };
                         error!("Metrics config runtime error: {error}");
                         // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{error}"));
                     }),
