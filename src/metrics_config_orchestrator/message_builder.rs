@@ -3,6 +3,8 @@
 mod value_aggregator;
 pub(super) mod value_aggregator_factory;
 
+pub(super) use value_aggregator::AggregationError;
+
 use log::trace;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
@@ -18,7 +20,7 @@ use crate::expr::proto_node_value_converter::node_value_to_protobuf_reflection::
     ReflectRepeatedMutExt, ToReflectValueBox,
 };
 
-use value_aggregator::{AggregationError, ValueAggregator};
+use value_aggregator::ValueAggregator;
 
 pub(crate) trait MessageBuilder: Send + Sync {
     /// Builds a protobuf message dynamically.

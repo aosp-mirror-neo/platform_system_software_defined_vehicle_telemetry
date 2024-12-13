@@ -16,7 +16,6 @@ use thiserror::Error;
 use crate::expr::{node_error::NodeError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum AggregationError {
     #[error("Evaluation of expression node failed: {e}")]
     ExpressionEvaluationError {

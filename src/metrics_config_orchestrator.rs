@@ -18,6 +18,7 @@ mod trigger_factory;
 // External dependencies.
 use async_trait::async_trait;
 use log::{debug, error};
+use message_builder::MessageBuilderError;
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
@@ -36,18 +37,29 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::expr::node::Node;
-use crate::expr::node_error::NodeError;
+use crate::expr::node_error::{MessageProviderError, NodeError};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
-use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
-use crate::service_publisher_accessor::ServicePublisherAccessor;
+use crate::metrics_config_runtime_error::{
+    AggregationPublisherRuntimeError, ConditionalTriggerRuntimeError, MetricsConfigRuntimeError,
+    MetricsReportGeneratorError, ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
+    ServiceRuntimeError,
+};
+use crate::service_publisher_accessor::{
+    CreateSubscriptionError,
+    GetLatestMessageError,
+    GetMessageProviderError,
+    // ServiceDiscoveryError,
+    ServicePublisherAccessor,
+};
 use crate::StatusCodes;
 
 // Child module dependencies.
 use descriptor_provider_factory::{
     DescriptorProviderFactory, DescriptorProviderFactoryError, DescriptorProviderFactoryImpl,
 };
+use message_builder::AggregationError;
 use message_builder_factory::MessageBuilderFactoryImpl;
 use message_provider::MessageProviderImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
@@ -156,7 +168,6 @@ pub(super) struct MetricsConfigOrchestratorImpl {
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
 
     /// The function that is used to report misc errors.
-    #[allow(dead_code)]
     misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
 }
 
@@ -225,7 +236,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
             |publisher_proto, triggers| {
                 let uuid = config_proto.uuid.clone();
-                let _misc_error_callback = Arc::clone(&self.misc_error_callback);
+                let misc_error_callback = Arc::clone(&self.misc_error_callback);
                 let context = PublisherFactoryCreateContext {
                     file_descriptors: &file_descriptors,
                     nodes: &expression_nodes,
@@ -242,8 +253,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                                 error,
                             },
                         );
-                        error!("Metrics config runtime error: {error}");
-                        // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{error}"));
+                        Self::log_error(error, &misc_error_callback)
                     }),
                 };
                 ordered_publisher_names.push(publisher_proto.name.clone());
@@ -257,7 +267,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             // Create a rust Trigger object using already created Publisher and Trigger objects to resolve dependencies.
             |trigger_proto, publishers, triggers| {
                 let uuid = config_proto.uuid.clone();
-                let _misc_error_callback = Arc::clone(&self.misc_error_callback);
+                let misc_error_callback = Arc::clone(&self.misc_error_callback);
                 let context = TriggerFactoryCreateContext {
                     expression_nodes: &expression_nodes,
                     node_types: &node_types,
@@ -268,8 +278,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                             metrics_config_uuid: uuid.clone(),
                             error,
                         };
-                        error!("Metrics config runtime error: {error}");
-                        // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{error}"));
+                        Self::log_error(error, &misc_error_callback)
                     }),
                 };
                 self.trigger_factory.create(trigger_proto, &context).map_err(|factory_error| {
@@ -551,13 +560,12 @@ impl MetricsConfigOrchestratorImpl {
         misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
+        let misc_error_callback_clone = Arc::clone(&misc_error_callback);
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
             Arc::clone(&service_publisher_manager),
-            Arc::new(move |err| {
-                error!("Metrics config runtime error: {err}");
-                // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{err}"));
-            }),
+            Arc::new(move |err| Self::log_error(err, &misc_error_callback_clone)),
         ));
+        let misc_error_callback_clone = Arc::clone(&misc_error_callback);
         Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
@@ -565,8 +573,7 @@ impl MetricsConfigOrchestratorImpl {
                 Arc::<MessageBuilderFactoryImpl>::clone(&message_builder_factory),
                 Arc::new(move |err| {
                     let err = MetricsConfigRuntimeError::MetricsReportGenerator(err);
-                    error!("Metrics config runtime error: {err}");
-                    // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{err}"));
+                    Self::log_error(err, &misc_error_callback_clone)
                 }),
             )),
             node_factory: Box::new(NodeFactoryImpl::new()),
@@ -580,6 +587,97 @@ impl MetricsConfigOrchestratorImpl {
             misc_error_callback,
             service_publisher_manager,
         }
+    }
+
+    fn log_error(
+        err: MetricsConfigRuntimeError,
+        misc_error_callback: &Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
+    ) {
+        fn status_code_for_message_builder_error(error: &MessageBuilderError) -> StatusCodes {
+            match error {
+                MessageBuilderError::BadAggregation { e: error, .. } => match error {
+                    AggregationError::ExpressionEvaluationError { e: error } => {
+                        status_code_for_node_error(error)
+                    }
+                    AggregationError::NumericAggregationTypeMismatch { .. }
+                    | AggregationError::VectorAppendTypeMismatch { .. }
+                    | AggregationError::VectorInitializationError { .. } => {
+                        StatusCodes::METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR
+                    }
+                },
+                MessageBuilderError::ExpressionEvaluationError { e: error, .. }
+                | MessageBuilderError::FailedToAssignValueToField { e: error, .. } => {
+                    status_code_for_node_error(error)
+                }
+            }
+        }
+
+        fn status_code_for_node_error(error: &NodeError) -> StatusCodes {
+            if let NodeError::MessageProviderError { e: error } = error {
+                match error.as_ref() {
+                    MessageProviderError::MessageRetrievalError { e: error } => match error {
+                        GetLatestMessageError::FailedToRetrieveMessage(_) => {
+                            return StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR;
+                        }
+                        GetLatestMessageError::MessageParsingError(_) => {
+                            return StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR;
+                        }
+                    },
+                    MessageProviderError::InvalidPublisherName => {}
+                }
+            }
+            StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR
+        }
+
+        let status_code = match err {
+            MetricsConfigRuntimeError::Service { ref error, .. } => match error {
+                ServiceRuntimeError::MessageRetrievalError(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR
+                }
+                ServiceRuntimeError::MessageParsingError(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR
+                }
+            },
+            MetricsConfigRuntimeError::AggregationPublisher {
+                error: AggregationPublisherRuntimeError { message_builder_error: ref error, .. },
+                ..
+            } => status_code_for_message_builder_error(error),
+            MetricsConfigRuntimeError::ServicePublisher {
+                error:
+                    ServicePublisherRuntimeError {
+                        error: ServicePublisherRuntimeErrorKind::RetryActivationFailed(ref error),
+                        ..
+                    },
+                ..
+            } => match error {
+                either::Left(GetMessageProviderError::FailedToParseMetadata(_))
+                | either::Right(CreateSubscriptionError::FailedToParseMetadata(_)) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR
+                }
+                either::Left(GetMessageProviderError::RpcFailedToConnect(_))
+                | either::Right(CreateSubscriptionError::RpcFailedToConnect(_))
+                | either::Right(CreateSubscriptionError::FailedToSubscribe(_)) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
+                }
+            },
+            // MetricsConfigRuntimeError::ServiceDiscovery { ref error, .. } => match error {
+            //     ServiceDiscoveryError::AmbiguousServiceName => {
+            //         StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_DISCOVERY_AMBIGUOUS_SERVICE_NAME_ERROR
+            //     }
+            //     ServiceDiscoveryError::InternalError(_) => StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_DISCOVERY_INTERNAL_ERROR,
+            // },
+            MetricsConfigRuntimeError::ConditionalTrigger {
+                error: ConditionalTriggerRuntimeError { node_error: ref error, .. },
+                ..
+            } => status_code_for_node_error(error),
+            MetricsConfigRuntimeError::MetricsReportGenerator(MetricsReportGeneratorError {
+                message_builder_error: ref error,
+                ..
+            }) => status_code_for_message_builder_error(error),
+        };
+
+        error!("Metrics config runtime error (status: {status_code:?}): {err}");
+        misc_error_callback(status_code, &format!("{err}"));
     }
 }
 
