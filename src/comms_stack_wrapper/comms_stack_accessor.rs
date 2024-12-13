@@ -6,7 +6,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
-use log::info;
+use log::{error, info};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
@@ -20,8 +20,8 @@ use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
 use sdv_telemetry::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServiceDiscoveryError,
-    ServicePublisherAccessor, ServicePublisherMetadata,
+    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
+    ServicePublisherMetadata,
 };
 use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils;
@@ -58,82 +58,58 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> (Result<Option<ServicePublisherMetadata>, GetMetadataError>, Vec<ServiceDiscoveryError>)
-    {
-        let mut service_discovery_errors = vec![];
-        let result = (async {
-            let Ok(service_name) = ServiceName::parse(service_name) else {
-                return Ok(None);
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+        let Ok(service_name) = ServiceName::parse(service_name) else {
+            return Ok(None);
+        };
+
+        let message_descriptor =
+            match self.service_message_descriptors.lock().await.entry(service_name) {
+                Entry::Occupied(o) => o.get().clone(),
+                Entry::Vacant(v) => {
+                    let Some(service_unit_definition) = self.discover_service(v.key()).await else {
+                        return Ok(None);
+                    };
+
+                    let message_descriptor =
+                        Self::parse_telemetry_metadata(v.key(), &service_unit_definition)
+                            .map_err(GetMetadataError::FailedToParseMetadata)?;
+                    v.insert(message_descriptor.clone());
+                    message_descriptor
+                }
             };
 
-            let message_descriptor =
-                match self.service_message_descriptors.lock().await.entry(service_name) {
-                    Entry::Occupied(o) => o.get().clone(),
-                    Entry::Vacant(v) => {
-                        let (service_unit_definition, discovery_error) =
-                            self.discover_service(v.key()).await;
-                        if let Some(discovery_error) = discovery_error {
-                            service_discovery_errors.push(discovery_error);
-                        }
-                        let Some(service_unit_definition) = service_unit_definition else {
-                            return Ok(None);
-                        };
-
-                        let message_descriptor =
-                            Self::parse_telemetry_metadata(v.key(), &service_unit_definition)
-                                .map_err(GetMetadataError::FailedToParseMetadata)?;
-                        v.insert(message_descriptor.clone());
-                        message_descriptor
-                    }
-                };
-
-            Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
-        })
-        .await;
-        (result, service_discovery_errors)
+        Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
 
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> (Result<GetMessageProviderOutcome, GetMessageProviderError>, Vec<ServiceDiscoveryError>)
-    {
-        let mut service_discovery_errors = vec![];
-        let result = (async {
-            let Ok(service_name) = ServiceName::parse(service_name) else {
-                return Ok(GetMessageProviderOutcome::NotRegistered);
-            };
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+        let Ok(service_name) = ServiceName::parse(service_name) else {
+            return Ok(GetMessageProviderOutcome::NotRegistered);
+        };
 
-            info!("Creating getter for comms stack service '{service_name}'.");
+        info!("Creating getter for comms stack service '{service_name}'.");
 
-            let (service_unit_definition, discovery_error) =
-                self.discover_service(&service_name).await;
-            if let Some(discovery_error) = discovery_error {
-                service_discovery_errors.push(discovery_error);
+        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+            return Ok(GetMessageProviderOutcome::NotRegistered);
+        };
+
+        let message_descriptor =
+            Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
+                .map_err(GetMessageProviderError::FailedToParseMetadata)?;
+
+        let unit_identifier = service_unit_definition.get_unit_identifier();
+
+        match service_unit_definition.get_unit_metadata() {
+            UnitMetadata::Publisher(_) => self
+                .data_tunnel_subscriber
+                .get_message_provider(unit_identifier, message_descriptor),
+            UnitMetadata::Server(_) => {
+                self.sdv_rpc_client.get_message_provider(unit_identifier, message_descriptor).await
             }
-            let Some(service_unit_definition) = service_unit_definition else {
-                return Ok(GetMessageProviderOutcome::NotRegistered);
-            };
-
-            let message_descriptor =
-                Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                    .map_err(GetMessageProviderError::FailedToParseMetadata)?;
-
-            let unit_identifier = service_unit_definition.get_unit_identifier();
-
-            match service_unit_definition.get_unit_metadata() {
-                UnitMetadata::Publisher(_) => self
-                    .data_tunnel_subscriber
-                    .get_message_provider(unit_identifier, message_descriptor),
-                UnitMetadata::Server(_) => {
-                    self.sdv_rpc_client
-                        .get_message_provider(unit_identifier, message_descriptor)
-                        .await
-                }
-            }
-        })
-        .await;
-        (result, service_discovery_errors)
+        }
     }
 
     async fn create_subscription(
@@ -142,56 +118,45 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
-    ) -> (Result<CreateSubscriptionOutcome, CreateSubscriptionError>, Vec<ServiceDiscoveryError>)
-    {
-        let mut service_discovery_errors = vec![];
-        let result = (async {
-            let Ok(service_name) = ServiceName::parse(service_name) else {
-                return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
-            };
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+        let Ok(service_name) = ServiceName::parse(service_name) else {
+            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+        };
 
-            info!("Subscribing to comms stack service '{service_name}'.");
+        info!("Subscribing to comms stack service '{service_name}'.");
 
-            let (service_unit_definition, discovery_error) =
-                self.discover_service(&service_name).await;
-            if let Some(discovery_error) = discovery_error {
-                service_discovery_errors.push(discovery_error);
+        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+        };
+
+        let message_descriptor =
+            Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
+                .map_err(CreateSubscriptionError::FailedToParseMetadata)?;
+
+        let unit_identifier = service_unit_definition.get_unit_identifier();
+
+        match service_unit_definition.get_unit_metadata() {
+            UnitMetadata::Publisher(_) => {
+                self.data_tunnel_subscriber
+                    .create_subscription(
+                        unit_identifier,
+                        sub_sampling_interval,
+                        message_descriptor,
+                        callback,
+                    )
+                    .await
             }
-            let Some(service_unit_definition) = service_unit_definition else {
-                return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
-            };
-
-            let message_descriptor =
-                Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                    .map_err(CreateSubscriptionError::FailedToParseMetadata)?;
-
-            let unit_identifier = service_unit_definition.get_unit_identifier();
-
-            match service_unit_definition.get_unit_metadata() {
-                UnitMetadata::Publisher(_) => {
-                    self.data_tunnel_subscriber
-                        .create_subscription(
-                            unit_identifier,
-                            sub_sampling_interval,
-                            message_descriptor,
-                            callback,
-                        )
-                        .await
-                }
-                UnitMetadata::Server(_) => {
-                    self.sdv_rpc_client
-                        .create_subscription(
-                            unit_identifier,
-                            configuration,
-                            message_descriptor,
-                            callback,
-                        )
-                        .await
-                }
+            UnitMetadata::Server(_) => {
+                self.sdv_rpc_client
+                    .create_subscription(
+                        unit_identifier,
+                        configuration,
+                        message_descriptor,
+                        callback,
+                    )
+                    .await
             }
-        })
-        .await;
-        (result, service_discovery_errors)
+        }
     }
 
     async fn register_availability_callback(
@@ -285,10 +250,7 @@ impl CommsStackAccessor {
         }
     }
 
-    async fn discover_service(
-        &self,
-        service_name: &ServiceName,
-    ) -> (Option<ServiceUnitDefinition>, Option<ServiceDiscoveryError>) {
+    async fn discover_service(&self, service_name: &ServiceName) -> Option<ServiceUnitDefinition> {
         let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
         match service_name {
             ServiceName::UnitTypeBased { unit_type, unit_name } => {
@@ -307,26 +269,25 @@ impl CommsStackAccessor {
 
                 if units.is_empty() {
                     info!("Could not find service for {service_name}.");
-                    (None, None)
+                    None
                 } else if units.len() == 1 {
-                    (Some(units.remove(0)), None)
+                    Some(units.remove(0))
                 } else {
-                    (None, Some(ServiceDiscoveryError::AmbiguousServiceName))
+                    error!("Found more than one service for {service_name}.");
+                    None
                 }
             }
-            ServiceName::FqinBased { fqin, unit_name } => {
-                match sd.get_unit(fqin, unit_name.to_owned()).await {
-                    Ok(unit) => (Some(unit), None),
-                    Err(err) => {
-                        if err.status_code() == SdvStatusCode::NotFound {
-                            info!("Could not find service for {service_name}.");
-                            (None, None)
-                        } else {
-                            (None, Some(ServiceDiscoveryError::InternalError(err)))
-                        }
+            ServiceName::FqinBased { fqin, unit_name } => sd
+                .get_unit(fqin, unit_name.to_owned())
+                .await
+                .inspect_err(|err| {
+                    if err.status_code() == SdvStatusCode::NotFound {
+                        info!("Could not find service for {service_name}.");
+                    } else {
+                        error!("Failed to query service discovery for {service_name}: {err}");
                     }
-                }
-            }
+                })
+                .ok(),
         }
     }
 
@@ -420,7 +381,7 @@ mod integration_tests {
     #[tokio::test]
     async fn get_metadata_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
-        assert!(accessor.get_metadata(INVALID_SERVICE_NAME).await.0.unwrap().is_none());
+        assert!(accessor.get_metadata(INVALID_SERVICE_NAME).await.unwrap().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -430,7 +391,7 @@ mod integration_tests {
 
         let accessor = create_accessor_with_context(0);
         // The service should not exist yet, therefore metadata should be `None`.
-        assert!(accessor.get_metadata(&service_name).await.0.unwrap().is_none());
+        assert!(accessor.get_metadata(&service_name).await.unwrap().is_none());
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -453,7 +414,7 @@ mod integration_tests {
         .unwrap();
 
         let accessor = create_accessor(ctx);
-        let publisher_metadata = accessor.get_metadata(&service_name).await.0.unwrap().unwrap();
+        let publisher_metadata = accessor.get_metadata(&service_name).await.unwrap().unwrap();
         assert!(!publisher_metadata.supports_get);
         assert_eq!(publisher_metadata.message_descriptor.name(), "TestMessage");
         assert_eq!(
@@ -467,7 +428,7 @@ mod integration_tests {
     async fn get_message_provider_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
 
-        let outcome = accessor.get_message_provider(INVALID_SERVICE_NAME).await.0;
+        let outcome = accessor.get_message_provider(INVALID_SERVICE_NAME).await;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
@@ -480,7 +441,7 @@ mod integration_tests {
     async fn get_message_provider_success() {
         let accessor = create_accessor_with_context(0);
 
-        let outcome = accessor.get_message_provider(VALID_SERVICE_NAME).await.0;
+        let outcome = accessor.get_message_provider(VALID_SERVICE_NAME).await;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
@@ -501,7 +462,6 @@ mod integration_tests {
                 Box::new(|_| {}),
             )
             .await
-            .0
             .unwrap();
 
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered(_)));
@@ -523,7 +483,6 @@ mod integration_tests {
                 }),
             )
             .await
-            .0
             .unwrap();
 
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered(_)));
@@ -559,7 +518,6 @@ mod integration_tests {
                 }),
             )
             .await
-            .0
             .unwrap();
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
     }
@@ -594,7 +552,6 @@ mod integration_tests {
                 }),
             )
             .await
-            .0
             .unwrap();
 
         let outcome2 = subscriber
@@ -607,7 +564,6 @@ mod integration_tests {
                 }),
             )
             .await
-            .0
             .unwrap();
         assert!(matches!(outcome1, CreateSubscriptionOutcome::Subscribed(_)));
         assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
@@ -644,7 +600,6 @@ mod integration_tests {
                 Box::new(move |message| tx1.send(message).unwrap()),
             )
             .await
-            .0
             .unwrap();
 
         let (tx2, mut rx2) =
@@ -657,7 +612,6 @@ mod integration_tests {
                 Box::new(move |message| tx2.send(message).unwrap()),
             )
             .await
-            .0
             .unwrap();
 
         write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
@@ -705,7 +659,6 @@ mod integration_tests {
                 Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
             )
             .await
-            .0
             .unwrap();
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
 
@@ -778,7 +731,6 @@ mod integration_tests {
                 }),
             )
             .await
-            .0
             .unwrap();
         let received_msg = receiver.await.unwrap().unwrap();
 
@@ -800,7 +752,7 @@ mod integration_tests {
 
         let subscriber = create_accessor(ctx);
         assert!(matches!(
-            subscriber.get_message_provider(&service_name).await.0.unwrap(),
+            subscriber.get_message_provider(&service_name).await.unwrap(),
             GetMessageProviderOutcome::NotRegistered
         ));
     }
@@ -826,7 +778,7 @@ mod integration_tests {
 
         let subscriber = create_accessor(ctx);
         let GetMessageProviderOutcome::Success(provider) =
-            subscriber.get_message_provider(&service_name).await.0.unwrap()
+            subscriber.get_message_provider(&service_name).await.unwrap()
         else {
             panic!("Unexpected outcome");
         };
@@ -869,7 +821,6 @@ mod integration_tests {
         let outcome = subscriber
             .get_message_provider(&service_name)
             .await
-            .0
             .expect("Message provider retrieval should be successful");
         let GetMessageProviderOutcome::Success(provider) = outcome else {
             panic!("Unexpected outcome: {outcome:?}");
@@ -898,7 +849,7 @@ mod integration_tests {
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
-        let result = accessor.discover_service(&service_name).await.0;
+        let result = accessor.discover_service(&service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -936,7 +887,7 @@ mod integration_tests {
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
-        let result = accessor.discover_service(&service_name).await.0;
+        let result = accessor.discover_service(&service_name).await;
 
         let service_unit_definition = result.unwrap();
         assert_eq!(service_unit_definition.get_unit_type(), unit_type);
@@ -976,7 +927,7 @@ mod integration_tests {
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
-        let result = accessor.discover_service(&service_name).await.0;
+        let result = accessor.discover_service(&service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -993,7 +944,7 @@ mod integration_tests {
             unit_type: unit_type.clone(),
             unit_name: Some(UNIT_NAME.to_owned()),
         };
-        let result = accessor.discover_service(&service_name).await.0;
+        let result = accessor.discover_service(&service_name).await;
 
         assert!(result.is_none(), "Unexpected result: {result:?}");
     }
@@ -1034,7 +985,7 @@ mod integration_tests {
             unit_type: unit_type.clone(),
             unit_name: Some(UNIT_NAME.to_owned()),
         };
-        let result = accessor.discover_service(&service_name).await.0;
+        let result = accessor.discover_service(&service_name).await;
 
         let service_unit_definition = result.unwrap();
         assert_eq!(service_unit_definition.get_unit_type(), unit_type);
@@ -1132,7 +1083,7 @@ mod integration_tests {
                 unit_type: unit_type.clone(),
                 unit_name: Some(UNIT_NAME.to_owned()),
             };
-            let result = accessor.discover_service(&service_name).await.0;
+            let result = accessor.discover_service(&service_name).await;
 
             assert!(result.is_none(), "Unexpected result: {result:?}");
         });
@@ -1155,7 +1106,7 @@ mod integration_tests {
 
             let service_name =
                 ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
-            let result = accessor.discover_service(&service_name).await.0;
+            let result = accessor.discover_service(&service_name).await;
 
             assert!(result.is_none(), "Unexpected result: {result:?}");
         });
@@ -1176,7 +1127,7 @@ mod integration_tests {
 
             let service_name =
                 ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
-            let result = accessor.discover_service(&service_name).await.0;
+            let result = accessor.discover_service(&service_name).await;
 
             let service_unit_definition = result.unwrap();
             assert_eq!(service_unit_definition.get_unit_type(), unit_type);

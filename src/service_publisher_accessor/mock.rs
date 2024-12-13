@@ -69,48 +69,37 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn get_metadata(
         &self,
         _service_name: &str,
-    ) -> (Result<Option<ServicePublisherMetadata>, GetMetadataError>, Vec<ServiceDiscoveryError>)
-    {
-        let result = (async {
-            let mut data = self.data.lock();
-            data.num_get_metadata_calls += 1;
-            data.check_next_error().map_err(GetMetadataError::FailedToParseMetadata)?;
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+        let mut data = self.data.lock();
+        data.num_get_metadata_calls += 1;
+        data.check_next_error().map_err(GetMetadataError::FailedToParseMetadata)?;
 
-            let metadata = data.next_descriptor.take().map(|message_descriptor| {
-                ServicePublisherMetadata { supports_get: false, message_descriptor }
-            });
-            Ok(metadata)
-        })
-        .await;
-
-        (result, vec![])
+        let metadata = data.next_descriptor.take().map(|message_descriptor| {
+            ServicePublisherMetadata { supports_get: false, message_descriptor }
+        });
+        Ok(metadata)
     }
 
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> (Result<GetMessageProviderOutcome, GetMessageProviderError>, Vec<ServiceDiscoveryError>)
-    {
-        let result = (async {
-            let mut data = self.data.lock();
-            data.num_get_message_provider_calls += 1;
-            data.check_next_error().map_err(GetMessageProviderError::FailedToParseMetadata)?;
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+        let mut data = self.data.lock();
+        data.num_get_message_provider_calls += 1;
+        data.check_next_error().map_err(GetMessageProviderError::FailedToParseMetadata)?;
 
-            if data.next_not_available {
-                data.next_not_available = false;
-                return Ok(GetMessageProviderOutcome::NotRegistered);
-            }
-            if data.next_get_not_supported {
-                data.next_get_not_supported = false;
-                return Ok(GetMessageProviderOutcome::GetNotSupported);
-            }
+        if data.next_not_available {
+            data.next_not_available = false;
+            return Ok(GetMessageProviderOutcome::NotRegistered);
+        }
+        if data.next_get_not_supported {
+            data.next_get_not_supported = false;
+            return Ok(GetMessageProviderOutcome::GetNotSupported);
+        }
 
-            Ok(GetMessageProviderOutcome::Success(Box::new(MockServicePublisherMessageProvider {
-                data: Arc::downgrade(&self.data),
-            })))
-        })
-        .await;
-        (result, vec![])
+        Ok(GetMessageProviderOutcome::Success(Box::new(MockServicePublisherMessageProvider {
+            data: Arc::downgrade(&self.data),
+        })))
     }
 
     async fn create_subscription(
@@ -119,39 +108,31 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
-    ) -> (Result<CreateSubscriptionOutcome, CreateSubscriptionError>, Vec<ServiceDiscoveryError>)
-    {
-        let result = (async {
-            let mut data = self.data.lock();
-            data.last_configuration = configuration.cloned();
-            data.num_subscribe_calls += 1;
-            data.check_next_error().map_err(CreateSubscriptionError::FailedToParseMetadata)?;
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+        let mut data = self.data.lock();
+        data.last_configuration = configuration.cloned();
+        data.num_subscribe_calls += 1;
+        data.check_next_error().map_err(CreateSubscriptionError::FailedToParseMetadata)?;
 
-            if data.next_not_available {
-                data.next_not_available = false;
-                return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
-            }
+        if data.next_not_available {
+            data.next_not_available = false;
+            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+        }
 
-            if data
-                .callbacks
-                .try_insert_value(
-                    (service_name.to_owned(), sub_sampling_interval.to_owned()),
-                    callback,
-                )
-                .is_err()
-            {
-                panic!("Callback is already set for service name {}", service_name);
-            }
+        if data
+            .callbacks
+            .try_insert_value((service_name.to_owned(), sub_sampling_interval.to_owned()), callback)
+            .is_err()
+        {
+            panic!("Callback is already set for service name {}", service_name);
+        }
 
-            let subscription = MockServicePublisherSubscription {
-                service_name: service_name.to_owned(),
-                data: Arc::downgrade(&self.data),
-                sub_sampling_interval: sub_sampling_interval.to_owned(),
-            };
-            Ok(CreateSubscriptionOutcome::Subscribed(Box::new(subscription)))
-        })
-        .await;
-        (result, vec![])
+        let subscription = MockServicePublisherSubscription {
+            service_name: service_name.to_owned(),
+            data: Arc::downgrade(&self.data),
+            sub_sampling_interval: sub_sampling_interval.to_owned(),
+        };
+        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(subscription)))
     }
 
     async fn register_availability_callback(

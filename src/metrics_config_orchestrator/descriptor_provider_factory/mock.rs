@@ -13,7 +13,6 @@ impl DescriptorProviderFactory for MockDescriptorProviderFactory {
         _fds: &[FileDescriptor],
         _publishers: &[PublisherProto],
         _service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
-        _error_callback: Arc<dyn Fn(String, ServiceDiscoveryError) + Send + Sync>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         Ok(Box::new(MockDescriptorProvider::new()))
     }

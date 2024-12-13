@@ -11,8 +11,8 @@ use std::sync::Arc;
 use crate::metrics_config_runtime_error::ServiceRuntimeError;
 use crate::service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServiceDiscoveryError,
-    ServicePublisherAccessor, ServicePublisherMetadata,
+    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
+    ServicePublisherMetadata,
 };
 use crate::sub_sampling_interval::SubSamplingInterval;
 
@@ -38,53 +38,37 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> (Result<Option<ServicePublisherMetadata>, GetMetadataError>, Vec<ServiceDiscoveryError>)
-    {
-        let mut service_discovery_errors = vec![];
-        let result = (async {
-            for accessor in &self.service_publisher_registry {
-                let (metadata, discovery_errors) = accessor.get_metadata(service_name).await;
-                service_discovery_errors.extend(discovery_errors);
-                let metadata = metadata?;
+    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+        for accessor in &self.service_publisher_registry {
+            let metadata = accessor.get_metadata(service_name).await?;
 
-                if metadata.is_some() {
-                    return Ok(metadata);
-                }
+            if metadata.is_some() {
+                return Ok(metadata);
             }
+        }
 
-            Ok(None)
-        })
-        .await;
-        (result, service_discovery_errors)
+        Ok(None)
     }
 
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> (Result<GetMessageProviderOutcome, GetMessageProviderError>, Vec<ServiceDiscoveryError>)
-    {
-        let mut service_discovery_errors = vec![];
-        let result = (async {
-            let mut get_not_supported = false;
+    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+        let mut get_not_supported = false;
 
-            for accessor in &self.service_publisher_registry {
-                let (outcome, discovery_errors) = accessor.get_message_provider(service_name).await;
-                service_discovery_errors.extend(discovery_errors);
-                match outcome? {
-                    outcome @ GetMessageProviderOutcome::Success(_) => return Ok(outcome),
-                    GetMessageProviderOutcome::NotRegistered => {}
-                    GetMessageProviderOutcome::GetNotSupported => get_not_supported = true,
-                }
+        for accessor in &self.service_publisher_registry {
+            match accessor.get_message_provider(service_name).await? {
+                outcome @ GetMessageProviderOutcome::Success(_) => return Ok(outcome),
+                GetMessageProviderOutcome::NotRegistered => {}
+                GetMessageProviderOutcome::GetNotSupported => get_not_supported = true,
             }
+        }
 
-            Ok(if get_not_supported {
-                GetMessageProviderOutcome::GetNotSupported
-            } else {
-                GetMessageProviderOutcome::NotRegistered
-            })
+        Ok(if get_not_supported {
+            GetMessageProviderOutcome::GetNotSupported
+        } else {
+            GetMessageProviderOutcome::NotRegistered
         })
-        .await;
-        (result, service_discovery_errors)
     }
 
     async fn create_subscription(
@@ -95,31 +79,18 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         mut callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-    ) -> (Result<CreateSubscriptionOutcome, CreateSubscriptionError>, Vec<ServiceDiscoveryError>)
-    {
-        let mut service_discovery_errors = vec![];
-        let result = (async {
-            for accessor in &self.service_publisher_registry {
-                let (outcome, discovery_errors) = accessor
-                    .create_subscription(
-                        service_name,
-                        configuration,
-                        sub_sampling_interval,
-                        callback,
-                    )
-                    .await;
-                service_discovery_errors.extend(discovery_errors);
+    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+        for accessor in &self.service_publisher_registry {
+            callback = match accessor
+                .create_subscription(service_name, configuration, sub_sampling_interval, callback)
+                .await?
+            {
+                outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
+                CreateSubscriptionOutcome::NotRegistered(callback) => callback,
+            };
+        }
 
-                callback = match outcome? {
-                    outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
-                    CreateSubscriptionOutcome::NotRegistered(callback) => callback,
-                };
-            }
-
-            Ok(CreateSubscriptionOutcome::NotRegistered(callback))
-        })
-        .await;
-        (result, service_discovery_errors)
+        Ok(CreateSubscriptionOutcome::NotRegistered(callback))
     }
 
     async fn register_availability_callback(
@@ -190,8 +161,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res =
-            service_publisher_manager_impl.get_metadata(SERVICE_NAME).await.0.unwrap().unwrap();
+        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
 
         assert_eq!(service_publisher.get_num_get_metadata_calls(), 1);
         assert_eq!(res.message_descriptor, Empty::descriptor());
@@ -207,7 +177,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let err = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.0.err().unwrap();
+        let err = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.err().unwrap();
 
         assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
@@ -220,7 +190,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.0.unwrap();
+        let res = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.unwrap();
 
         assert!(res.is_none());
     }
@@ -233,7 +203,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await.0;
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::Success(_))),
@@ -253,12 +223,8 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let err = service_publisher_manager_impl
-            .get_message_provider(SERVICE_NAME2)
-            .await
-            .0
-            .err()
-            .unwrap();
+        let err =
+            service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.err().unwrap();
 
         assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
@@ -272,7 +238,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.0;
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
@@ -289,7 +255,7 @@ mod tests {
             vec![Arc::clone(&service_publisher) as Arc<dyn ServicePublisherAccessor>];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await.0;
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
@@ -308,7 +274,7 @@ mod tests {
         ];
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await.0;
+        let outcome = service_publisher_manager_impl.get_message_provider(SERVICE_NAME).await;
 
         assert!(
             matches!(outcome, Ok(GetMessageProviderOutcome::GetNotSupported)),
@@ -334,7 +300,6 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .0
             .unwrap();
 
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
@@ -359,7 +324,6 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .0
             .err()
             .unwrap();
 
@@ -383,7 +347,6 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .0
             .unwrap();
 
         assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
@@ -407,7 +370,6 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .0
             .unwrap()
             .unwrap();
         let res = subscription.unsubscribe().await;

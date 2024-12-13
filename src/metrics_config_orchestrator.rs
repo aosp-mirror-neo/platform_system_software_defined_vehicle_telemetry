@@ -204,24 +204,9 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl::new());
-        let _misc_error_callback = Arc::clone(&self.misc_error_callback);
-        let uuid = config_proto.uuid.clone();
         let descriptor_provider = self
             .descriptor_provider_factory
-            .create(
-                &file_descriptors,
-                &config_proto.publishers,
-                &self.service_publisher_manager,
-                Arc::new(move |service_name, error| {
-                    let error = MetricsConfigRuntimeError::ServiceDiscovery {
-                        metrics_config_uuid: Some(uuid.clone()),
-                        service_name,
-                        error,
-                    };
-                    error!("Metrics config runtime error: {error}");
-                    // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{error}"));
-                }),
-            )
+            .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
             .await?;
         let node_factory_context = NodeFactoryContext {
             message_provider: Some(Arc::<MessageProviderImpl>::clone(&message_provider)),
@@ -489,14 +474,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         file_descriptors.append(&mut WELL_KNOWN_FILE_DESCRIPTORS.clone());
         let descriptor_provider = self
             .descriptor_provider_factory
-            .create(
-                &file_descriptors,
-                &config_proto.publishers,
-                &self.service_publisher_manager,
-                Arc::new(move |_service_name, _error| {
-                    // For validation, we ignore service discovery errors.
-                }),
-            )
+            .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
             .await?;
         let node_factory_context =
             NodeFactoryContext { message_provider: None, descriptor_provider };
