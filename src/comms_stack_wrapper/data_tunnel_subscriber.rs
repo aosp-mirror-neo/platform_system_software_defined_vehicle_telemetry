@@ -134,17 +134,16 @@ impl DataTunnelSubscriber {
                 &self,
                 _configuration: Option<&Any>,
             ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
-                let Ok(message_bytes) = dt::InstantReader::get_last_message(
+                let message_bytes = dt::InstantReader::get_last_message(
                     self.ctx.clone().await,
                     &self.unit_identifier,
                 )
                 .await
-                else {
-                    // TODO - b/380258890: It is not currently possible for us to distinguish
-                    // between no message being available and the call failing. Therefore, we treat
-                    // any error as no message being available for now.
+                .map_err(|err| GetLatestMessageError::FailedToRetrieveMessage(err.into()))?;
+
+                if message_bytes.is_empty() {
                     return Ok(None);
-                };
+                }
 
                 Ok(Some(
                     DataTunnelSubscriber::read_length_delimited_proto(
