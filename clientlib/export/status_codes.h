@@ -77,6 +77,47 @@ enum class TelemetryServiceStatusCodes : int32_t {
     API_CALL_FAILED_INTERNAL_ERROR = 415,
 
     /**
+     * Errors during runtime aggregation of metrics.
+     */
+    METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR = 416,
+
+    /**
+     * Errors during evaluation of expression nodes in the metrics
+       configuration.
+     */
+    METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR = 417,
+
+    /**
+     * Ambiguous service name encountered during service discovery.
+     */
+    METRICS_CONFIG_RUNTIME_SERVICE_DISCOVERY_AMBIGUOUS_SERVICE_NAME_ERROR = 418,
+
+    /**
+     * Internal service discovery error occurred during service discovery.
+     */
+    METRICS_CONFIG_RUNTIME_SERVICE_DISCOVERY_INTERNAL_ERROR = 419,
+
+    /**
+     * Error occurred during service connection.
+     */
+    METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR = 420,
+
+    /**
+     * Error occurred while parsing service metadata.
+     */
+    METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR = 421,
+
+    /**
+     * Error occurred while retrieving service messages.
+     */
+    METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR = 422,
+
+    /**
+     * Error occurred while parsing service messages.
+     */
+    METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR = 423,
+
+    /**
      * Arbitrary Error used as a placeholder for errors not yet defined
      */
     TELEMETRY_SERVICE_UNKNOWN_ERROR = 499,
