@@ -480,6 +480,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::new(MockServiceAdapter::new()),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         let err = factory
@@ -511,6 +512,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::new(MockServiceAdapter::new()),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         let res = factory

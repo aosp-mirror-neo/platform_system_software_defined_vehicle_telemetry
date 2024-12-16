@@ -2,8 +2,12 @@
 
 //! This module represents runtime errors of a metrics config.
 
+use either::Either;
+
 use crate::{
     expr::node_error::NodeError, metrics_config_orchestrator::message_builder::MessageBuilderError,
+    service_publisher_accessor::CreateSubscriptionError,
+    service_publisher_accessor::GetMessageProviderError,
 };
 
 /// Runtime errors of a metrics config.
@@ -28,6 +32,15 @@ pub(crate) enum MetricsConfigRuntimeError {
         metrics_config_uuid: String,
         /// Aggregation publisher error.
         error: AggregationPublisherRuntimeError,
+    },
+
+    /// Runtime errors related to service publishers.
+    #[error("Service publisher error for metrics config {metrics_config_uuid}: {error}")]
+    ServicePublisher {
+        /// UUID of the metrics config.
+        metrics_config_uuid: String,
+        /// Service publisher error.
+        error: ServicePublisherRuntimeError,
     },
 
     /// Runtime errors related to conditional triggers.
@@ -76,6 +89,23 @@ pub(crate) struct AggregationPublisherRuntimeError {
 
     /// Message builder error.
     pub(crate) message_builder_error: MessageBuilderError,
+}
+
+#[derive(thiserror::Error, Debug)]
+#[error("Service publisher '{publisher_name}' failed to build message: {error}")]
+pub(crate) struct ServicePublisherRuntimeError {
+    /// Name of the service publisher.
+    pub(crate) publisher_name: String,
+
+    /// Service publisher error.
+    pub(crate) error: ServicePublisherRuntimeErrorKind,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum ServicePublisherRuntimeErrorKind {
+    /// Retrying activation of the publisher failed.
+    #[error("Retrying activation failed: {0}")]
+    RetryActivationFailed(Either<GetMessageProviderError, CreateSubscriptionError>),
 }
 
 #[derive(thiserror::Error, Debug)]
