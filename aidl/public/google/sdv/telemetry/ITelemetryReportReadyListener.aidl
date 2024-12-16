@@ -11,7 +11,7 @@ import google.sdv.telemetry.MetricsReportInfo;
 oneway interface ITelemetryReportReadyListener {
     /**
      * Called by telemetry service to provide notifications on finished reports.
-     * @param metrics_report_info info of the ready report.
+     * @param metricsReportInfo info of the ready report.
      */
-    void onReady(in MetricsReportInfo metrics_report_info);
+    void onReady(in MetricsReportInfo metricsReportInfo);
 }

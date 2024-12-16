@@ -218,7 +218,7 @@ Status TelemetryServiceClient::clear_report_ready_listener(void** outPreviousRep
 }
 
 Status TelemetryServiceClient::get_metrics_report(
-        const MetricsReportInfo* metrics_report_info, void* metricsReportCbData,
+        const MetricsReportInfo* metricsReportInfo, void* metricsReportCbData,
         GetSerializedDataCallbackFunction metricsReportCb) {
     RETURN_IF_ERROR(validateParams(metricsReportCbData, metricsReportCb));
 
@@ -227,9 +227,9 @@ Status TelemetryServiceClient::get_metrics_report(
                     Callback<GetSerializedDataCallbackFunction>(metricsReportCbData,
                                                                 std::move(metricsReportCb)));
     const ::aidl::google::sdv::telemetry::MetricsReportInfo
-            info{.metricsConfigUuid = metrics_report_info->metrics_config_uuid,
-                 .reportConfigName = metrics_report_info->report_config_name,
-                 .reportNumber = metrics_report_info->report_number};
+            info{.metricsConfigUuid = metricsReportInfo->metrics_config_uuid,
+                 .reportConfigName = metricsReportInfo->report_config_name,
+                 .reportNumber = metricsReportInfo->report_number};
 
     ndk::ScopedAStatus status = mBinderService->getMetricsReport(info, mReportListener);
     return Status::fromBinderStatus(status);
