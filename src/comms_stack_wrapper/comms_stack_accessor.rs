@@ -711,8 +711,12 @@ mod integration_tests {
             },
             "CreateSubscription".to_owned(),
             rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
-                future::ready(Ok(stream::once(future::ready(Ok(msg_bytes.clone()))).boxed()))
-                    .boxed()
+                future::ready(Ok(stream::select(
+                    stream::once(future::ready(Ok(msg_bytes.clone()))),
+                    stream::pending(),
+                )
+                .boxed()))
+                .boxed()
             })),
         )
         .await
@@ -727,20 +731,32 @@ mod integration_tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| {
-                    sender.take().expect("Callback should only be called once").send(msg).unwrap();
+                    sender
+                        .take()
+                        .unwrap_or_else(|| {
+                            panic!("Callback should only be called once, got {msg:?}")
+                        })
+                        .send(msg)
+                        .unwrap();
                 }),
             )
             .await
             .unwrap();
         let received_msg = receiver.await.unwrap().unwrap();
 
-        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+        let CreateSubscriptionOutcome::Subscribed(subscription) = outcome else {
+            panic!("Unexpected outcome");
+        };
         let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();
         let value = value_field.get_singular(received_msg.as_ref()).unwrap();
         assert!(
             matches!(&value, ReflectValueRef::I32(val) if *val == msg.value),
             "Unexpected value: {value:?}"
         );
+
+        // Unsubscribe to avoid error sent to `create_subscription` callback triggered by publisher
+        // being dropped while still subscribed.
+        subscription.unsubscribe().await.unwrap();
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]

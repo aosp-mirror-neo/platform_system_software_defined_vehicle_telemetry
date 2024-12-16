@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for SDV RPC.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -112,7 +112,13 @@ impl SdvRpcClient {
             while let Some(result) = select! {
                 biased;
                 _ = cancellation_token.cancelled() => None,
-                result = response_stream.next() => result,
+                result = async {
+                    let result = response_stream.next().await;
+                    if result.is_none() {
+                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(anyhow!("Subscription ended unexpectedly"))));
+                    }
+                    result
+                } => result,
             } {
                 let buffer = match result
                     .with_context(|| "RPC server stream produced an intermittent error")

@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for DT.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -74,7 +74,13 @@ impl DataTunnelSubscriber {
             while let Some(result) = select! {
                 biased;
                 _ = cancellation_token.cancelled() => None,
-                result = subscriber_stream.next() => result,
+                result = async {
+                    let result = subscriber_stream.next().await;
+                    if result.is_none() {
+                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(anyhow!("Subscription ended unexpectedly"))));
+                    }
+                    result
+                } => result,
             } {
                 let (number_of_messages, buffer) = match result
                     .with_context(|| "Data Tunnel message stream produced an intermittent error")
