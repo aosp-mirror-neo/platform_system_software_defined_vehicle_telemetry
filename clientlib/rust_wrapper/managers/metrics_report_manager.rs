@@ -12,7 +12,7 @@ use crate::{
 use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 
 /// Callback that handles report ready event.
 ///
@@ -21,13 +21,10 @@ use std::ffi::{c_char, c_void, CStr, CString};
 /// * `listener` points to a valid `MetricsReportReadyListener` originally sent to the caller as
 ///    part of the `set_report_ready_listener` API call.
 ///
-/// * `metrics_config_uuid` and `report_config_name` must point to C raw strings that satisfy
-///   `CStr::from_ptr` safety requirements.
+/// * `metrics_report_info` points to a valid 'MetricsReportInfo' provided by ReadyReportListener
 unsafe extern "C" fn on_report_ready(
     listener: *mut std::ffi::c_void,
-    metrics_config_uuid: *const std::ffi::c_char,
-    report_config_name: *const std::ffi::c_char,
-    report_number: i32,
+    metrics_report_info: *const rust_to_c::MetricsReportInfo,
 ) {
     // SAFETY: The caller sends back the reference to `MetricsReportReadyListener` that was
     // originally sent to the caller during as part of the `set_report_ready_listener` API call.
@@ -36,14 +33,17 @@ unsafe extern "C" fn on_report_ready(
     // calls to `on_report_ready` can still access the same `listener`.
     let listener = unsafe { &mut *(listener as *mut MetricsReportReadyListener) };
 
+    // SAFETY: The caller has provided a valid pointer to `MetricsReportInfo`
+    let metrics_report_info = unsafe { *metrics_report_info };
     let metrics_config_uuid =
         // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
         // requirements.
-        unsafe { CStr::from_ptr(metrics_config_uuid) }.to_str().unwrap().to_owned();
+        unsafe { CStr::from_ptr(metrics_report_info.metrics_config_uuid) }.to_str().unwrap().to_owned();
     let report_config_name =
         // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
         // requirements.
-        unsafe { CStr::from_ptr(report_config_name) }.to_str().unwrap().to_owned();
+        unsafe { CStr::from_ptr(metrics_report_info.report_config_name) }.to_str().unwrap().to_owned();
+    let report_number = metrics_report_info.report_number;
 
     info!(
         "Report ready: {metrics_config_uuid:?} {report_config_name:?} report number: {report_number}"
@@ -148,21 +148,19 @@ pub async fn get_metrics_report(
         CString::new(report_info.report_config_name).expect("CString::new failed");
 
     call_api_with_metrics_report_callback(move |callback_data, callback| {
-        let config_uuid_ref: *const c_char = metrics_config_uuid.as_ptr();
-        let config_name_ref: *const c_char = report_config_name.as_ptr();
+        let report_info = rust_to_c::MetricsReportInfo {
+            metrics_config_uuid: metrics_config_uuid.as_ptr(),
+            report_config_name: report_config_name.as_ptr(),
+            report_number: report_info.report_number,
+        };
+
+        let report_info_ref: *const rust_to_c::MetricsReportInfo = &report_info;
 
         // SAFETY: the caller has provided pointers that are used to safely get the metrics report
         // from the telemetry service. The validity of `callback_data` and `callback` is ensured by
         // `call_api_with_metrics_report_callback`.
         unsafe {
-            rust_to_c::get_metrics_report(
-                service.0,
-                config_uuid_ref,
-                config_name_ref,
-                report_info.report_number,
-                callback_data,
-                callback,
-            )
+            rust_to_c::get_metrics_report(service.0, report_info_ref, callback_data, callback)
         }
     })
     .await

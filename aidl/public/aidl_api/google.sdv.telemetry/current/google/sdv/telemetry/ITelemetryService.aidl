@@ -18,7 +18,6 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry;
-
 @VintfStability
 interface ITelemetryService {
     void addMetricsConfig(in int apiCallId, in byte[] metricsConfig);
@@ -29,8 +28,7 @@ interface ITelemetryService {
     void getActiveMetricsConfigUuids(in google.sdv.telemetry.ITelemetryConfigListListener listener);
     void getInactiveMetricsConfigUuids(
             in google.sdv.telemetry.ITelemetryConfigListListener listener);
-    void getMetricsReport(in @utf8InCpp String metricsConfigUuid,
-            in @utf8InCpp String metricsReportConfigName, in int reportNumber,
+    void getMetricsReport(in google.sdv.telemetry.MetricsReportInfo metricsReportInfo,
             in google.sdv.telemetry.ITelemetryReportListener listener);
     void getReadyReportsInfo(in google.sdv.telemetry.ITelemetryReadyReportsInfoListener listener);
     void registerReportReadyListener(

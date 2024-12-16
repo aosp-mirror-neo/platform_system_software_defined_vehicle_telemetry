@@ -4,8 +4,10 @@
 
 #include "callback_container.h"
 #include "callback_functions.h"
+#include "lib.h"
 #include "ready_reports_info_listener_impl.h"
 
+#include <aidl/google/sdv/telemetry/MetricsReportInfo.h>
 #include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
 #include <android-base/expected.h>
 #include <android-base/logging.h>
@@ -216,17 +218,20 @@ Status TelemetryServiceClient::clear_report_ready_listener(void** outPreviousRep
 }
 
 Status TelemetryServiceClient::get_metrics_report(
-        const char* metricsConfigUuid, const char* reportConfigName, int32_t reportNumber,
-        void* metricsReportCbData, GetSerializedDataCallbackFunction metricsReportCb) {
+        const MetricsReportInfo* metrics_report_info, void* metricsReportCbData,
+        GetSerializedDataCallbackFunction metricsReportCb) {
     RETURN_IF_ERROR(validateParams(metricsReportCbData, metricsReportCb));
 
     std::shared_ptr<ReportListenerImpl> mReportListener =
             ndk::SharedRefBase::make<ReportListenerImpl>(
                     Callback<GetSerializedDataCallbackFunction>(metricsReportCbData,
                                                                 std::move(metricsReportCb)));
-    ndk::ScopedAStatus status =
-            mBinderService->getMetricsReport(metricsConfigUuid, reportConfigName, reportNumber,
-                                             mReportListener);
+    const ::aidl::google::sdv::telemetry::MetricsReportInfo
+            info{.metricsConfigUuid = metrics_report_info->metrics_config_uuid,
+                 .reportConfigName = metrics_report_info->report_config_name,
+                 .reportNumber = metrics_report_info->report_number};
+
+    ndk::ScopedAStatus status = mBinderService->getMetricsReport(info, mReportListener);
     return Status::fromBinderStatus(status);
 }
 

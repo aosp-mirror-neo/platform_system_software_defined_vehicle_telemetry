@@ -4,6 +4,7 @@
 
 #include "api_status_listener_impl.h"
 #include "callback_container.h"
+#include "callback_functions.h"
 #include "config_list_listener_impl.h"
 #include "misc_status_listener_impl.h"
 #include "report_listener_impl.h"
@@ -74,8 +75,7 @@ public:
                                      void** outPreviousReportReadyCbData);
     Status clear_report_ready_listener(void** outPreviousReportReadyCbData);
 
-    Status get_metrics_report(const char* metricsConfigUuid, const char* reportConfigName,
-                              int32_t reportNumber, void* metricsReportCbData,
+    Status get_metrics_report(const MetricsReportInfo*, void* metricsReportCbData,
                               GetSerializedDataCallbackFunction metricsReportCb);
 
     Status get_ready_reports_info(void* readyReportsInfoCbData,

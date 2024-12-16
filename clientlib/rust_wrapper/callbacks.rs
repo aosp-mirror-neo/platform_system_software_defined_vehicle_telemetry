@@ -158,7 +158,7 @@ where
 /// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
 ///    `call_api_with_metrics_report_callback` API call. It will not be valid after the function
 ///    completes.
-/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
+/// * `status_msg` must point to C raw string that satisfy `CStr::from_ptr` safety requirements.
 /// * `report` must point to valid array of length `report_size`.
 /// * `report_size` must contain the length of the byte array that can be parsed from `report`.
 unsafe extern "C" fn on_report_received(
@@ -225,7 +225,7 @@ where
 /// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
 ///    `call_api_with_ready_reports_info_callback` API call. It will not be valid after the function
 ///    completes.
-/// * `status_msg` must point to C raw strings that satisfy `CStr::from_ptr` safety requirements.
+/// * `status_msg` must point to C raw string that satisfy `CStr::from_ptr` safety requirements.
 /// * `ready_reports_info` must point to a valid pointer array of MetricsReportInfo with
 ///   `metrics_report_uuid` and `report_config_name` fields as C raw strings that satisfy `CStr::from_ptr` safety
 ///   requirements.

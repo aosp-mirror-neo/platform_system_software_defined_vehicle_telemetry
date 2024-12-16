@@ -23,9 +23,10 @@ ndk::ScopedAStatus ReadyReportsInfoListenerImpl::sendReadyReportsInfo(
     std::vector<MetricsReportInfo> converted_info;
     converted_info.reserve(ready_reports_info.size());
     for (const auto& report_info : ready_reports_info) {
-        converted_info.emplace_back(MetricsReportInfo{report_info.metricsConfigUuid.c_str(),
-                                                      report_info.reportConfigName.c_str(),
-                                                      report_info.reportNumber});
+        converted_info.emplace_back(
+                MetricsReportInfo{.metrics_config_uuid = report_info.metricsConfigUuid.c_str(),
+                                  .report_config_name = report_info.reportConfigName.c_str(),
+                                  .report_number = report_info.reportNumber});
     }
     mCallback.run(std::to_underlying(statusCode), statusMessage.c_str(), converted_info.data(),
                   converted_info.size());

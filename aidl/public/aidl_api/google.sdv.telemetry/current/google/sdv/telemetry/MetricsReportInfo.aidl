@@ -18,8 +18,7 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry;
-
-@RustDerive(Clone=true)
+@RustDerive(Clone=true, Eq=true, Hash=true, PartialEq=true)
 @VintfStability
 parcelable MetricsReportInfo {
     @utf8InCpp String metricsConfigUuid;
