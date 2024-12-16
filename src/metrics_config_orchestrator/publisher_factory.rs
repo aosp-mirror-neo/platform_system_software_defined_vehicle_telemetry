@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use anyhow::anyhow;
+use either::Either;
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
@@ -21,6 +22,9 @@ use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPubli
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
 use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
+use crate::metrics_config_runtime_error::{
+    AggregationPublisherRuntimeError, ServicePublisherRuntimeError,
+};
 use crate::sub_sampling_interval::SubSamplingInterval;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
@@ -49,6 +53,11 @@ pub(crate) struct PublisherFactoryCreateContext<'a> {
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
     pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
+    pub error_callback: Arc<
+        dyn Fn(Either<ServicePublisherRuntimeError, AggregationPublisherRuntimeError>)
+            + Send
+            + Sync,
+    >,
 }
 
 pub(crate) struct PublisherFactoryValidateContext<'a> {
@@ -89,6 +98,7 @@ impl PublisherFactory for PublisherFactoryImpl {
         let publisher_name = publisher_proto.name.clone();
         match &publisher_proto.publisher_type {
             Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+                let error_callback = Arc::clone(&context.error_callback);
                 Ok(Arc::new(ServicePublisher::new(
                     publisher_name,
                     service_publisher.service_name.clone(),
@@ -96,6 +106,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                     Self::get_sub_sampling_interval(service_publisher)?,
                     Self::get_connection_type(service_publisher.connection_type)?,
                     Arc::clone(&self.service_adapter),
+                    Arc::new(move |err| error_callback(Either::Left(err))),
                 )))
             }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
@@ -160,11 +171,13 @@ impl PublisherFactoryImpl {
             .iter()
             .map(|trigger_name| Arc::clone(&context.triggers[trigger_name]) as Arc<dyn Trigger>)
             .collect();
+        let error_callback = Arc::clone(&context.error_callback);
         let publisher = AggregationPublisher::new(
             publisher_name,
             message_builder.into(),
             aggregation_publisher_proto.reset_on_get,
             triggers,
+            Arc::new(move |err| error_callback(Either::Right(err))),
         );
         Ok(Box::new(publisher))
     }
@@ -363,6 +376,9 @@ mod tests {
                 nodes: &nodes,
                 node_types: &node_types,
                 triggers: &triggers,
+                error_callback: Arc::new(|err| {
+                    panic!("Unexpected error: {err:?}");
+                }),
             };
             self.create(publisher_proto, &context)
         }

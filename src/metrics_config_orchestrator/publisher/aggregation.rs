@@ -1,7 +1,6 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
-use log::error;
 use protobuf::MessageDyn;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
@@ -17,6 +16,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
+use crate::metrics_config_runtime_error::AggregationPublisherRuntimeError;
 use crate::service_publisher_accessor::GetLatestMessageError;
 
 pub(crate) struct AggregationPublisher {
@@ -27,6 +27,7 @@ pub(crate) struct AggregationPublisher {
     message_builder: Arc<dyn MessageBuilder>,
     state: AsyncMutex<AggregationPublisherState>,
     trigger_subscriber: TriggerSubscriber,
+    error_callback: Arc<dyn Fn(AggregationPublisherRuntimeError) + Send + Sync>,
 }
 
 #[derive(strum_macros::Display)]
@@ -218,6 +219,7 @@ impl AggregationPublisher {
         message_builder: Arc<dyn MessageBuilder>,
         reset_on_get: bool,
         triggers: Vec<Arc<dyn Trigger>>,
+        error_callback: Arc<dyn Fn(AggregationPublisherRuntimeError) + Send + Sync>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name.clone()),
@@ -227,6 +229,7 @@ impl AggregationPublisher {
             reset_on_get,
             trigger_subscriber: TriggerSubscriber::AggregationPublisher { name },
             triggers,
+            error_callback,
         }
     }
 
@@ -245,11 +248,10 @@ impl AggregationPublisher {
         let message = match build_result.into_future().await {
             Ok(msg) => msg.into(),
             Err(err) => {
-                error!(
-                    "Error when trying to evaluate expression for publisher {}: {}",
-                    self.get_name(),
-                    err
-                );
+                (self.error_callback)(AggregationPublisherRuntimeError {
+                    publisher_name: self.get_name().to_owned(),
+                    message_builder_error: err,
+                });
                 return;
             }
         };
@@ -287,6 +289,7 @@ mod tests {
             Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
             false,
             triggers,
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
         (publisher, message_builder)
     }
@@ -329,6 +332,7 @@ mod tests {
             Arc::<MockMessageBuilder>::clone(&message_builder),
             true,
             vec![Arc::<MockTrigger>::clone(&trigger)],
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();

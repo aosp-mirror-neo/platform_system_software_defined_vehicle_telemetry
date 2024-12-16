@@ -2,7 +2,6 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use log::error;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
@@ -18,6 +17,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
+use crate::metrics_config_runtime_error::ConditionalTriggerRuntimeError;
 
 pub(crate) enum ConditionType {
     RisingEdge,
@@ -35,6 +35,7 @@ pub(crate) struct ConditionalTrigger {
 
     condition_checker: fn(NodeValue, &mut Option<NodeValue>) -> anyhow::Result<bool>,
     subscriber: TriggerSubscriber,
+    error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
 }
 
 #[async_trait]
@@ -162,6 +163,7 @@ impl ConditionalTrigger {
         condition_type: ConditionType,
         triggers: Vec<Arc<dyn Trigger>>,
         selector_expression: Arc<Node>,
+        error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
     ) -> Arc<Self> {
         let condition_checker: for<'a> fn(
             NodeValue,
@@ -198,6 +200,7 @@ impl ConditionalTrigger {
             selector_expression,
             condition_checker,
             subscriber: TriggerSubscriber::ConditionalTrigger { name },
+            error_callback,
         })
     }
 
@@ -260,11 +263,10 @@ impl ConditionalTrigger {
         let node_value = match evaluation_result.into_future().await {
             Ok(node_value) => node_value,
             Err(err) => {
-                error!(
-                    "Error when performing expression evaluation for trigger {}: {}",
-                    self.get_name(),
-                    err
-                );
+                (self.error_callback)(ConditionalTriggerRuntimeError {
+                    trigger_name: self.get_name().to_owned(),
+                    node_error: err,
+                });
                 return;
             }
         };
@@ -328,6 +330,7 @@ mod tests {
             condition_type,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
 
         (trigger, message_provider, parent_trigger)
@@ -401,6 +404,7 @@ mod tests {
                 Arc::<MockTrigger>::clone(&parent_trigger2),
             ],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
         let mut trigger = Arc::into_inner(trigger).unwrap();
         let subscription_manager = MockSubscriptionManager::new();
@@ -448,6 +452,7 @@ mod tests {
             ConditionType::IsTrue,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
 
         let callback_listener1 = Arc::new(MockCallbackListener::new());
@@ -699,6 +704,7 @@ mod tests {
 
         // Fire parent trigger three times: [None, 1, 1].
         // This is to verify it filters out None and lets repeated non-zeroes go through.
+        message_provider.set_next_sync_result(Ok(None));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg) as Arc<dyn MessageDyn>)));
@@ -724,6 +730,7 @@ mod tests {
 
         // Fire parent trigger three times: [None, 0, 0].
         // This is to verify it filters out None and lets repeated zero go through.
+        message_provider.set_next_sync_result(Ok(None));
         parent_trigger.fire().await;
 
         message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg) as Arc<dyn MessageDyn>)));
