@@ -75,7 +75,7 @@ public:
                                      void** outPreviousReportReadyCbData);
     Status clear_report_ready_listener(void** outPreviousReportReadyCbData);
 
-    Status get_metrics_report(const MetricsReportInfo*, void* metricsReportCbData,
+    Status get_metrics_report(const MetricsReportInfo* metricsReportInfo, void* metricsReportCbData,
                               GetSerializedDataCallbackFunction metricsReportCb);
 
     Status get_ready_reports_info(void* readyReportsInfoCbData,

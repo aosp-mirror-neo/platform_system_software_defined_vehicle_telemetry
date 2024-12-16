@@ -14,12 +14,12 @@ ReportReadyListenerImpl::ReportReadyListenerImpl(Callback<ReportReadyCallbackFun
 }
 
 ndk::ScopedAStatus ReportReadyListenerImpl::onReady(
-        const aidl::google::sdv::telemetry::MetricsReportInfo& metrics_report_info) {
-    LOG(DEBUG) << "ReportReadyListenerImpl::onReady, " << metrics_report_info.toString();
+        const aidl::google::sdv::telemetry::MetricsReportInfo& metricsReportInfo) {
+    LOG(DEBUG) << "ReportReadyListenerImpl::onReady, " << metricsReportInfo.toString();
 
-    const char* metrics_config_uuid = metrics_report_info.metricsConfigUuid.c_str();
-    const char* report_config_name = metrics_report_info.reportConfigName.c_str();
-    const int32_t report_number = metrics_report_info.reportNumber;
+    const char* metrics_config_uuid = metricsReportInfo.metricsConfigUuid.c_str();
+    const char* report_config_name = metricsReportInfo.reportConfigName.c_str();
+    const int32_t report_number = metricsReportInfo.reportNumber;
 
     MetricsReportInfo info{.metrics_config_uuid = metrics_config_uuid,
                            .report_config_name = report_config_name,

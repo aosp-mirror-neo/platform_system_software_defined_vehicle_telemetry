@@ -15,7 +15,7 @@ public:
     explicit ReportReadyListenerImpl(Callback<ReportReadyCallbackFunction> callback);
 
     ndk::ScopedAStatus onReady(
-            const aidl::google::sdv::telemetry::MetricsReportInfo& metrics_report_info) override;
+            const aidl::google::sdv::telemetry::MetricsReportInfo& metricsReportInfo) override;
 
     void* getData() { return mCallback.data; }
 

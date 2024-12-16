@@ -20,5 +20,5 @@
 package google.sdv.telemetry;
 @VintfStability
 interface ITelemetryReportReadyListener {
-    oneway void onReady(in google.sdv.telemetry.MetricsReportInfo metrics_report_info);
+    oneway void onReady(in google.sdv.telemetry.MetricsReportInfo metricsReportInfo);
 }
