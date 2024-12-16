@@ -250,11 +250,21 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             },
             // Create a rust Trigger object using already created Publisher and Trigger objects to resolve dependencies.
             |trigger_proto, publishers, triggers| {
+                let uuid = config_proto.uuid.clone();
+                let _misc_error_callback = Arc::clone(&self.misc_error_callback);
                 let context = TriggerFactoryCreateContext {
                     expression_nodes: &expression_nodes,
                     node_types: &node_types,
                     publishers,
                     triggers,
+                    error_callback: Arc::new(move |error| {
+                        let error = MetricsConfigRuntimeError::ConditionalTrigger {
+                            metrics_config_uuid: uuid.clone(),
+                            error,
+                        };
+                        error!("Metrics config runtime error: {error}");
+                        // misc_error_callback(StatusCodes::METRICS_CONFIG_RUNTIME_ERROR, &format!("{error}"));
+                    }),
                 };
                 self.trigger_factory.create(trigger_proto, &context).map_err(|factory_error| {
                     MetricsConfigOrchestratorError::InvalidTriggerDefinition {
