@@ -81,6 +81,12 @@ enum VisitStatus {
     Visited,
 }
 
+#[derive(Clone)]
+pub struct VisitInfo {
+    visit_status: VisitStatus,
+    parent_index: Option<usize>,
+}
+
 /// Implementation of NodeFactory trait.
 pub struct NodeFactoryImpl {}
 
@@ -97,8 +103,11 @@ impl NodeFactoryImpl {
     /// # Arguments
     ///
     /// * `index` - The index of the node that will be visited.
+    /// * `parent_index` - The index of the node that was visited previously or None if the current
+    ///   node is the first one to visit.
     /// * `proto_nodes` - The list of expression nodes in the MetricsConfig.
-    /// * `visit_status` - Tracks if a node has been visited by index.
+    /// * `visit_info` - Tracks if a node has been visited by index, together with tracking node's parent.
+    ///                  This information is used to detect and restore cyclic dependencies.
     /// * `nodes` - If non-empty, this function will create Rust node with
     ///             1-1 correspondence with the protobuf node, put the Rust node at
     ///             the given `index` and return the Node. If `nodes` is empty, this
@@ -110,19 +119,27 @@ impl NodeFactoryImpl {
     ///               for messages and descriptors for type-checking.
     fn visit(
         index: usize,
+        parent_index: Option<usize>,
         proto_nodes: &[NodeProto],
-        visit_status: &mut [VisitStatus],
+        visit_info: &mut [VisitInfo],
         nodes: &mut [Option<Arc<Node>>],
         node_value_types: &mut [Option<NodeValueType>],
         context: &NodeFactoryContext,
     ) -> Result<Option<Arc<Node>>, NodeError> {
-        let status = visit_status
+        let status = &visit_info
             .get(index)
-            .ok_or(NodeError::IndexOutOfBound { i: index, n: proto_nodes.len() })?;
+            .ok_or(NodeError::IndexOutOfBound { i: index, n: proto_nodes.len() })?
+            .visit_status;
 
         // detect cycles using visit status, and visit the node
         match status {
-            VisitStatus::Visiting => Err(NodeError::CyclicDependency { i: index }),
+            VisitStatus::Visiting => Err(NodeError::CyclicDependency {
+                cycle: Self::restore_cycle(
+                    parent_index.expect("parent index should be set in order to restore cycle"),
+                    index,
+                    visit_info,
+                ),
+            }),
             VisitStatus::Visited => {
                 if nodes.is_empty() {
                     Ok(None)
@@ -132,7 +149,8 @@ impl NodeFactoryImpl {
             }
             VisitStatus::NotVisited => {
                 // mark index as "visiting", if visit() comes back to this index, there is a cycle
-                visit_status[index] = VisitStatus::Visiting;
+                visit_info[index].visit_status = VisitStatus::Visiting;
+                visit_info[index].parent_index = parent_index;
 
                 // match on the node type and capture value returned by match block
                 let rust_node = match &proto_nodes[index].node_type {
@@ -183,19 +201,21 @@ impl NodeFactoryImpl {
                             as usize;
                         let left = Self::visit(
                             left_child_index,
+                            Some(index),
                             proto_nodes,
-                            visit_status,
+                            visit_info,
                             nodes,
                             node_value_types,
                             context,
                         )?;
 
                         // visit right child if right child is specified
-                        let right = if let Some(right_idx) = combination_node.right_index {
+                        let right = if let Some(right_child_index) = combination_node.right_index {
                             Self::visit(
-                                right_idx as usize,
+                                right_child_index as usize,
+                                Some(index),
                                 proto_nodes,
-                                visit_status,
+                                visit_info,
                                 nodes,
                                 node_value_types,
                                 context,
@@ -221,7 +241,7 @@ impl NodeFactoryImpl {
                 };
 
                 // mark index as visited and return Ok
-                visit_status[index] = VisitStatus::Visited;
+                visit_info[index].visit_status = VisitStatus::Visited;
                 Ok(rust_node)
             } // match arm `VisitStatus::NotVisited`
         } // `match` block
@@ -277,6 +297,29 @@ impl NodeFactoryImpl {
         nodes[index] = Some(create_node_func()?);
         Ok(nodes[index].clone())
     }
+
+    fn restore_cycle(
+        start_index: usize,
+        finish_index: usize,
+        visit_info: &mut [VisitInfo],
+    ) -> Vec<usize> {
+        let mut cycle = vec![];
+        let mut current_index = start_index;
+        loop {
+            cycle.push(current_index);
+            if current_index == finish_index {
+                break;
+            }
+            current_index = visit_info[current_index]
+                .parent_index
+                .expect("each cycle node should have its parent set");
+        }
+
+        // For the cycle to look like (0 -> 1 -> 2 -> 0)
+        cycle.push(start_index);
+        cycle.reverse();
+        cycle
+    }
 }
 
 impl NodeFactory for NodeFactoryImpl {
@@ -286,13 +329,15 @@ impl NodeFactory for NodeFactoryImpl {
         context: &NodeFactoryContext,
     ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
         let n = proto_nodes.len();
-        let mut visit_status = vec![VisitStatus::NotVisited; n];
+        let mut visit_info =
+            vec![VisitInfo { visit_status: VisitStatus::NotVisited, parent_index: None }; n];
         let mut node_value_types = vec![None; n];
         for i in 0..n {
             Self::visit(
                 i,
+                None,
                 proto_nodes,
-                &mut visit_status,
+                &mut visit_info,
                 &mut [],
                 &mut node_value_types,
                 context,
@@ -307,15 +352,17 @@ impl NodeFactory for NodeFactoryImpl {
         context: &NodeFactoryContext,
     ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
         let n = proto_nodes.len();
-        let mut visit_status = vec![VisitStatus::NotVisited; n];
+        let mut visit_info =
+            vec![VisitInfo { visit_status: VisitStatus::NotVisited, parent_index: None }; n];
         let mut node_value_types = vec![None; n];
         let mut rust_nodes: Vec<Option<Arc<Node>>> = vec![None; n];
 
         for i in 0..n {
             Self::visit(
                 i,
+                None,
                 proto_nodes,
-                &mut visit_status,
+                &mut visit_info,
                 &mut rust_nodes,
                 &mut node_value_types,
                 context,
@@ -619,7 +666,11 @@ mod tests {
         let err = node_factory.create_nodes(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(matches!(err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
+        assert!(
+            matches!(&err, NodeError::CyclicDependency { cycle } if cycle == &vec![1, 0, 1]),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -703,7 +754,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(matches!(&err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
+        assert!(
+            matches!(&err, NodeError::CyclicDependency { cycle } if cycle == &vec![0, 0]),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
@@ -725,7 +780,11 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         // assert
-        assert!(matches!(&err, NodeError::CyclicDependency { .. }), "Unexpected error: {:?}", err);
+        assert!(
+            matches!(&err, NodeError::CyclicDependency { cycle } if cycle == &vec![1, 0, 1]),
+            "Unexpected error: {:?}",
+            err
+        );
     }
 
     #[test]
