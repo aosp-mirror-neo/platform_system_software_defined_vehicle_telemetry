@@ -1348,9 +1348,9 @@ mod tests {
         does_not_contain_left_unknown_type_success: (RelationalOperator::DOES_NOT_CONTAIN, false, true, true,),
         does_not_contain_right_unknown_type_success: (RelationalOperator::DOES_NOT_CONTAIN, true, false, true,),
         does_not_contain_both_unknown_types_success: (RelationalOperator::DOES_NOT_CONTAIN, false, false, true,),
-        all_eq_left_unknown_type_success: (RelationalOperator::ALL_EQ, false, true, true,),
-        all_eq_right_unknown_type_success: (RelationalOperator::ALL_EQ, true, false, true,),
-        all_eq_both_unknown_types_success: (RelationalOperator::ALL_EQ, false, false, true,),
+        list_eq_left_unknown_type_success: (RelationalOperator::EQ, false, true, true,),
+        list_eq_right_unknown_type_success: (RelationalOperator::EQ, true, false, true,),
+        list_eq_both_unknown_types_success: (RelationalOperator::EQ, false, false, true,),
     );
 
     // Validates logical operators with different operand availability combinations.

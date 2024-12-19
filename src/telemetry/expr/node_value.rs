@@ -206,6 +206,19 @@ impl NodeValue {
         self.get_double().is_some()
     }
 
+    /// Check if node holds a list.
+    fn is_list(&self) -> bool {
+        matches!(
+            self,
+            NodeValue::BoolList(_)
+                | NodeValue::Int32List(_)
+                | NodeValue::Int64List(_)
+                | NodeValue::FloatList(_)
+                | NodeValue::DoubleList(_)
+                | NodeValue::MessageList(_)
+        )
+    }
+
     /// Checks whether the node value is zero.
     pub fn is_zero(&self) -> Result<bool, NodeEvaluationError> {
         Ok(match self {
@@ -554,6 +567,9 @@ impl NodeValue {
         let err_provider = || NodeEvaluationError::ComparisonOperatorIncomptaibleOperands;
         Ok(NodeValue::Bool(match op {
             RelationalOperator::EQ => {
+                if self.is_list() {
+                    return Ok(NodeValue::Bool(self.all_equals(other)?));
+                }
                 if !self.is_numeric() || !other.is_numeric() {
                     return Ok(NodeValue::Bool(self == other));
                 }
@@ -604,7 +620,6 @@ impl NodeValue {
                 // negate the boolean in a Result<bool, E>
                 self.contains(other).map(|x| !x)
             }
-            RelationalOperator::ALL_EQ => self.all_equals(other),
         }?))
     }
 
@@ -684,7 +699,7 @@ impl NodeValue {
     /// Check if all list items are equal to some element.
     /// Returns errors if `self` is not a list value or `element` is not a compatible type.
     fn all_equals(&self, element: &NodeValue) -> Result<bool, NodeEvaluationError> {
-        let err_provider = || NodeEvaluationError::AllEqualsOperatorIncompatibleOperands;
+        let err_provider = || NodeEvaluationError::ComparisonOperatorListIncompatibleOperands;
         Ok(match self {
             NodeValue::BoolList(v) => {
                 let target_value = element.get_bool().ok_or_else(err_provider)?;
@@ -806,10 +821,6 @@ mod tests {
 
     fn unary_right_operand_provider() -> Result<NodeValue, NodeEvaluationError> {
         panic!("Unary operator should not call right operand provider");
-    }
-
-    fn provide(value: &NodeValue) -> Result<NodeValue, NodeEvaluationError> {
-        Ok(value.clone())
     }
 
     #[test]
@@ -1304,6 +1315,20 @@ mod tests {
         eq_none_left: (&OP_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         eq_none_right: (&OP_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
+        eq_list_1: (&OP_EQ, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_2: (&OP_EQ, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_3: (&OP_EQ, NodeValue::BoolList(vec![true, false, false]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_4: (&OP_EQ, NodeValue::BoolList(vec![true, false, false]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_5: (&OP_EQ, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_6: (&OP_EQ, NodeValue::Int64List(vec![0, 0]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_7: (&OP_EQ, NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_8: (&OP_EQ, NodeValue::FloatList(vec![0.5, 0.5]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_9: (&OP_EQ, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone()), Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TEST_MESSAGE.clone())), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_10: (&OP_EQ, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone()), Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TestMessage::new())), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_none_left: (&OP_EQ, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
+        eq_list_none_right: (&OP_EQ, NodeValue::Int64List(vec![42]), NodeValue::None, ok(eq(&NodeValue::None)),),
+        eq_list_incompatible_types: (&OP_EQ, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
+
         ne_1: (&OP_NOT_EQ, ONE, ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
         ne_2: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
         ne_3: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Int64(2), ok(eq(&NodeValue::Bool(false))),),
@@ -1388,102 +1413,6 @@ mod tests {
         not_contains_incompatible_types_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
         not_contains_incompatible_types_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
     );
-
-    #[test]
-    fn operate_sync_relational_all_eq_errs_if_left_operand_not_a_list() {
-        let two = NodeValue::Int32(2);
-
-        assert!(matches!(
-            two.clone().operate_sync(&OP_ALL_EQ, || provide(&two)).unwrap_err(),
-            NodeEvaluationError::AllEqualsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_all_eq_errs_if_operands_have_incompatible_types() {
-        let bool_list = NodeValue::BoolList(vec![true, true, false]);
-        let five = NodeValue::Float(5.5);
-
-        assert!(matches!(
-            bool_list.operate_sync(&OP_ALL_EQ, || provide(&five)).unwrap_err(),
-            NodeEvaluationError::AllEqualsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_all_eq_bool_type_ok() {
-        let bool_list_1 = NodeValue::BoolList(vec![true, true, true]);
-        let bool_list_2 = NodeValue::BoolList(vec![true, false, false]);
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-
-        assert_eq!(
-            bool_list_1.clone().operate_sync(&OP_ALL_EQ, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            bool_list_1.operate_sync(&OP_ALL_EQ, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            bool_list_2.clone().operate_sync(&OP_ALL_EQ, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            bool_list_2.operate_sync(&OP_ALL_EQ, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_all_eq_int_type_ok() {
-        let int_list_1 = NodeValue::Int64List(vec![3, 30, 300]);
-        let int_list_2 = NodeValue::Int64List(vec![0, 0]);
-        let zero = NodeValue::Int32(0);
-
-        assert_eq!(
-            int_list_1.operate_sync(&OP_ALL_EQ, || provide(&zero)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            int_list_2.operate_sync(&OP_ALL_EQ, || provide(&zero)).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_all_eq_float_type_ok() {
-        let float_list_1 = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
-        let float_list_2 = NodeValue::FloatList(vec![0.5, 0.5]);
-
-        let point_five = NodeValue::Double(0.5);
-
-        assert_eq!(
-            float_list_1.operate_sync(&OP_ALL_EQ, || provide(&point_five)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            float_list_2.operate_sync(&OP_ALL_EQ, || provide(&point_five)).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_all_eq_message_type_ok() {
-        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
-        let msg_list = NodeValue::MessageList(vec![Arc::clone(&message); 2]);
-        let msg_1 = NodeValue::Message(message);
-        let msg_2 = NodeValue::Message(Arc::new(TestMessage::new()));
-
-        assert_eq!(
-            msg_list.clone().operate_sync(&OP_ALL_EQ, || provide(&msg_1)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            msg_list.operate_sync(&OP_ALL_EQ, || provide(&msg_2)).unwrap(),
-            NodeValue::Bool(false)
-        );
-    }
 
     parameterized_test!(
         #[test]

@@ -66,8 +66,6 @@ lazy_static! {
         OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into());
     pub static ref OP_DOES_NOT_CONTAIN: OperatorProto =
         OperatorProto::RelationalOperator(RelationalOperator::DOES_NOT_CONTAIN.into());
-    pub static ref OP_ALL_EQ: OperatorProto =
-        OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into());
     pub static ref OP_FLOOR: OperatorProto =
         OperatorProto::RoundingOperator(RoundingOperator::FLOOR.into());
     pub static ref OP_ROUND: OperatorProto =
