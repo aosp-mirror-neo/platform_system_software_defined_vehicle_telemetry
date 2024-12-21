@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use protobuf::reflect::FileDescriptor;
+use protobuf::well_known_types::timestamp::Timestamp;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
 };
@@ -41,18 +42,19 @@ pub(crate) trait MetricsReportGeneratorFactory: Send + Sync {
 downcast_rs::impl_downcast!(MetricsReportGeneratorFactory);
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
+    pub config_activation_timestamp: &'a Timestamp,
     pub config_proto: &'a MetricsConfigProto,
-    pub report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
-    pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
+    pub report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
+    pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
 }
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
-    pub trigger_protos: &'a HashMap<String, ()>,
-    pub file_descriptors: &'a [FileDescriptor],
     pub node_types: &'a [Option<NodeValueType>],
+    pub file_descriptors: &'a [FileDescriptor],
+    pub trigger_protos: &'a HashMap<String, ()>,
 }
 
 #[derive(Error, Debug)]
@@ -131,12 +133,13 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         // Create and return a new report generator.
         Ok(Arc::new(MetricsReportGeneratorImpl::new(
             metrics_report_config,
+            context.config_activation_timestamp.to_owned(),
             context.config_proto.uuid.clone(),
             context.config_proto.version,
-            Arc::clone(context.report_ready_callback),
-            triggers,
             message_builder.into(),
+            triggers,
             Arc::clone(&self.error_callback),
+            Arc::clone(context.report_ready_callback),
         )))
     }
 
@@ -202,14 +205,18 @@ impl MetricsReportGeneratorFactoryImpl {
 mod tests {
     use super::*;
 
+    use parking_lot::Mutex;
     use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
+    use tokio::sync::oneshot;
 
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
-    use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
+    use crate::metrics_config_orchestrator::trigger::{
+        mock::MockTrigger, periodic::PeriodicTrigger, TriggerSubscriber,
+    };
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";
@@ -241,12 +248,13 @@ mod tests {
                 triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
             });
             let context = MetricsReportGeneratorFactoryCreateContext {
+                config_activation_timestamp: &Timestamp::now(),
                 config_proto: &metrics_config_proto,
-                report_ready_callback: &report_ready_callback,
-                triggers: &triggers,
                 file_descriptors: get_test_file_descriptors(),
                 nodes: get_test_nodes(),
                 node_types: get_test_node_types(),
+                report_ready_callback: &report_ready_callback,
+                triggers: &triggers,
             };
             self.create(report_config, &context).map(|generator| {
                 generator.downcast_arc::<MetricsReportGeneratorImpl>().ok().unwrap()
@@ -395,31 +403,38 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_success() {
+    #[tokio::test]
+    async fn create_success() {
         let factory = create_factory();
         let report_config = create_valid_config();
         let metrics_config =
             MetricsConfigProto { uuid: UUID.to_owned(), version: VERSION, ..Default::default() };
-        let report_ready_callback = Arc::new(|_| {}) as Arc<dyn Fn(MetricsReport) + Send + Sync>;
-        let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), Duration::ZERO);
+        let mut trigger = MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            TriggerSubscriber::MetricsReportGenerator { name: report_config.name.clone() },
+        );
+        let (tx, rx) = oneshot::channel();
+        let tx = Mutex::new(Some(tx));
+        trigger.set_subscribe_callback(move |name| {
+            tx.lock()
+                .take()
+                .expect("Callback should only be called once")
+                .send(name.to_owned())
+                .unwrap()
+        });
+        let trigger = Arc::new(trigger);
 
         let res = factory
             .create_using_context(
                 &report_config,
                 Some(metrics_config),
-                Some(Arc::clone(&report_ready_callback)),
+                Some(Arc::new(|_| {})),
                 Some(vec![Arc::clone(&trigger) as Arc<dyn Trigger>]),
             )
             .unwrap();
+        res.activate().await;
 
-        assert_eq!(res.name, METRICS_REPORT_CONFIG_NAME);
-        assert_eq!(res.config_uuid, UUID);
-        assert_eq!(res.config_version, VERSION);
-        assert!(res.report_incomplete);
-        assert_eq!(res.triggers.len(), 1);
-        assert!(Arc::ptr_eq(&res.report_ready_callback, &report_ready_callback));
-        assert!(Arc::ptr_eq(&res.triggers[0], &(trigger as Arc<dyn Trigger>)));
+        assert_eq!(rx.await.unwrap(), TRIGGER_NAME);
     }
 
     #[test]

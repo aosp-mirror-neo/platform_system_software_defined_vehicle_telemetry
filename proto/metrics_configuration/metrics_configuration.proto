@@ -241,6 +241,7 @@ message MetricsReport {
 
   // Required.
   // Report generation timestamp.
+  // Depending on system implementation details, the underlying clock time may go backwards.
   google.protobuf.Timestamp report_timestamp = 2;
 
   enum ReportReason {
@@ -275,6 +276,11 @@ message MetricsReport {
   // Required.
   // Metrics Report data.
   google.protobuf.Any report_data = 7;
+
+  // Required.
+  // Metrics Configuration activation timestamp.
+  // Depending on system implementation details, the underlying clock time may go backwards.
+  google.protobuf.Timestamp config_activation_timestamp = 8;
 }
 
 // Builds a protobuf message of some given type, where the content of the

@@ -21,6 +21,7 @@ use log::{debug, error};
 use message_builder::MessageBuilderError;
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
+use protobuf::well_known_types::timestamp::Timestamp;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
@@ -205,6 +206,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         &self,
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
+        let activation_timestamp = Timestamp::now();
+
         // Build the provided proto file descriptors
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let mut file_descriptors = FileDescriptor::new_dynamic_fds(
@@ -292,12 +295,13 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Create metrics report generators.
         let context = MetricsReportGeneratorFactoryCreateContext {
+            config_activation_timestamp: &activation_timestamp,
             config_proto,
-            triggers: &triggers,
-            report_ready_callback: &self.report_ready_callback,
             file_descriptors: &file_descriptors,
             nodes: &expression_nodes,
             node_types: &node_types,
+            report_ready_callback: &self.report_ready_callback,
+            triggers: &triggers,
         };
         let metrics_report_configs = config_proto.metrics_report_configs.iter().try_fold(
             HashMap::new(),

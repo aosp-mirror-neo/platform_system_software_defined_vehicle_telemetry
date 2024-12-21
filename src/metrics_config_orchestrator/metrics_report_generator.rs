@@ -30,19 +30,19 @@ pub(crate) trait MetricsReportGenerator: Send + Sync {
 downcast_rs::impl_downcast!(sync MetricsReportGenerator);
 
 pub(crate) struct MetricsReportGeneratorImpl {
-    pub(super) name: String,
-
-    pub(super) config_uuid: String,
-    pub(super) config_version: u32,
-    pub(super) report_incomplete: bool,
-    pub(super) report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
-    pub(super) triggers: Vec<Arc<dyn Trigger>>,
-
+    config_activation_timestamp: Timestamp,
+    config_uuid: String,
+    config_version: u32,
     is_active: AsyncMutex<bool>,
+    message_builder: Arc<dyn MessageBuilder>,
+    name: String,
+    report_incomplete: bool,
     report_number: AtomicI32,
     subscriber: TriggerSubscriber,
-    message_builder: Arc<dyn MessageBuilder>,
+    triggers: Vec<Arc<dyn Trigger>>,
+
     error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+    report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
 }
 
 #[async_trait]
@@ -90,29 +90,33 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
 }
 
 impl MetricsReportGeneratorImpl {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn new(
         metrics_report_config: &MetricsReportConfig,
+        config_activation_timestamp: Timestamp,
         config_uuid: String,
         config_version: u32,
-        report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
-        triggers: Vec<Arc<dyn Trigger>>,
         message_builder: Arc<dyn MessageBuilder>,
+        triggers: Vec<Arc<dyn Trigger>>,
         error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+        report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
     ) -> Self {
         let subscriber =
             TriggerSubscriber::MetricsReportGenerator { name: metrics_report_config.name.clone() };
         Self {
-            name: metrics_report_config.name.clone(),
+            config_activation_timestamp,
             config_uuid,
             config_version,
-            report_incomplete: metrics_report_config.report_incomplete,
-            report_ready_callback,
-            triggers,
             is_active: false.into(),
+            message_builder,
+            name: metrics_report_config.name.clone(),
+            report_incomplete: metrics_report_config.report_incomplete,
             report_number: 1.into(),
             subscriber,
-            message_builder,
+            triggers,
+
             error_callback,
+            report_ready_callback,
         }
     }
 
@@ -125,13 +129,15 @@ impl MetricsReportGeneratorImpl {
         match build_result.into_future().await {
             Ok(report_data) => {
                 let mut report = MetricsReport::new();
-                report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
-                report.report_timestamp = Some(Timestamp::now()).into();
-                report.report_reason = report_reason.into();
+                report.config_activation_timestamp =
+                    Some(self.config_activation_timestamp.clone()).into();
                 report.metrics_config_uuid.clone_from(&self.config_uuid);
                 report.metrics_config_version = self.config_version;
                 report.report_config_name.clone_from(&self.name);
                 report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+                report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
+                report.report_timestamp = Some(Timestamp::now()).into();
+                report.report_reason = report_reason.into();
 
                 debug!(
                     "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
@@ -203,14 +209,15 @@ mod test {
     fn create_generator(message_builder: Arc<MockMessageBuilder>) -> MetricsReportGeneratorImpl {
         MetricsReportGeneratorImpl::new(
             &create_report_config_proto(),
+            Timestamp::now(),
             CONFIG_UUID.to_owned(),
             CONFIG_VERSION,
-            Arc::new(|_| {}),
-            vec![],
             message_builder,
+            vec![],
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
+            Arc::new(|_| {}),
         )
     }
 
@@ -259,9 +266,10 @@ mod test {
         let (tx, mut rx) = mpsc::channel(2);
         generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+        let generator = Arc::new(generator);
 
         // Activate the generator.
-        Arc::new(generator).activate().await;
+        Arc::clone(&generator).activate().await;
 
         // Fire twice to make sure report number is incremented.
         trigger.fire().await;
@@ -278,15 +286,20 @@ mod test {
         let report = rx.recv().await.unwrap();
 
         // Verify the report.
-        assert_eq!(report.report_number, 2);
-        // Less than 1 hour old.
-        assert!(
-            Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
+        assert_eq!(
+            report.config_activation_timestamp.unwrap(),
+            generator.config_activation_timestamp
         );
-        assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
         assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
         assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
+        assert_eq!(report.report_number, 2);
+        assert!(
+            // Less than 1 hour old.
+            Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
+        );
+        assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
+
         // as built by MockMessageBuilder
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(message.int_field, 1);
