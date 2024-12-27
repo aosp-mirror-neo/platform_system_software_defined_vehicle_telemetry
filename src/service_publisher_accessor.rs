@@ -84,7 +84,10 @@ pub trait ServicePublisherAccessor: Send + Sync {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+        new_message_callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError>;
 
     /// Registers a callback that will be called when a service with the specified string
@@ -126,7 +129,13 @@ pub enum CreateSubscriptionOutcome {
     /// Service publisher is available and a subscription was successfully created.
     Subscribed(Box<dyn ServicePublisherSubscription>),
     /// The service with the specified service name is not registered.
-    NotRegistered(Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>),
+    NotRegistered {
+        /// New message callback passed to the create subscription call.
+        new_message_callback:
+            Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+        /// Cancellation callback passed to the create subscription call.
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+    },
 }
 
 /// Successful result of getting a message provider.
@@ -166,7 +175,7 @@ impl CreateSubscriptionOutcome {
     pub fn unwrap(self) -> Box<dyn ServicePublisherSubscription> {
         match self {
             Self::Subscribed(subscription) => subscription,
-            Self::NotRegistered(_) => panic!("Unexpected result: Not Registered"),
+            Self::NotRegistered { .. } => panic!("Unexpected result: Not Registered"),
         }
     }
 }

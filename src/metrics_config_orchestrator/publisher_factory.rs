@@ -265,6 +265,7 @@ mod tests {
             _configuration: Option<&Any>,
             _sub_sampling_interval: &SubSamplingInterval,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
+            _cancellation_callback: Box<dyn Fn() + Send + Sync>,
         ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
             unreachable!()
         }

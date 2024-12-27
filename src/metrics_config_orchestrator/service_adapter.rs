@@ -39,6 +39,7 @@ pub(crate) trait ServiceAdapter {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError>;
 
     /// Deactivate specified subscription.
@@ -178,6 +179,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
         let maybe_subscription_type = if configuration.is_some() {
             let error_callback = Arc::clone(&self.error_callback);
@@ -198,6 +200,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             });
                         }
                     }),
+                    cancellation_callback,
                 )
                 .await?;
 
@@ -205,7 +208,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 CreateSubscriptionOutcome::Subscribed(subscription) => {
                     Some(ServiceSubscriptionType::new_configured(subscription))
                 }
-                CreateSubscriptionOutcome::NotRegistered(_) => None,
+                CreateSubscriptionOutcome::NotRegistered { .. } => None,
             }
         } else {
             // Subscription doesn't have configuration, so it can be shared.
@@ -254,6 +257,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                     });
                                 }
                             }),
+                            cancellation_callback,
                         )
                         .await?;
 
@@ -306,7 +310,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                 sub_sampling_interval.to_owned(),
                             ))
                         }
-                        CreateSubscriptionOutcome::NotRegistered(_) => None,
+                        CreateSubscriptionOutcome::NotRegistered { .. } => None,
                     }
                 }
             }
@@ -434,8 +438,13 @@ pub(super) mod tests {
             Int32Value::descriptor().field_by_name("value").unwrap();
     }
 
-    fn create_empty_fn_box() -> Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync> {
-        Box::new(|_| {})
+    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+        Box::new(|| unreachable!())
+    }
+
+    fn create_empty_message_handler(
+    ) -> Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync> {
+        Box::new(|_| unreachable!())
     }
 
     fn create_service_adapter(accessor: Arc<MockServicePublisherAccessor>) -> ServiceAdapterImpl {
@@ -537,6 +546,7 @@ pub(super) mod tests {
                 SERVICE_NAME,
                 Some(&Any::new()),
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -558,6 +568,7 @@ pub(super) mod tests {
                 SERVICE_NAME,
                 Some(&Any::new()),
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -581,6 +592,7 @@ pub(super) mod tests {
                 Some(&Any::new()),
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -604,7 +616,13 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let err = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .err()
             .unwrap();
@@ -620,7 +638,13 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let res = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -647,6 +671,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -656,6 +681,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -692,6 +718,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -701,6 +728,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -737,6 +765,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -746,6 +775,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::MAX,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -790,6 +820,7 @@ pub(super) mod tests {
                     None,
                     &SubSamplingInterval::ZERO,
                     Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
+                    create_empty_fn_box(),
                 )
                 .await
                 .unwrap();
@@ -818,7 +849,13 @@ pub(super) mod tests {
 
         // Create subscription for a different service.
         service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap();
 
@@ -837,6 +874,7 @@ pub(super) mod tests {
                 SERVICE_NAME,
                 Some(&Any::new()),
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -860,6 +898,7 @@ pub(super) mod tests {
                 SERVICE_NAME,
                 Some(&Any::new()),
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -878,7 +917,13 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -896,7 +941,13 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -913,13 +964,25 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
 
         let _subscription2 = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
@@ -937,13 +1000,25 @@ pub(super) mod tests {
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
 
         let subscription = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");
 
         let subscription2 = service_adapter
-            .subscribe(SERVICE_NAME, None, &SubSamplingInterval::ZERO, create_empty_fn_box())
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
             .await
             .unwrap()
             .expect("Subscription should be available");

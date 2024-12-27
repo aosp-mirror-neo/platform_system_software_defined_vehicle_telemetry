@@ -428,6 +428,7 @@ impl ServicePublisher {
                                 .send(Arc::clone(msg))
                                 .expect("Callback should only receive messages when subscribed")
                         }),
+                        Box::new(|| {}),
                     )
                     .await
                     .map_err(Either::Right)?;

@@ -117,16 +117,25 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+        new_message_callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
-            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered {
+                new_message_callback,
+                cancellation_callback,
+            });
         };
 
         info!("Subscribing to comms stack service '{service_name}'.");
 
         let Some(service_unit_definition) = self.discover_service(&service_name).await else {
-            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered {
+                new_message_callback,
+                cancellation_callback,
+            });
         };
 
         let message_descriptor =
@@ -142,7 +151,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                         unit_identifier,
                         sub_sampling_interval,
                         message_descriptor,
-                        callback,
+                        new_message_callback,
                     )
                     .await
             }
@@ -152,7 +161,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                         unit_identifier,
                         configuration,
                         message_descriptor,
-                        callback,
+                        new_message_callback,
                     )
                     .await
             }
@@ -348,6 +357,15 @@ mod integration_tests {
     const VALID_SERVICE_NAME: &str =
         "com.google.sdv.telemetry.tests.DataTunnelSubscriberTest#Topic|default";
 
+    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+        Box::new(|| unreachable!())
+    }
+
+    fn create_empty_message_handler(
+    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
+        Box::new(|_| unreachable!())
+    }
+
     fn create_accessor(ctx: ContextRef) -> CommsStackAccessor {
         CommsStackAccessor::new(std::future::ready(ctx).boxed().shared())
     }
@@ -459,12 +477,13 @@ mod integration_tests {
                 INVALID_SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
-                Box::new(|_| {}),
+                create_empty_message_handler(),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
 
-        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered(_)));
+        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -478,14 +497,13 @@ mod integration_tests {
                 &service_name,
                 None,
                 &SubSamplingInterval::ZERO,
-                Box::new(|_| {
-                    unreachable!();
-                }),
+                create_empty_message_handler(),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
 
-        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered(_)));
+        assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -513,9 +531,8 @@ mod integration_tests {
                 &service_name,
                 None,
                 &SubSamplingInterval::ZERO,
-                Box::new(|_| {
-                    unreachable!();
-                }),
+                create_empty_message_handler(),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -547,9 +564,8 @@ mod integration_tests {
                 &service_name,
                 None,
                 &SubSamplingInterval::ZERO,
-                Box::new(|_| {
-                    unreachable!();
-                }),
+                create_empty_message_handler(),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -559,9 +575,8 @@ mod integration_tests {
                 &service_name,
                 None,
                 &SubSamplingInterval::ZERO,
-                Box::new(|_| {
-                    unreachable!();
-                }),
+                create_empty_message_handler(),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -598,6 +613,7 @@ mod integration_tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx1.send(message).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -610,6 +626,7 @@ mod integration_tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx2.send(message).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -657,6 +674,7 @@ mod integration_tests {
                 None,
                 &notification_interval,
                 Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();
@@ -739,6 +757,7 @@ mod integration_tests {
                         .send(msg)
                         .unwrap();
                 }),
+                create_empty_fn_box(),
             )
             .await
             .unwrap();

@@ -76,21 +76,31 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        mut callback: Box<
+        mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
+        mut cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         for accessor in &self.service_publisher_registry {
-            callback = match accessor
-                .create_subscription(service_name, configuration, sub_sampling_interval, callback)
+            (new_message_callback, cancellation_callback) = match accessor
+                .create_subscription(
+                    service_name,
+                    configuration,
+                    sub_sampling_interval,
+                    new_message_callback,
+                    cancellation_callback,
+                )
                 .await?
             {
                 outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
-                CreateSubscriptionOutcome::NotRegistered(callback) => callback,
+                CreateSubscriptionOutcome::NotRegistered {
+                    new_message_callback,
+                    cancellation_callback,
+                } => (new_message_callback, cancellation_callback),
             };
         }
 
-        Ok(CreateSubscriptionOutcome::NotRegistered(callback))
+        Ok(CreateSubscriptionOutcome::NotRegistered { new_message_callback, cancellation_callback })
     }
 
     async fn register_availability_callback(
@@ -147,9 +157,13 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
-    fn create_empty_fn_box(
+    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+        Box::new(|| unreachable!())
+    }
+
+    fn create_empty_message_handler(
     ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
-        Box::new(|_| {})
+        Box::new(|_| unreachable!())
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -297,6 +311,7 @@ mod tests {
                 SERVICE_NAME,
                 configuration_msg.as_ref(),
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -321,6 +336,7 @@ mod tests {
                 SERVICE_NAME2,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -344,12 +360,13 @@ mod tests {
                 SERVICE_NAME2,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
             .unwrap();
 
-        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
+        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -367,6 +384,7 @@ mod tests {
                 SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await

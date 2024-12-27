@@ -142,23 +142,27 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         configuration: Option<&Any>,
         // TODO: b/373332101 - Not yet implemented.
         _sub_sampling_interval: &SubSamplingInterval,
-        mut callback: Box<
+        mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
         });
 
         let Some((message_descriptor, publisher)) = result else {
-            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered {
+                new_message_callback,
+                cancellation_callback,
+            });
         };
 
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
 
         let join_handle = tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
-                (callback)(Ok(message));
+                (new_message_callback)(Ok(message));
             }
         });
 
@@ -398,9 +402,13 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
-    fn create_empty_fn_box(
+    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+        Box::new(|| unreachable!())
+    }
+
+    fn create_empty_message_handler(
     ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
-        Box::new(|_| {})
+        Box::new(|_| unreachable!())
     }
 
     #[derive(Clone)]
@@ -649,6 +657,7 @@ mod tests {
                 SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -671,12 +680,13 @@ mod tests {
                 SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
             .unwrap();
 
-        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered(_)));
+        assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
     #[sdv_telemetry_test_utils_macros::timeout]
@@ -691,6 +701,7 @@ mod tests {
                 SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -713,6 +724,7 @@ mod tests {
                 SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await
@@ -741,6 +753,7 @@ mod tests {
                 SERVICE_NAME,
                 None,
                 &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
                 create_empty_fn_box(),
             )
             .await

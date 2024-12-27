@@ -107,7 +107,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         service_name: &str,
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
-        callback: Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+        new_message_callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+        >,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let mut data = self.data.lock();
         data.last_configuration = configuration.cloned();
@@ -116,12 +119,18 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
 
         if data.next_not_available {
             data.next_not_available = false;
-            return Ok(CreateSubscriptionOutcome::NotRegistered(callback));
+            return Ok(CreateSubscriptionOutcome::NotRegistered {
+                new_message_callback,
+                cancellation_callback,
+            });
         }
 
         if data
             .callbacks
-            .try_insert_value((service_name.to_owned(), sub_sampling_interval.to_owned()), callback)
+            .try_insert_value(
+                (service_name.to_owned(), sub_sampling_interval.to_owned()),
+                new_message_callback,
+            )
             .is_err()
         {
             panic!("Callback is already set for service name {}", service_name);
