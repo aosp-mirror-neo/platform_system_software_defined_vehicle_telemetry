@@ -80,7 +80,7 @@ enum ServicePublisherState {
         _event_processor: AsyncEventProcessor,
 
         // Subscription to ServiceAdapter.
-        service_subscription: Option<ServiceSubscription>,
+        service_subscription: ServiceSubscription,
     },
 }
 
@@ -185,8 +185,9 @@ impl Publisher for ServicePublisher {
     async fn deactivate(&self) -> anyhow::Result<()> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
+        let old_state = mem::replace(&mut *state_lock, ServicePublisherState::Inactive);
 
-        match &mut *state_lock {
+        match old_state {
             ServicePublisherState::Inactive => {
                 panic!("Unable to deactivate publisher {}: it's inactive", self.get_name())
             }
@@ -207,24 +208,16 @@ impl Publisher for ServicePublisher {
                     self.get_name()
                 );
 
-                if let Some(subscription) = service_subscription.take() {
-                    self.service_adapter.unsubscribe(subscription).await.with_context(|| {
-                        "Service adapter failed to process unsubscription request"
-                    })?;
-                } else {
-                    panic!(
-                        "Unable to deactivate publisher {} because it's in an inconsistent state: it's deactivating, but subscription is not set",
-                        self.get_name());
-                }
+                self.service_adapter
+                    .unsubscribe(service_subscription)
+                    .await
+                    .with_context(|| "Service adapter failed to process unsubscription request")?;
             }
         }
 
         // Reset latest message.
         // The publisher is unsubscribed from underlying data sources, so no callback will change it back to some stale message.
         self.base.reset_latest_message();
-
-        // Change state to Inactive and release the mutex.
-        *state_lock = ServicePublisherState::Inactive;
 
         Ok(())
     }
@@ -451,10 +444,12 @@ impl ServicePublisher {
                     AsyncReceiver::Unbounded(receiver),
                     ServicePublisherHandler { service_publisher: Arc::downgrade(self) },
                 );
-                maybe_subscription.map(|subscription| ServicePublisherState::ActiveSubscribed {
-                    callback_map: HashMap::new(),
-                    _event_processor: event_processor,
-                    service_subscription: Some(subscription),
+                maybe_subscription.map(|service_subscription| {
+                    ServicePublisherState::ActiveSubscribed {
+                        callback_map: HashMap::new(),
+                        _event_processor: event_processor,
+                        service_subscription,
+                    }
                 })
             }
         };
