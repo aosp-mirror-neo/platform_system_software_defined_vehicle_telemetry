@@ -5,7 +5,7 @@ use quote::{quote_spanned, ToTokens};
 use std::time::Duration;
 use syn::spanned::Spanned;
 use syn::visit_mut::{self, VisitMut};
-use syn::{parse2, Expr, ItemFn, LitInt};
+use syn::{parse2, Attribute, Expr, ItemFn, LitInt};
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -44,10 +44,10 @@ impl WrapAwaitWithTimeoutVisitor {
         Self { duration }
     }
 
-    /// Wrap the provided `await`able statement using `tokio::time::timeout`. The use of
-    /// `quote_spanned` ensures that a panic caused by this code is attributed to the original line
-    /// in the source file.
-    fn await_with_timeout(&self, statement: TokenStream) -> TokenStream {
+    /// Wrap the provided `await`able statement and its `attrs` using `tokio::time::timeout`. The
+    /// use of `quote_spanned` ensures that a panic caused by this code is attributed to the
+    /// original line in the source file.
+    fn await_with_timeout(&self, attrs: &[Attribute], statement: &Expr) -> TokenStream {
         let duration = &self.duration;
         let span = statement.span();
         quote_spanned! {span=>
@@ -58,6 +58,7 @@ impl WrapAwaitWithTimeoutVisitor {
                         .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", #duration));
                 tokio::time::timeout(
                     __test_utils_macro_timeout_time_left,
+                    #(#attrs)*
                     #statement,
                 )
                     .await
@@ -70,12 +71,10 @@ impl WrapAwaitWithTimeoutVisitor {
 impl VisitMut for WrapAwaitWithTimeoutVisitor {
     fn visit_expr_mut(&mut self, node: &mut Expr) {
         if let Expr::Await(ref mut expr) = node {
-            assert!(expr.attrs.is_empty(), "Attributes on an await expression are currently not supported by the `timeout` macro.");
-
             // First, visit whatever is being `await`ed.
             visit_mut::visit_expr_mut(self, &mut expr.base);
             // Then, apply the timeout.
-            *node = Expr::Verbatim(self.await_with_timeout(expr.base.clone().into_token_stream()));
+            *node = Expr::Verbatim(self.await_with_timeout(&expr.attrs, &expr.base));
         } else {
             visit_mut::visit_expr_mut(self, node);
         }
@@ -119,6 +118,7 @@ mod tests {
             quote!(
                 #[tokio::test]
                 async fn test_case() {
+                    #[some_attribute]
                     bar().await;
                 }
             ),
@@ -139,6 +139,7 @@ mod tests {
                                 .unwrap_or_else(|| panic!("Test timeout of {}ms reached!", 1000u64));
                             tokio::time::timeout(
                                 __test_utils_macro_timeout_time_left,
+                                #[some_attribute]
                                 bar(),
                             )
                             .await
