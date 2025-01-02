@@ -233,6 +233,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         test_read_publisher_config_from_file,
 
         |file_path, error_string| {
@@ -274,6 +275,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         test_parse_csv_file,
 
         |file_path, file_name, error_string| {

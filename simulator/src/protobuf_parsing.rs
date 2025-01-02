@@ -277,6 +277,7 @@ mod tests {
     use sdv_telemetry_test_utils::parameterized_test;
 
     parameterized_test!(
+        #[test]
         test_parse_value,
 
         |run_time_type, value, expected_output| {

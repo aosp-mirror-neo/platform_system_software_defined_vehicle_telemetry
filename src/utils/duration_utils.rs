@@ -57,6 +57,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         try_into_duration_negative,
 
         |duration_proto| {

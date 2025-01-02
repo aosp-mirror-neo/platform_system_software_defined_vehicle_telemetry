@@ -88,6 +88,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         sub_sampling_interval_gcd_or_zero,
 
         |expected, a, b| {

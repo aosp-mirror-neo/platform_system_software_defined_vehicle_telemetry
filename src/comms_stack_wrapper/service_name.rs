@@ -63,6 +63,7 @@ mod tests {
     use std::str::FromStr;
 
     parameterized_test!(
+        #[test]
         service_name_parser,
 
         |input, expected| {

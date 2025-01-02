@@ -30,10 +30,10 @@ pub fn timeout(
     timeout_impl(attr.into(), item.into()).unwrap_or_else(|err| err.to_compile_error()).into()
 }
 
-/// Macro for generating parameterized tests. The first argument is a common test name prefix for
-/// all generated tests. The second argument is a lambda that takes a number of arguments, and
-/// includes the actual test body. Then follow multiple lines of `test_name_suffix: (arg1, arg2,
-/// ..., argN,),`, one per test case.
+/// Macro for generating parameterized tests. Arguments:
+/// - Test attributes and a common test name prefix for all generated tests.
+/// - A lambda that takes a number of arguments, and includes the actual test body.
+/// - Multiple lines of `test_name_suffix: (arg1, arg2, ..., argN,),`, one per test case.
 ///
 /// NOTE: Async tests are not currently supported.
 ///
@@ -41,6 +41,7 @@ pub fn timeout(
 ///
 /// ```
 /// parameterized_test!(
+///     #[test]
 ///     is_equal,
 ///
 ///     |expected, a, b| {

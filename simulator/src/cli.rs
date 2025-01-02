@@ -420,6 +420,7 @@ Application will finish after 00:00:10 or 5 returned reports, whichever comes fi
     }
 
     parameterized_test!(
+        #[test]
         test_parse_duration,
 
         |expected, input| {

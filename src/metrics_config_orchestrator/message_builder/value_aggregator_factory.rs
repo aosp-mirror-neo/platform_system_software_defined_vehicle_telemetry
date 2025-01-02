@@ -457,6 +457,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         validate,
 
         |field_descriptor_name, node_types, aggregation, result_matcher: Box<dyn FnOnce(&Result<_, _>) -> bool>| {
@@ -660,6 +661,7 @@ mod tests {
     );
 
     parameterized_test!(
+        #[test]
         create,
 
         |field_descriptor_name, nodes_and_types: (Vec<Arc<Node>>, Vec<Option<NodeValueType>>), aggregation, result_matcher: Box<dyn FnOnce(&Result<_, _>) -> bool>| {
