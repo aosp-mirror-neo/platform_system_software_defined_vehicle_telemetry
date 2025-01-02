@@ -92,7 +92,7 @@ mod tests {
         }
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn process_events_success() {
         let (tx, rx) = mpsc::unbounded_channel();
@@ -107,7 +107,7 @@ mod tests {
         assert_eq!(handler.get_event_count(), 3);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn process_events_with_bounded_receiver_success() {
         let (tx, rx) = mpsc::channel(2);
@@ -122,7 +122,7 @@ mod tests {
         assert_eq!(handler.get_event_count(), 3);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn drop_success() {
         let (tx, rx) = mpsc::unbounded_channel();

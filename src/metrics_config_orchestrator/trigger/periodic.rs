@@ -153,7 +153,7 @@ mod tests {
         (Arc::new(trigger), subscription_manager)
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_calls_subscription_manager() {
         let (trigger, subscription_manager) =
@@ -174,7 +174,7 @@ mod tests {
         assert!(subscription_manager.callback.lock().is_some());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_calls_subscription_manager() {
         let (trigger, subscription_manager) =
@@ -193,7 +193,7 @@ mod tests {
         assert!(subscription_manager.callback.lock().is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_periodic_trigger_fires_twice() {
         let (trigger, subscription_manager) =
@@ -222,7 +222,7 @@ mod tests {
         assert_eq!(activation_id2, ACTIVATION_ID);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn shares_context_across_subscribers() {
         let trigger = create_valid_periodic_trigger();
@@ -249,7 +249,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_periodic_trigger_deactivate_from_callback_success() {
         let (trigger, subscription_manager) =

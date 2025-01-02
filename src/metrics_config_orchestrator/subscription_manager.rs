@@ -189,7 +189,7 @@ mod tests {
         Box::new(|_| {})
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
@@ -202,7 +202,7 @@ mod tests {
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_twice_activates_once() {
         let (manager, _activatable) = create_subscription_manager(|activatable| {
@@ -214,7 +214,7 @@ mod tests {
         manager.subscribe(KEY2.to_owned(), create_empty_fn_box()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_adds_callback() {
         let (manager, _activatable) = create_subscription_manager(|activatable| {
@@ -229,7 +229,7 @@ mod tests {
         assert!(callback_map.contains_key(KEY));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -239,7 +239,7 @@ mod tests {
         manager.unsubscribe(&KEY.to_owned()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_twice_deactivates_once() {
         let (manager, _activatable) = create_subscription_manager(|activatable| {
@@ -262,7 +262,7 @@ mod tests {
         manager.unsubscribe(&KEY2.to_owned()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_removes_callback() {
         let (manager, _activatable) = create_subscription_manager(|activatable| {
@@ -280,7 +280,7 @@ mod tests {
         assert!(maybe_callback_map_lock.is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_unsubscribe_subscribe_unsubscribe_increments_activation_id() {
         let (manager, _activatable) = create_subscription_manager(|activatable| {
@@ -307,7 +307,7 @@ mod tests {
         manager.unsubscribe(&KEY.to_owned()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn notify_notifies_only_callback_with_current_activation_id() {
         let (manager, _activatable) = create_subscription_manager(|activatable| {
@@ -349,7 +349,7 @@ mod tests {
         assert_eq!(123, rx.await.unwrap());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn notify_can_be_called_without_subscribers() {
         let (manager, _activatable) = create_subscription_manager(|_activatable| {});

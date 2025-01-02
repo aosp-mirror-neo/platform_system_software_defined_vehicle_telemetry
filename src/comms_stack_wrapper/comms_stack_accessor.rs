@@ -395,14 +395,14 @@ mod integration_tests {
         publisher.write_messages(&bytes).unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
         assert!(accessor.get_metadata(INVALID_SERVICE_NAME).await.unwrap().is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_topic_not_registered_returns_none() {
         let service_name = test_utils::make_unique_service_name();
@@ -412,7 +412,7 @@ mod integration_tests {
         assert!(accessor.get_metadata(&service_name).await.unwrap().is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_success() {
         let ctx = test_utils::make_context(0).await;
@@ -441,7 +441,7 @@ mod integration_tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
@@ -454,7 +454,7 @@ mod integration_tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
         let accessor = create_accessor_with_context(0);
@@ -467,7 +467,7 @@ mod integration_tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_invalid_service_name_success() {
         let accessor = create_accessor_with_context(0);
@@ -486,7 +486,7 @@ mod integration_tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_when_topic_does_not_exist_failure() {
         let service_name = test_utils::make_unique_service_name();
@@ -506,7 +506,7 @@ mod integration_tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
         let ctx = test_utils::make_context(0).await;
@@ -539,7 +539,7 @@ mod integration_tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[sdv_telemetry_test_utils::timeout(10_000)]
     #[tokio::test]
     async fn create_multiple_subscription_success() {
         let ctx = test_utils::make_context(0).await;
@@ -584,7 +584,7 @@ mod integration_tests {
         assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[sdv_telemetry_test_utils::timeout(10_000)]
     #[tokio::test]
     async fn create_repeated_subscriptions_and_read_messages_success() {
         let ctx = test_utils::make_context(0).await;
@@ -644,7 +644,7 @@ mod integration_tests {
         assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap()), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout(10_000)]
+    #[sdv_telemetry_test_utils::timeout(10_000)]
     // Force a multi-threaded runtime for this test, to ensure that the notification timestamps are
     // more accurate, even when one of the threads is stuck in synchronous FFI code.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -712,7 +712,7 @@ mod integration_tests {
         }
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_rpc_subscription_success() {
         let ctx = test_utils::make_context(0).await;
@@ -778,7 +778,7 @@ mod integration_tests {
         subscription.unsubscribe().await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_dt_message_provider_not_registered_success() {
         let ctx = test_utils::make_context(0).await;
@@ -792,7 +792,7 @@ mod integration_tests {
         ));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_dt_message_provider_and_read_messages_success() {
         let ctx = test_utils::make_context(0).await;
@@ -829,7 +829,7 @@ mod integration_tests {
         assert_eq!(get_int_field_value(message3.unwrap().unwrap()), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_rpc_message_provider_success() {
         let ctx = test_utils::make_context(0).await;
@@ -875,7 +875,7 @@ mod integration_tests {
     }
 
     // Unit Type -> 0 matches
-    #[sdv_telemetry_test_utils_macros::timeout(5_000)]
+    #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_no_matching_service_exists_fails() {
         let accessor = create_accessor_with_context(0);
@@ -890,7 +890,7 @@ mod integration_tests {
     }
 
     // Unit Type -> 1 match
-    #[sdv_telemetry_test_utils_macros::timeout(5_000)]
+    #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_one_matching_service_exists_success() {
         let ctx = test_utils::make_context(0).await;
@@ -930,7 +930,7 @@ mod integration_tests {
     }
 
     // Unit Type -> 2 matches
-    #[sdv_telemetry_test_utils_macros::timeout(5_000)]
+    #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_two_matching_services_exist_fail() {
         let accessor = create_accessor_with_context(1);
@@ -968,7 +968,7 @@ mod integration_tests {
     }
 
     // Unit Type + Unit Name -> 0 matches
-    #[sdv_telemetry_test_utils_macros::timeout(5_000)]
+    #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_no_matching_service_exists_fails() {
         let accessor = create_accessor_with_context(0);
@@ -985,7 +985,7 @@ mod integration_tests {
     }
 
     // Unit Type + Unit Name -> 1 match
-    #[sdv_telemetry_test_utils_macros::timeout(5_000)]
+    #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_exactly_one_matching_service_exists_success(
     ) {
@@ -1172,7 +1172,7 @@ mod integration_tests {
     }
 
     // FQIN + Unit Name -> 2 matches
-    #[sdv_telemetry_test_utils_macros::timeout(5_000)]
+    #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_fqin_when_two_services_with_unit_name_exist_fails() {
         let ctx = test_utils::make_context(0).await;

@@ -39,11 +39,6 @@ rust_test {
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],
-    proc_macros: [
-        // keep-sorted start
-        "libsdv_telemetry_test_utils_macros",
-        // keep-sorted end
-    ],
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",

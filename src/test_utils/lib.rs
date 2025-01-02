@@ -6,6 +6,7 @@ use log::trace;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
 
 pub use sdv_telemetry_test_utils_macros::parameterized_test;
+pub use sdv_telemetry_test_utils_macros::timeout;
 
 /// Generate a unique Data Tunnel topic name for testing.
 ///
@@ -33,6 +34,8 @@ pub fn unique_dt_topic_name() -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use std::thread;
     use tokio::time::{sleep, Duration};
 
@@ -40,27 +43,27 @@ mod tests {
     // a proc macro crate.
 
     #[tokio::test]
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[timeout]
     async fn timeout_does_not_trigger() {
         sleep(Duration::from_millis(100)).await;
     }
 
     #[tokio::test]
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[timeout]
     #[should_panic(expected = "Test timeout of 1000ms reached (call stalled for ")]
     async fn timeout_triggers() {
         sleep(Duration::from_millis(1100)).await;
     }
 
     #[tokio::test]
-    #[sdv_telemetry_test_utils_macros::timeout(100)]
+    #[timeout(100)]
     #[should_panic(expected = "Test timeout of 100ms reached (call stalled for ")]
     async fn timeout_triggers_with_explicit_duration() {
         sleep(Duration::from_millis(200)).await;
     }
 
     #[tokio::test]
-    #[sdv_telemetry_test_utils_macros::timeout(100)]
+    #[timeout(100)]
     #[should_panic(expected = "Test timeout of 100ms reached!")]
     async fn timeout_triggers_after_sync_sleep() {
         thread::sleep(Duration::from_millis(200));

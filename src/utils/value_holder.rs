@@ -102,7 +102,7 @@ mod test {
 
     use std::future;
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn collect_unordered_async_success() {
         let res = ValueHolder::collect_unordered(vec![
@@ -126,7 +126,7 @@ mod test {
         assert_eq!(res, vec![1, 2]);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn map_async_success() {
         let res =
@@ -149,7 +149,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn then_sync_async_success() {
         let res = ValueHolder::Synchronous(1)
@@ -160,7 +160,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn then_async_sync_success() {
         let res = ValueHolder::Asynchronous(future::ready(1).boxed())
@@ -171,7 +171,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn then_async_async_success() {
         let res = ValueHolder::Asynchronous(future::ready(1).boxed())
@@ -182,7 +182,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn sync_into_future_success() {
         let res = ValueHolder::Synchronous(1).into_future().await;
@@ -190,7 +190,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn async_into_future_success() {
         let res = ValueHolder::Asynchronous(future::ready(1).boxed()).into_future().await;
@@ -198,7 +198,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unwrap_async_success() {
         let res = ValueHolder::Asynchronous(future::ready(1).boxed()).unwrap_async().await;
@@ -206,7 +206,7 @@ mod test {
         assert_eq!(res, 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unwrap_async_failure() {

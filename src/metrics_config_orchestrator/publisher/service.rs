@@ -559,7 +559,7 @@ mod tests {
         Box::new(|_| {})
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_propagates_adapter_error() {
         let service_adapter =
@@ -574,7 +574,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -593,7 +593,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_falls_back_to_subscription() {
         let service_adapter =
@@ -615,7 +615,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_pending_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_retries_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -677,7 +677,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_with_retries_unsubscribes_on_deactivate() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscription_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -744,7 +744,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscription_pending_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -765,7 +765,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscription_retries_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -823,7 +823,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscription_no_availability_callback_fails() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -848,7 +848,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn activate_when_active_panics() {
@@ -857,7 +857,7 @@ mod tests {
         publisher.activate().await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_when_inactive_panics() {
@@ -866,7 +866,7 @@ mod tests {
         publisher.deactivate().await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_with_subscriptions_panics() {
@@ -875,7 +875,7 @@ mod tests {
         publisher.deactivate().await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_pending_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -889,7 +889,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unsubscribe_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_subscribed_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -904,7 +904,7 @@ mod tests {
         assert_eq!(service_adapter.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_when_inactive_panics() {
@@ -913,7 +913,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
@@ -922,7 +922,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_new_message_notifies_subscriber() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -955,7 +955,7 @@ mod tests {
         assert!(Arc::ptr_eq(&latest_message, &msg), "Expected {latest_message:?} to equal {msg:?}");
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_latest_message_calls_adapter() {
         let message = Box::new(Int32Value { value: 42, ..Default::default() });
@@ -975,7 +975,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_latest_message_propagates_provider_error() {
         const ERROR_STRING: &str = "Error 42";
@@ -990,7 +990,7 @@ mod tests {
         assert!(err.to_string().contains(ERROR_STRING), "Unexpected error: {:?}", err);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_when_inactive_panics() {
@@ -999,7 +999,7 @@ mod tests {
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -1008,7 +1008,7 @@ mod tests {
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_success() {
         let publisher = create_service_publisher_with_subscription(None).await;

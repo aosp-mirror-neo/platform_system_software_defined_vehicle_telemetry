@@ -384,7 +384,7 @@ mod tests {
         (trigger, message_provider, parent_trigger, callback_listener)
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscribes_to_parents() {
         let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
@@ -438,7 +438,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn shares_context_across_subscribers() {
         let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -480,7 +480,7 @@ mod tests {
         assert!(Arc::ptr_eq(&parent_context, &child_context2));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_filters_none() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -506,7 +506,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_filters_all_changes() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -532,7 +532,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_filters_falling_edge() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -558,7 +558,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_filters_rising_edge() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_is_true_filters_true() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -612,7 +612,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_is_false_filters_false() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -640,7 +640,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_is_true_filters_non_zero() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -667,7 +667,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_is_false_filters_zero() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -694,7 +694,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_is_true_filters_none() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -720,7 +720,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_is_false_filters_none() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -746,7 +746,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_handles_async_expression_result() {
         let (_trigger, message_provider, parent_trigger, callback_listener) =
@@ -761,7 +761,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn activate_active_panics() {
@@ -771,7 +771,7 @@ mod tests {
         trigger.activate(ActivationId::new(1)).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_unsubscribes_from_parents() {
         let mut parent_trigger = MockTrigger::new_for_subscriber(
@@ -797,7 +797,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_inactive_panics() {

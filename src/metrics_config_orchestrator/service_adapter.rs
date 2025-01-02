@@ -466,7 +466,7 @@ pub(super) mod tests {
         }
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_accessor_returns_error_fails() {
         let accessor =
@@ -479,7 +479,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_get_not_supported_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_get_not_supported());
@@ -493,7 +493,7 @@ pub(super) mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_accessor_latest_message_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -511,7 +511,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_get_latest_message_success() {
         let mut message = Box::new(Int32Value::new());
@@ -534,7 +534,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_configured_accessor_returns_error_fails() {
         let accessor =
@@ -557,7 +557,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_configured_accessor_returns_not_available_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
@@ -577,7 +577,7 @@ pub(super) mod tests {
         assert!(res.is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -608,7 +608,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_shared_accessor_returns_error_fails() {
         let accessor =
@@ -631,7 +631,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_shared_accessor_returns_not_available_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_next_not_available());
@@ -652,7 +652,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_shared_different_services_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -701,7 +701,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 2);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_shared_same_service_subscribes_to_registry() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -748,7 +748,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_shared_same_service_different_sub_sampling_interval_subscribes_twice() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -798,7 +798,7 @@ pub(super) mod tests {
 
     // This test must run on a multi-threaded executor, because only then does the code under test
     // exhibit the problematic behavior.
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn subscribe_shared_same_service_receives_messages_in_order() {
         const RANGE: std::ops::RangeInclusive<i32> = 1..=10;
@@ -841,7 +841,7 @@ pub(super) mod tests {
         }
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -863,7 +863,7 @@ pub(super) mod tests {
         service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_configured_accessor_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -887,7 +887,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_configured_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -910,7 +910,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_accessor_returns_error_fails() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -934,7 +934,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -957,7 +957,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_not_called_unless_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -993,7 +993,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_shared_called_after_last_subscriber_unsubscribes() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
@@ -1030,7 +1030,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_availability_callback_success() {
         let accessor = Arc::new(MockServicePublisherAccessor::new().with_availability_callback());
@@ -1045,7 +1045,7 @@ pub(super) mod tests {
         assert_eq!(accessor.get_num_register_availability_callback_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_availability_callback_propagates_error() {
         let accessor = Arc::new(

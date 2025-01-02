@@ -706,7 +706,7 @@ mod tests {
         assert_eq!(res, NodeValue::Int64(context.monotonic_time_since_boot.0));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn evaluate_asynchronous_provider_left_node_propagates_error() {
         let message_provider = Arc::new(MockMessageProvider::new());
@@ -735,7 +735,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn evaluate_asynchronous_provider_right_node_propagates_error() {
         let message_provider = Arc::new(MockMessageProvider::new());
@@ -764,7 +764,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn evaluate_asynchronous_provider_result_success() {
         let left_message_provider = Arc::new(MockMessageProvider::new());

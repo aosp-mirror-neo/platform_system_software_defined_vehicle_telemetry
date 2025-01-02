@@ -318,7 +318,7 @@ mod tests {
         Box::new(|_| {})
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn get_latest_message_resets() {
@@ -351,7 +351,7 @@ mod tests {
         assert_eq!(message_builder.get_num_reset_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn activate_when_active_panics() {
@@ -360,7 +360,7 @@ mod tests {
         let _ = publisher.activate().await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_when_inactive_panics() {
@@ -369,7 +369,7 @@ mod tests {
         let _ = publisher.deactivate().await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_with_subscriptions_panics() {
@@ -378,7 +378,7 @@ mod tests {
         let _ = publisher.deactivate().await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_when_inactive_panics() {
@@ -387,7 +387,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
@@ -396,7 +396,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_notifies_subscriber_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -432,7 +432,7 @@ mod tests {
         }
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_passes_trigger_context_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -470,7 +470,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscribe_handles_async_expression_result() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
@@ -510,7 +510,7 @@ mod tests {
         }
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_when_inactive_panics() {
@@ -519,7 +519,7 @@ mod tests {
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
@@ -528,7 +528,7 @@ mod tests {
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_success() {
         let publisher = create_aggregation_publisher_with_subscription(vec![]).await;

@@ -885,7 +885,7 @@ mod tests {
         config.write_to_bytes().unwrap()
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_call_received() {
         const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
@@ -911,7 +911,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_call_duplicate_fail() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -943,7 +943,7 @@ mod tests {
         assert_eq!(2, test_environment.get_num_add_metrics_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_metrics_config_call_received() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -966,7 +966,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_metrics_config_fail_config_doesnt_exist() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -982,7 +982,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_metrics_config_call_received() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1009,7 +1009,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_deactivate_metrics_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_metrics_config_fail_config_doesnt_exist() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1026,7 +1026,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_deactivate_metrics_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_metrics_config_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1053,7 +1053,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_metrics_config_fail_config_doesnt_exist() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1070,7 +1070,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_remove_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_all_metrics_configs() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1103,7 +1103,7 @@ mod tests {
         assert_eq!(1, test_environment.get_num_remove_all_config_calls());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_active_metrics_config_uuids() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1136,7 +1136,7 @@ mod tests {
             .all(|item| config_list_listener.get_metrics_config_list().contains(item)));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_inactive_metrics_config_uuids() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1170,7 +1170,7 @@ mod tests {
             .all(|item| config_list_listener.get_metrics_config_list().contains(item)));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn clear_report_ready_listener() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1202,7 +1202,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn set_report_ready_listener() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1228,7 +1228,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn set_report_ready_listener_and_check_on_ready_calls() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1264,7 +1264,7 @@ mod tests {
         assert_eq!(UUID1, &report_ready_listener.get_uuid());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn set_multiple_report_ready_listener_fails() {
         const ROOT_PATH: &str = "set_multiple_report_ready_listener";
@@ -1296,7 +1296,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_api_status_listener_success() {
         const ROOT_PATH: &str = "register_api_status_listener";
@@ -1311,7 +1311,7 @@ mod tests {
         assert!(test_environment.status_listener.api_listener.lock().is_some());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_misc_status_listener_success() {
         const ROOT_PATH: &str = "register_misc_status_listener";
@@ -1329,7 +1329,7 @@ mod tests {
         assert!(listener.is_some());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unregister_api_status_listener_success() {
         const ROOT_PATH: &str = "unregister_api_status_listener";
@@ -1350,7 +1350,7 @@ mod tests {
         assert!(test_environment.status_listener.api_listener.lock().is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unregister_misc_status_listener_success() {
         const ROOT_PATH: &str = "unregister_misc_status_listener";
@@ -1371,7 +1371,7 @@ mod tests {
         assert!(test_environment.status_listener.misc_listener.lock().is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metrics_report() {
         // Creating a separate directory for each unit test to avoid overlapping file
@@ -1437,7 +1437,7 @@ mod tests {
         assert_eq!(REPORT_NUMBER, report_listener.get_report_number());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_ready_reports_info() {
         // Creating a separate directory for each unit test to avoid overlapping file

@@ -153,7 +153,7 @@ mod tests {
         publisher
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_descriptor_provider_service_publisher_manager_error_fails() {
         let service_publisher_manager =
@@ -181,7 +181,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_descriptor_provider_aggregation_publisher_no_proto_message_builder_fails() {
         let publisher = create_aggregation_publisher_with_no_proto_message_builder(PUBLISHER_1);
@@ -204,7 +204,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_descriptor_invalid_publisher_name_fails() {
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
@@ -222,7 +222,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_descriptor_service_publisher_success() {
         let mut publisher = PublisherProto::new();
@@ -245,7 +245,7 @@ mod tests {
         )
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_descriptor_aggregation_publisher_success() {
         let publisher_1 =
@@ -273,7 +273,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_descriptor_aggregation_publisher_no_leading_dot_success() {
         let publisher = create_aggregation_publisher_with_msg_type(

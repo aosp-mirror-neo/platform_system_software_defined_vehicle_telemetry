@@ -546,7 +546,7 @@ mod tests {
         (configurable_publisher_registry, binder_adapter)
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_incorrect_service_name_returns_none() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
@@ -556,7 +556,7 @@ mod tests {
         assert!(res.is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_success() {
         let configurable_publisher = MockConfigurablePublisher::new(true);
@@ -570,7 +570,7 @@ mod tests {
         assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_incorrect_service_name_success() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
@@ -583,7 +583,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_get_not_supported_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
@@ -598,7 +598,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
         let config = Int32Value { value: 42, ..Default::default() };
@@ -633,7 +633,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_publisher_death_notification_removes_entry() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
@@ -645,7 +645,7 @@ mod tests {
         assert!(configurable_publisher_registry.publisher_entries.lock().is_empty());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
@@ -670,7 +670,7 @@ mod tests {
             .contains_key(SERVICE_NAME));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_incorrect_service_name_returns_not_available() {
         let configurable_publisher_registry = ConfigurablePublisherRegistry::new();
@@ -689,7 +689,7 @@ mod tests {
         assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
@@ -741,7 +741,7 @@ mod tests {
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unregister_incorrect_service_name_gets_ignored() {
         let configurable_publisher = MockConfigurablePublisher::new(false);

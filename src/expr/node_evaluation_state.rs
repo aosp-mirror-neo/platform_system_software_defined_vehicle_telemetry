@@ -143,7 +143,7 @@ mod tests {
         assert!(res.is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_async_message_from_cache_success() {
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() });

@@ -152,7 +152,7 @@ mod tests {
         service_units[0].clone()
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_topic_success() {
         let ctx = make_context().await;
@@ -171,7 +171,7 @@ mod tests {
         assert_eq!(service_unit_definition.get_application_metadata().as_slice(), &[1, 2, 3]);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_bytes_success() {
         let ctx = make_context().await;
@@ -200,7 +200,7 @@ mod tests {
         assert_eq!(buffer, vec![1, 1, 1, 2, 2, 2]);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_bytes_overflow() {
         let ctx = make_context().await;
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(subscriber.available_to_read().unwrap(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_length_delimited_proto_success() {
         let ctx = make_context().await;
@@ -275,7 +275,7 @@ mod tests {
         assert_eq!(buffer, expected);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_length_delimited_proto_too_long_failure() {
         let ctx = make_context().await;

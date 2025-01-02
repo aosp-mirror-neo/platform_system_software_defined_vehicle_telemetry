@@ -55,7 +55,7 @@ mod tests {
     // Arbitrarily chosen buffer capacity
     const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscriber_wrapper_send_data_invalid_message_fails() {
         let (tx, _) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
@@ -64,7 +64,7 @@ mod tests {
         assert!(wrapper.sendData(&[0xFF]).await.err().is_some());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscriber_wrapper_send_data_success() {
         let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);

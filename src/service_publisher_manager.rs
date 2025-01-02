@@ -166,7 +166,7 @@ mod tests {
         Box::new(|_| unreachable!())
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_success() {
         let service_publisher =
@@ -181,7 +181,7 @@ mod tests {
         assert_eq!(res.message_descriptor, Empty::descriptor());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_propagates_error() {
         let service_publisher = Arc::new(
@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_no_match_returns_none() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
@@ -209,7 +209,7 @@ mod tests {
         assert!(res.is_none());
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
@@ -227,7 +227,7 @@ mod tests {
         assert_eq!(service_publisher.get_num_get_message_provider_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_propagates_error() {
         let service_publisher = Arc::new(
@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_no_match_success() {
         let service_publisher =
@@ -260,7 +260,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_get_not_supported_success() {
         let service_publisher =
@@ -277,7 +277,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_multiple_accessors_get_not_supported_success() {
         let service_publishers = vec![
@@ -296,7 +296,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_success() {
         let configuration_msg =
@@ -321,7 +321,7 @@ mod tests {
         assert_eq!(service_publisher.take_last_configuration(), configuration_msg);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_propagates_error() {
         let service_publisher = Arc::new(
@@ -346,7 +346,7 @@ mod tests {
         assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_no_match_returns_not_available() {
         let service_publisher =
@@ -369,7 +369,7 @@ mod tests {
         assert!(matches!(res, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_returns_valid_subscription() {
         let service_publisher = Arc::new(MockServicePublisherAccessor::new());
@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(service_publisher.get_num_unsubscribe_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_availability_callback_success() {
         let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(service_publisher2.get_num_unregister_availability_callback_calls(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_availability_callback_no_callbacks_success() {
         let service_publisher1 = Arc::new(MockServicePublisherAccessor::new());
@@ -450,7 +450,7 @@ mod tests {
         assert_eq!(service_publisher1.get_num_unregister_availability_callback_calls(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_availability_callback_propagates_error_and_unsubscribes() {
         let service_publisher1 =

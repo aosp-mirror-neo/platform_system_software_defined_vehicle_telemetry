@@ -1701,7 +1701,7 @@ mod tests {
         config
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_publisher_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1717,7 +1717,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1733,7 +1733,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_publisher_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1749,7 +1749,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_publisher_trigger_cycle_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1765,7 +1765,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_aggregation_publisher_invalid_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1781,7 +1781,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_data_trigger_invalid_publisher_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1797,7 +1797,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_conditional_trigger_invalid_parent_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1813,7 +1813,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_metrics_report_config_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1829,7 +1829,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1846,7 +1846,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1865,7 +1865,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_publisher_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1884,7 +1884,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_trigger_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1904,7 +1904,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_metrics_report_config_factory_error_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -1932,7 +1932,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_with_dependencies_success() {
         let value1 = Arc::new(Int32Value { value: 101, ..Default::default() });
@@ -2012,7 +2012,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_start_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2030,7 +2030,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_end_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2048,7 +2048,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_invalid_finish_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2066,7 +2066,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_publisher_doesnt_activate_fails() {
         // Setup mock factory.
@@ -2094,7 +2094,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_only_end_trigger_set_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2110,7 +2110,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_with_lifecycle_triggers_success() {
         const ACTIVATE: &str = "activate";
@@ -2246,7 +2246,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_no_start_trigger_starts_data_collection() {
         // Create and setup mock report generator.
@@ -2287,7 +2287,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_activates_publishers_topologically() {
         // The names of the publishers set up in a way that alphabetic sorting
@@ -2382,7 +2382,7 @@ mod tests {
         assert_eq!(*activate_calls.lock(), expected_activations);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_with_known_protobuf_type_success() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2391,7 +2391,7 @@ mod tests {
         orchestrator.initialize_config(&config).await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_callback_triggered_when_finish_trigger_fires() {
         // Setup orchestrator.
@@ -2425,7 +2425,7 @@ mod tests {
         assert_eq!(&rx.await.unwrap(), UUID);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn finish_config_invalid_config_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2439,7 +2439,7 @@ mod tests {
         )
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn finish_config_not_started_unsubscribes() {
         // Setup trigger mocks.
@@ -2572,7 +2572,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn finish_config_running_unsubscribes_and_deactivates() {
         // Setup trigger mocks.
@@ -2722,7 +2722,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_with_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2738,7 +2738,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_duplicate_publisher_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2754,7 +2754,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_duplicate_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2770,7 +2770,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_duplicate_publisher_trigger_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2786,7 +2786,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_publisher_trigger_cycle_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2802,7 +2802,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_aggregation_publisher_invalid_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2818,7 +2818,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_data_trigger_invalid_publisher_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2834,7 +2834,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_conditional_trigger_invalid_parent_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2850,7 +2850,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_duplicate_metrics_report_config_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2866,7 +2866,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_duplicate_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2883,7 +2883,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2902,7 +2902,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_publisher_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2921,7 +2921,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_trigger_factory_error_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2940,7 +2940,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_metrics_report_config_factory_error_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2968,7 +2968,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_with_dependencies_success() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2997,7 +2997,7 @@ mod tests {
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_with_known_protobuf_type_success() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -3006,7 +3006,7 @@ mod tests {
         orchestrator.validate_config(&config).await.unwrap();
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_invalid_start_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -3024,7 +3024,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_invalid_end_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -3042,7 +3042,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_invalid_finish_trigger_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -3060,7 +3060,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn validate_config_only_end_trigger_set_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();

@@ -462,7 +462,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn build_from_asynchronous_result_propagates_error() {
         // Setup a field node that always returns an error.
@@ -500,7 +500,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn build_from_asynchronous_result_success() {
         // Setup a field node that returns the value of the test message int field.

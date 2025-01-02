@@ -78,7 +78,7 @@ fn setup_once() {
     });
 }
 
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_simple_config_end_to_end_test() {
     setup_once();
@@ -144,7 +144,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
 /// aggregation publisher being triggered when it is being deactivated.
 ///
 /// The test is not perfect, and failures usually only show up when running it multiple times.
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_no_aggregation_publisher_race_condition_during_metrics_config_deactivation(
 ) {
@@ -213,7 +213,7 @@ async fn telemetry_service_no_aggregation_publisher_race_condition_during_metric
 /// condition caused by a conditional trigger being triggered when it is being deactivated.
 ///
 /// The test is not perfect, and failures usually only show up when running it multiple times.
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_no_conditional_trigger_race_condition_during_metrics_config_deactivation(
 ) {
@@ -451,7 +451,7 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
     assert_eq!(result, (1..=70).collect::<Vec<_>>());
 }
 
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_vector_aggregation() {
     setup_once();
@@ -476,7 +476,7 @@ async fn telemetry_service_vector_aggregation() {
     run_vector_aggregation_test(publisher, format!("{unit_type}|{UNIT_NAME}")).await;
 }
 
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_vector_aggregation_with_fqin() {
     setup_once();
@@ -501,7 +501,7 @@ async fn telemetry_service_vector_aggregation_with_fqin() {
     run_vector_aggregation_test(publisher, format!("{}|{UNIT_NAME}", ctx.get_self_fqin())).await;
 }
 
-#[sdv_telemetry_test_utils_macros::timeout(100_000)]
+#[sdv_telemetry_test_utils::timeout(100_000)]
 #[tokio::test]
 async fn telemetry_service_someip() {
     setup_once();
@@ -544,7 +544,7 @@ async fn telemetry_service_someip() {
     assert_eq!(metrics_report.report_data.unpack::<Int32Value>().unwrap().unwrap().value, 42);
 }
 
-#[sdv_telemetry_test_utils_macros::timeout(30_000)]
+#[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_middleware() {
     setup_once();

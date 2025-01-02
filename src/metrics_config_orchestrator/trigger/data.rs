@@ -146,7 +146,7 @@ mod tests {
         (Arc::new(trigger), subscription_manager)
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscribes_to_publisher() {
         let publisher = Arc::new(create_valid_mock_publisher());
@@ -175,7 +175,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn shares_context_across_subscribers() {
         let publisher = Arc::new(create_valid_mock_publisher());
@@ -205,7 +205,7 @@ mod tests {
         );
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn activate_active_panics() {
@@ -220,7 +220,7 @@ mod tests {
         trigger.activate(ActivationId::new(2)).await;
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_unsubscribes_from_publisher() {
         let callback_listener = Arc::new(MockCallbackListener::new());
@@ -241,7 +241,7 @@ mod tests {
         assert_eq!(callback_listener.get_fired_count(), 1);
     }
 
-    #[sdv_telemetry_test_utils_macros::timeout]
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     #[should_panic]
     async fn deactivate_inactive_panics() {
