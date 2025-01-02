@@ -4,8 +4,12 @@
 
 extern crate proc_macro;
 
+mod parameterized_test;
 mod timeout;
 
+use syn::parse_macro_input;
+
+use parameterized_test::{parameterized_test_impl, MacroInput as ParameterizedTestMacroInput};
 use timeout::timeout_impl;
 
 /// Fail the test after the specified timeout in `ms`, or the default timeout of 1 second if no
@@ -24,4 +28,57 @@ pub fn timeout(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     timeout_impl(attr.into(), item.into()).unwrap_or_else(|err| err.to_compile_error()).into()
+}
+
+/// Macro for generating parameterized tests. The first argument is a common test name prefix for
+/// all generated tests. The second argument is a lambda that takes a number of arguments, and
+/// includes the actual test body. Then follow multiple lines of `test_name_suffix: (arg1, arg2,
+/// ..., argN,),`, one per test case.
+///
+/// NOTE: Async tests are not currently supported.
+///
+/// Example:
+///
+/// ```
+/// parameterized_test!(
+///     is_equal,
+///
+///     |expected, a, b| {
+///         assert_eq!(a == b, expected);
+///     },
+///
+///     two_and_four: (false, 2, 4,),
+///     two_and_two: (true, 2, 2,),
+/// )
+/// ```
+///
+/// This will generate the following code for you:
+///
+/// ```no_run
+/// #[test]
+/// fn is_equal_two_and_four() {
+///     (|expected, a, b| {
+///         assert_eq!(a == b, expected);
+///     })(
+///         false,
+///         2,
+///         4,
+///     )
+/// }
+///
+/// #[test]
+/// fn is_equal_two_and_two() {
+///     (|expected, a, b| {
+///         assert_eq!(a == b, expected);
+///     })(
+///         true,
+///         2,
+///         2,
+///     )
+/// }
+/// ```
+#[proc_macro]
+pub fn parameterized_test(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    let input = parse_macro_input!(input as ParameterizedTestMacroInput);
+    parameterized_test_impl(input).into()
 }

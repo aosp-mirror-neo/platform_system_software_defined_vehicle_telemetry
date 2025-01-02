@@ -95,7 +95,6 @@ rust_test {
     ],
     proc_macros: [
         // keep-sorted start
-        "libpaste",
         "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],

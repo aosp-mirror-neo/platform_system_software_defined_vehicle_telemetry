@@ -30,6 +30,11 @@ rust_defaults {
         "librand",
         // keep-sorted end
     ],
+    proc_macros: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils_macros",
+        // keep-sorted end
+    ],
     product_available: true,
     vendor_available: true,
 }
@@ -47,11 +52,6 @@ rust_test_host {
     rustlibs: [
         // keep-sorted start
         "libtokio",
-        // keep-sorted end
-    ],
-    proc_macros: [
-        // keep-sorted start
-        "libsdv_telemetry_test_utils_macros",
         // keep-sorted end
     ],
     test_options: {

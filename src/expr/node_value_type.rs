@@ -497,7 +497,7 @@ mod tests {
     );
 
     parameterized_test!(
-        can_apply_list_operator_for_,
+        can_apply_list_operator_for,
 
         |expected, value_type: NodeValueType, other: Option<&NodeValueType>| {
             assert_eq!(
