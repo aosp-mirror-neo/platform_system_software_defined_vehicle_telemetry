@@ -69,4 +69,50 @@ mod tests {
         thread::sleep(Duration::from_millis(200));
         sleep(Duration::MAX).await;
     }
+
+    parameterized_test!(
+        #[test]
+        parameterized_sync_no_args,
+        || {},
+        test_case: (),
+    );
+
+    parameterized_test!(
+        #[test]
+        #[should_panic(expected = "panic message")]
+        parameterized_sync_should_panic_no_args,
+        || {
+            panic!("panic message");
+        },
+        test_case: (),
+    );
+
+    parameterized_test!(
+        #[test]
+        parameterized_sync_args,
+        |n| {
+            assert_eq!(n % 2, 1);
+        },
+        one: (1,),
+        three: (3,),
+    );
+
+    parameterized_test!(
+        #[tokio::test]
+        #[timeout]
+        parameterized_async_no_args,
+        || async {},
+        test_case: (),
+    );
+
+    parameterized_test!(
+        #[tokio::test]
+        #[timeout]
+        parameterized_async_args,
+        |n| async move {
+            assert_eq!(n % 2, 1);
+        },
+        one: (1,),
+        three: (3,),
+    );
 }

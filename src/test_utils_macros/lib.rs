@@ -32,10 +32,9 @@ pub fn timeout(
 
 /// Macro for generating parameterized tests. Arguments:
 /// - Test attributes and a common test name prefix for all generated tests.
-/// - A lambda that takes a number of arguments, and includes the actual test body.
+/// - A closure that takes a number of arguments, and provides the actual test body. If the
+///   closure's body is an `async` block, then the test function will be marked as `async`.
 /// - Multiple lines of `test_name_suffix: (arg1, arg2, ..., argN,),`, one per test case.
-///
-/// NOTE: Async tests are not currently supported.
 ///
 /// Example:
 ///
@@ -77,6 +76,24 @@ pub fn timeout(
 ///         2,
 ///     )
 /// }
+/// ```
+///
+/// Async Example:
+///
+/// ```
+/// parameterized_test!(
+///     #[tokio::test]
+///     #[sdv_telemetry_test_utils::timeout]
+///     is_equal,
+///
+///     |expected, a, b| async move {
+///         something_async().await;
+///         assert_eq!(a == b, expected);
+///     },
+///
+///     two_and_four: (false, 2, 4,),
+///     two_and_two: (true, 2, 2,),
+/// )
 /// ```
 #[proc_macro]
 pub fn parameterized_test(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
