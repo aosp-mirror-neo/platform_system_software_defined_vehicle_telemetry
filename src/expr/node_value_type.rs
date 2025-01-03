@@ -421,6 +421,7 @@ mod tests {
     use sdv_telemetry_test_utils::parameterized_test;
 
     parameterized_test!(
+        #[test]
         is_bool,
 
         |expected, value_type: NodeValueType| {
@@ -440,6 +441,7 @@ mod tests {
     );
 
     parameterized_test!(
+        #[test]
         is_numeric,
 
         |expected, value_type: NodeValueType| {
@@ -459,6 +461,7 @@ mod tests {
     );
 
     parameterized_test!(
+        #[test]
         is_int,
 
         |expected, value_type: NodeValueType| {
@@ -478,6 +481,7 @@ mod tests {
     );
 
     parameterized_test!(
+        #[test]
         is_float,
 
         |expected, value_type: NodeValueType| {
@@ -497,6 +501,7 @@ mod tests {
     );
 
     parameterized_test!(
+        #[test]
         can_apply_list_operator_for,
 
         |expected, value_type: NodeValueType, other: Option<&NodeValueType>| {

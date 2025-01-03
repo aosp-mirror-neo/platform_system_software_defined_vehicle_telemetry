@@ -433,6 +433,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         create_service_publisher,
 
         |publisher| {
@@ -531,6 +532,7 @@ mod tests {
     }
 
     parameterized_test!(
+        #[test]
         validate_service_publisher,
 
         |publisher| {

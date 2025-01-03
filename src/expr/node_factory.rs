@@ -1121,6 +1121,7 @@ mod tests {
 
     // Validates relational operators with different operand availability combinations.
     parameterized_test!(
+        #[test]
         validate_combination_node,
 
         |operator: RelationalOperator, is_left_known, is_right_known, is_list| {
@@ -1163,6 +1164,7 @@ mod tests {
 
     // Validates logical operators with different operand availability combinations.
     parameterized_test!(
+        #[test]
         validate_combination_node,
 
         |operator: LogicalOperator, is_left_known, is_right_known| {
@@ -1215,6 +1217,7 @@ mod tests {
 
     // Validates arithmetic operators with different operand availability combinations.
     parameterized_test!(
+        #[test]
         validate_combination_node,
 
         |operator: ArithmeticOperator, are_float_operands, is_left_known, is_right_known, expected_result| {

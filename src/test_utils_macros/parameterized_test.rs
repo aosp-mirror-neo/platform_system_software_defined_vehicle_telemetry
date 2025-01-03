@@ -3,31 +3,36 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote_spanned};
 use syn::{
-    parenthesized, parse::Parse, parse::ParseStream, punctuated::Punctuated, Expr, Ident, Token,
+    parenthesized, parse::Parse, parse::ParseStream, punctuated::Punctuated, Attribute, Expr,
+    ExprClosure, Ident, Token,
 };
 
 pub(crate) struct MacroInput {
+    attrs: Vec<Attribute>,
     name_prefix: Ident,
-    test_fn: Expr,
+    test_fn: ExprClosure,
     cases: Punctuated<CaseInput, Token![,]>,
 }
 
 impl Parse for MacroInput {
     /// Input format:
     /// ```
+    /// #[test]
+    /// #[abc]
     /// some_name,
     /// |a, b| {},
     /// case_1: (arg_1, arg_2,...),
     /// case_2: (arg_1, arg_2,...),
     /// ```
     fn parse(input: ParseStream) -> syn::Result<Self> {
+        let attrs = input.call(Attribute::parse_outer)?;
         let name_prefix = input.parse()?;
         input.parse::<Token![,]>()?;
         let test_fn = input.parse()?;
         input.parse::<Token![,]>()?;
         let cases = input.call(Punctuated::parse_terminated)?;
 
-        Ok(Self { name_prefix, test_fn, cases })
+        Ok(Self { attrs, name_prefix, test_fn, cases })
     }
 }
 
@@ -53,21 +58,30 @@ impl Parse for CaseInput {
 }
 
 pub(crate) fn parameterized_test_impl(input: MacroInput) -> TokenStream {
+    let is_async = matches!(*input.test_fn.body, Expr::Async(_));
+
     input
         .cases
         .into_iter()
         .map(|case| {
-            let test_name =
-                format_ident!("{}_{}", input.name_prefix, case.name, span = case.name.span());
             let test_fn = &input.test_fn;
             let args = case.args;
 
             let span = case.name.span();
+
+            let (fn_async, fn_body) = if is_async {
+                (Some(Token![async](span)), quote_spanned! {span=> (#test_fn)(#args).await })
+            } else {
+                (None, quote_spanned! {span=> (#test_fn)(#args) })
+            };
+
+            let attrs = &input.attrs;
+            let test_name = format_ident!("{}_{}", input.name_prefix, case.name, span = span);
             quote_spanned! {span=>
-                #[test]
-                fn #test_name() {
+                #(#attrs)*
+                #fn_async fn #test_name() {
                     #[expect(clippy::redundant_closure_call)]
-                    (#test_fn)(#args)
+                    #fn_body
                 }
             }
         })
