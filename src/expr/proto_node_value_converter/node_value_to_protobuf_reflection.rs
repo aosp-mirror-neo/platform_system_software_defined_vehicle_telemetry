@@ -277,10 +277,10 @@ mod tests {
             assert_that!(result, expected);
         },
 
-        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(ReflectValueBox::String("kukkula".to_owned()))),),
+        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned()))),),
         string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. })),),
 
-        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(ReflectValueBox::Bytes(vec![1, 2, 3]))),),
+        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3]))),),
         vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. })),),
     );
 }

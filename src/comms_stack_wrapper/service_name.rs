@@ -86,7 +86,7 @@ mod tests {
             "vm:com.google.sdv.telemetry.tests.Blah/instance|the-unit-name",
             ok(
                 eq(
-                    ServiceName::FqinBased{
+                    &ServiceName::FqinBased{
                         fqin: ServiceFqin::from_str("vm:com.google.sdv.telemetry.tests.Blah/instance").unwrap(),
                         unit_name: "the-unit-name".to_owned()
                     }
@@ -97,7 +97,7 @@ mod tests {
             "com.google.sdv.telemetry.tests.Blah#Blubb",
             ok(
                 eq(
-                    ServiceName::UnitTypeBased{
+                    &ServiceName::UnitTypeBased{
                         unit_type: UnitType::from_str("com.google.sdv.telemetry.tests.Blah#Blubb").unwrap(),
                         unit_name: None,
                     }
@@ -108,7 +108,7 @@ mod tests {
             "com.google.sdv.telemetry.tests.Blah#Blubb|the-unit-name",
             ok(
                 eq(
-                    ServiceName::UnitTypeBased{
+                    &ServiceName::UnitTypeBased{
                         unit_type: UnitType::from_str("com.google.sdv.telemetry.tests.Blah#Blubb").unwrap(),
                         unit_name: Some("the-unit-name".to_owned())
                     }

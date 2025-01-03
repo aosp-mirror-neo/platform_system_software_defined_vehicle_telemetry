@@ -199,9 +199,9 @@ mod tests {
             args.command,
             matches_pattern!(Commands::TelemetryClient {
                 telemetry_client_args: matches_pattern!(TelemetryClientArgs {
-                    no_binary_reports: eq(true),
-                    max_report_count: some(eq(5)),
-                    output_directory: eq(PathBuf::from("/data/local/tmp/telemetry_simulator_out")),
+                    no_binary_reports: eq(&true),
+                    max_report_count: some(eq(&5u64)),
+                    output_directory: eq(&PathBuf::from("/data/local/tmp/telemetry_simulator_out")),
                 })
             })
         );
@@ -247,12 +247,12 @@ mod tests {
             args.command,
             matches_pattern!(Commands::FullSimulation {
                 telemetry_client_args: matches_pattern!(TelemetryClientArgs {
-                    max_report_count: some(eq(5)),
+                    max_report_count: some(eq(&5u64)),
                     metrics_config_paths: container_eq([
                         PathBuf::from("metrics_config_1.textproto"),
                         PathBuf::from("metrics_config_2.textproto")
                     ]),
-                    output_directory: eq(PathBuf::from("/foo/bar")),
+                    output_directory: eq(&PathBuf::from("/foo/bar")),
                 }),
                 simulation_publisher_args: matches_pattern!(SimulationPublisherArgs {
                     publisher_config_paths: container_eq([
