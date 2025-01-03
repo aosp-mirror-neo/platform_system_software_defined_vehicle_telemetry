@@ -2,7 +2,6 @@
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use std::{
-    cmp::min,
     fmt,
     hash::{Hash, Hasher},
     time::Duration,
@@ -53,7 +52,7 @@ impl fmt::Display for PublisherConfig {
         if num_messages > max_displayed_messages {
             write!(f, ", showing the first {max_displayed_messages}")?;
         }
-        for parsed_data_entry in &self.parsed_data[..min(max_displayed_messages, num_messages)] {
+        for parsed_data_entry in self.parsed_data.iter().take(max_displayed_messages) {
             writeln!(f, "{}", parsed_data_entry)?;
         }
         Ok(())

@@ -56,6 +56,7 @@ rust_defaults {
         "-D clippy::explicit_into_iter_loop",
         "-D clippy::explicit_iter_loop",
         "-D clippy::filetype_is_file",
+        "-D clippy::indexing_slicing",
         "-D clippy::match_bool",
         "-D clippy::panic",
         "-D clippy::single_match_else",

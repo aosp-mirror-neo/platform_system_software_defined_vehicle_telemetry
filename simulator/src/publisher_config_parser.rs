@@ -26,7 +26,15 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
     )?;
 
     // TODO(b/351183822): Allow more than one data generator.
-    let data_generator = &publisher_config_proto.data_generators[0];
+    let [ref data_generator] = publisher_config_proto.data_generators[..] else {
+        return Err(SimulatorError::FailedToParseFile {
+            file_name: file_name.to_owned(),
+            error_message: format!(
+                "Expected exactly one data generator, but got {}.",
+                publisher_config_proto.data_generators.len()
+            ),
+        });
+    };
 
     if !data_generator.configuration.is_none() {
         return Err(SimulatorError::NotImplemented {
