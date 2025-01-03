@@ -88,6 +88,7 @@ rust_test {
     ],
     rustlibs: [
         // keep-sorted start
+        "libgoogletest_rust",
         "libsdv_telemetry_simulator_test_proto",
         "libsdv_telemetry_test_utils",
         "libtempfile",

@@ -176,6 +176,8 @@ fn parse_duration(s: &str) -> Result<Duration, Error> {
 mod tests {
     use super::*;
 
+    use googletest::assert_that;
+    use googletest::matchers::{container_eq, eq, matches_pattern, none, some};
     use sdv_telemetry_test_utils::parameterized_test;
 
     #[test]
@@ -192,16 +194,17 @@ mod tests {
             "--no-binary-reports",
         ]);
         let args = args.unwrap();
-        if let Commands::TelemetryClient { telemetry_client_args } = args.command {
-            assert!(telemetry_client_args.no_binary_reports);
-            assert_eq!(telemetry_client_args.max_report_count, Some(5));
-            assert_eq!(
-                telemetry_client_args.output_directory,
-                PathBuf::from("/data/local/tmp/telemetry_simulator_out"),
-            );
-        } else {
-            panic!("Wrong subcommand: {:?}", args.command);
-        };
+
+        assert_that!(
+            args.command,
+            matches_pattern!(Commands::TelemetryClient {
+                telemetry_client_args: matches_pattern!(TelemetryClientArgs {
+                    no_binary_reports: eq(true),
+                    max_report_count: some(eq(5)),
+                    output_directory: eq(PathBuf::from("/data/local/tmp/telemetry_simulator_out")),
+                })
+            })
+        );
     }
 
     #[test]
@@ -216,7 +219,7 @@ mod tests {
         ]);
         let args = args.unwrap();
 
-        assert!(matches!(args.command, Commands::SimulationPublishers { .. }), "Wrong subcommand");
+        assert_that!(args.command, matches_pattern!(Commands::SimulationPublishers { .. }));
     }
 
     #[test]
@@ -240,29 +243,25 @@ mod tests {
         let args = args.unwrap();
         assert_eq!(args.max_simulation_time, Duration::from_secs(10));
 
-        if let Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } =
-            args.command
-        {
-            assert_eq!(
-                telemetry_client_args.metrics_config_paths,
-                vec![
-                    PathBuf::from("metrics_config_1.textproto"),
-                    PathBuf::from("metrics_config_2.textproto")
-                ]
-            );
-            assert_eq!(telemetry_client_args.max_report_count, Some(5));
-            assert_eq!(telemetry_client_args.output_directory, PathBuf::from("/foo/bar"));
-
-            assert_eq!(
-                simulation_publisher_args.publisher_config_paths,
-                vec![
-                    PathBuf::from("publisher_config_1.textproto"),
-                    PathBuf::from("publisher_config_2.textproto")
-                ]
-            );
-        } else {
-            panic!("Wrong subcommand: {:?}", args.command);
-        };
+        assert_that!(
+            args.command,
+            matches_pattern!(Commands::FullSimulation {
+                telemetry_client_args: matches_pattern!(TelemetryClientArgs {
+                    max_report_count: some(eq(5)),
+                    metrics_config_paths: container_eq([
+                        PathBuf::from("metrics_config_1.textproto"),
+                        PathBuf::from("metrics_config_2.textproto")
+                    ]),
+                    output_directory: eq(PathBuf::from("/foo/bar")),
+                }),
+                simulation_publisher_args: matches_pattern!(SimulationPublisherArgs {
+                    publisher_config_paths: container_eq([
+                        PathBuf::from("publisher_config_1.textproto"),
+                        PathBuf::from("publisher_config_2.textproto")
+                    ])
+                })
+            })
+        );
     }
 
     #[test]
@@ -277,16 +276,15 @@ mod tests {
             "--no-binary-reports",
         ]);
         let args = args.unwrap();
-        assert!(
-            matches!(
-                args.command,
-                Commands::TelemetryClient {
-                    telemetry_client_args: TelemetryClientArgs { max_report_count: None, .. },
-                },
-            ),
-            "Unexpected result: {:?}",
-            args.command
-        )
+
+        assert_that!(
+            args.command,
+            matches_pattern!(Commands::TelemetryClient {
+                telemetry_client_args: matches_pattern!(TelemetryClientArgs {
+                    max_report_count: none(),
+                })
+            })
+        );
     }
 
     #[test]
@@ -302,17 +300,15 @@ mod tests {
             "publisher_config_1.textproto",
         ]);
         let args = args.unwrap();
-        assert!(
-            matches!(
-                args.command,
-                Commands::FullSimulation {
-                    telemetry_client_args: TelemetryClientArgs { max_report_count: None, .. },
-                    ..
-                },
-            ),
-            "Unexpected result: {:?}",
-            args.command
-        )
+
+        assert_that!(
+            args.command,
+            matches_pattern!(Commands::FullSimulation {
+                telemetry_client_args: matches_pattern!(TelemetryClientArgs {
+                    max_report_count: none(),
+                })
+            })
+        );
     }
 
     #[test]
