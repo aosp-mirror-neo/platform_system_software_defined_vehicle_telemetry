@@ -647,29 +647,24 @@ impl MetricsConfigOrchestratorImpl {
                 ..
             } => status_code_for_message_builder_error(error),
             MetricsConfigRuntimeError::ServicePublisher {
-                error:
-                    ServicePublisherRuntimeError {
-                        error: ServicePublisherRuntimeErrorKind::RetryActivationFailed(ref error),
-                        ..
-                    },
+                error: ServicePublisherRuntimeError { error: ref error_kind, .. },
                 ..
-            } => match error {
-                either::Left(GetMessageProviderError::FailedToParseMetadata(_))
-                | either::Right(CreateSubscriptionError::FailedToParseMetadata(_)) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR
-                }
-                either::Left(GetMessageProviderError::RpcFailedToConnect(_))
-                | either::Right(CreateSubscriptionError::RpcFailedToConnect(_))
-                | either::Right(CreateSubscriptionError::FailedToSubscribe(_)) => {
+            } => match error_kind {
+                ServicePublisherRuntimeErrorKind::RetryActivationFailed(ref error) => match error {
+                    either::Left(GetMessageProviderError::FailedToParseMetadata(_))
+                    | either::Right(CreateSubscriptionError::FailedToParseMetadata(_)) => {
+                        StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR
+                    }
+                    either::Left(GetMessageProviderError::RpcFailedToConnect(_))
+                    | either::Right(CreateSubscriptionError::RpcFailedToConnect(_))
+                    | either::Right(CreateSubscriptionError::FailedToSubscribe(_)) => {
+                        StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
+                    }
+                },
+                ServicePublisherRuntimeErrorKind::ActivationAfterCancellationFailed(_) => {
                     StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
                 }
             },
-            // MetricsConfigRuntimeError::ServiceDiscovery { ref error, .. } => match error {
-            //     ServiceDiscoveryError::AmbiguousServiceName => {
-            //         StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_DISCOVERY_AMBIGUOUS_SERVICE_NAME_ERROR
-            //     }
-            //     ServiceDiscoveryError::InternalError(_) => StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_DISCOVERY_INTERNAL_ERROR,
-            // },
             MetricsConfigRuntimeError::ConditionalTrigger {
                 error: ConditionalTriggerRuntimeError { node_error: ref error, .. },
                 ..

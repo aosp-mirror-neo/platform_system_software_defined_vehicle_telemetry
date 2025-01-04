@@ -106,6 +106,9 @@ pub(crate) enum ServicePublisherRuntimeErrorKind {
     /// Retrying activation of the publisher failed.
     #[error("Retrying activation failed: {0}")]
     RetryActivationFailed(Either<GetMessageProviderError, CreateSubscriptionError>),
+    /// Retrying activation after subscription termination failed.
+    #[error("Activation after subscription cancellation failed: {0:#}")]
+    ActivationAfterCancellationFailed(anyhow::Error),
 }
 
 #[derive(thiserror::Error, Debug)]
