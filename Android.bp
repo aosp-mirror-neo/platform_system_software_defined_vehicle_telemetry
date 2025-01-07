@@ -177,6 +177,12 @@ rust_test {
     name: "libsdv_telemetry_dt_wrapper_integration_tests",
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
+    // Use a custom test config template as per
+    // https://source.android.com/docs/core/tests/vts/setup11, because we need
+    // to ensure that the integration tests are run serially (so that they can
+    // use `fork`), not in parallel, by adding the `--test-threads=1` flag to
+    // the test execution.
+    test_config_template: "tests/integration_tests_config_template.config",
     test_options: {
         unit_test: false,
     },

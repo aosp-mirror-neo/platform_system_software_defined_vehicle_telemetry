@@ -1031,11 +1031,13 @@ mod integration_tests {
     /// then returns an object that stops the child when dropped, as well as the FQIN of the
     /// publisher of the child process.
     ///
-    /// This function is _not_ async due to the warnings around the use of `fork` [1], which sound
-    /// pretty scary, so this should be called before setting up an async Tokio environment.
+    /// # Safety
+    ///
+    /// This function must be called from a single-threaded environment. See the warnings around the
+    /// use of `fork` [1] for more information.
     ///
     /// [1]: https://docs.rs/nix/latest/nix/unistd/fn.fork.html#safety
-    fn fork_and_create_publisher(
+    unsafe fn fork_and_create_publisher(
         fqin_extra: u8,
         service_name: String,
     ) -> (scopeguard::ScopeGuard<(), impl FnOnce(())>, ServiceFqin) {
@@ -1051,7 +1053,8 @@ mod integration_tests {
         // This will be used to signal to the child when it should exit.
         let (rx_child_exit, tx_child_exit) = nix_pipe().unwrap();
 
-        // SAFETY: Should be safe in tests.
+        // SAFETY: Safe because the caller ensured that this function is called in a single-threaded
+        // environment.
         match unsafe { fork() }.unwrap() {
             ForkResult::Parent { child: child_pid, .. } => {
                 drop(tx_child_fqin);
@@ -1118,8 +1121,14 @@ mod integration_tests {
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let (_child1, _) = fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}"));
-        let (_child2, _) = fork_and_create_publisher(2, format!("{unit_type}|{UNIT_NAME}"));
+        let (_child1, _) =
+            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
+            // and it is called before setting up Tokio.
+            unsafe { fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}")) };
+        let (_child2, _) =
+            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
+            // and it is called before setting up Tokio.
+            unsafe { fork_and_create_publisher(2, format!("{unit_type}|{UNIT_NAME}")) };
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             let accessor = create_accessor_with_context(0);
@@ -1139,7 +1148,9 @@ mod integration_tests {
     fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
         let (_child, child_fqin) =
-            fork_and_create_publisher(1, format!("{unit_type}|different-name"));
+            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
+            // and it is called before setting up Tokio.
+            unsafe { fork_and_create_publisher(1, format!("{unit_type}|different-name")) };
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             let accessor = create_accessor_with_context(2);
@@ -1156,7 +1167,10 @@ mod integration_tests {
     #[test]
     fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
         let unit_type = test_utils::make_unique_unit_type();
-        let (_child, child_fqin) = fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}"));
+        let (_child, child_fqin) =
+            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
+            // and it is called before setting up Tokio.
+            unsafe { fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}")) };
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             let accessor = create_accessor_with_context(2);
