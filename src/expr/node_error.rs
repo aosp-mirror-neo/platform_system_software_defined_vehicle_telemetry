@@ -15,8 +15,8 @@ pub enum NodeError {
     // general errors
     #[error("Node at index {i} is out of bounds, expression nodes have size {n}")]
     IndexOutOfBound { i: usize, n: usize },
-    #[error("Expression nodes contain a cycle at index {i}")]
-    CyclicDependency { i: usize },
+    #[error("Expression nodes contain a cycle with the following node indices: {cycle:?}")]
+    CyclicDependency { cycle: Vec<usize> },
     #[error("Node at index {i} did not set node_type")]
     NodeTypeNotSet { i: usize },
     #[error("Node at index {i} has an unsupported node_type")]
