@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::marker::{Send, Sync};
 use std::mem;
-use std::path::Path;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use thiserror::Error;
@@ -90,8 +90,8 @@ pub(crate) enum MetricsConfigManagerError {
 }
 
 pub(super) struct MetricsConfigManagerImpl {
-    active_data_dir: String,
-    inactive_data_dir: String,
+    active_dir_path: PathBuf,
+    inactive_dir_path: PathBuf,
     cur_persistent_config_store_size: AtomicUsize,
     max_persistent_config_store_size: usize,
     /// Instance of Metrics Configuration Orchestrator.
@@ -104,8 +104,8 @@ pub(super) struct MetricsConfigManagerImpl {
 impl MetricsConfigManagerImpl {
     /// Creates a new instance of the struct.
     pub async fn new(
-        active_data_dir: String,
-        inactive_data_dir: String,
+        active_dir_path: PathBuf,
+        inactive_dir_path: PathBuf,
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
@@ -148,8 +148,8 @@ impl MetricsConfigManagerImpl {
                 ));
 
                 MetricsConfigManagerImpl {
-                    active_data_dir: active_data_dir.clone(),
-                    inactive_data_dir: inactive_data_dir.clone(),
+                    active_dir_path: active_dir_path.clone(),
+                    inactive_dir_path: inactive_dir_path.clone(),
                     cur_persistent_config_store_size: AtomicUsize::new(0),
                     max_persistent_config_store_size: config_store_size,
                     metrics_config_orchestrator: config_orchestrator,
@@ -159,9 +159,6 @@ impl MetricsConfigManagerImpl {
         );
 
         // Activate configs that are stored in the active directory.
-        let active_dir_path = Path::new(&active_data_dir);
-        let inactive_dir_path = Path::new(&inactive_data_dir);
-
         let configs_store = &config_manager.metrics_configs_store;
         let mut num_active_configs = 0;
         let mut num_inactive_configs = 0;
@@ -224,7 +221,7 @@ impl MetricsConfigManagerImpl {
                 }
             }
         } else {
-            match file_io_utils::create_dir(active_dir_path).await {
+            match file_io_utils::create_dir(&active_dir_path).await {
                 Ok(_) => {
                     // Success, directory was created or already exists
                     info!("active config telemetry directory created");
@@ -261,13 +258,13 @@ impl MetricsConfigManagerImpl {
                 }
             }
         } else {
-            match file_io_utils::create_dir(inactive_dir_path).await {
+            match file_io_utils::create_dir(&inactive_dir_path).await {
                 Ok(_) => {
                     // Success, directory was created or already exists
                     info!("inactive config telemetry directory created");
                 }
                 Err(e) => {
-                    let err = format!("Error {} in creating active config directory", e);
+                    let err = format!("Error {} in creating inactive config directory", e);
                     handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
                 }
             };
@@ -304,7 +301,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         // Validate the metrics config and report any errors to client
         self.metrics_config_orchestrator.validate_config(&config).await?;
 
-        let path = Path::new(&self.inactive_data_dir).join(&config.uuid);
+        let path = self.inactive_dir_path.join(&config.uuid);
 
         match self.metrics_configs_store.lock().entry(config.uuid.clone()) {
             Entry::Occupied(_) => {
@@ -341,7 +338,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         metrics_config_uuid: &str,
     ) -> Result<(), MetricsConfigManagerError> {
         info!("activate_metrics_config: {:?} \n", metrics_config_uuid);
-        let path = Path::new(&self.inactive_data_dir).join(metrics_config_uuid);
+        let path = self.inactive_dir_path.join(metrics_config_uuid);
         if path.is_file() {
             let bytes = file_io_utils::read_from_file(&path)
                 .await
@@ -356,7 +353,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             match Arc::clone(&self.metrics_config_orchestrator).initialize_config(&config).await {
                 Ok(()) => {
                     info!("Metrics config orchestrator successfully initialized {} config", uuid);
-                    let new_path = Path::new(&self.active_data_dir).join(uuid);
+                    let new_path = self.active_dir_path.join(uuid);
                     file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
                         error!(
                             "An error occurred in renaming config to {}: {}",
@@ -394,8 +391,8 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             },
         )?;
 
-        let old_path = Path::new(&self.active_data_dir).join(metrics_config_uuid);
-        let new_path = Path::new(&self.inactive_data_dir).join(metrics_config_uuid);
+        let old_path = self.active_dir_path.join(metrics_config_uuid);
+        let new_path = self.inactive_dir_path.join(metrics_config_uuid);
 
         // TODO: b/299329266: Handle file io errors gracefully
         file_io_utils::rename_file(&old_path, &new_path)
@@ -436,9 +433,9 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
 
         let path = {
             if active_config {
-                Path::new(&self.active_data_dir).join(&uuid)
+                self.active_dir_path.join(&uuid)
             } else {
-                Path::new(&self.inactive_data_dir).join(&uuid)
+                self.inactive_dir_path.join(&uuid)
             }
         };
 
@@ -455,14 +452,14 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         info!("remove_all_metrics_configs");
 
         // remove all configs from active directory
-        for entry in fs::read_dir(self.active_data_dir.clone()).unwrap() {
+        for entry in fs::read_dir(self.active_dir_path.clone()).unwrap() {
             file_io_utils::remove_file(&entry.unwrap().path())
                 .await
                 .unwrap_or_else(|e| error!("An error occurred in removing active config: {}", e));
         }
 
         // remove all configs from inactive directory
-        for entry in fs::read_dir(self.inactive_data_dir.clone()).unwrap() {
+        for entry in fs::read_dir(self.inactive_dir_path.clone()).unwrap() {
             file_io_utils::remove_file(&entry.unwrap().path())
                 .await
                 .unwrap_or_else(|e| error!("An error occurred in removing inactive config: {}", e));
@@ -515,10 +512,13 @@ mod tests {
     use super::*;
 
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
+    use futures::future::{self, BoxFuture, FutureExt};
     use protobuf::Message;
     use rand::prelude::SliceRandom;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use sdv_telemetry_test_utils::oneshot_callback;
+    use std::path::Path;
+    use tempfile::Builder;
 
     static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -607,8 +607,8 @@ mod tests {
     }
 
     struct TestEnvironment {
-        root_path: String,
         manager: Arc<dyn MetricsConfigManager>,
+        error_receiver: future::Shared<BoxFuture<'static, (StatusCodes, String)>>,
         metrics_config_orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
         num_initialize_config_calls: Arc<Mutex<i32>>,
         num_finish_config_calls: Arc<Mutex<i32>>,
@@ -619,18 +619,10 @@ mod tests {
     impl TestEnvironment {
         // Test setup
         async fn new(
-            root_path: String,
+            active_dir_path: &Path,
+            inactive_dir_path: &Path,
             max_persistent_config_store_size: usize,
         ) -> TestEnvironment {
-            let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
-                (
-                    format!("{}/{}", root_path, ACTIVE_CONFIGS_DATA_DIR),
-                    format!("{}/{}", root_path, INACTIVE_CONFIGS_DATA_DIR),
-                )
-            } else {
-                (ACTIVE_CONFIGS_DATA_DIR.to_owned(), INACTIVE_CONFIGS_DATA_DIR.to_owned())
-            };
-
             let num_initialize_config_calls = Arc::new(Mutex::new(0));
             let num_finish_config_calls = Arc::new(Mutex::new(0));
             let num_validate_config_calls = Arc::new(Mutex::new(0));
@@ -644,21 +636,24 @@ mod tests {
             ));
 
             // Used to initialize/create root directories
+            let (tx, rx) = oneshot_callback();
             MetricsConfigManagerImpl::new(
-                active_data_dir.clone(),
-                inactive_data_dir.clone(),
+                active_dir_path.to_path_buf(),
+                inactive_dir_path.to_path_buf(),
                 max_persistent_config_store_size,
                 Arc::new(MockServicePublisherAccessor::new()),
                 |_| {},
-                |_, _| {},
+                move |status_code, status_msg| {
+                    tx((status_code, status_msg.to_owned()));
+                },
             )
             .await
             .unwrap();
 
             // Used to assign MockMetricsConfigOrchestrator
             let manager = Arc::new(MetricsConfigManagerImpl {
-                active_data_dir,
-                inactive_data_dir,
+                active_dir_path: active_dir_path.to_path_buf(),
+                inactive_dir_path: inactive_dir_path.to_path_buf(),
                 cur_persistent_config_store_size: AtomicUsize::new(0),
                 max_persistent_config_store_size,
                 metrics_config_orchestrator: Arc::<MockMetricsConfigOrchestratorImpl>::clone(
@@ -668,8 +663,8 @@ mod tests {
             });
 
             TestEnvironment {
-                root_path,
                 manager,
+                error_receiver: rx.boxed().shared(),
                 metrics_config_orchestrator,
                 num_initialize_config_calls: Arc::clone(&num_initialize_config_calls),
                 num_finish_config_calls: Arc::clone(&num_finish_config_calls),
@@ -695,15 +690,6 @@ mod tests {
         }
     }
 
-    // Drop is executed as soon as the object goes out of scope.
-    // Drop will work even in case of a panic.
-    impl Drop for TestEnvironment {
-        fn drop(&mut self) {
-            // Removing all files created during the test
-            fs::remove_dir_all(Path::new(&self.root_path)).unwrap();
-        }
-    }
-
     fn create_serialized_config(uuid: &str) -> Vec<u8> {
         let mut config = MetricsConfig::new();
         config.uuid = uuid.to_string();
@@ -726,57 +712,47 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn read_corrupt_config_misc_callback_received() {
-        const ROOT_PATH: &str = "misc_error_callback";
-        let (active_data_dir, inactive_data_dir) = (
-            format!("{}/{}", ROOT_PATH, ACTIVE_CONFIGS_DATA_DIR),
-            format!("{}/{}", ROOT_PATH, INACTIVE_CONFIGS_DATA_DIR),
-        );
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&active_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating active config directory: {:?} {}",
+                active_dir_path, e
+            );
+        });
 
-        let active_dir_path = Path::new(&active_data_dir);
-        match file_io_utils::create_dir(active_dir_path).await {
-            Ok(_) => {
-                info!("active config telemetry directory created");
-            }
-            Err(e) => {
-                panic!("Error {} in creating active config directory", e);
-            }
-        };
-
-        let file_path = Path::new(&active_data_dir).join(UUID);
+        let file_path = active_dir_path.join(UUID);
         let corrupt_config = create_corrupt_config(UUID);
-
         file_io_utils::write_to_file(&file_path, &corrupt_config).await.unwrap_or_else(|e| {
             panic!("An error occurred in writing corrupt config: {:?} {}", file_path, e)
         });
 
-        let (tx, rx) = oneshot_callback();
-        MetricsConfigManagerImpl::new(
-            active_data_dir.clone(),
-            inactive_data_dir.clone(),
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
             MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-            Arc::new(MockServicePublisherAccessor::new()),
-            |_| {},
-            move |status_code, status_msg| {
-                tx((status_code, status_msg.to_owned()));
-            },
         )
-        .await
-        .unwrap();
+        .await;
 
-        let (status, _) = rx.await;
+        let (status, _) = test_environment.error_receiver.await;
         assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_validate_config_calls_received() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "add_metrics_config";
-        let file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let file_path = inactive_dir_path.join(UUID);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);
@@ -790,12 +766,17 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_duplicate_config_fail() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "add_metrics_config_duplicate_fail";
-        let file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let file_path = inactive_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);
@@ -817,12 +798,16 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_validate_config_fail() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "add_metrics_config_fail";
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
         test_environment.metrics_config_orchestrator.next_error.lock().replace(
             ConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid: UUID.to_string() },
         );
@@ -843,11 +828,11 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_memory_exceeded_fail() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "add_metrics_config_memory_exceeded";
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let test_environment = TestEnvironment::new(ROOT_PATH.to_owned(), 0).await;
+        let test_environment = TestEnvironment::new(&active_dir_path, &inactive_dir_path, 0).await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);
@@ -865,14 +850,19 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_metrics_config_initialize_configs_calls_received() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "activate_metrics_config";
-        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
-        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let old_file_path = inactive_dir_path.join(UUID);
+        let new_file_path = active_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         let serialized_config = create_serialized_config(UUID);
         test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
@@ -888,13 +878,17 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_metrics_config_initialize_config_fail() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "activate_metrics_config_fail";
-        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let old_file_path = inactive_dir_path.join(UUID);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         let serialized_config = create_serialized_config(UUID);
         test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
@@ -917,14 +911,19 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_metrics_config_finish_config_calls_received() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "deactivate_metrics_config";
-        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
-        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let old_file_path = inactive_dir_path.join(UUID);
+        let new_file_path = active_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         let serialized_config = create_serialized_config(UUID);
         test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
@@ -944,14 +943,18 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_metrics_config_finish_config_fail() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "deactivate_metrics_config_fail";
-        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
-        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let old_file_path = inactive_dir_path.join(UUID);
+        let new_file_path = active_dir_path.join(UUID);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         let serialized_config = create_serialized_config(UUID);
         test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
@@ -980,13 +983,18 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_metrics_config_success() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "remove_metrics_config";
-        let old_file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
-        let new_file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let old_file_path = inactive_dir_path.join(UUID);
+        let new_file_path = active_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         let serialized_config = create_serialized_config(UUID);
         test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
@@ -1007,12 +1015,16 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_metrics_config_invalid_uuid_fail() {
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "remove_metrics_config_fail";
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
         let err = test_environment.manager.remove_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { uuid } if uuid == UUID),
@@ -1027,18 +1039,21 @@ mod tests {
         const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
 
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "remove_all_metrics_configs";
-        let inactive_dir_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR);
-        let active_dir_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR);
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let old_file_path1 = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID1);
-        let new_file_path1 = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID1);
-        let old_file_path2 = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID2);
-        let new_file_path2 = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID2);
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let old_file_path1 = inactive_dir_path.join(UUID1);
+        let new_file_path1 = active_dir_path.join(UUID1);
+        let old_file_path2 = inactive_dir_path.join(UUID2);
+        let new_file_path2 = active_dir_path.join(UUID2);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         let serialized_config1 = create_serialized_config(UUID1);
         let serialized_config2 = create_serialized_config(UUID2);
@@ -1069,13 +1084,19 @@ mod tests {
     #[tokio::test]
     async fn get_active_metrics_configs_success() {
         const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "get_active_metrics_configs_success";
-        let file_path = Path::new(ROOT_PATH).join(ACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+
+        let file_path = active_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);
@@ -1098,13 +1119,18 @@ mod tests {
     #[tokio::test]
     async fn get_inactive_metrics_configs_success() {
         const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-        // Creating a separate directory for each unit test to avoid overlapping file
-        // IO operations in the same directories which can cause test flakiness.
-        const ROOT_PATH: &str = "get_inactive_metrics_configs_success";
-        let file_path = Path::new(ROOT_PATH).join(INACTIVE_CONFIGS_DATA_DIR).join(UUID);
 
-        let test_environment =
-            TestEnvironment::new(ROOT_PATH.to_owned(), MAX_PERSISTENT_CONFIGURATION_SIZE_MB).await;
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let file_path = inactive_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);

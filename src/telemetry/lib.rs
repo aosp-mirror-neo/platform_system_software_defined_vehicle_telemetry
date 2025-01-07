@@ -31,6 +31,7 @@ use protobuf::Message;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use std::marker::{Send, Sync};
 use std::ops::Deref;
+use std::path::Path;
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -128,13 +129,16 @@ impl SdvTelemetryService {
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
     ) -> Option<Self> {
-        let (active_data_dir, inactive_data_dir) = if !root_path.is_empty() {
+        let (active_dir_path, inactive_dir_path) = if !root_path.is_empty() {
             (
-                format!("{}/{}", root_path, ACTIVE_CONFIGS_DATA_DIR),
-                format!("{}/{}", root_path, INACTIVE_CONFIGS_DATA_DIR),
+                Path::new(root_path).join(ACTIVE_CONFIGS_DATA_DIR),
+                Path::new(root_path).join(INACTIVE_CONFIGS_DATA_DIR),
             )
         } else {
-            (ACTIVE_CONFIGS_DATA_DIR.to_owned(), INACTIVE_CONFIGS_DATA_DIR.to_owned())
+            (
+                Path::new(ACTIVE_CONFIGS_DATA_DIR).to_owned(),
+                Path::new(INACTIVE_CONFIGS_DATA_DIR).to_owned(),
+            )
         };
 
         // Create manager and its dependencies
@@ -145,8 +149,8 @@ impl SdvTelemetryService {
         let status_listener_clone = Arc::clone(&status_listener);
 
         let config_manager_res = MetricsConfigManagerImpl::new(
-            active_data_dir,
-            inactive_data_dir,
+            active_dir_path,
+            inactive_dir_path,
             config_store_size,
             service_publisher_manager,
             move |report| report_listener.on_report_ready(report),

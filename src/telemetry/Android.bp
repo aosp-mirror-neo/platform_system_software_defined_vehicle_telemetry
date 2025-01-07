@@ -63,6 +63,7 @@ rust_test {
         "libsdv_telemetry_test_proto",
         "libsdv_telemetry_test_utils",
         "libsdv_telemetry_utils",
+        "libtempfile",
         // keep-sorted end
     ],
     proc_macros: [
