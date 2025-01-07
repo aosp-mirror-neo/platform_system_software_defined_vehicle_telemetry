@@ -1028,41 +1028,54 @@ mod integration_tests {
     }
 
     /// This madness forks the current process, and creates a publisher in the child process. It
-    /// then returns the child process' PID as well as the FQIN of the publisher of the child
-    /// process.
+    /// then returns an object that stops the child when dropped, as well as the FQIN of the
+    /// publisher of the child process.
     ///
     /// This function is _not_ async due to the warnings around the use of `fork` [1], which sound
     /// pretty scary, so this should be called before setting up an async Tokio environment.
     ///
     /// [1]: https://docs.rs/nix/latest/nix/unistd/fn.fork.html#safety
-    fn fork_and_create_publisher_then_sleep(
+    fn fork_and_create_publisher(
         fqin_extra: u8,
         service_name: String,
-    ) -> (nix::unistd::Pid, ServiceFqin) {
+    ) -> (scopeguard::ScopeGuard<(), impl FnOnce(())>, ServiceFqin) {
+        use nix::sys::wait::waitpid;
         use nix::unistd::{
             fork, pipe as nix_pipe, read as nix_read, write as nix_write, ForkResult,
         };
+        use scopeguard::guard;
         use std::os::fd::AsRawFd;
 
         // This will be used to send the FQIN from the child process to the parent process.
-        let (rx, tx) = nix_pipe().unwrap();
+        let (rx_child_fqin, tx_child_fqin) = nix_pipe().unwrap();
+        // This will be used to signal to the child when it should exit.
+        let (rx_child_exit, tx_child_exit) = nix_pipe().unwrap();
 
         // SAFETY: Should be safe in tests.
         match unsafe { fork() }.unwrap() {
             ForkResult::Parent { child: child_pid, .. } => {
-                drop(tx); // Close the writing end of the pipe.
+                drop(tx_child_fqin);
+                drop(rx_child_exit);
 
                 let mut child_fqin = vec![0; 1000];
-                let read_count = nix_read(rx.as_raw_fd(), &mut child_fqin).unwrap();
+                let read_count = nix_read(rx_child_fqin.as_raw_fd(), &mut child_fqin).unwrap();
                 child_fqin.resize(read_count, 0);
 
                 let child_fqin =
                     ServiceFqin::from_str(std::str::from_utf8(&child_fqin).unwrap()).unwrap();
 
-                (child_pid, child_fqin)
+                let child = guard((), move |_| {
+                    // The child will stop when it receives any message; the message content is
+                    // inconsequential.
+                    nix_write(tx_child_exit, "stop please".as_bytes()).unwrap();
+                    waitpid(child_pid, None).unwrap();
+                });
+
+                (child, child_fqin)
             }
             ForkResult::Child => {
-                drop(rx); // Close the reading end of the pipe.
+                drop(rx_child_fqin);
+                drop(tx_child_exit);
 
                 tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(
                     async {
@@ -1085,11 +1098,12 @@ mod integration_tests {
                         .await
                         .unwrap();
 
-                        nix_write(tx, format!("{}", ctx.get_self_fqin()).as_bytes()).unwrap();
+                        nix_write(tx_child_fqin, format!("{}", ctx.get_self_fqin()).as_bytes())
+                            .unwrap();
 
-                        // TODO: Ideally, the parent would signal us when we can terminate, but for
-                        // now, we just sleep for a long-enough duration.
-                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        // Wait until we receive a message, then exit.
+                        let mut child_exit = vec![0; 1000];
+                        nix_read(rx_child_exit.as_raw_fd(), &mut child_exit).unwrap();
                     },
                 );
                 std::process::exit(0);
@@ -1100,16 +1114,12 @@ mod integration_tests {
     // Unit Type + Unit Name -> 2 matches
     #[test]
     fn discover_service_by_unit_type_and_unit_name_when_two_matching_service_exists_fails() {
-        use nix::sys::wait::waitpid;
-
         let unit_type = test_utils::make_unique_unit_type();
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let (child_pid1, _) =
-            fork_and_create_publisher_then_sleep(1, format!("{unit_type}|{UNIT_NAME}"));
-        let (child_pid2, _) =
-            fork_and_create_publisher_then_sleep(2, format!("{unit_type}|{UNIT_NAME}"));
+        let (_child1, _) = fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}"));
+        let (_child2, _) = fork_and_create_publisher(2, format!("{unit_type}|{UNIT_NAME}"));
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             let accessor = create_accessor_with_context(0);
@@ -1122,19 +1132,14 @@ mod integration_tests {
 
             assert!(result.is_none(), "Unexpected result: {result:?}");
         });
-
-        waitpid(child_pid1, None).unwrap();
-        waitpid(child_pid2, None).unwrap();
     }
 
     // FQIN + Unit Name -> 0 matches
     #[test]
     fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
-        use nix::sys::wait::waitpid;
-
         let unit_type = test_utils::make_unique_unit_type();
-        let (child_pid, child_fqin) =
-            fork_and_create_publisher_then_sleep(1, format!("{unit_type}|different-name"));
+        let (_child, child_fqin) =
+            fork_and_create_publisher(1, format!("{unit_type}|different-name"));
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             let accessor = create_accessor_with_context(2);
@@ -1145,17 +1150,13 @@ mod integration_tests {
 
             assert!(result.is_none(), "Unexpected result: {result:?}");
         });
-        waitpid(child_pid, None).unwrap();
     }
 
     // FQIN + Unit Name -> 1 match
     #[test]
     fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
-        use nix::sys::wait::waitpid;
-
         let unit_type = test_utils::make_unique_unit_type();
-        let (child_pid, child_fqin) =
-            fork_and_create_publisher_then_sleep(1, format!("{unit_type}|{UNIT_NAME}"));
+        let (_child, child_fqin) = fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}"));
 
         tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
             let accessor = create_accessor_with_context(2);
@@ -1168,7 +1169,6 @@ mod integration_tests {
             assert_eq!(service_unit_definition.get_unit_type(), unit_type);
             assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
         });
-        waitpid(child_pid, None).unwrap();
     }
 
     // FQIN + Unit Name -> 2 matches
