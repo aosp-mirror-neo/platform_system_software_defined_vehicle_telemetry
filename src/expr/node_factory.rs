@@ -13,7 +13,8 @@ use std::sync::Arc;
 use crate::expr::node::{FunctionType, Node, TimeSource};
 use crate::expr::node_error::{
     DescriptorProviderError, FunctionLeafNodeArgumentError,
-    FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeEvaluationError,
+    FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeError,
+    NodeEvaluationError,
 };
 use crate::expr::node_value::NodeValue;
 use crate::expr::node_value_type::{
@@ -32,7 +33,7 @@ pub trait NodeFactory: Send + Sync {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeEvaluationError>;
+    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError>;
 
     /// Validate the expression nodes to ensure they do not contain cyclic dependencies
     /// and all indices are valid.
@@ -40,7 +41,7 @@ pub trait NodeFactory: Send + Sync {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext, // Copyright 2024 Google LLC
-    ) -> Result<Vec<Option<NodeValueType>>, NodeEvaluationError>;
+    ) -> Result<Vec<Option<NodeValueType>>, NodeError>;
 }
 
 #[cfg(test)]
@@ -125,20 +126,26 @@ impl NodeFactoryImpl {
         nodes: &mut [Option<Arc<Node>>],
         node_value_types: &mut [Option<NodeValueType>],
         context: &NodeFactoryContext,
-    ) -> Result<Option<Arc<Node>>, NodeEvaluationError> {
+    ) -> Result<Option<Arc<Node>>, NodeError> {
         let status = &visit_info
             .get(index)
-            .ok_or(NodeEvaluationError::IndexOutOfBound { i: index, n: proto_nodes.len() })?
+            .ok_or(NodeError {
+                index,
+                err: NodeEvaluationError::IndexOutOfBound { n: proto_nodes.len() },
+            })?
             .visit_status;
 
         // detect cycles using visit status, and visit the node
         match status {
-            VisitStatus::Visiting => Err(NodeEvaluationError::CyclicDependency {
-                cycle: Self::restore_cycle(
-                    parent_index.expect("parent index should be set in order to restore cycle"),
-                    index,
-                    visit_info,
-                ),
+            VisitStatus::Visiting => Err(NodeError {
+                index,
+                err: NodeEvaluationError::CyclicDependency {
+                    cycle: Self::restore_cycle(
+                        parent_index.expect("parent index should be set in order to restore cycle"),
+                        index,
+                        visit_info,
+                    ),
+                },
             }),
             VisitStatus::Visited => {
                 if nodes.is_empty() {
@@ -156,7 +163,11 @@ impl NodeFactoryImpl {
                 let rust_node = match &proto_nodes[index].node_type {
                     // base case 1: constant leaf node, can return from match block immediately
                     Some(NodeTypeProto::ConstantLeafNode(constant_leaf)) => {
-                        node_value_types[index] = Some(constant_leaf.get_node_value_type()?);
+                        node_value_types[index] = Some(
+                            constant_leaf
+                                .get_node_value_type()
+                                .map_err(|err| NodeError { index, err })?,
+                        );
                         Self::maybe_create_node(nodes, index, || {
                             Ok(Arc::new(Node::ConstantLeaf {
                                 value: NodeValue::from_constant_leaf_node(constant_leaf)?,
@@ -165,8 +176,9 @@ impl NodeFactoryImpl {
                     }
                     // base case 2: field leaf node, can return from match block immediately
                     Some(NodeTypeProto::FieldLeafNode(field_leaf)) => {
-                        node_value_types[index] =
-                            field_leaf.get_node_value_type(context.descriptor_provider.as_ref())?;
+                        node_value_types[index] = field_leaf
+                            .get_node_value_type(context.descriptor_provider.as_ref())
+                            .map_err(|err| NodeError { index, err })?;
                         Self::maybe_create_node(nodes, index, || {
                             Ok(Arc::new(Node::FieldLeaf {
                                 publisher_name: field_leaf.publisher_name.clone(),
@@ -179,8 +191,13 @@ impl NodeFactoryImpl {
                     }
                     // base case 3: function leaf node, can return from match block immediately
                     Some(NodeTypeProto::FunctionLeafNode(function_leaf_node)) => {
-                        node_value_types[index] = Some(function_leaf_node.get_node_value_type()?);
-                        let function = Self::to_function_type(function_leaf_node)?;
+                        node_value_types[index] = Some(
+                            function_leaf_node
+                                .get_node_value_type()
+                                .map_err(|err| NodeError { index, err })?,
+                        );
+                        let function = Self::to_function_type(function_leaf_node)
+                            .map_err(|err| NodeError { index, err })?;
                         Self::maybe_create_node(nodes, index, move || {
                             Ok(Arc::new(Node::FunctionLeaf { function }))
                         })?
@@ -190,14 +207,15 @@ impl NodeFactoryImpl {
                         let op = combination_node
                             .operator
                             .as_ref()
-                            .ok_or(NodeEvaluationError::OperatorNotSet { i: index })?;
+                            .ok_or(NodeError { index, err: NodeEvaluationError::OperatorNotSet })?;
                         // before recursion, check if the child node is set up correctly
-                        op.check_right_child(combination_node.right_index)?;
+                        op.check_right_child(combination_node.right_index)
+                            .map_err(|err| NodeError { index, err })?;
 
                         // visit left child
                         let left_child_index = combination_node
                             .left_index
-                            .ok_or(NodeEvaluationError::LeftChildNotSet { i: index })?
+                            .ok_or(NodeError { index, err: NodeEvaluationError::LeftChildNotSet })?
                             as usize;
                         let left = Self::visit(
                             left_child_index,
@@ -225,19 +243,28 @@ impl NodeFactoryImpl {
                         };
 
                         // check if right operand is compatible with operator and assign type
-                        node_value_types[index] = op.get_node_value_type(
-                            node_value_types,
-                            left_child_index,
-                            combination_node.right_index,
-                        )?;
+                        node_value_types[index] = op
+                            .get_node_value_type(
+                                node_value_types,
+                                left_child_index,
+                                combination_node.right_index,
+                            )
+                            .map_err(|err| NodeError { index, err })?;
 
                         // visit self
                         Self::maybe_create_node(nodes, index, move || {
                             Ok(Arc::new(Node::Combination { operator: op.clone(), left, right }))
                         })?
                     } // match arm `Some(CombinationNode)`
-                    Some(_) => return Err(NodeEvaluationError::NodeTypeNotSupported { i: index }),
-                    None => return Err(NodeEvaluationError::NodeTypeNotSet { i: index }),
+                    Some(_) => {
+                        return Err(NodeError {
+                            index,
+                            err: NodeEvaluationError::NodeTypeNotSupported,
+                        })
+                    }
+                    None => {
+                        return Err(NodeError { index, err: NodeEvaluationError::NodeTypeNotSet })
+                    }
                 };
 
                 // mark index as visited and return Ok
@@ -289,15 +316,23 @@ impl NodeFactoryImpl {
         nodes: &mut [Option<Arc<Node>>],
         index: usize,
         create_node_func: impl FnOnce() -> Result<Arc<Node>, NodeEvaluationError>,
-    ) -> Result<Option<Arc<Node>>, NodeEvaluationError> {
+    ) -> Result<Option<Arc<Node>>, NodeError> {
         if nodes.is_empty() {
             return Ok(None);
         }
         if index >= nodes.len() {
-            return Err(NodeEvaluationError::IndexOutOfBound { i: index, n: nodes.len() });
+            return Err(NodeError {
+                index,
+                err: NodeEvaluationError::IndexOutOfBound { n: nodes.len() },
+            });
         }
-        nodes[index] = Some(create_node_func()?);
-        Ok(nodes[index].clone())
+        match create_node_func() {
+            Ok(node) => {
+                nodes[index] = Some(node);
+                Ok(nodes[index].clone())
+            }
+            Err(err) => Err(NodeError { index, err }),
+        }
     }
 
     fn restore_cycle(
@@ -329,7 +364,7 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<Vec<Option<NodeValueType>>, NodeEvaluationError> {
+    ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
         let n = proto_nodes.len();
         let mut visit_info =
             vec![VisitInfo { visit_status: VisitStatus::NotVisited, parent_index: None }; n];
@@ -352,7 +387,7 @@ impl NodeFactory for NodeFactoryImpl {
         &self,
         proto_nodes: &[NodeProto],
         context: &NodeFactoryContext,
-    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeEvaluationError> {
+    ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
         let n = proto_nodes.len();
         let mut visit_info =
             vec![VisitInfo { visit_status: VisitStatus::NotVisited, parent_index: None }; n];
@@ -373,8 +408,15 @@ impl NodeFactory for NodeFactoryImpl {
         // flatten Vec<Option<T>> into Vec<T>, ignoring None values.
         let nodes: Vec<Arc<Node>> = rust_nodes.into_iter().flatten().collect();
         if nodes.len() != n {
-            return Err(NodeEvaluationError::InternalError {
-                msg: format!("expected to create {} nodes, but created {} nodes", n, nodes.len()),
+            return Err(NodeError {
+                index: 0,
+                err: NodeEvaluationError::InternalError {
+                    msg: format!(
+                        "expected to create {} nodes, but created {} nodes",
+                        n,
+                        nodes.len()
+                    ),
+                },
             });
         }
         Ok((nodes, node_value_types))
@@ -501,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn create_nodes_success() -> Result<(), NodeEvaluationError> {
+    fn create_nodes_success() -> Result<(), NodeError> {
         // setup
         let op = LogicalOperator::AND;
         let node_factory = NodeFactoryImpl {};
@@ -561,7 +603,10 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::UnaryOperatorIncorrectChildren),
+            matches!(
+                &err,
+                NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -622,7 +667,10 @@ mod tests {
 
         // assert error because binary operator needs 2 children
         assert!(
-            matches!(&err, NodeEvaluationError::BinaryOperatorIncorrectChildren),
+            matches!(
+                &err,
+                NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -647,7 +695,10 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::IndexOutOfBound { .. }),
+            matches!(
+                &err,
+                NodeError { index: 10, err: NodeEvaluationError::IndexOutOfBound { .. } }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -673,7 +724,13 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::CyclicDependency { cycle } if cycle == &vec![1, 0, 1]),
+            matches!(
+                &err,
+                NodeError {
+                    err: NodeEvaluationError::CyclicDependency { cycle },
+                    ..
+                }
+                if cycle == &vec![1, 0, 1]),
             "Unexpected error: {:?}",
             err
         );
@@ -690,7 +747,7 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::NodeTypeNotSet { .. }),
+            matches!(&err, NodeError { index: 0, err: NodeEvaluationError::NodeTypeNotSet }),
             "Unexpected error: {:?}",
             err
         );
@@ -709,7 +766,7 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::ConstantValueNotSet { .. }),
+            matches!(&err, NodeError { err: NodeEvaluationError::ConstantValueNotSet { .. }, .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -728,7 +785,7 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::OperatorNotSet { .. }),
+            matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -769,7 +826,12 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::CyclicDependency { cycle } if cycle == &vec![0, 0]),
+            matches!(
+                &err,
+                NodeError {
+                    err: NodeEvaluationError::CyclicDependency{cycle}, ..
+                }
+                if cycle == &vec![0, 0]),
             "Unexpected error: {:?}",
             err
         );
@@ -795,7 +857,12 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::CyclicDependency { cycle } if cycle == &vec![1, 0, 1]),
+            matches!(
+                &err,
+                NodeError {
+                    err: NodeEvaluationError::CyclicDependency{cycle}, ..
+                }
+                if cycle == &vec![1, 0, 1]),
             "Unexpected error: {:?}",
             err
         );
@@ -818,7 +885,10 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::IndexOutOfBound { .. }),
+            matches!(
+                &err,
+                NodeError { index: 42, err: NodeEvaluationError::IndexOutOfBound { .. } }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -837,7 +907,7 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::OperatorNotSet { .. }),
+            matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -859,7 +929,7 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::LeftChildNotSet { .. }),
+            matches!(&err, NodeError { index: 0, err: NodeEvaluationError::LeftChildNotSet }),
             "Unexpected error: {:?}",
             err
         );
@@ -887,7 +957,10 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::BinaryOperatorIncorrectChildren),
+            matches!(
+                &err,
+                NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -905,7 +978,10 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeEvaluationError::UnaryOperatorIncorrectChildren),
+            matches!(
+                &err,
+                NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -994,7 +1070,13 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::ArithmeticOperatorIncompatibleOperands),
+            matches!(
+                &err,
+                NodeError {
+                    index: 1,
+                    err: NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
+                }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1010,7 +1092,10 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::ContainsOperatorIncompatibleOperands),
+            matches!(
+                &err,
+                NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1026,7 +1111,10 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::ContainsOperatorIncompatibleOperands),
+            matches!(
+                &err,
+                NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1065,7 +1153,13 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::LogicalOperatorIncompatibleOperands),
+            matches!(
+                &err,
+                NodeError {
+                    index: 1,
+                    err: NodeEvaluationError::LogicalOperatorIncompatibleOperands
+                }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1093,7 +1187,13 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::RoundingOperatorIncompatibleOperands),
+            matches!(
+                &err,
+                NodeError {
+                    index: 1,
+                    err: NodeEvaluationError::RoundingOperatorIncompatibleOperands
+                }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1122,7 +1222,10 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::UnaryOperatorIncorrectChildren),
+            matches!(
+                &err,
+                NodeError { index: 1, err: NodeEvaluationError::UnaryOperatorIncorrectChildren }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1198,7 +1301,10 @@ mod tests {
         let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
 
         assert!(
-            matches!(&err, NodeEvaluationError::DescriptorProviderError { .. }),
+            matches!(
+                &err,
+                NodeError { index: 0, err: NodeEvaluationError::DescriptorProviderError { .. } }
+            ),
             "Unexpected error: {:?}",
             err
         );
@@ -1387,10 +1493,13 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(NodeEvaluationError::FunctionLeafNodeArgumentError {
-                    error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
-                        FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet,
-                    ),
+                Err(NodeError {
+                    index: 0,
+                    err: NodeEvaluationError::FunctionLeafNodeArgumentError {
+                        error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                            FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet,
+                        ),
+                    }
                 })
             ),
             "Unexpected result: {result:?}"
@@ -1411,10 +1520,13 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(NodeEvaluationError::FunctionLeafNodeArgumentError {
-                    error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
-                        FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSupported,
-                    ),
+                Err(NodeError {
+                    index: 0,
+                    err: NodeEvaluationError::FunctionLeafNodeArgumentError {
+                        error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(
+                            FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSupported,
+                        ),
+                    }
                 })
             ),
             "Unexpected result: {result:?}"

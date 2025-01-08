@@ -38,7 +38,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::expr::node::Node;
-use crate::expr::node_error::{MessageProviderError, NodeEvaluationError};
+use crate::expr::node_error::{MessageProviderError, NodeError, NodeEvaluationError};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
@@ -122,7 +122,7 @@ pub enum MetricsConfigOrchestratorError {
     #[error("Metric Config with UUID {uuid} doesn't exist")]
     InvalidConfigUuid { uuid: String },
     #[error("Invalid expression nodes. Reason: {e}")]
-    InvalidExpressionNodes { e: NodeEvaluationError },
+    InvalidExpressionNodes { e: NodeError },
     #[error("Invalid dependency: {dependency_name} doesn't exist")]
     InvalidDependency { dependency_type: String, dependency_name: String },
     #[error("Invalid descriptor protos: {error}")]
@@ -1135,10 +1135,13 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             _context: &NodeFactoryContext,
-        ) -> Result<Vec<Option<NodeValueType>>, NodeEvaluationError> {
+        ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
             if self.fail_validate {
-                return Err(NodeEvaluationError::InternalError {
-                    msg: "Simulated failure".to_string(),
+                return Err(NodeError {
+                    index: 0,
+                    err: NodeEvaluationError::InternalError {
+                        msg: "Simulated failure".to_string(),
+                    },
                 });
             }
             Ok(vec![None; proto_nodes.len()])
@@ -1148,10 +1151,13 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             context: &NodeFactoryContext,
-        ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeEvaluationError> {
+        ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
             if self.fail_create_nodes {
-                return Err(NodeEvaluationError::InternalError {
-                    msg: "Simulated failure".to_string(),
+                return Err(NodeError {
+                    index: 0,
+                    err: NodeEvaluationError::InternalError {
+                        msg: "Simulated failure".to_string(),
+                    },
                 });
             }
 
