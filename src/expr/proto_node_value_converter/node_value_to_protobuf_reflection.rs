@@ -97,10 +97,10 @@ impl ToReflectValueBox for NodeValue {
                 }
             }
             ProtobufRuntimeType::String => {
-                self.get_string(&err_provider)?.to_owned().to_reflect_value_box(protobuf_type)
+                self.get_string(&err_provider)?.to_reflect_value_box(protobuf_type)
             }
             ProtobufRuntimeType::VecU8 => {
-                self.get_bytes(&err_provider)?.to_owned().to_reflect_value_box(protobuf_type)
+                self.get_bytes(&err_provider)?.to_reflect_value_box(protobuf_type)
             }
         }
     }
@@ -222,13 +222,13 @@ impl ToReflectValueBox for Arc<dyn MessageDyn> {
 }
 
 /// A String can be converted into a protobuf reflection value.
-impl ToReflectValueBox for String {
+impl ToReflectValueBox for &str {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
-            ProtobufRuntimeType::String => Ok(ReflectValueBox::String(self.clone())),
+            ProtobufRuntimeType::String => Ok(ReflectValueBox::String(self.to_string())),
             _ => Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
@@ -238,13 +238,13 @@ impl ToReflectValueBox for String {
 }
 
 /// A Vec<u8> can be converted into a protobuf reflection value.
-impl ToReflectValueBox for Vec<u8> {
+impl ToReflectValueBox for &[u8] {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeError> {
         match protobuf_type {
-            ProtobufRuntimeType::VecU8 => Ok(ReflectValueBox::Bytes(self.clone())),
+            ProtobufRuntimeType::VecU8 => Ok(ReflectValueBox::Bytes(self.to_vec())),
             _ => Err(NodeError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
@@ -257,31 +257,24 @@ impl ToReflectValueBox for Vec<u8> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn string_to_reflect_value_box_with_string_protobuf_runtime_type_success() {
-        let result = "kukkula".to_owned().to_reflect_value_box(&ProtobufRuntimeType::String);
+    use googletest::assert_that;
+    use googletest::matchers::{eq, err, matches_pattern, ok};
+    use sdv_telemetry_test_utils::parameterized_test;
 
-        assert_eq!(result.unwrap(), ReflectValueBox::String("kukkula".to_owned()));
-    }
+    parameterized_test!(
+        #[test]
+        to_reflect_value_box,
 
-    #[test]
-    fn string_to_reflect_value_box_with_i32_protobuf_runtime_type_failure() {
-        let result = "kukkula".to_owned().to_reflect_value_box(&ProtobufRuntimeType::I32);
+        |input: &dyn ToReflectValueBox, runtime_type, expected| {
+            let result = input.to_reflect_value_box(&runtime_type);
 
-        assert!(matches!(result, Err(NodeError::ValueToProtoConversionError { .. })));
-    }
+            assert_that!(result, expected);
+        },
 
-    #[test]
-    fn vec_to_reflect_value_box_with_bytes_protobuf_runtime_type_success() {
-        let result = vec![1, 2, 3].to_owned().to_reflect_value_box(&ProtobufRuntimeType::VecU8);
+        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(ReflectValueBox::String("kukkula".to_owned()))),),
+        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeError::ValueToProtoConversionError { .. })),),
 
-        assert_eq!(result.unwrap(), ReflectValueBox::Bytes(vec![1, 2, 3].to_owned()));
-    }
-
-    #[test]
-    fn vec_to_reflect_value_box_with_i32_protobuf_runtime_type_failure() {
-        let result = vec![1, 2, 3].to_owned().to_reflect_value_box(&ProtobufRuntimeType::I32);
-
-        assert!(matches!(result, Err(NodeError::ValueToProtoConversionError { .. })));
-    }
+        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(ReflectValueBox::Bytes(vec![1, 2, 3]))),),
+        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeError::ValueToProtoConversionError { .. })),),
+    );
 }
