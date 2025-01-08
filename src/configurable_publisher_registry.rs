@@ -29,13 +29,9 @@ use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
 use thiserror::Error;
-use tokio::sync::mpsc;
 
 // Crate dependencies.
 use crate::subscriber_service::SubscriberService;
-
-// Arbitrarily chosen buffer capacity
-const TOKIO_CHANNEL_CAPACITY: usize = 32;
 
 /// ConfigurablePublisherRegistry that maintains the list of configurable publishers in memory.
 pub struct ConfigurablePublisherRegistry {
@@ -47,8 +43,6 @@ pub struct ConfigurablePublisherRegistry {
 }
 
 pub struct ConfigurablePublisherRegistrySubscription {
-    /// Handles for the spawned tokio task that reads the data.
-    join_handle: tokio::task::JoinHandle<()>,
     /// The underlying configurable publisher subscription.
     configurable_publisher_subscription: binder::Strong<dyn IConfigurablePublisherSubscription>,
 }
@@ -142,7 +136,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         configuration: Option<&Any>,
         // TODO: b/373332101 - Not yet implemented.
         _sub_sampling_interval: &SubSamplingInterval,
-        mut new_message_callback: Box<
+        new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn Fn() + Send + Sync>,
@@ -158,16 +152,8 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             });
         };
 
-        let (tx, mut rx) = mpsc::channel(TOKIO_CHANNEL_CAPACITY);
-
-        let join_handle = tokio::spawn(async move {
-            while let Some(message) = rx.recv().await {
-                (new_message_callback)(Ok(message));
-            }
-        });
-
         let listener_wrapper = BnSubscriber::new_async_binder(
-            SubscriberService::new(message_descriptor, tx),
+            SubscriberService::new(message_descriptor, new_message_callback),
             TokioRuntime(tokio::runtime::Handle::current()),
             BinderFeatures::default(),
         );
@@ -179,7 +165,6 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
 
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
             ConfigurablePublisherRegistrySubscription {
-                join_handle,
                 configurable_publisher_subscription: subscription,
             },
         )))
@@ -313,10 +298,6 @@ impl ConfigurablePublisherRegistry {
 #[async_trait]
 impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription {
     async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
-        if !self.join_handle.is_finished() {
-            self.join_handle.abort();
-        }
-
         self.configurable_publisher_subscription.unsubscribe()?;
         Ok(())
     }
