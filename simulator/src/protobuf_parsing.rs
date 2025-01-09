@@ -112,7 +112,13 @@ impl CsvToProtoMessagesParser {
         for (record_num, record) in records.into_iter().enumerate() {
             let mut delay = self.default_delay;
             let fields = self.map_field_names_values_to(record);
-            let delay_value = &fields[DELAY_FIELD_NAME];
+            let delay_value = &fields.get(DELAY_FIELD_NAME).ok_or_else(||
+                    // `CsvToProtoMessagesParser::parse` expects `headers` to always contain
+                    // `DELAY_FIELD_NAME`. This should be checked by the previous CSV validation
+                    // step.
+                    SimulatorError::ProgrammingError {
+                    error_message: format!("Field {DELAY_FIELD_NAME} not found in record."),
+                })?;
             if !delay_value.is_empty() {
                 delay = self.parse_delay(delay_value)?;
             }
@@ -134,8 +140,8 @@ impl CsvToProtoMessagesParser {
         Ok(parsed_data)
     }
 
-    fn map_field_names_values_to(&self, record: Vec<String>) -> HashMap<String, String> {
-        self.headers.iter().cloned().zip(record).collect::<HashMap<String, String>>()
+    fn map_field_names_values_to(&self, record: Vec<String>) -> HashMap<&str, String> {
+        self.headers.iter().map(String::as_str).zip(record).collect::<HashMap<&str, String>>()
     }
 
     fn parse_delay(&self, value: &str) -> Result<Duration, SimulatorError> {
@@ -153,7 +159,7 @@ impl CsvToProtoMessagesParser {
         &self,
         node: &FieldNode,
         message: &mut dyn MessageDyn,
-        fields_map: &HashMap<String, String>,
+        fields_map: &HashMap<&str, String>,
         record_num: usize,
     ) -> Result<bool, SimulatorError> {
         if let Some(internal_node_info) = &node.message_field_info {
@@ -175,11 +181,11 @@ impl CsvToProtoMessagesParser {
             }
             Ok(false)
         } else {
-            if !fields_map.contains_key(&node.csv_field_name) {
+            if !fields_map.contains_key(node.csv_field_name.as_str()) {
                 // Ignore this field because it has an unsupported type.
                 return Ok(false);
             }
-            let csv_value = &fields_map[&node.csv_field_name];
+            let csv_value = &fields_map[node.csv_field_name.as_str()];
             if csv_value.is_empty() {
                 return Ok(false);
             }
