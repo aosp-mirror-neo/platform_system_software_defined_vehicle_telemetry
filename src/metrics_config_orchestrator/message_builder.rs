@@ -14,7 +14,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::expr::node::Node;
-use crate::expr::node_error::NodeError;
+use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
     ReflectRepeatedMutExt, ToReflectValueBox,
@@ -51,9 +51,9 @@ pub(crate) enum MessageBuilderError {
     #[error("Unable to assign value to field {field_name} because of: {e}")]
     BadAggregation { field_name: String, e: AggregationError },
     #[error("Evaluation of expression node for field {field_name} failed: {e}")]
-    ExpressionEvaluationError { field_name: String, e: NodeError },
+    ExpressionEvaluationError { field_name: String, e: NodeEvaluationError },
     #[error("Failed to assign node value to field {field_name} because of: {e}")]
-    FailedToAssignValueToField { field_name: String, e: NodeError },
+    FailedToAssignValueToField { field_name: String, e: NodeEvaluationError },
 }
 
 impl MessageBuilder for MessageBuilderImpl {

@@ -11,7 +11,7 @@ use crate::service_publisher_accessor::GetLatestMessageError;
 #[derive(Error, Debug)]
 #[non_exhaustive]
 #[allow(missing_docs)]
-pub enum NodeError {
+pub enum NodeEvaluationError {
     // general errors
     #[error("Node at index {i} is out of bounds, expression nodes have size {n}")]
     IndexOutOfBound { i: usize, n: usize },

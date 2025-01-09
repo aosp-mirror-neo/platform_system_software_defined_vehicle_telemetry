@@ -189,7 +189,7 @@ mod test {
         mock::MockMessageBuilder, MessageBuilderError,
     };
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
-    use crate::metrics_config_orchestrator::NodeError;
+    use crate::metrics_config_orchestrator::NodeEvaluationError;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
@@ -278,7 +278,7 @@ mod test {
         // Setup generator to return an error to make sure no reports can be generated past this point.
         message_builder.set_next_error(MessageBuilderError::FailedToAssignValueToField {
             field_name: String::default(),
-            e: NodeError::ConstantValueNotSet,
+            e: NodeEvaluationError::ConstantValueNotSet,
         });
 
         // Wait for reports to be delivered.

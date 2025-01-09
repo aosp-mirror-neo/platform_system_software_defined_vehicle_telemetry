@@ -38,7 +38,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::expr::node::Node;
-use crate::expr::node_error::{MessageProviderError, NodeError};
+use crate::expr::node_error::{MessageProviderError, NodeEvaluationError};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
@@ -122,7 +122,7 @@ pub enum MetricsConfigOrchestratorError {
     #[error("Metric Config with UUID {uuid} doesn't exist")]
     InvalidConfigUuid { uuid: String },
     #[error("Invalid expression nodes. Reason: {e}")]
-    InvalidExpressionNodes { e: NodeError },
+    InvalidExpressionNodes { e: NodeEvaluationError },
     #[error("Invalid dependency: {dependency_name} doesn't exist")]
     InvalidDependency { dependency_type: String, dependency_name: String },
     #[error("Invalid descriptor protos: {error}")]
@@ -616,8 +616,8 @@ impl MetricsConfigOrchestratorImpl {
             }
         }
 
-        fn status_code_for_node_error(error: &NodeError) -> StatusCodes {
-            if let NodeError::MessageProviderError { e: error } = error {
+        fn status_code_for_node_error(error: &NodeEvaluationError) -> StatusCodes {
+            if let NodeEvaluationError::MessageProviderError { e: error } = error {
                 match error.as_ref() {
                     MessageProviderError::MessageRetrievalError { e: error } => match error {
                         GetLatestMessageError::FailedToRetrieveMessage(_) => {
@@ -1135,9 +1135,11 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             _context: &NodeFactoryContext,
-        ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
+        ) -> Result<Vec<Option<NodeValueType>>, NodeEvaluationError> {
             if self.fail_validate {
-                return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
+                return Err(NodeEvaluationError::InternalError {
+                    msg: "Simulated failure".to_string(),
+                });
             }
             Ok(vec![None; proto_nodes.len()])
         }
@@ -1146,9 +1148,11 @@ mod tests {
             &self,
             proto_nodes: &[NodeProto],
             context: &NodeFactoryContext,
-        ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
+        ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeEvaluationError> {
             if self.fail_create_nodes {
-                return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
+                return Err(NodeEvaluationError::InternalError {
+                    msg: "Simulated failure".to_string(),
+                });
             }
 
             *self.num_nodes.lock() = proto_nodes.len();

@@ -7,7 +7,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{MessageDyn, MessageFull};
 use std::sync::Arc;
 
-use crate::expr::{node_error::NodeError, node_value::NodeValue};
+use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 /// Implementing type will be able to convert self into a ReflectValueBox.
 pub trait ToReflectValueBox {
@@ -17,22 +17,28 @@ pub trait ToReflectValueBox {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError>;
+    ) -> Result<ReflectValueBox, NodeEvaluationError>;
 }
 
 /// Extensions for ReflectRepeatedMut.
 pub trait ReflectRepeatedMutExt {
     /// If NodeValue holds a list, it will push all the contents of the list into self.
-    fn push_node_value_content(&mut self, node_value: &NodeValue) -> Result<(), NodeError>;
+    fn push_node_value_content(
+        &mut self,
+        node_value: &NodeValue,
+    ) -> Result<(), NodeEvaluationError>;
 
     /// Convert every vector element into a ReflectValueBox and pushes it to self.
-    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeError>
+    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeEvaluationError>
     where
         T: ToReflectValueBox;
 }
 
 impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
-    fn push_node_value_content(&mut self, node_value: &NodeValue) -> Result<(), NodeError> {
+    fn push_node_value_content(
+        &mut self,
+        node_value: &NodeValue,
+    ) -> Result<(), NodeEvaluationError> {
         match node_value {
             NodeValue::BoolList(v) => self.push_vec_content(v),
             NodeValue::Int32List(v) => self.push_vec_content(v),
@@ -40,13 +46,13 @@ impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
             NodeValue::FloatList(v) => self.push_vec_content(v),
             NodeValue::DoubleList(v) => self.push_vec_content(v),
             NodeValue::MessageList(v) => self.push_vec_content(v),
-            _ => {
-                Err(NodeError::RepeatedFieldWrongAssignment { value: format!("{:?}", node_value) })
-            }
+            _ => Err(NodeEvaluationError::RepeatedFieldWrongAssignment {
+                value: format!("{:?}", node_value),
+            }),
         }
     }
 
-    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeError>
+    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeEvaluationError>
     where
         T: ToReflectValueBox,
     {
@@ -64,8 +70,8 @@ impl ToReflectValueBox for NodeValue {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
-        let err_provider = || NodeError::ValueToProtoConversionError {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
+        let err_provider = || NodeEvaluationError::ValueToProtoConversionError {
             value: format!("{:?}", self),
             refl_type: format!("{:?}", protobuf_type),
         };
@@ -111,11 +117,11 @@ impl ToReflectValueBox for bool {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         if matches!(protobuf_type, ProtobufRuntimeType::Bool) {
             return Ok(ReflectValueBox::Bool(*self));
         }
-        Err(NodeError::ValueToProtoConversionError {
+        Err(NodeEvaluationError::ValueToProtoConversionError {
             value: format!("{:?}", self),
             refl_type: format!("{:?}", protobuf_type),
         })
@@ -127,7 +133,7 @@ impl ToReflectValueBox for i32 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
             ProtobufRuntimeType::I32 => Ok(ReflectValueBox::I32(*self)),
             ProtobufRuntimeType::Enum(enum_descriptor) => {
@@ -143,9 +149,9 @@ impl ToReflectValueBox for i64 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         let err_provider = |_| {
-            Err(NodeError::ValueToProtoConversionError {
+            Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             })
@@ -165,7 +171,7 @@ impl ToReflectValueBox for i64 {
                 .map_or_else(err_provider, |v| {
                     Ok(ReflectValueBox::Enum(enum_descriptor.clone(), v))
                 }),
-            _ => Err(NodeError::ValueToProtoConversionError {
+            _ => Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -178,7 +184,7 @@ impl ToReflectValueBox for f32 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self)),
             _ => f64::from(*self).to_reflect_value_box(protobuf_type),
@@ -191,11 +197,11 @@ impl ToReflectValueBox for f64 {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self as f32)),
             ProtobufRuntimeType::F64 => Ok(ReflectValueBox::F64(*self)),
-            _ => Err(NodeError::ValueToProtoConversionError {
+            _ => Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -208,12 +214,12 @@ impl ToReflectValueBox for Arc<dyn MessageDyn> {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
             ProtobufRuntimeType::Message(_) => {
                 Ok(ReflectValueBox::Message(self.as_ref().clone_box()))
             }
-            _ => Err(NodeError::ValueToProtoConversionError {
+            _ => Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -226,10 +232,10 @@ impl ToReflectValueBox for &str {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
             ProtobufRuntimeType::String => Ok(ReflectValueBox::String(self.to_string())),
-            _ => Err(NodeError::ValueToProtoConversionError {
+            _ => Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -242,10 +248,10 @@ impl ToReflectValueBox for &[u8] {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
-    ) -> Result<ReflectValueBox, NodeError> {
+    ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
             ProtobufRuntimeType::VecU8 => Ok(ReflectValueBox::Bytes(self.to_vec())),
-            _ => Err(NodeError::ValueToProtoConversionError {
+            _ => Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -272,9 +278,9 @@ mod tests {
         },
 
         string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(ReflectValueBox::String("kukkula".to_owned()))),),
-        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeError::ValueToProtoConversionError { .. })),),
+        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. })),),
 
         vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(ReflectValueBox::Bytes(vec![1, 2, 3]))),),
-        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeError::ValueToProtoConversionError { .. })),),
+        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. })),),
     );
 }

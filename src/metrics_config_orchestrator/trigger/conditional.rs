@@ -10,7 +10,7 @@ use tokio::sync::mpsc;
 use super::base::{BaseTrigger, TriggerState};
 use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
 use crate::expr::node::Node;
-use crate::expr::node_error::NodeError;
+use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
@@ -100,14 +100,14 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         #[async_trait]
         impl
             AsyncEventHandler<(
-                OperationResult<'static, NodeValue, NodeError>,
+                OperationResult<'static, NodeValue, NodeEvaluationError>,
                 Arc<NodeEvaluationContext>,
             )> for ConditionalTriggerHandler
         {
             async fn handle(
                 &mut self,
                 (evaluation_result, context): (
-                    OperationResult<'static, NodeValue, NodeError>,
+                    OperationResult<'static, NodeValue, NodeEvaluationError>,
                     Arc<NodeEvaluationContext>,
                 ),
             ) {
@@ -256,7 +256,7 @@ impl ConditionalTrigger {
     async fn on_new_message(
         &self,
         activation_id: ActivationId,
-        evaluation_result: OperationResult<'static, NodeValue, NodeError>,
+        evaluation_result: OperationResult<'static, NodeValue, NodeEvaluationError>,
         context: Arc<NodeEvaluationContext>,
         maybe_previous_value: &mut Option<NodeValue>,
     ) {

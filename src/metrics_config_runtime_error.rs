@@ -5,7 +5,8 @@
 use either::Either;
 
 use crate::{
-    expr::node_error::NodeError, metrics_config_orchestrator::message_builder::MessageBuilderError,
+    expr::node_error::NodeEvaluationError,
+    metrics_config_orchestrator::message_builder::MessageBuilderError,
     service_publisher_accessor::CreateSubscriptionError,
     service_publisher_accessor::GetMessageProviderError,
 };
@@ -115,5 +116,5 @@ pub(crate) struct ConditionalTriggerRuntimeError {
     pub(crate) trigger_name: String,
 
     /// Condition evaluation error.
-    pub(crate) node_error: NodeError,
+    pub(crate) node_error: NodeEvaluationError,
 }

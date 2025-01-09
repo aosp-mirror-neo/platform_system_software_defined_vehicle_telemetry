@@ -11,19 +11,19 @@ use protobuf::{
 };
 use std::sync::Arc;
 
-use crate::expr::{node_error::NodeError, node_value::NodeValue};
+use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 pub trait MessageDescriptorExt {
     fn get_field_value(
         &self,
         field_descriptor: &FieldDescriptor,
         msg: &dyn MessageDyn,
-    ) -> Result<NodeValue, NodeError>;
+    ) -> Result<NodeValue, NodeEvaluationError>;
 }
 
 /// Implementing type will be able to convert itself into a NodeValue.
 trait ToNodeValue {
-    fn to_node_value(&self) -> Result<NodeValue, NodeError>;
+    fn to_node_value(&self) -> Result<NodeValue, NodeEvaluationError>;
 }
 
 /// Extensions for ReflectRepeatedRef.
@@ -33,8 +33,8 @@ trait ReflectRepeatedRefExt {
     /// the `transform_func` returned an error.
     fn to_vec<T>(
         &self,
-        transform_func: impl FnMut(ReflectValueRef) -> Result<T, NodeError>,
-    ) -> Result<Vec<T>, NodeError>;
+        transform_func: impl FnMut(ReflectValueRef) -> Result<T, NodeEvaluationError>,
+    ) -> Result<Vec<T>, NodeEvaluationError>;
 }
 
 impl MessageDescriptorExt for MessageDescriptor {
@@ -42,7 +42,7 @@ impl MessageDescriptorExt for MessageDescriptor {
         &self,
         field_descriptor: &FieldDescriptor,
         msg: &dyn MessageDyn,
-    ) -> Result<NodeValue, NodeError> {
+    ) -> Result<NodeValue, NodeEvaluationError> {
         match field_descriptor.get_reflect(msg) {
             // `optional` or singular protobuf field
             ReflectFieldRef::Optional(singular_field) => singular_field.value().map_or_else(
@@ -68,7 +68,7 @@ impl MessageDescriptorExt for MessageDescriptor {
             // `repeated` protobuf field
             ReflectFieldRef::Repeated(repeated_field) => repeated_field.to_node_value(),
             // map field
-            _ => Err(NodeError::UnsupportedSingularFieldType),
+            _ => Err(NodeEvaluationError::UnsupportedSingularFieldType),
         }
     }
 }
@@ -76,7 +76,7 @@ impl MessageDescriptorExt for MessageDescriptor {
 /// An optional protobuf field value can be converted into a NodeValue.
 impl ToNodeValue for ReflectValueRef<'_> {
     /// Converts a protobuf reflection on a singular field into a NodeValue.
-    fn to_node_value(&self) -> Result<NodeValue, NodeError> {
+    fn to_node_value(&self) -> Result<NodeValue, NodeEvaluationError> {
         Ok(match &self {
             ReflectValueRef::U32(v) => NodeValue::Int64(i64::from(*v)),
             ReflectValueRef::U64(v) => NodeValue::Int64(*v as i64),
@@ -95,7 +95,7 @@ impl ToNodeValue for ReflectValueRef<'_> {
 
 /// A repeated protobuf field can be converted into a NodeValue.
 impl ToNodeValue for ReflectRepeatedRef<'_> {
-    fn to_node_value(&self) -> Result<NodeValue, NodeError> {
+    fn to_node_value(&self) -> Result<NodeValue, NodeEvaluationError> {
         // depending on the field type, create the correct list type
         // `repeated int32` = NodeValue::Int32List etc.
         Ok(match self.element_type() {
@@ -103,7 +103,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::Int32List(self.to_vec(
                     // closure that unwraps an i32 value from a value reflection
                     |val: ReflectValueRef<'_>| {
-                        val.to_i32().ok_or(NodeError::TypeMismatch {
+                        val.to_i32().ok_or(NodeEvaluationError::TypeMismatch {
                             msg: format!("Repeated field {:?} type expected to be i32", self),
                         })
                     },
@@ -113,7 +113,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::Int64List(self.to_vec(
                     // unwraps an i64 value from a value reflection or error
                     |val: ReflectValueRef<'_>| {
-                        val.to_i64().ok_or(NodeError::TypeMismatch {
+                        val.to_i64().ok_or(NodeEvaluationError::TypeMismatch {
                             msg: format!("Repeated field {:?} type expected to be i64", self),
                         })
                     },
@@ -122,7 +122,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
             ProtobufRuntimeType::U32 => {
                 NodeValue::Int64List(self.to_vec(|val: ReflectValueRef<'_>| {
                     // map Option<u32> into Option<i64> and convert it to a Result
-                    val.to_u32().map(i64::from).ok_or(NodeError::TypeMismatch {
+                    val.to_u32().map(i64::from).ok_or(NodeEvaluationError::TypeMismatch {
                         msg: format!("Repeated field {:?} type expected to be u32", self),
                     })
                 })?)
@@ -130,7 +130,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
             ProtobufRuntimeType::U64 => {
                 NodeValue::Int64List(self.to_vec(|val: ReflectValueRef<'_>| {
                     // map Option<u64> into Option<i64> and convert it to a Result
-                    val.to_u64().map(|x| x as i64).ok_or(NodeError::TypeMismatch {
+                    val.to_u64().map(|x| x as i64).ok_or(NodeEvaluationError::TypeMismatch {
                         msg: format!("Repeated field {:?} type expected to be u64", self),
                     })
                 })?)
@@ -139,7 +139,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::FloatList(self.to_vec(
                     // closure that unwraps f32 value from a single value reflection
                     |val: ReflectValueRef<'_>| {
-                        val.to_f32().ok_or(NodeError::TypeMismatch {
+                        val.to_f32().ok_or(NodeEvaluationError::TypeMismatch {
                             msg: format!("Repeated field {:?} type expected to be f32", self),
                         })
                     },
@@ -149,7 +149,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::DoubleList(self.to_vec(
                     // unwraps a f64 value from a value reflection or error
                     |val: ReflectValueRef<'_>| {
-                        val.to_f64().ok_or(NodeError::TypeMismatch {
+                        val.to_f64().ok_or(NodeEvaluationError::TypeMismatch {
                             msg: format!("Repeated field {:?} type expected to be f64", self),
                         })
                     },
@@ -159,7 +159,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::BoolList(self.to_vec(
                     // unwraps a bool value from a value reflection or error
                     |val: ReflectValueRef<'_>| {
-                        val.to_bool().ok_or(NodeError::TypeMismatch {
+                        val.to_bool().ok_or(NodeEvaluationError::TypeMismatch {
                             msg: format!("Repeated field {:?} type expected to be bool", self),
                         })
                     },
@@ -168,7 +168,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
             ProtobufRuntimeType::Enum(_) => NodeValue::Int32List(self.to_vec(
                 // unwraps an enum as i32 from a value reflection or error
                 |val: ReflectValueRef<'_>| {
-                    val.to_enum_value().ok_or(NodeError::TypeMismatch {
+                    val.to_enum_value().ok_or(NodeEvaluationError::TypeMismatch {
                         msg: format!("Repeated field {:?} type expected to be enum", self),
                     })
                 },
@@ -178,7 +178,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 |val: ReflectValueRef<'_>| {
                     Ok(Arc::from(
                         val.to_message()
-                            .ok_or(NodeError::TypeMismatch {
+                            .ok_or(NodeEvaluationError::TypeMismatch {
                                 msg: format!(
                                     "Repeated field {:?} type expected to be protobuf message",
                                     self
@@ -189,7 +189,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 },
             )?),
             _ => {
-                return Err(NodeError::UnsupportedRepeatedFieldType);
+                return Err(NodeEvaluationError::UnsupportedRepeatedFieldType);
             }
         })
     }
@@ -198,8 +198,8 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
 impl ReflectRepeatedRefExt for ReflectRepeatedRef<'_> {
     fn to_vec<T>(
         &self,
-        transform_func: impl FnMut(ReflectValueRef) -> Result<T, NodeError>,
-    ) -> Result<Vec<T>, NodeError> {
+        transform_func: impl FnMut(ReflectValueRef) -> Result<T, NodeEvaluationError>,
+    ) -> Result<Vec<T>, NodeEvaluationError> {
         // apply `transform_func` to each element in the repeated_field
         self.into_iter().map(transform_func).collect()
     }
@@ -207,7 +207,7 @@ impl ReflectRepeatedRefExt for ReflectRepeatedRef<'_> {
 
 fn get_default_node_value_from_type(
     runtime_type: &ProtobufRuntimeType,
-) -> Result<NodeValue, NodeError> {
+) -> Result<NodeValue, NodeEvaluationError> {
     Ok(match runtime_type {
         ProtobufRuntimeType::I32 => NodeValue::Int32(0),
         ProtobufRuntimeType::I64 => NodeValue::Int64(0),

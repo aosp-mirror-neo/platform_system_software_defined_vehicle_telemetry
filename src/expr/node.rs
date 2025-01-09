@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::expr::node_error::NodeError;
+use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
 use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
@@ -75,7 +75,7 @@ impl Node {
     pub fn evaluate(
         self: &Arc<Self>,
         context: Arc<NodeEvaluationContext>,
-    ) -> OperationResult<'static, NodeValue, NodeError> {
+    ) -> OperationResult<'static, NodeValue, NodeEvaluationError> {
         let state = NodeEvaluationState::new(context);
         self.evaluate_core(state).map_ok(|(value, _state)| value)
     }
@@ -85,7 +85,7 @@ impl Node {
     fn evaluate_core(
         self: &Arc<Self>,
         mut state: NodeEvaluationState,
-    ) -> OperationResult<'static, NodeEvaluationResult, NodeError> {
+    ) -> OperationResult<'static, NodeEvaluationResult, NodeEvaluationError> {
         match self.as_ref() {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
@@ -97,7 +97,7 @@ impl Node {
                     maybe_msg: Option<T>,
                     fields: &[String],
                     msg_selector: impl FnOnce(T) -> Cow<'a, Arc<dyn MessageDyn>>,
-                ) -> Result<NodeValue, NodeError> {
+                ) -> Result<NodeValue, NodeEvaluationError> {
                     maybe_msg.map_or_else(
                         || Ok(NodeValue::None),
                         |msg| NodeValue::extract_value(msg_selector(msg), fields),
@@ -258,7 +258,7 @@ mod tests {
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
 
     #[test]
-    fn evaluate_logical_operator_success() -> Result<(), NodeError> {
+    fn evaluate_logical_operator_success() -> Result<(), NodeEvaluationError> {
         // setup this tree:
         //               XOR
         //          /             \
@@ -297,7 +297,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_arithmetic_operator_success() -> Result<(), NodeError> {
+    fn evaluate_arithmetic_operator_success() -> Result<(), NodeEvaluationError> {
         // setup this tree: |-( 5 / 2 * 5^2 )|
         //             ABSOLUTE
         //                 |
@@ -365,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_relational_operator_success() -> Result<(), NodeError> {
+    fn evaluate_relational_operator_success() -> Result<(), NodeEvaluationError> {
         // setup this tree which uses the protobuf message in the expr/mock.rs
         //                                 EQ
         //                           /              \
@@ -409,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_rounding_operator_success() -> Result<(), NodeError> {
+    fn evaluate_rounding_operator_success() -> Result<(), NodeEvaluationError> {
         let pi_node =
             Arc::new(Node::ConstantLeaf { value: NodeValue::Float(std::f32::consts::PI) });
         let round_node = Arc::new(Node::Combination {
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_mixed_operators_success() -> Result<(), NodeError> {
+    fn evaluate_mixed_operators_success() -> Result<(), NodeEvaluationError> {
         // setup tree containing all 4 types of operators
         //                       logical (&&)
         //                    /               \
@@ -486,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_mixed_leaf_node_types_success() -> Result<(), NodeError> {
+    fn evaluate_mixed_leaf_node_types_success() -> Result<(), NodeEvaluationError> {
         // setup this tree which uses the message initialized in expr/mock.rs
         //                           index 4 (<)
         //                       /               \
@@ -551,7 +551,7 @@ mod tests {
 
         // 0 cannot be less than True
         assert!(
-            matches!(&err, NodeError::ComparisonOperatorIncomptaibleOperands),
+            matches!(&err, NodeEvaluationError::ComparisonOperatorIncomptaibleOperands),
             "Unexpected error: {:?}",
             err
         );
@@ -569,7 +569,7 @@ mod tests {
         let err = node.evaluate(context).unwrap_sync().unwrap_err();
 
         assert!(
-            matches!(&err, NodeError::MessageProviderError { .. }),
+            matches!(&err, NodeEvaluationError::MessageProviderError { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -729,7 +729,7 @@ mod tests {
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
-            matches!(&err, NodeError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
+            matches!(&err, NodeEvaluationError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
             "Unexpected error: {:?}",
             err
         );
@@ -758,7 +758,7 @@ mod tests {
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
-            matches!(&err, NodeError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
+            matches!(&err, NodeEvaluationError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
             "Unexpected error: {:?}",
             err
         );
