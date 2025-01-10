@@ -426,10 +426,6 @@ impl NodeValue {
     ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::ArithmeticOperatorIncompatibleOperands;
 
-        if !self.is_numeric() {
-            return Err(err_provider()).into();
-        }
-
         match op {
             ArithmeticOperator::ABSOLUTE => self.handle_unary(state, |value| {
                 value.apply_numeric_unary(
@@ -845,7 +841,8 @@ impl From<f64> for NodeValue {
 mod tests {
     use super::*;
 
-    use parking_lot::Mutex;
+    use googletest::assert_that;
+    use googletest::matchers::{eq, err, ok, pat};
     use protobuf::reflect::ReflectEqMode;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
@@ -1195,419 +1192,133 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn operate_sync_logical_requires_boolean_types() {
-        let true_val = NodeValue::Bool(true);
-        let int_val = NodeValue::Int32(1);
+    parameterized_test!(
+        #[test]
+        operate_sync_logical,
 
-        assert!(matches!(
-            true_val.clone().operate_sync(&OP_AND, || provide(&int_val)).unwrap_err(),
-            NodeEvaluationError::LogicalOperatorIncompatibleOperands
-        ));
-        assert!(matches!(
-            int_val.operate_sync(&OP_AND, || provide(&true_val)).unwrap_err(),
-            NodeEvaluationError::LogicalOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_logical_and() {
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-        let none_val = NodeValue::None;
-
-        // true && true = true
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_AND, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        // true && false = false
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_AND, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        // false && false = false
-        assert_eq!(
-            false_val.clone().operate_sync(&OP_AND, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        // true && None = None
-        assert_eq!(true_val.operate_sync(&OP_AND, || provide(&none_val)).unwrap(), NodeValue::None);
-    }
-
-    #[test]
-    fn operate_sync_logical_and_short_circuits() {
-        let false_val = NodeValue::Bool(false);
-        let num_calls = Mutex::new(0);
-        let right_operand_provider = || {
-            *num_calls.lock() += 1;
-            provide(&false_val)
-        };
-
-        let res = false_val.clone().operate_sync(&OP_AND, right_operand_provider).unwrap();
-
-        // false && anything = false
-        assert_eq!(res, NodeValue::Bool(false));
-        // should not compute right operand because of short circuiting
-        assert_eq!(*num_calls.lock(), 0);
-    }
-
-    #[test]
-    fn operate_sync_logical_and_short_circuiting_attempted() {
-        let true_val = NodeValue::Bool(true);
-        let num_calls = Mutex::new(0);
-        let right_operand_provider = || {
-            *num_calls.lock() += 1;
-            provide(&true_val)
-        };
-
-        // true && [right_operand] = [right_operand]
-        let res = true_val.clone().operate_sync(&OP_AND, right_operand_provider).unwrap();
-
-        assert_eq!(res, NodeValue::Bool(true));
-        // should compute right operand because left operand does not uniquely determine result
-        assert_eq!(*num_calls.lock(), 1);
-    }
-
-    #[test]
-    fn operate_sync_logical_or() {
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-        let none_val = NodeValue::None;
-
-        // true || true = true
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_OR, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        // true || false = true
-        assert_eq!(
-            true_val.operate_sync(&OP_OR, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        // false || false = false
-        assert_eq!(
-            false_val.clone().operate_sync(&OP_OR, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        // false || None = None
-        assert_eq!(false_val.operate_sync(&OP_OR, || provide(&none_val)).unwrap(), NodeValue::None);
-    }
-
-    #[test]
-    fn operate_sync_logical_or_short_circuits() {
-        let true_val = NodeValue::Bool(true);
-        let num_calls = Mutex::new(0);
-        let right_operand_provider = || {
-            *num_calls.lock() += 1;
-            provide(&true_val)
-        };
-
-        let res = true_val.clone().operate_sync(&OP_OR, right_operand_provider).unwrap();
-
-        // true || anything = true
-        assert_eq!(res, NodeValue::Bool(true));
-        // should not compute right operand because of short circuiting
-        assert_eq!(*num_calls.lock(), 0);
-    }
-
-    #[test]
-    fn operate_sync_logical_or_short_circuiting_attempted() {
-        let false_val = NodeValue::Bool(false);
-        let num_calls = Mutex::new(0);
-        let right_operand_provider = || {
-            *num_calls.lock() += 1;
-            provide(&false_val)
-        };
-
-        // false || [right_operand] = [right_operand]
-        let res = false_val.clone().operate_sync(&OP_OR, right_operand_provider).unwrap();
-
-        assert_eq!(res, NodeValue::Bool(false));
-        // should compute right operand because left operand does not uniquely determine result
-        assert_eq!(*num_calls.lock(), 1);
-    }
-
-    #[test]
-    fn operate_sync_logical_xor() {
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-        let none_val = NodeValue::None;
-
-        // true XOR true = false
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_XOR, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        // true XOR false = true
-        assert_eq!(
-            true_val.operate_sync(&OP_XOR, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        // false XOR false = false
-        assert_eq!(
-            false_val.clone().operate_sync(&OP_XOR, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        // false || None = None
-        assert_eq!(
-            false_val.operate_sync(&OP_XOR, || provide(&none_val)).unwrap(),
-            NodeValue::None
-        );
-    }
-
-    #[test]
-    fn operate_sync_logical_not() {
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-
-        // !true = false
-        assert_eq!(
-            true_val.operate_sync(&OP_NOT, unary_right_operand_provider).unwrap(),
-            NodeValue::Bool(false)
-        );
-        // !false = true
-        assert_eq!(
-            false_val.operate_sync(&OP_NOT, unary_right_operand_provider).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_requires_numeric_types() {
-        let true_val = NodeValue::Bool(true);
-        let int_val = NodeValue::Int32(1);
-
-        assert!(matches!(
-            true_val.clone().operate_sync(&OP_ADD, || provide(&int_val)).unwrap_err(),
-            NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
-        ));
-        assert!(matches!(
-            int_val.operate_sync(&OP_ADD, || provide(&true_val)).unwrap_err(),
-            NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_propagates_up_none_values() {
-        let int_val = NodeValue::Int32(1);
-        let none_val = NodeValue::None;
-
-        // 1 + None = None
-        assert_eq!(
-            int_val.clone().operate_sync(&OP_ADD, || provide(&none_val)).unwrap(),
-            NodeValue::None
-        );
-        // None + 1 = None
-        assert_eq!(
-            none_val.clone().operate_sync(&OP_ADD, || provide(&int_val)).unwrap(),
-            NodeValue::None
-        );
-        // - None = None
-        assert_eq!(
-            none_val.clone().operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap(),
-            NodeValue::None
-        );
-        // |None| = None
-        assert_eq!(
-            none_val.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
-            NodeValue::None
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_add_integers() {
-        let five = NodeValue::Int32(5);
-        let twenty = NodeValue::Int32(20);
-
-        // 5 + 20 = 25
-        assert_eq!(five.operate_sync(&OP_ADD, || provide(&twenty)).unwrap(), NodeValue::Int64(25));
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_add_floats() {
-        let five = NodeValue::Float(5.2);
-        let twenty = NodeValue::Double(20.1);
-
-        // 5.2 + 20.1 = 25.3
-        assert_eq!(
-            five.operate_sync(&OP_ADD, || provide(&twenty)).unwrap(),
-            NodeValue::Double(25.3)
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_subtract_integers() {
-        let five = NodeValue::Int32(5);
-        let twenty = NodeValue::Int32(20);
-
-        // 5 - 20 = -15
-        assert_eq!(
-            five.operate_sync(&OP_SUBTRACT, || provide(&twenty)).unwrap(),
-            NodeValue::Int64(-15)
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_subtract_floats() {
-        let five = NodeValue::Float(5.2);
-        let twenty = NodeValue::Double(20.1);
-
-        // 5.2 - 20.1 = -14.9
-        assert_eq!(
-            five.operate_sync(&OP_SUBTRACT, || provide(&twenty)).unwrap(),
-            NodeValue::Double(-14.9)
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_multiply() {
-        let five = NodeValue::Int32(5);
-        let point_five = NodeValue::Float(0.5);
-
-        // 5 * 0.5 = 2.5
-        assert_eq!(
-            five.operate_sync(&OP_MULTIPLY, || provide(&point_five)).unwrap(),
-            NodeValue::Double(2.5)
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_divide_by_zero() {
-        let five = NodeValue::Int32(5);
-        let zero = NodeValue::Int32(0);
-
-        assert!(matches!(
-            five.operate_sync(&OP_DIVIDE, || provide(&zero)).unwrap_err(),
-            NodeEvaluationError::DivideByZero
-        ));
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_divide() {
-        let five = NodeValue::Int32(5);
-        let two = NodeValue::Int32(2);
-
-        // 5 / 2 = 2.5
-        assert_eq!(
-            five.operate_sync(&OP_DIVIDE, || provide(&two)).unwrap(),
-            NodeValue::Double(2.5)
-        );
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_modulo_trunc_by_zero() {
-        let five = NodeValue::Int32(5);
-        let zero = NodeValue::Int32(0);
-
-        assert!(matches!(
-            five.operate_sync(&OP_MODULO_TRUNC, || provide(&zero)).unwrap_err(),
-            NodeEvaluationError::DivideByZero
-        ));
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_modulo_trunc_ok() {
-        let cases = [
-            (8, /*%*/ 3, /*=*/ 2),
-            (8, /*%*/ -3, /*=*/ 2),
-            (-8, /*%*/ 3, /*=*/ -2),
-            (-8, /*%*/ -3, /*=*/ -2),
-        ];
-        for (dividend, divisor, expected) in cases {
-            assert_eq!(
-                NodeValue::Int32(dividend)
-                    .operate_sync(&OP_MODULO_TRUNC, || provide(&NodeValue::Int32(divisor)))
-                    .unwrap(),
-                NodeValue::Int64(expected)
+        |operator, a: NodeValue, b: NodeValue, matcher| {
+            assert_that!(
+                a.operate_sync(operator, || Ok(b)),
+                matcher,
             );
-        }
-    }
+        },
 
-    #[test]
-    fn operate_sync_arithmetic_modulo_trunc_no_floating_points() {
-        let five = NodeValue::Float(5.0);
-        let two = NodeValue::Int32(2);
+        and_1: (&OP_AND, NodeValue::Bool(true), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        and_2: (&OP_AND, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        and_3: (&OP_AND, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        and_4: (&OP_AND, NodeValue::Bool(false), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        and_none_left: (&OP_AND, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
+        and_none_right: (&OP_AND, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::None)),),
+        and_integers_fails: (&OP_AND, NodeValue::Int32(1), NodeValue::Int32(0), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        and_non_bool_left_fails_1: (&OP_AND, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        and_non_bool_left_fails_2: (&OP_AND, NodeValue::BoolList(vec![true]), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        and_non_bool_right_fails_1: (&OP_AND, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        and_non_bool_right_fails_2: (&OP_AND, NodeValue::Bool(true), NodeValue::BoolList(vec![true]), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
 
-        // both operands must be integers
-        assert!(matches!(
-            five.clone().operate_sync(&OP_MODULO_TRUNC, || provide(&two)).unwrap_err(),
-            NodeEvaluationError::ModuloOperatorIncompatibleOperands
-        ));
-        assert!(matches!(
-            two.operate_sync(&OP_MODULO_TRUNC, || provide(&five)).unwrap_err(),
-            NodeEvaluationError::ModuloOperatorIncompatibleOperands
-        ));
-    }
+        or_1: (&OP_OR, NodeValue::Bool(true), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        or_2: (&OP_OR, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        or_3: (&OP_OR, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
+        or_4: (&OP_OR, NodeValue::Bool(false), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        or_none_left: (&OP_OR, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
+        or_none_right: (&OP_OR, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::Bool(true))),),
+        or_integers_fails: (&OP_OR, NodeValue::Int32(1), NodeValue::Int32(0), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        or_non_bool_left_fails_1: (&OP_OR, NodeValue::Int32(1), NodeValue::Bool(false), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        or_non_bool_left_fails_2: (&OP_OR, NodeValue::BoolList(vec![false]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        or_non_bool_right_fails_1: (&OP_OR, NodeValue::Bool(false), NodeValue::Int32(1), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        or_non_bool_right_fails_2: (&OP_OR, NodeValue::Bool(false), NodeValue::BoolList(vec![false]), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+
+        xor_1: (&OP_XOR, NodeValue::Bool(true), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        xor_2: (&OP_XOR, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        xor_3: (&OP_XOR, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
+        xor_4: (&OP_XOR, NodeValue::Bool(false), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        xor_none_left: (&OP_XOR, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
+        xor_none_right: (&OP_XOR, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::None)),),
+        xor_integers_fails: (&OP_XOR, NodeValue::Int32(1), NodeValue::Int32(0), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        xor_non_bool_left_fails_1: (&OP_XOR, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        xor_non_bool_left_fails_2: (&OP_XOR, NodeValue::BoolList(vec![true]), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        xor_non_bool_right_fails_1: (&OP_XOR, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+        xor_non_bool_right_fails_2: (&OP_XOR, NodeValue::Bool(true), NodeValue::BoolList(vec![true]), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
+    );
+
+    parameterized_test!(
+        // Regardless of the right operand, even when the right operand is an incompatible type
+        // (e.g., Int, List, etc.), or is `NodeValue::None`, the short-circuiting behavior will
+        // ensure that the right operand isn't accessed nor checked.
+        #[test]
+        operate_sync_logical_short_circuit,
+
+        |operator, left: NodeValue, matcher| {
+            assert_that!(
+                left.operate_sync(operator, || {
+                    panic!("Right operator should not be accessed due to short-circuiting behavior.");
+                }),
+                matcher,
+            );
+        },
+
+        and: (&OP_AND, NodeValue::Bool(false), /* right operand panics */ ok(eq(&NodeValue::Bool(false))),),
+        or: (&OP_OR, NodeValue::Bool(true), /* right operand panics */ ok(eq(&NodeValue::Bool(true))),),
+    );
 
     parameterized_test!(
         #[test]
-        operate_sync_arithmetic_power,
+        operate_sync_arithmetic,
 
-        |a: NodeValue, b, expected| {
-            let result = a.operate_sync(&OP_POWER, || provide(&b));
-
-            assert_eq!(result.unwrap(), expected);
+        |operator, a: NodeValue, b: NodeValue, matcher| {
+            assert_that!(
+                a.operate_sync(operator, || Ok(b)),
+                matcher,
+            );
         },
 
-        integers: (NodeValue::Int32(2), NodeValue::Int32(2), NodeValue::Int64(4),), // 2^2 = 4
-        negative_integer_base: (NodeValue::Int32(-2), NodeValue::Int32(2), NodeValue::Int64(4),), // (-2)^2 = 4
-        negative_integer_power: (NodeValue::Int32(2), NodeValue::Int32(-2), NodeValue::Double(0.25),), // 2^(-2) = 0.25
-        floats: (NodeValue::Double(2.5), NodeValue::Double(2.5), NodeValue::Double(9.88211768803),),
+        add_integers: (&OP_ADD, NodeValue::Int32(5), NodeValue::Int32(20), ok(eq(&NodeValue::Int64(25))),),
+        add_floats: (&OP_ADD, NodeValue::Float(5.2), NodeValue::Double(20.1), ok(eq(&NodeValue::Double(25.3))),),
+        add_none_left: (&OP_ADD, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        add_none_right: (&OP_ADD, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
+        add_non_numeric_left_fails: (&OP_ADD, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        add_non_numeric_right_fails: (&OP_ADD, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+
+        sub_integers: (&OP_SUBTRACT, NodeValue::Int32(5), NodeValue::Int32(20), ok(eq(&NodeValue::Int64(-15))),),
+        sub_floats: (&OP_SUBTRACT, NodeValue::Float(5.2), NodeValue::Double(20.1), ok(eq(&NodeValue::Double(-14.9))),),
+        sub_none_left: (&OP_SUBTRACT, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        sub_none_right: (&OP_SUBTRACT, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
+        sub_non_numeric_left_fails: (&OP_SUBTRACT, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        sub_non_numeric_right_fails: (&OP_SUBTRACT, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+
+        multiply: (&OP_MULTIPLY, NodeValue::Int32(5), NodeValue::Float(0.5), ok(eq(&NodeValue::Double(2.5))),),
+        multiply_none_left: (&OP_MULTIPLY, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        multiply_none_right: (&OP_MULTIPLY, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
+        multiply_non_numeric_left_fails: (&OP_MULTIPLY, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        multiply_non_numeric_right_fails: (&OP_MULTIPLY, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+
+        divide: (&OP_DIVIDE, NodeValue::Int32(5), NodeValue::Int32(2), ok(eq(&NodeValue::Double(2.5))),),
+        divide_by_zero_fails: (&OP_DIVIDE, NodeValue::Int32(5), NodeValue::Int32(0), err(pat!(NodeEvaluationError::DivideByZero)),),
+        divide_none_left: (&OP_DIVIDE, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        divide_none_right: (&OP_DIVIDE, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
+        divide_non_numeric_left_fails: (&OP_DIVIDE, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        divide_non_numeric_right_fails: (&OP_DIVIDE, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+
+        modulo_trunc_1: (&OP_MODULO_TRUNC, NodeValue::Int32(8), NodeValue::Int32(3), ok(eq(&NodeValue::Int64(2))),),
+        modulo_trunc_2: (&OP_MODULO_TRUNC, NodeValue::Int32(8), NodeValue::Int32(-3), ok(eq(&NodeValue::Int64(2))),),
+        modulo_trunc_3: (&OP_MODULO_TRUNC, NodeValue::Int32(-8), NodeValue::Int32(3), ok(eq(&NodeValue::Int64(-2))),),
+        modulo_trunc_4: (&OP_MODULO_TRUNC, NodeValue::Int32(-8), NodeValue::Int32(-3), ok(eq(&NodeValue::Int64(-2))),),
+        modulo_trunc_by_zero_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(5), NodeValue::Int32(0), err(pat!(NodeEvaluationError::DivideByZero)),),
+        modulo_trunc_none_left: (&OP_MODULO_TRUNC, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        modulo_trunc_none_right: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
+        modulo_trunc_float_left_fails: (&OP_MODULO_TRUNC, NodeValue::Float(5.0), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
+        modulo_trunc_float_right_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::Float(5.0), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
+        modulo_trunc_non_numeric_left_fails: (&OP_MODULO_TRUNC, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
+        modulo_trunc_non_numeric_right_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
+
+        power_integers: (&OP_POWER, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Int64(4))),), // 2^2 = 4
+        power_negative_integer_base: (&OP_POWER, NodeValue::Int32(-2), NodeValue::Int32(2), ok(eq(&NodeValue::Int64(4))),), // (-2)^2 = 4
+        power_negative_integer_power: (&OP_POWER, NodeValue::Int32(2), NodeValue::Int32(-2), ok(eq(&NodeValue::Double(0.25))),), // 2^(-2) = 0.25
+        power_floats: (&OP_POWER, NodeValue::Double(2.5), NodeValue::Double(2.5), ok(eq(&NodeValue::Double(9.88211768803))),), // 2.5^2.5 = 9.88...
+        power_none_left: (&OP_POWER, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        power_none_right: (&OP_POWER, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
+        power_non_numeric_left_fails: (&OP_POWER, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        power_non_numeric_right_fails: (&OP_POWER, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
     );
-
-    #[test]
-    fn operate_sync_arithmetic_unary_minus() {
-        let two = NodeValue::Int32(2);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
-
-        assert_eq!(
-            two.operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(-2)
-        );
-        assert_eq!(
-            five.operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap(),
-            NodeValue::Double(-5.5)
-        );
-        // fails for non-numeric operand
-        assert!(matches!(
-            true_val.operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap_err(),
-            NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_arithmetic_absolute() {
-        let one = NodeValue::Int64(1);
-        let negative_three = NodeValue::Int64(-3);
-        let two_point_seven = NodeValue::Float(2.7);
-        let negative_two_point_seven = NodeValue::Float(-2.7);
-        let zero = NodeValue::Float(0.0);
-
-        assert_eq!(
-            one.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(1)
-        );
-        assert_eq!(
-            negative_three.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(3)
-        );
-        assert_eq!(
-            two_point_seven.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
-            NodeValue::Double(2.7)
-        );
-        assert_eq!(
-            negative_two_point_seven
-                .operate_sync(&OP_ABSOLUTE, unary_right_operand_provider)
-                .unwrap(),
-            NodeValue::Double(2.7)
-        );
-        assert_eq!(
-            zero.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
-            NodeValue::Double(0.0)
-        );
-    }
 
     #[test]
     fn operate_sync_relational_propagates_up_none_values() {
@@ -2177,112 +1888,57 @@ mod tests {
         );
     }
 
-    #[test]
-    fn operate_sync_rounding_errs_if_operand_is_incompatible() {
-        let true_val = NodeValue::Bool(true);
-        let one = NodeValue::Int32(1);
+    parameterized_test!(
+        #[test]
+        operate_sync_unary,
 
-        assert!(matches!(
-            one.clone().operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap_err(),
-            NodeEvaluationError::RoundingOperatorIncompatibleOperands
-        ));
-        assert!(matches!(
-            true_val.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap_err(),
-            NodeEvaluationError::RoundingOperatorIncompatibleOperands
-        ));
-        assert!(matches!(
-            one.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap_err(),
-            NodeEvaluationError::RoundingOperatorIncompatibleOperands
-        ));
-    }
+        |operator, value: NodeValue, matcher| {
+            assert_that!(
+                value.operate_sync(operator, unary_right_operand_provider),
+                matcher,
+            );
+        },
 
-    #[test]
-    fn operate_sync_rounding_floor_ok() {
-        let point_one = NodeValue::Double(0.1);
-        let two_point_nine = NodeValue::Float(2.9);
-        let five = NodeValue::Float(5.0);
-        let negative_point_three = NodeValue::Double(-0.33);
-        let negative_point_nine = NodeValue::Double(-0.99);
+        not_true: (&OP_NOT, NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        not_false: (&OP_NOT, NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
+        not_none: (&OP_NOT, NodeValue::None, ok(eq(&NodeValue::None)),),
+        not_non_bool_fails: (&OP_NOT, NodeValue::Int32(3), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
 
-        assert_eq!(
-            point_one.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(0)
-        );
-        assert_eq!(
-            two_point_nine.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(2)
-        );
-        assert_eq!(
-            five.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(5)
-        );
-        assert_eq!(
-            negative_point_three.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(-1)
-        );
-        assert_eq!(
-            negative_point_nine.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(-1)
-        );
-    }
+        minus_1: (&OP_UNARY_MINUS, NodeValue::Int32(2), ok(eq(&NodeValue::Int64(-2))),),
+        minus_2: (&OP_UNARY_MINUS, NodeValue::Float(5.5), ok(eq(&NodeValue::Double(-5.5))),),
+        minus_none: (&OP_UNARY_MINUS, NodeValue::None, ok(eq(&NodeValue::None)),),
+        minus_non_numeric_fails: (&OP_UNARY_MINUS, NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
 
-    #[test]
-    fn operate_sync_rounding_round_ok() {
-        let point_one = NodeValue::Double(0.1);
-        let two_point_nine = NodeValue::Float(2.9);
-        let five = NodeValue::Float(5.0);
-        let negative_point_three = NodeValue::Double(-0.33);
-        let negative_point_nine = NodeValue::Double(-0.99);
+        absolute_1: (&OP_ABSOLUTE, NodeValue::Int64(1), ok(eq(&NodeValue::Int64(1))),),
+        absolute_2: (&OP_ABSOLUTE, NodeValue::Int64(-3), ok(eq(&NodeValue::Int64(3))),),
+        absolute_3: (&OP_ABSOLUTE, NodeValue::Double(2.7), ok(eq(&NodeValue::Double(2.7))),),
+        absolute_4: (&OP_ABSOLUTE, NodeValue::Double(-2.7), ok(eq(&NodeValue::Double(2.7))),),
+        absolute_5: (&OP_ABSOLUTE, NodeValue::Double(0.0), ok(eq(&NodeValue::Double(0.0))),),
+        absolute_none: (&OP_ABSOLUTE, NodeValue::None, ok(eq(&NodeValue::None)),),
+        absolute_non_numeric_fails: (&OP_ABSOLUTE, NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
 
-        assert_eq!(
-            point_one.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(0)
-        );
-        assert_eq!(
-            two_point_nine.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(3)
-        );
-        assert_eq!(
-            five.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(5)
-        );
-        assert_eq!(
-            negative_point_three.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(0)
-        );
-        assert_eq!(
-            negative_point_nine.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(-1)
-        );
-    }
+        floor_1: (&OP_FLOOR, NodeValue::Double(0.1), ok(eq(&NodeValue::Int64(0))),),
+        floor_2: (&OP_FLOOR, NodeValue::Float(2.9), ok(eq(&NodeValue::Int64(2))),),
+        floor_3: (&OP_FLOOR, NodeValue::Float(5.0), ok(eq(&NodeValue::Int64(5))),),
+        floor_4: (&OP_FLOOR, NodeValue::Double(-0.33), ok(eq(&NodeValue::Int64(-1))),),
+        floor_5: (&OP_FLOOR, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(-1))),),
+        floor_none: (&OP_FLOOR, NodeValue::None, ok(eq(&NodeValue::None)),),
+        floor_non_numeric_fails: (&OP_FLOOR, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
 
-    #[test]
-    fn operate_sync_rounding_ceil_ok() {
-        let point_one = NodeValue::Double(0.1);
-        let two_point_nine = NodeValue::Float(2.9);
-        let five = NodeValue::Float(5.0);
-        let negative_point_three = NodeValue::Double(-0.33);
-        let negative_point_nine = NodeValue::Double(-0.99);
+        round_1: (&OP_ROUND, NodeValue::Double(0.1), ok(eq(&NodeValue::Int64(0))),),
+        round_2: (&OP_ROUND, NodeValue::Float(2.9), ok(eq(&NodeValue::Int64(3))),),
+        round_3: (&OP_ROUND, NodeValue::Float(5.0), ok(eq(&NodeValue::Int64(5))),),
+        round_4: (&OP_ROUND, NodeValue::Double(-0.33), ok(eq(&NodeValue::Int64(0))),),
+        round_5: (&OP_ROUND, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(-1))),),
+        round_none: (&OP_ROUND, NodeValue::None, ok(eq(&NodeValue::None)),),
+        round_non_numeric_fails: (&OP_ROUND, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
 
-        assert_eq!(
-            point_one.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(1)
-        );
-        assert_eq!(
-            two_point_nine.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(3)
-        );
-        assert_eq!(
-            five.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(5)
-        );
-        assert_eq!(
-            negative_point_three.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(0)
-        );
-        assert_eq!(
-            negative_point_nine.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
-            NodeValue::Int64(0)
-        );
-    }
+        ceil_1: (&OP_CEIL, NodeValue::Double(0.1), ok(eq(&NodeValue::Int64(1))),),
+        ceil_2: (&OP_CEIL, NodeValue::Float(2.9), ok(eq(&NodeValue::Int64(3))),),
+        ceil_3: (&OP_CEIL, NodeValue::Float(5.0), ok(eq(&NodeValue::Int64(5))),),
+        ceil_4: (&OP_CEIL, NodeValue::Double(-0.33), ok(eq(&NodeValue::Int64(0))),),
+        ceil_5: (&OP_CEIL, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(0))),),
+        ceil_none: (&OP_ROUND, NodeValue::None, ok(eq(&NodeValue::None)),),
+        ceil_non_numeric_fails: (&OP_CEIL, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
+    );
 }
