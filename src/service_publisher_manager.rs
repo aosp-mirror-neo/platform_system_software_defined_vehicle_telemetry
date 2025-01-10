@@ -79,7 +79,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-        mut cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        mut cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         for accessor in &self.service_publisher_registry {
             (new_message_callback, cancellation_callback) = match accessor
@@ -157,7 +157,7 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
-    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
         Box::new(|| unreachable!())
     }
 

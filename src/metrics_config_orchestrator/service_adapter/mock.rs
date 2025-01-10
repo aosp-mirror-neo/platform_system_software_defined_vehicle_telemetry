@@ -19,7 +19,7 @@ pub(crate) struct MockServiceAdapter {
     // Notify that's triggered when unsubscribe is blocked.
     pub(crate) notify_unsubscribing: Arc<Notify>,
     availability_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
-    cancellation_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    cancellation_callback: Mutex<Option<Box<dyn FnOnce() + Send + Sync>>>,
     message_provider_returned_sender: Mutex<Option<oneshot::Sender<()>>>,
     next_error: Mutex<Option<anyhow::Error>>,
     next_message_provider: Mutex<Option<MockServiceMessageProvider>>,
@@ -80,7 +80,7 @@ impl ServiceAdapter for MockServiceAdapter {
         configuration: Option<&Any>,
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
         self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
@@ -214,7 +214,7 @@ impl MockServiceAdapter {
     }
 
     pub(crate) fn notify_cancelled(&self) {
-        self.cancellation_callback.lock().as_ref().unwrap()();
+        self.cancellation_callback.lock().take().unwrap()();
     }
 
     pub(crate) async fn publish_new_message(&self, message: &Arc<dyn MessageDyn>) {
