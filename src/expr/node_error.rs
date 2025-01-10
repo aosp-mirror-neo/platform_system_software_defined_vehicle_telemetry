@@ -8,19 +8,27 @@ use thiserror::Error;
 
 use crate::service_publisher_accessor::GetLatestMessageError;
 
+/// A wrapper for NodeEvaluationError containing index of the node causing it
+#[derive(Error, Debug)]
+#[error("Processing node at index {index} failed: {err}")]
+pub struct NodeError {
+    pub index: usize,
+    pub err: NodeEvaluationError,
+}
+
 #[derive(Error, Debug)]
 #[non_exhaustive]
 #[allow(missing_docs)]
-pub enum NodeError {
+pub enum NodeEvaluationError {
     // general errors
-    #[error("Node at index {i} is out of bounds, expression nodes have size {n}")]
-    IndexOutOfBound { i: usize, n: usize },
+    #[error("Node is out of bounds, expression nodes have size {n}")]
+    IndexOutOfBound { n: usize },
     #[error("Expression nodes contain a cycle with the following node indices: {cycle:?}")]
     CyclicDependency { cycle: Vec<usize> },
-    #[error("Node at index {i} did not set node_type")]
-    NodeTypeNotSet { i: usize },
-    #[error("Node at index {i} has an unsupported node_type")]
-    NodeTypeNotSupported { i: usize },
+    #[error("Node does not set node_type")]
+    NodeTypeNotSet,
+    #[error("Node has an unsupported node_type")]
+    NodeTypeNotSupported,
     #[error("Node evaluation type mismatch: {msg}")]
     TypeMismatch { msg: String },
     #[error("Internal implementation error: {msg}")]
@@ -61,12 +69,12 @@ pub enum NodeError {
     FunctionLeafNodeArgumentError { error: FunctionLeafNodeArgumentError },
 
     // error related to CombinationNode
-    #[error("Combination node at index {i} did not set operator")]
-    OperatorNotSet { i: usize },
+    #[error("Combination node does not set operator")]
+    OperatorNotSet,
     #[error("Unknown operator type: {op}")]
     UnknownOperator { op: String },
-    #[error("Combination node at index {i} did not set left child")]
-    LeftChildNotSet { i: usize },
+    #[error("Combination node does not set left child")]
+    LeftChildNotSet,
     #[error("Unary operator has 2 child nodes")]
     UnaryOperatorIncorrectChildren,
     #[error("Binary operator has 1 child")]

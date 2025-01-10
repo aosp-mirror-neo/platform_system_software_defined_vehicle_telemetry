@@ -38,7 +38,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::expr::node::Node;
-use crate::expr::node_error::{MessageProviderError, NodeError};
+use crate::expr::node_error::{MessageProviderError, NodeError, NodeEvaluationError};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
@@ -616,8 +616,8 @@ impl MetricsConfigOrchestratorImpl {
             }
         }
 
-        fn status_code_for_node_error(error: &NodeError) -> StatusCodes {
-            if let NodeError::MessageProviderError { e: error } = error {
+        fn status_code_for_node_error(error: &NodeEvaluationError) -> StatusCodes {
+            if let NodeEvaluationError::MessageProviderError { e: error } = error {
                 match error.as_ref() {
                     MessageProviderError::MessageRetrievalError { e: error } => match error {
                         GetLatestMessageError::FailedToRetrieveMessage(_) => {
@@ -1137,7 +1137,12 @@ mod tests {
             _context: &NodeFactoryContext,
         ) -> Result<Vec<Option<NodeValueType>>, NodeError> {
             if self.fail_validate {
-                return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
+                return Err(NodeError {
+                    index: 0,
+                    err: NodeEvaluationError::InternalError {
+                        msg: "Simulated failure".to_string(),
+                    },
+                });
             }
             Ok(vec![None; proto_nodes.len()])
         }
@@ -1148,7 +1153,12 @@ mod tests {
             context: &NodeFactoryContext,
         ) -> Result<(Vec<Arc<Node>>, Vec<Option<NodeValueType>>), NodeError> {
             if self.fail_create_nodes {
-                return Err(NodeError::InternalError { msg: "Simulated failure".to_string() });
+                return Err(NodeError {
+                    index: 0,
+                    err: NodeEvaluationError::InternalError {
+                        msg: "Simulated failure".to_string(),
+                    },
+                });
             }
 
             *self.num_nodes.lock() = proto_nodes.len();

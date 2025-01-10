@@ -13,14 +13,14 @@ pub(super) mod vector_aggregator;
 
 use thiserror::Error;
 
-use crate::expr::{node_error::NodeError, node_value::NodeValue};
+use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 pub(crate) enum AggregationError {
     #[error("Evaluation of expression node failed: {e}")]
     ExpressionEvaluationError {
         #[from]
-        e: NodeError,
+        e: NodeEvaluationError,
     },
     #[error("Numeric aggregation requires expressions to output numeric values, but the value is {value}")]
     NumericAggregationTypeMismatch { value: String },
