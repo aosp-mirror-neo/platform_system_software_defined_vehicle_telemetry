@@ -81,16 +81,16 @@ impl ToReflectValueBox for NodeValue {
             | ProtobufRuntimeType::U32
             | ProtobufRuntimeType::U64
             | ProtobufRuntimeType::Enum(_) => {
-                self.get_int(&err_provider)?.to_reflect_value_box(protobuf_type)
+                self.get_int().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
             ProtobufRuntimeType::F32 | ProtobufRuntimeType::F64 => {
-                self.get_double(&err_provider)?.to_reflect_value_box(protobuf_type)
+                self.get_double().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
             ProtobufRuntimeType::Bool => {
-                self.get_bool(&err_provider)?.to_reflect_value_box(protobuf_type)
+                self.get_bool().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
             ProtobufRuntimeType::Message(descriptor) => {
-                let msg = self.get_message(err_provider)?;
+                let msg = self.get_message().ok_or_else(err_provider)?;
                 let msg_descriptor = msg.descriptor_dyn();
                 if &msg_descriptor != descriptor {
                     if descriptor == &Any::descriptor() {
@@ -103,10 +103,10 @@ impl ToReflectValueBox for NodeValue {
                 }
             }
             ProtobufRuntimeType::String => {
-                self.get_string(&err_provider)?.to_reflect_value_box(protobuf_type)
+                self.get_string().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
             ProtobufRuntimeType::VecU8 => {
-                self.get_bytes(&err_provider)?.to_reflect_value_box(protobuf_type)
+                self.get_bytes().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
         }
     }

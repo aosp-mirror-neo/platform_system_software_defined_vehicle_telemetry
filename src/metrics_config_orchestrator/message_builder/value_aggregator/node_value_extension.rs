@@ -53,27 +53,27 @@ impl NodeValueExtension for NodeValue {
         };
         match self {
             NodeValue::BoolList(v) => {
-                v.push(value.get_bool(&err_provider)?);
+                v.push(value.get_bool().ok_or_else(err_provider)?);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::Int32List(v) => {
-                v.push(value.get_int(&err_provider)? as i32);
+                v.push(value.get_int().ok_or_else(err_provider)? as i32);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::Int64List(v) => {
-                v.push(value.get_int(&err_provider)?);
+                v.push(value.get_int().ok_or_else(err_provider)?);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::FloatList(v) => {
-                v.push(value.get_double(&err_provider)? as f32);
+                v.push(value.get_double().ok_or_else(err_provider)? as f32);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::DoubleList(v) => {
-                v.push(value.get_double(&err_provider)?);
+                v.push(value.get_double().ok_or_else(err_provider)?);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::MessageList(v) => {
-                v.push(Arc::clone(value.get_message(err_provider)?));
+                v.push(Arc::clone(value.get_message().ok_or_else(err_provider)?));
                 pop_front_to_size_n(v, max_length);
             }
             _ => panic!("push() should never be called on non-list: {:?}", self),
@@ -102,7 +102,7 @@ impl NodeValueExtension for NodeValue {
             panic!("update_running_average() should never be called on non-double");
         };
 
-        let new_sample = new_value.get_double(&|| {
+        let new_sample = new_value.get_double().ok_or_else(|| {
             AggregationError::NumericAggregationTypeMismatch { value: format!("{:?}", new_value) }
         })?;
 

@@ -13,7 +13,7 @@ use sdv_telemetry_proto_rust::expression::combination_node::{
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
 use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodeProto;
 use sdv_telemetry_utils::operation_result::OperationResult;
-use std::{borrow::Cow, convert::From, error::Error, sync::Arc};
+use std::{borrow::Cow, convert::From, sync::Arc};
 
 use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
@@ -140,80 +140,59 @@ impl NodeValue {
         .map(|(value, _state)| value)
     }
 
-    /// Returns the bool value or a custom error message if NodeValue is not a bool.
-    pub fn get_bool<E>(&self, err_provider: &impl Fn() -> E) -> Result<bool, E>
-    where
-        E: Error,
-    {
+    /// Returns the bool value or `None` if `Self` is not a bool.
+    pub fn get_bool(&self) -> Option<bool> {
         if let NodeValue::Bool(val) = self {
-            Ok(*val)
+            Some(*val)
         } else {
-            Err(err_provider())
+            None
         }
     }
 
-    /// Returns the int value or the provided error if NodeValue is not an int.
-    pub fn get_int<E>(&self, err_provider: &impl Fn() -> E) -> Result<i64, E>
-    where
-        E: Error,
-    {
-        Ok(match self {
+    /// Returns the int value or `None` if `Self` is not an int.
+    pub fn get_int(&self) -> Option<i64> {
+        Some(match self {
             NodeValue::Int32(val) => i64::from(*val),
             NodeValue::Int64(val) => *val,
-            _ => return Err(err_provider()),
+            _ => return None,
         })
     }
 
-    /// Returns the double value or error if NodeValue is not numeric.
-    pub fn get_double<E>(&self, err_provider: &impl Fn() -> E) -> Result<f64, E>
-    where
-        E: Error,
-    {
-        Ok(match self {
+    /// Returns the double value or `None` if `Self` is not numeric.
+    pub fn get_double(&self) -> Option<f64> {
+        Some(match self {
             NodeValue::Int32(val) => f64::from(*val),
             NodeValue::Int64(val) => *val as f64,
             NodeValue::Float(val) => f64::from(*val),
             NodeValue::Double(val) => *val,
-            _ => return Err(err_provider()),
+            _ => return None,
         })
     }
 
-    /// Returns the Message value or the provided error if NodeValue is not a Message.
-    pub fn get_message<E>(
-        &self,
-        err_provider: impl FnOnce() -> E,
-    ) -> Result<&Arc<dyn MessageDyn>, E>
-    where
-        E: Error,
-    {
+    /// Returns the Message value or `None` if `Self` is not a Message.
+    pub fn get_message(&self) -> Option<&Arc<dyn MessageDyn>> {
         if let NodeValue::Message(msg) = self {
-            Ok(msg)
+            Some(msg)
         } else {
-            Err(err_provider())
+            None
         }
     }
 
-    /// Returns the string value or the provided error if NodeValue is not a string.
-    pub fn get_string<E>(&self, err_provider: &impl Fn() -> E) -> Result<&str, E>
-    where
-        E: Error,
-    {
+    /// Returns the string value or `None` if `Self` is not a string.
+    pub fn get_string(&self) -> Option<&str> {
         if let NodeValue::String(val) = self {
-            Ok(val)
+            Some(val)
         } else {
-            Err(err_provider())
+            None
         }
     }
 
-    /// Returns the bytes value or the provided error if NodeValue is not bytes.
-    pub fn get_bytes<E>(&self, err_provider: &impl Fn() -> E) -> Result<&[u8], E>
-    where
-        E: Error,
-    {
+    /// Returns the bytes value or `None` if `Self` is not bytes.
+    pub fn get_bytes(&self) -> Option<&[u8]> {
         if let NodeValue::ByteList(val) = self {
-            Ok(val)
+            Some(val)
         } else {
-            Err(err_provider())
+            None
         }
     }
 
@@ -224,10 +203,7 @@ impl NodeValue {
 
     /// Check if node holds a numeric value.
     pub fn is_numeric(&self) -> bool {
-        matches!(
-            self,
-            NodeValue::Int32(_) | NodeValue::Int64(_) | NodeValue::Float(_) | NodeValue::Double(_)
-        )
+        self.get_double().is_some()
     }
 
     /// Checks whether the node value is zero.
@@ -428,11 +404,12 @@ impl NodeValue {
 
         match op {
             ArithmeticOperator::ABSOLUTE => self.handle_unary(state, |value| {
-                value.apply_numeric_unary(
-                    |a| NodeValue::Int64(a.abs()),
-                    |a| NodeValue::Double(a.abs()),
-                    &err_provider,
-                )
+                value
+                    .apply_numeric_unary(
+                        |a| NodeValue::Int64(a.abs()),
+                        |a| NodeValue::Double(a.abs()),
+                    )
+                    .ok_or_else(err_provider)
             }),
             ArithmeticOperator::ADD => {
                 self.handle_binary(state, right_operand_provider, move |left, right| {
@@ -440,14 +417,14 @@ impl NodeValue {
                         right,
                         |a, b| NodeValue::Int64(a + b),
                         |a, b| NodeValue::Double(a + b),
-                        &err_provider,
                     )
+                    .ok_or_else(err_provider)
                 })
             }
             ArithmeticOperator::DIVIDE => {
                 self.handle_binary(state, right_operand_provider, move |left, right| {
-                    let left_double = left.get_double(&err_provider)?;
-                    let right_double = right.get_double(&err_provider)?;
+                    let left_double = left.get_double().ok_or_else(err_provider)?;
+                    let right_double = right.get_double().ok_or_else(err_provider)?;
 
                     if approximately_equal(right_double, 0.0) {
                         return Err(NodeEvaluationError::DivideByZero);
@@ -461,8 +438,8 @@ impl NodeValue {
                     // First, verify that both operands have the corrected data
                     // types, and only then perform further checks.
                     let err_provider = || NodeEvaluationError::ModuloOperatorIncompatibleOperands;
-                    let dividend = left.get_int(&err_provider)?;
-                    let divisor = right.get_int(&err_provider)?;
+                    let dividend = left.get_int().ok_or_else(err_provider)?;
+                    let divisor = right.get_int().ok_or_else(err_provider)?;
 
                     if divisor == 0 {
                         return Err(NodeEvaluationError::DivideByZero);
@@ -477,8 +454,8 @@ impl NodeValue {
                         right,
                         |a, b| NodeValue::Int64(a * b),
                         |a, b| NodeValue::Double(a * b),
-                        &err_provider,
                     )
+                    .ok_or_else(err_provider)
                 })
             }
             ArithmeticOperator::POWER => {
@@ -496,8 +473,8 @@ impl NodeValue {
                             }
                         },
                         |a, b| NodeValue::Double(a.powf(b)),
-                        &err_provider,
                     )
+                    .ok_or_else(err_provider)
                 })
             }
             ArithmeticOperator::SUBTRACT => {
@@ -506,16 +483,14 @@ impl NodeValue {
                         right,
                         |a, b| NodeValue::Int64(a - b),
                         |a, b| NodeValue::Double(a - b),
-                        &err_provider,
                     )
+                    .ok_or_else(err_provider)
                 })
             }
             ArithmeticOperator::UNARY_MINUS => self.handle_unary(state, |value| {
-                value.apply_numeric_unary(
-                    |a| NodeValue::Int64(-a),
-                    |a| NodeValue::Double(-a),
-                    &err_provider,
-                )
+                value
+                    .apply_numeric_unary(|a| NodeValue::Int64(-a), |a| NodeValue::Double(-a))
+                    .ok_or_else(err_provider)
             }),
         }
     }
@@ -532,10 +507,7 @@ impl NodeValue {
     ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::LogicalOperatorIncompatibleOperands;
 
-        let left_value = match self.get_bool(&err_provider) {
-            Ok(value) => value,
-            Err(err) => return Err(err).into(),
-        };
+        let Some(left_value) = self.get_bool() else { return Err(err_provider()).into() };
 
         match op {
             LogicalOperator::AND => {
@@ -545,7 +517,7 @@ impl NodeValue {
                 } else {
                     // If left is true, the result depends on the right operand.
                     self.handle_binary(state, right_operand_provider, move |_left, right| {
-                        Ok(NodeValue::Bool(right.get_bool(&err_provider)?))
+                        Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
                     })
                 }
             }
@@ -556,13 +528,13 @@ impl NodeValue {
                 } else {
                     // If left is false, the result depends on the right operand.
                     self.handle_binary(state, right_operand_provider, move |_left, right| {
-                        Ok(NodeValue::Bool(right.get_bool(&err_provider)?))
+                        Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
                     })
                 }
             }
             LogicalOperator::XOR => {
                 self.handle_binary(state, right_operand_provider, move |_left, right| {
-                    Ok(NodeValue::Bool(left_value != right.get_bool(&err_provider)?))
+                    Ok(NodeValue::Bool(left_value != right.get_bool().ok_or_else(err_provider)?))
                 })
             }
             LogicalOperator::NOT => NodeValue::Bool(!left_value).into_operation_result(state),
@@ -585,47 +557,48 @@ impl NodeValue {
                 if !self.is_numeric() || !other.is_numeric() {
                     return Ok(NodeValue::Bool(self == other));
                 }
-                self.apply_numeric_binary(other, |a, b| a == b, approximately_equal, &err_provider)
+                self.apply_numeric_binary(other, |a, b| a == b, approximately_equal)
+                    .ok_or_else(err_provider)
             }
             RelationalOperator::NOT_EQ => {
                 if !self.is_numeric() || !other.is_numeric() {
                     return Ok(NodeValue::Bool(self != other));
                 }
-                self.apply_numeric_binary(
-                    other,
-                    |a, b| a != b,
-                    |a, b| !approximately_equal(a, b),
-                    &err_provider,
-                )
+                self.apply_numeric_binary(other, |a, b| a != b, |a, b| !approximately_equal(a, b))
+                    .ok_or_else(err_provider)
             }
-            RelationalOperator::GT => self.apply_generic_operation(
-                other,
-                |a, b| a & !b,
-                |a, b| a > b,
-                |a, b| a > b && !approximately_equal(a, b),
-                &err_provider,
-            ),
-            RelationalOperator::GT_OR_EQ => self.apply_generic_operation(
-                other,
-                |a, b| a >= b,
-                |a, b| a >= b,
-                |a, b| a >= b || approximately_equal(a, b),
-                &err_provider,
-            ),
-            RelationalOperator::LT => self.apply_generic_operation(
-                other,
-                |a, b| !a & b,
-                |a, b| a < b,
-                |a, b| a < b && !approximately_equal(a, b),
-                &err_provider,
-            ),
-            RelationalOperator::LT_OR_EQ => self.apply_generic_operation(
-                other,
-                |a, b| a <= b,
-                |a, b| a <= b,
-                |a, b| a <= b || approximately_equal(a, b),
-                &err_provider,
-            ),
+            RelationalOperator::GT => self
+                .apply_generic_operation(
+                    other,
+                    |a, b| a & !b,
+                    |a, b| a > b,
+                    |a, b| a > b && !approximately_equal(a, b),
+                )
+                .ok_or_else(err_provider),
+            RelationalOperator::GT_OR_EQ => self
+                .apply_generic_operation(
+                    other,
+                    |a, b| a >= b,
+                    |a, b| a >= b,
+                    |a, b| a >= b || approximately_equal(a, b),
+                )
+                .ok_or_else(err_provider),
+            RelationalOperator::LT => self
+                .apply_generic_operation(
+                    other,
+                    |a, b| !a & b,
+                    |a, b| a < b,
+                    |a, b| a < b && !approximately_equal(a, b),
+                )
+                .ok_or_else(err_provider),
+            RelationalOperator::LT_OR_EQ => self
+                .apply_generic_operation(
+                    other,
+                    |a, b| a <= b,
+                    |a, b| a <= b,
+                    |a, b| a <= b || approximately_equal(a, b),
+                )
+                .ok_or_else(err_provider),
             RelationalOperator::CONTAINS => self.contains(other),
             RelationalOperator::DOES_NOT_CONTAIN => {
                 // negate the boolean in a Result<bool, E>
@@ -641,7 +614,7 @@ impl NodeValue {
         if !matches!(self, NodeValue::Float(_) | NodeValue::Double(_)) {
             return Err(err_provider());
         }
-        let value = self.get_double(&err_provider)?;
+        let value = self.get_double().ok_or_else(err_provider)?;
         Ok(NodeValue::Int64(match op {
             RoundingOperator::FLOOR => value.floor() as i64,
             RoundingOperator::ROUND => value.round() as i64,
@@ -685,22 +658,22 @@ impl NodeValue {
     fn contains(&self, element: &NodeValue) -> Result<bool, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::ContainsOperatorIncompatibleOperands;
         Ok(match self {
-            NodeValue::BoolList(v) => v.contains(&element.get_bool(&err_provider)?),
+            NodeValue::BoolList(v) => v.contains(&element.get_bool().ok_or_else(err_provider)?),
             NodeValue::Int32List(v) => {
-                let target_value = element.get_int(&err_provider)? as i32;
+                let target_value = element.get_int().ok_or_else(err_provider)? as i32;
                 v.contains(&target_value)
             }
-            NodeValue::Int64List(v) => v.contains(&element.get_int(&err_provider)?),
+            NodeValue::Int64List(v) => v.contains(&element.get_int().ok_or_else(err_provider)?),
             NodeValue::FloatList(v) => {
-                let target_value = element.get_double(&err_provider)?;
+                let target_value = element.get_double().ok_or_else(err_provider)?;
                 v.iter().any(|x| approximately_equal(f64::from(*x), target_value))
             }
             NodeValue::DoubleList(v) => {
-                let target_value = element.get_double(&err_provider)?;
+                let target_value = element.get_double().ok_or_else(err_provider)?;
                 v.iter().any(|x| approximately_equal(*x, target_value))
             }
             NodeValue::MessageList(v) => {
-                let target_value = element.get_message(err_provider)?;
+                let target_value = element.get_message().ok_or_else(err_provider)?;
                 let mode = ReflectEqMode::default();
                 v.iter().any(|x| x.reflect_eq_dyn(target_value.as_ref(), &mode))
             }
@@ -714,47 +687,32 @@ impl NodeValue {
         let err_provider = || NodeEvaluationError::AllEqualsOperatorIncompatibleOperands;
         Ok(match self {
             NodeValue::BoolList(v) => {
-                let target_value = element.get_bool(&err_provider)?;
-                Self::all_equal_to(v, target_value)
+                let target_value = element.get_bool().ok_or_else(err_provider)?;
+                v.iter().all(|x| *x == target_value)
             }
             NodeValue::Int32List(v) => {
-                let target_value = element.get_int(&err_provider)? as i32;
-                Self::all_equal_to(v, target_value)
+                let target_value = element.get_int().ok_or_else(err_provider)? as i32;
+                v.iter().all(|x| *x == target_value)
             }
             NodeValue::Int64List(v) => {
-                let target_value = element.get_int(&err_provider)?;
-                Self::all_equal_to(v, target_value)
+                let target_value = element.get_int().ok_or_else(err_provider)?;
+                v.iter().all(|x| *x == target_value)
             }
             NodeValue::FloatList(v) => {
-                let target_value = element.get_double(&err_provider)?;
+                let target_value = element.get_double().ok_or_else(err_provider)?;
                 v.iter().all(|x| approximately_equal(f64::from(*x), target_value))
             }
             NodeValue::DoubleList(v) => {
-                let target_value = element.get_double(&err_provider)?;
+                let target_value = element.get_double().ok_or_else(err_provider)?;
                 v.iter().all(|x| approximately_equal(*x, target_value))
             }
             NodeValue::MessageList(v) => {
-                let target_value = element.get_message(err_provider)?;
+                let target_value = element.get_message().ok_or_else(err_provider)?;
                 let mode = ReflectEqMode::default();
                 v.iter().all(|x| x.reflect_eq_dyn(target_value.as_ref(), &mode))
             }
             _ => return Err(err_provider()),
         })
-    }
-
-    /// Check if all vector elements are equal to target_value.
-    fn all_equal_to<T: PartialEq>(v: &[T], target_value: T) -> bool {
-        v.iter().all(|x| *x == target_value)
-    }
-
-    /// Check if node holds a boolean value.
-    fn is_bool(&self) -> bool {
-        matches!(self, NodeValue::Bool(_))
-    }
-
-    /// Check if node holds an integer value.
-    fn is_int(&self) -> bool {
-        matches!(self, NodeValue::Int32(_) | NodeValue::Int64(_))
     }
 
     /// Applies the provided function on two numeric NodeValues based on
@@ -765,14 +723,13 @@ impl NodeValue {
         other: &NodeValue,
         int_func: impl FnOnce(i64, i64) -> R,
         float_func: impl FnOnce(f64, f64) -> R,
-        err_provider: &impl Fn() -> NodeEvaluationError,
-    ) -> Result<R, NodeEvaluationError> {
-        if self.is_int() && other.is_int() {
-            Ok(int_func(self.get_int(err_provider)?, other.get_int(err_provider)?))
-        } else if self.is_numeric() && other.is_numeric() {
-            Ok(float_func(self.get_double(err_provider)?, other.get_double(err_provider)?))
+    ) -> Option<R> {
+        if let (Some(l), Some(r)) = (self.get_int(), other.get_int()) {
+            Some(int_func(l, r))
+        } else if let (Some(l), Some(r)) = (self.get_double(), other.get_double()) {
+            Some(float_func(l, r))
         } else {
-            Err(err_provider())
+            None
         }
     }
 
@@ -783,15 +740,8 @@ impl NodeValue {
         &self,
         int_func: impl FnOnce(i64) -> R,
         float_func: impl FnOnce(f64) -> R,
-        err_provider: &impl Fn() -> NodeEvaluationError,
-    ) -> Result<R, NodeEvaluationError> {
-        if self.is_int() {
-            Ok(int_func(self.get_int(err_provider)?))
-        } else if self.is_numeric() {
-            Ok(float_func(self.get_double(err_provider)?))
-        } else {
-            Err(err_provider())
-        }
+    ) -> Option<R> {
+        self.get_int().map(int_func).or_else(|| self.get_double().map(float_func))
     }
 
     /// Applies the provided function on two NodeValues based on their types,
@@ -803,12 +753,11 @@ impl NodeValue {
         bool_func: impl FnOnce(bool, bool) -> R,
         int_func: impl FnOnce(i64, i64) -> R,
         float_func: impl FnOnce(f64, f64) -> R,
-        err_provider: &impl Fn() -> NodeEvaluationError,
-    ) -> Result<R, NodeEvaluationError> {
-        if self.is_bool() && other.is_bool() {
-            Ok(bool_func(self.get_bool(err_provider)?, other.get_bool(err_provider)?))
+    ) -> Option<R> {
+        if let (Some(l), Some(r)) = (self.get_bool(), other.get_bool()) {
+            Some(bool_func(l, r))
         } else {
-            self.apply_numeric_binary(other, int_func, float_func, err_provider)
+            self.apply_numeric_binary(other, int_func, float_func)
         }
     }
 }
@@ -1339,8 +1288,8 @@ mod tests {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
-            one.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
-            one_epsilon.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
+            one.get_double().unwrap(),
+            one_epsilon.get_double().unwrap(),
             "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
         );
         let two = NodeValue::Int32(2);
@@ -1385,8 +1334,8 @@ mod tests {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
-            one.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
-            one_epsilon.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
+            one.get_double().unwrap(),
+            one_epsilon.get_double().unwrap(),
             "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
         );
         let two = NodeValue::Int32(2);
@@ -1421,8 +1370,8 @@ mod tests {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
-          one.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
-          one_epsilon.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
+          one.get_double().unwrap(),
+          one_epsilon.get_double().unwrap(),
           "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
         );
         let two = NodeValue::Int32(2);
@@ -1461,8 +1410,8 @@ mod tests {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
-            one.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
-            one_epsilon.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
+            one.get_double().unwrap(),
+            one_epsilon.get_double().unwrap(),
             "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
         );
         let two = NodeValue::Int32(2);
@@ -1500,8 +1449,8 @@ mod tests {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
-            one.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
-            one_epsilon.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
+            one.get_double().unwrap(),
+            one_epsilon.get_double().unwrap(),
             "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
         );
         let two = NodeValue::Int32(2);
@@ -1540,8 +1489,8 @@ mod tests {
         let one = NodeValue::Double(1.0);
         let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
         assert_ne!(
-            one.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
-            one_epsilon.get_double(&|| -> NodeEvaluationError { unreachable!() }).unwrap(),
+            one.get_double().unwrap(),
+            one_epsilon.get_double().unwrap(),
             "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
         );
         let two = NodeValue::Int32(2);

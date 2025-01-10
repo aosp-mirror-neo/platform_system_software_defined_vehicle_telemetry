@@ -77,8 +77,10 @@ impl StdDevAggregator {
         let n = f64::from(n);
 
         let get_double = |node_value: &NodeValue| -> Result<f64, AggregationError> {
-            node_value.get_double(&|| AggregationError::NumericAggregationTypeMismatch {
-                value: format!("{:?}", node_value),
+            node_value.get_double().ok_or_else(|| {
+                AggregationError::NumericAggregationTypeMismatch {
+                    value: format!("{:?}", node_value),
+                }
             })
         };
 
