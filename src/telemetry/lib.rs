@@ -29,7 +29,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
 use log::{error, info, warn};
 use protobuf::Message;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
-use std::marker::{Send, Sync};
+use std::borrow::Cow;
 use std::ops::Deref;
 use std::path::Path;
 use std::sync::Arc;
@@ -339,20 +339,15 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         info!("registerReportReadyListener");
         let (status_code, status_message) =
             self.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
-                |_| {
-                    (
-                        StatusCodes::SET_REPORT_READY_LISTENER_FAILED,
-                        "Report Ready Listener already exists",
-                    )
-                },
-                |_| {
+                |err| (StatusCodes::SET_REPORT_READY_LISTENER_FAILED, Cow::Owned(err.to_string())),
+                |()| {
                     (
                         StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-                        "Report Ready Listener successfully added",
+                        Cow::Borrowed("Report Ready Listener successfully added"),
                     )
                 },
             );
-        self.status_listener.send_api_status(api_call_id, status_code, status_message);
+        self.status_listener.send_api_status(api_call_id, status_code, &status_message);
         Ok(())
     }
 
@@ -423,7 +418,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     #[instrument(skip(self))]
     async fn unregisterReportReadyListener(&self) -> binder::Result<()> {
         info!("unregisterReportReadyListener");
-        self.metrics_report_listener.clear_report_ready_listener().unwrap();
+        self.metrics_report_listener.clear_report_ready_listener();
         Ok(())
     }
 
@@ -462,6 +457,7 @@ mod tests {
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 
     use crate::metrics_config_manager::mock::MockMetricsConfigManager;
+    use crate::metrics_report_listener::tests::create_default_metrics_report_listener;
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     const DUMMY_API_CALL_ID: i32 = -1;
@@ -498,7 +494,7 @@ mod tests {
         }
 
         fn get_metrics_config_list(&self) -> Vec<String> {
-            self.metrics_config_list.lock().clone().unwrap()
+            self.metrics_config_list.lock().as_ref().unwrap().clone()
         }
     }
 
@@ -509,13 +505,9 @@ mod tests {
             _status_message: &str,
             config_list: &[String],
         ) -> binder::Result<()> {
-            let mut mut_status_code = self.status_code.lock();
-            *mut_status_code = status_code;
-            let mut num_send_config_calls = self.num_send_config_calls.lock();
-            *num_send_config_calls += 1;
-            let mut mut_config_list = self.metrics_config_list.lock();
-            *mut_config_list = Some(config_list.to_vec());
-
+            *self.status_code.lock() = status_code;
+            *self.num_send_config_calls.lock() += 1;
+            self.metrics_config_list.lock().replace(config_list.to_vec());
             Ok(())
         }
     }
@@ -730,6 +722,7 @@ mod tests {
 
     struct MockStatusListener {
         api_status_code: Arc<Mutex<Option<StatusCodes>>>,
+        api_status_message: Arc<Mutex<Option<String>>>,
         api_listener: Arc<Mutex<Option<binder::Strong<dyn ITelemetryApiStatusListener>>>>,
         misc_listener: Arc<Mutex<Option<(i32, binder::Strong<dyn ITelemetryMiscStatusListener>)>>>,
     }
@@ -738,6 +731,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 api_status_code: Arc::new(Mutex::new(None)),
+                api_status_message: Arc::new(Mutex::new(None)),
                 api_listener: Arc::new(Mutex::new(None)),
                 misc_listener: Arc::new(Mutex::new(None)),
             }
@@ -749,9 +743,10 @@ mod tests {
             &self,
             _api_call_id: i32,
             status_code: StatusCodes,
-            _status_message: &str,
+            status_message: &str,
         ) {
             self.api_status_code.lock().replace(status_code);
+            self.api_status_message.lock().replace(status_message.to_owned());
         }
 
         fn send_misc_status(&self, _status_code: StatusCodes, _status_message: &str) {}
@@ -826,6 +821,7 @@ mod tests {
             service.metrics_config_manager = Arc::<
                 metrics_config_manager::mock::MockMetricsConfigManager,
             >::clone(&metrics_config_manager);
+            service.metrics_report_listener = create_default_metrics_report_listener().into();
 
             let status_listener = Arc::new(MockStatusListener::new());
             service.status_listener = Arc::<MockStatusListener>::clone(&status_listener);
@@ -848,6 +844,14 @@ mod tests {
 
         pub fn get_status_code(&self) -> StatusCodes {
             self.status_listener.api_status_code.lock().expect("Status code should be set")
+        }
+
+        pub fn get_status_message(&self) -> String {
+            self.status_listener
+                .api_status_message
+                .lock()
+                .take()
+                .expect("Status message should be set")
         }
 
         pub fn get_num_add_metrics_config_calls(&self) -> i32 {
@@ -1399,7 +1403,10 @@ mod tests {
 
         assert_eq!(
             StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
+            test_environment.get_status_code(),
+            "Unexpected status: ({:?}, {})",
+            test_environment.get_status_code(),
+            test_environment.get_status_message()
         );
 
         // Setting Report Listener
