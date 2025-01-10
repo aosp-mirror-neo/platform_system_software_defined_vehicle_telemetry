@@ -489,7 +489,16 @@ impl NodeValue {
                 self.handle_binary(state, right_operand_provider, move |left, right| {
                     left.apply_numeric_binary(
                         right,
-                        |a, b| NodeValue::Int64(a.pow(b as u32)),
+                        |a: i64, b: i64| {
+                            if let Ok(b) = b.try_into() {
+                                // If `b` is positive and fits into `u32`, calculate the power as an
+                                // integer (i64::pow requires a `u32` exponent).
+                                NodeValue::Int64(a.pow(b))
+                            } else {
+                                // Otherwise, fall back to using floats to calculate the power.
+                                NodeValue::Double((a as f64).powf(b as f64))
+                            }
+                        },
                         |a, b| NodeValue::Double(a.powf(b)),
                         &err_provider,
                     )
@@ -840,6 +849,7 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
+    use sdv_telemetry_test_utils::parameterized_test;
 
     use crate::expr::mock::*;
 
@@ -1541,27 +1551,21 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn operate_sync_arithmetic_power_integers() -> Result<(), NodeEvaluationError> {
-        let two = NodeValue::Int32(2);
+    parameterized_test!(
+        #[test]
+        operate_sync_arithmetic_power,
 
-        // 2^2 = 4
-        assert_eq!(two.clone().operate_sync(&OP_POWER, || provide(&two))?, NodeValue::Int64(4));
-        Ok(())
-    }
+        |a: NodeValue, b, expected| {
+            let result = a.operate_sync(&OP_POWER, || provide(&b));
 
-    #[test]
-    fn operate_sync_arithmetic_power_floats() -> Result<(), NodeEvaluationError> {
-        let val = 2.5_f64;
-        let expected = val.powf(val);
-        let two_point_five = NodeValue::Double(val);
+            assert_eq!(result.unwrap(), expected);
+        },
 
-        assert_eq!(
-            two_point_five.clone().operate_sync(&OP_POWER, || provide(&two_point_five))?,
-            NodeValue::Double(expected)
-        );
-        Ok(())
-    }
+        integers: (NodeValue::Int32(2), NodeValue::Int32(2), NodeValue::Int64(4),), // 2^2 = 4
+        negative_integer_base: (NodeValue::Int32(-2), NodeValue::Int32(2), NodeValue::Int64(4),), // (-2)^2 = 4
+        negative_integer_power: (NodeValue::Int32(2), NodeValue::Int32(-2), NodeValue::Double(0.25),), // 2^(-2) = 0.25
+        floats: (NodeValue::Double(2.5), NodeValue::Double(2.5), NodeValue::Double(9.88211768803),),
+    );
 
     #[test]
     fn operate_sync_arithmetic_unary_minus() -> Result<(), NodeEvaluationError> {
