@@ -18,10 +18,12 @@ pub(crate) struct MockServicePublisherAccessor {
 
 struct MockServicePublisherAccessorData {
     /// The map of subscribed callbacks, keyed by service name and sub-sampling interval.
-    callbacks: HashMap<
+    new_message_callbacks: HashMap<
         (String, SubSamplingInterval),
         Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
     >,
+    /// Last passed cancellation callback.
+    cancellation_callback: Option<Box<dyn FnOnce() + Send + Sync>>,
     /// The last configuration message that was passed to create_subscription.
     last_configuration: Option<Any>,
     /// When set, the descriptor will be returned on the next call to get_metadata.
@@ -126,7 +128,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         }
 
         if data
-            .callbacks
+            .new_message_callbacks
             .try_insert_value(
                 (service_name.to_owned(), sub_sampling_interval.to_owned()),
                 new_message_callback,
@@ -135,6 +137,8 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         {
             panic!("Callback is already set for service name {}", service_name);
         }
+
+        data.cancellation_callback.replace(cancellation_callback);
 
         let subscription = MockServicePublisherSubscription {
             service_name: service_name.to_owned(),
@@ -165,7 +169,8 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
 impl MockServicePublisherAccessor {
     pub(crate) fn new() -> Self {
         let data = Arc::new(Mutex::new(MockServicePublisherAccessorData {
-            callbacks: HashMap::new(),
+            cancellation_callback: None,
+            new_message_callbacks: HashMap::new(),
             last_configuration: None,
             next_descriptor: None,
             next_error: None,
@@ -206,6 +211,10 @@ impl MockServicePublisherAccessor {
         self.data.lock().num_unregister_availability_callback_calls
     }
 
+    pub(crate) fn notify_cancellation(&self) {
+        self.data.lock().cancellation_callback.take().unwrap()();
+    }
+
     pub(crate) fn notify_subscriber(
         &self,
         service_name: &str,
@@ -214,7 +223,7 @@ impl MockServicePublisherAccessor {
     ) {
         let mut data_lock = self.data.lock();
         data_lock
-            .callbacks
+            .new_message_callbacks
             .get_mut(&(service_name.to_owned(), sub_sampling_interval.to_owned()))
             .unwrap()(Ok(message))
     }
@@ -295,7 +304,10 @@ impl ServicePublisherSubscription for MockServicePublisherSubscription {
         data.num_unsubscribe_calls += 1;
         data.check_next_error()?;
 
-        let _ = data.callbacks.remove(&(self.service_name, self.sub_sampling_interval)).unwrap();
+        let _ = data
+            .new_message_callbacks
+            .remove(&(self.service_name, self.sub_sampling_interval))
+            .unwrap();
         Ok(())
     }
 }

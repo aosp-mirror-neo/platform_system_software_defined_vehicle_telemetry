@@ -260,7 +260,7 @@ mod tests {
         }
 
         async fn subscribe(
-            &self,
+            self: Arc<Self>,
             _service_name: &str,
             _configuration: Option<&Any>,
             _sub_sampling_interval: &SubSamplingInterval,
