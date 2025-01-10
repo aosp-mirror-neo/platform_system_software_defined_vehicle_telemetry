@@ -120,7 +120,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(CreateSubscriptionOutcome::NotRegistered {
@@ -357,7 +357,7 @@ mod integration_tests {
     const VALID_SERVICE_NAME: &str =
         "com.google.sdv.telemetry.tests.DataTunnelSubscriberTest#Topic|default";
 
-    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
         Box::new(|| unreachable!())
     }
 

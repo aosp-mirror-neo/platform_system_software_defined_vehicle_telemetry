@@ -87,7 +87,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError>;
 
     /// Registers a callback that will be called when a service with the specified string
@@ -134,7 +134,7 @@ pub enum CreateSubscriptionOutcome {
         new_message_callback:
             Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
         /// Cancellation callback passed to the create subscription call.
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     },
 }
 

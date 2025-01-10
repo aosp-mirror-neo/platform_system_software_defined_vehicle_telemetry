@@ -39,7 +39,7 @@ pub(crate) trait ServiceAdapter {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError>;
 
     /// Deactivate specified subscription.
@@ -179,7 +179,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
         let maybe_subscription_type = if configuration.is_some() {
             let error_callback = Arc::clone(&self.error_callback);
@@ -438,7 +438,7 @@ pub(super) mod tests {
             Int32Value::descriptor().field_by_name("value").unwrap();
     }
 
-    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
         Box::new(|| unreachable!())
     }
 

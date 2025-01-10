@@ -110,7 +110,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let mut data = self.data.lock();
         data.last_configuration = configuration.cloned();

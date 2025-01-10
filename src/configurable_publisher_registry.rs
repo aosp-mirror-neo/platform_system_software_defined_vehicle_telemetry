@@ -139,7 +139,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
-        cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.publisher.clone())
@@ -383,7 +383,7 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
-    fn create_empty_fn_box() -> Box<dyn Fn() + Send + Sync> {
+    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
         Box::new(|| unreachable!())
     }
 
