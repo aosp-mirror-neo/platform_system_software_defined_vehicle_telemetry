@@ -13,7 +13,7 @@ use sdv_telemetry_utils::{
 use std::sync::{Arc, Weak};
 use std::{collections::HashMap, mem};
 use tokio::sync::mpsc;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
@@ -127,7 +127,7 @@ impl Publisher for ServicePublisher {
 
     async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
         // Lock state mutex and hold it until the state transition is complete.
-        let mut state_lock = self.state.lock().await;
+        let state_lock = self.state.lock().await;
         assert!(
             matches!(*state_lock, ServicePublisherState::Inactive),
             "Unable to activate publisher {}: it's in {} state",
@@ -135,51 +135,7 @@ impl Publisher for ServicePublisher {
             state_lock
         );
 
-        let new_state = if let Some(state) = self.try_activate().await? {
-            state
-        } else {
-            info!(
-                "Publisher {} activation wasn't able to discover the service. \
-                Subscribing to availability notifications",
-                self.get_name()
-            );
-
-            let registration_container = Arc::new(Mutex::new(None));
-            let registration_container_clone = Arc::clone(&registration_container);
-            let self_clone = Arc::clone(&self);
-            let maybe_registration = self
-                .service_adapter
-                .register_availability_callback(
-                    &self.service_name,
-                    Box::new(move || {
-                        let registration_container_clone =
-                            Arc::clone(&registration_container_clone);
-                        let self_clone = Arc::clone(&self_clone);
-                        tokio::spawn(async move {
-                            self_clone.retry_activation(registration_container_clone).await;
-                        });
-                    }),
-                )
-                .await
-                .with_context(|| "Service adapter failed to subscribe to service availability")?;
-            let Some(registration) = maybe_registration else {
-                return Err(anyhow!(
-                    "Service with name {} is not supported by underlying data providers",
-                    self.service_name
-                ));
-            };
-
-            assert!(registration_container.lock().replace(registration).is_none());
-
-            ServicePublisherState::Pending {
-                availability_registration: registration_container,
-                callback_map: HashMap::new(),
-            }
-        };
-
-        // Set the new state and release the mutex.
-        *state_lock = new_state;
-        Ok(())
+        self.activate_impl(state_lock).await
     }
 
     async fn deactivate(&self) -> anyhow::Result<()> {
@@ -306,6 +262,59 @@ impl ServicePublisher {
         }
     }
 
+    /// Attempts Service Publisher activation, subscribes to availability callback if activation
+    /// didn't succeed and sets the new publisher status using provided state lock.
+    async fn activate_impl<'a>(
+        self: &Arc<Self>,
+        mut state_lock: AsyncMutexGuard<'a, ServicePublisherState>,
+    ) -> anyhow::Result<()> {
+        let new_state = if let Some(state) = self.try_activate().await? {
+            state
+        } else {
+            info!(
+                "Publisher {} activation wasn't able to discover the service. \
+                Subscribing to availability notifications",
+                self.get_name()
+            );
+
+            let registration_container = Arc::new(Mutex::new(None));
+            let registration_container_clone = Arc::clone(&registration_container);
+            let self_clone = Arc::clone(self);
+            let maybe_registration = self
+                .service_adapter
+                .register_availability_callback(
+                    &self.service_name,
+                    Box::new(move || {
+                        let registration_container_clone =
+                            Arc::clone(&registration_container_clone);
+                        let self_clone = Arc::clone(&self_clone);
+                        tokio::spawn(async move {
+                            self_clone.retry_activation(registration_container_clone).await;
+                        });
+                    }),
+                )
+                .await
+                .with_context(|| "Service adapter failed to subscribe to service availability")?;
+            let Some(registration) = maybe_registration else {
+                return Err(anyhow!(
+                    "Service with name {} is not supported by underlying data providers",
+                    self.service_name
+                ));
+            };
+
+            assert!(registration_container.lock().replace(registration).is_none());
+
+            ServicePublisherState::Pending {
+                availability_registration: registration_container,
+                callback_map: HashMap::new(),
+            }
+        };
+
+        // Set the new state and release the mutex.
+        *state_lock = new_state;
+        Ok(())
+    }
+
     /// Moves callbacks from pending state callback map if the new state after Pending supports subscriptions.
     fn maybe_swap_callback_map(
         new_state: &mut ServicePublisherState,
@@ -410,6 +419,7 @@ impl ServicePublisher {
             GetMessageProviderOutcome::GetNotSupported => {
                 // Subscribe to the service adapter.
                 let (sender, receiver) = mpsc::unbounded_channel();
+                let self_clone = Arc::clone(self);
                 let maybe_subscription = self
                     .service_adapter
                     .subscribe(
@@ -421,7 +431,10 @@ impl ServicePublisher {
                                 .send(Arc::clone(msg))
                                 .expect("Callback should only receive messages when subscribed")
                         }),
-                        Box::new(|| {}),
+                        Box::new(move || {
+                            info!("Service Publisher {} received subscription cancellation notification", self_clone.base.get_name());
+                            self_clone.on_subscription_cancelled();
+                        }),
                     )
                     .await
                     .map_err(Either::Right)?;
@@ -472,6 +485,25 @@ impl ServicePublisher {
         };
 
         self.base.set_new_message(message, &context, callback_map);
+    }
+
+    fn on_subscription_cancelled(self: &Arc<Self>) {
+        let self_clone = Arc::clone(self);
+        tokio::spawn(async move {
+            // Lock state mutex and hold it until the state transition is complete.
+            let state_lock = self_clone.state.lock().await;
+
+            if !matches!(*state_lock, ServicePublisherState::ActiveSubscribed { .. }) {
+                return;
+            }
+
+            if let Err(err) = self_clone.activate_impl(state_lock).await {
+                (self_clone.error_callback)(ServicePublisherRuntimeError {
+                    publisher_name: self_clone.base.get_name().to_owned(),
+                    error: ServicePublisherRuntimeErrorKind::ActivationAfterCancellationFailed(err),
+                });
+            }
+        });
     }
 }
 
@@ -846,6 +878,62 @@ mod tests {
         );
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_subscription_resubscribes_on_cancelled() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = Arc::new(ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            SubSamplingInterval::ZERO,
+            ConnectionType::Subscription,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+        let rx = service_adapter.set_next_subscribe_successful();
+        service_adapter.notify_cancelled();
+        rx.await.unwrap();
+
+        let state = publisher.state.lock().await;
+        assert!(
+            matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
+            "Unexpected state: {}",
+            *state
+        );
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_subscription_not_resubscribes_when_inactive() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = Arc::new(ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            SubSamplingInterval::ZERO,
+            ConnectionType::Subscription,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+        publisher.deactivate().await.unwrap();
+        service_adapter.notify_cancelled();
+        tokio::task::yield_now().await;
+
+        let state = publisher.state.lock().await;
+        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils::timeout]

@@ -19,6 +19,7 @@ pub(crate) struct MockServiceAdapter {
     // Notify that's triggered when unsubscribe is blocked.
     pub(crate) notify_unsubscribing: Arc<Notify>,
     availability_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
+    cancellation_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     message_provider_returned_sender: Mutex<Option<oneshot::Sender<()>>>,
     next_error: Mutex<Option<anyhow::Error>>,
     next_message_provider: Mutex<Option<MockServiceMessageProvider>>,
@@ -79,7 +80,7 @@ impl ServiceAdapter for MockServiceAdapter {
         configuration: Option<&Any>,
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        _cancellation_callback: Box<dyn Fn() + Send + Sync>,
+        cancellation_callback: Box<dyn Fn() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
         self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
@@ -99,6 +100,7 @@ impl ServiceAdapter for MockServiceAdapter {
         let maybe_sender = self.successful_subscribe_sender.lock().take();
         if let Some(sender) = maybe_sender {
             self.new_message_callback.lock().await.replace(new_message_callback);
+            self.cancellation_callback.lock().replace(cancellation_callback);
             let _ = sender.send(());
             Ok(Some(ServiceSubscription {
                 subscription_type: ServiceSubscriptionType::Shared {
@@ -152,6 +154,7 @@ impl MockServiceAdapter {
             availability_callback: None.into(),
             block_subscribe: false,
             block_unsubscribe: false,
+            cancellation_callback: None.into(),
             successful_subscribe_sender: None.into(),
             latest_configuration: None.into(),
             message_provider_returned_sender: None.into(),
@@ -208,6 +211,10 @@ impl MockServiceAdapter {
         let (tx, rx) = oneshot::channel();
         self.successful_subscribe_sender.lock().replace(tx);
         rx
+    }
+
+    pub(crate) fn notify_cancelled(&self) {
+        self.cancellation_callback.lock().as_ref().unwrap()();
     }
 
     pub(crate) async fn publish_new_message(&self, message: &Arc<dyn MessageDyn>) {
