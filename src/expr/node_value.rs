@@ -853,6 +853,10 @@ mod tests {
 
     use crate::expr::mock::*;
 
+    fn unary_right_operand_provider() -> Result<NodeValue, NodeEvaluationError> {
+        panic!("Unary operator should not call right operand provider");
+    }
+
     fn provide(value: &NodeValue) -> Result<NodeValue, NodeEvaluationError> {
         Ok(value.clone())
     }
@@ -1359,20 +1363,12 @@ mod tests {
 
         // !true = false
         assert_eq!(
-            true_val
-                .operate_sync(&OP_NOT, || panic!(
-                    "Unary operator should not call right operand provider"
-                ))
-                .unwrap(),
+            true_val.operate_sync(&OP_NOT, unary_right_operand_provider).unwrap(),
             NodeValue::Bool(false)
         );
         // !false = true
         assert_eq!(
-            false_val
-                .operate_sync(&OP_NOT, || panic!(
-                    "Unary operator should not call right operand provider"
-                ))
-                .unwrap(),
+            false_val.operate_sync(&OP_NOT, unary_right_operand_provider).unwrap(),
             NodeValue::Bool(true)
         );
     }
@@ -1409,21 +1405,12 @@ mod tests {
         );
         // - None = None
         assert_eq!(
-            none_val
-                .clone()
-                .operate_sync(&OP_UNARY_MINUS, || panic!(
-                    "Unary operator should not call right operand provider"
-                ))
-                .unwrap(),
+            none_val.clone().operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap(),
             NodeValue::None
         );
         // |None| = None
         assert_eq!(
-            none_val
-                .operate_sync(&OP_ABSOLUTE, || panic!(
-                    "Unary operator should not call right operand provider"
-                ))
-                .unwrap(),
+            none_val.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
             NodeValue::None
         );
     }
@@ -1576,26 +1563,16 @@ mod tests {
         let true_val = NodeValue::Bool(true);
 
         assert_eq!(
-            two.operate_sync(&OP_UNARY_MINUS, || panic!(
-                "Unary operator should not call right operand provider"
-            ))
-            .unwrap(),
+            two.operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(-2)
         );
         assert_eq!(
-            five.operate_sync(&OP_UNARY_MINUS, || panic!(
-                "Unary operator should not call right operand provider"
-            ))
-            .unwrap(),
+            five.operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap(),
             NodeValue::Double(-5.5)
         );
         // fails for non-numeric operand
         assert!(matches!(
-            true_val
-                .operate_sync(&OP_UNARY_MINUS, || panic!(
-                    "Unary operator should not call right operand provider"
-                ))
-                .unwrap_err(),
+            true_val.operate_sync(&OP_UNARY_MINUS, unary_right_operand_provider).unwrap_err(),
             NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
         ));
     }
@@ -1609,25 +1586,25 @@ mod tests {
         let zero = NodeValue::Float(0.0);
 
         assert_eq!(
-            one.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None)).unwrap(),
+            one.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(1)
         );
         assert_eq!(
-            negative_three.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None)).unwrap(),
+            negative_three.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(3)
         );
         assert_eq!(
-            two_point_seven.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None)).unwrap(),
+            two_point_seven.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
             NodeValue::Double(2.7)
         );
         assert_eq!(
             negative_two_point_seven
-                .operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None))
+                .operate_sync(&OP_ABSOLUTE, unary_right_operand_provider)
                 .unwrap(),
             NodeValue::Double(2.7)
         );
         assert_eq!(
-            zero.operate_sync(&OP_ABSOLUTE, || provide(&NodeValue::None)).unwrap(),
+            zero.operate_sync(&OP_ABSOLUTE, unary_right_operand_provider).unwrap(),
             NodeValue::Double(0.0)
         );
     }
@@ -2206,15 +2183,15 @@ mod tests {
         let one = NodeValue::Int32(1);
 
         assert!(matches!(
-            one.clone().operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap_err(),
+            one.clone().operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap_err(),
             NodeEvaluationError::RoundingOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            true_val.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap_err(),
+            true_val.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap_err(),
             NodeEvaluationError::RoundingOperatorIncompatibleOperands
         ));
         assert!(matches!(
-            one.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap_err(),
+            one.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap_err(),
             NodeEvaluationError::RoundingOperatorIncompatibleOperands
         ));
     }
@@ -2228,23 +2205,23 @@ mod tests {
         let negative_point_nine = NodeValue::Double(-0.99);
 
         assert_eq!(
-            point_one.operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap(),
+            point_one.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(0)
         );
         assert_eq!(
-            two_point_nine.operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap(),
+            two_point_nine.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(2)
         );
         assert_eq!(
-            five.operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap(),
+            five.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(5)
         );
         assert_eq!(
-            negative_point_three.operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap(),
+            negative_point_three.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(-1)
         );
         assert_eq!(
-            negative_point_nine.operate_sync(&OP_FLOOR, || provide(&NodeValue::None)).unwrap(),
+            negative_point_nine.operate_sync(&OP_FLOOR, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(-1)
         );
     }
@@ -2258,23 +2235,23 @@ mod tests {
         let negative_point_nine = NodeValue::Double(-0.99);
 
         assert_eq!(
-            point_one.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap(),
+            point_one.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(0)
         );
         assert_eq!(
-            two_point_nine.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap(),
+            two_point_nine.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(3)
         );
         assert_eq!(
-            five.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap(),
+            five.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(5)
         );
         assert_eq!(
-            negative_point_three.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap(),
+            negative_point_three.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(0)
         );
         assert_eq!(
-            negative_point_nine.operate_sync(&OP_ROUND, || provide(&NodeValue::None)).unwrap(),
+            negative_point_nine.operate_sync(&OP_ROUND, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(-1)
         );
     }
@@ -2288,23 +2265,23 @@ mod tests {
         let negative_point_nine = NodeValue::Double(-0.99);
 
         assert_eq!(
-            point_one.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap(),
+            point_one.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(1)
         );
         assert_eq!(
-            two_point_nine.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap(),
+            two_point_nine.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(3)
         );
         assert_eq!(
-            five.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap(),
+            five.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(5)
         );
         assert_eq!(
-            negative_point_three.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap(),
+            negative_point_three.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(0)
         );
         assert_eq!(
-            negative_point_nine.operate_sync(&OP_CEIL, || provide(&NodeValue::None)).unwrap(),
+            negative_point_nine.operate_sync(&OP_CEIL, unary_right_operand_provider).unwrap(),
             NodeValue::Int64(0)
         );
     }
