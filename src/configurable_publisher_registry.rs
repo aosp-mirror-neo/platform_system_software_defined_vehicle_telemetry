@@ -28,6 +28,7 @@ use std::collections::{hash_map::Entry, HashMap};
 use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
+use tokio::sync::mpsc;
 use thiserror::Error;
 
 // Crate dependencies.
@@ -38,8 +39,10 @@ pub struct ConfigurablePublisherRegistry {
     availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
     /// Adapter to make calls into Binder library.
     binder_adapter: Box<dyn BinderAdapter<dyn IConfigurablePublisher>>,
+    /// Sender of cancellation callbacks.
+    cancellation_sender: mpsc::UnboundedSender<Vec<Box<dyn FnOnce() + Send + Sync>>>,
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
-    publisher_entries: Arc<Mutex<HashMap<String, PublisherEntry>>>,
+    publisher_entries: Mutex<HashMap<String, PublisherEntry>>,
 }
 
 pub struct ConfigurablePublisherRegistrySubscription {
@@ -74,6 +77,7 @@ struct AvailabilityCallbackRegistrationImpl {
 
 /// Publisher registry entry.
 struct PublisherEntry {
+    cancellation_callbacks: Vec<Box<dyn FnOnce() + Send + Sync>>,
     _death_recipient: binder::DeathRecipient,
     message_descriptor: MessageDescriptor,
     publisher: binder::Strong<dyn IConfigurablePublisher>,
@@ -141,15 +145,16 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
-        let result = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
+        let (message_descriptor, publisher) = {
+            let mut publisher_entries_lock = self.publisher_entries.lock();
+            let Some(entry) = publisher_entries_lock.get_mut(service_name) else {
+                return Ok(CreateSubscriptionOutcome::NotRegistered {
+                    new_message_callback,
+                    cancellation_callback,
+                });
+            };
+            entry.cancellation_callbacks.push(cancellation_callback);
             (entry.message_descriptor.clone(), entry.publisher.clone())
-        });
-
-        let Some((message_descriptor, publisher)) = result else {
-            return Ok(CreateSubscriptionOutcome::NotRegistered {
-                new_message_callback,
-                cancellation_callback,
-            });
         };
 
         let listener_wrapper = BnSubscriber::new_async_binder(
@@ -195,15 +200,26 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
 impl ConfigurablePublisherRegistry {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
+        let (cancellation_sender, mut cancellation_receiver) =
+            mpsc::unbounded_channel::<Vec<Box<dyn FnOnce() + Send + Sync>>>();
+        tokio::spawn(async move {
+            while let Some(cancellation_callbacks) = cancellation_receiver.recv().await {
+                for cancellation_callback in cancellation_callbacks.into_iter() {
+                    cancellation_callback();
+                }
+            }
+        });
+
         Self {
             availability_callbacks: Arc::new(Mutex::new(HashMap::new())),
             binder_adapter: Box::new(BinderAdapterImpl {}),
-            publisher_entries: Mutex::new(HashMap::new()).into(),
+            cancellation_sender,
+            publisher_entries: HashMap::new().into(),
         }
     }
 
     pub(crate) async fn register_publisher(
-        &self,
+        self: &Arc<Self>,
         publisher_info: &PublisherInfo,
         publisher: &binder::Strong<dyn IConfigurablePublisher>,
     ) -> Result<(), ConfigurablePublisherRegistryRegisterError> {
@@ -224,16 +240,19 @@ impl ConfigurablePublisherRegistry {
                 });
             }
             Entry::Vacant(v) => {
-                let publisher_entries_reference = Arc::downgrade(&self.publisher_entries);
+                let self_reference = Arc::downgrade(self);
                 let service_name_clone = v.key().clone();
                 let death_recipient = self.binder_adapter.link_to_death(
                     publisher,
                     Box::new(move || {
-                        Self::on_publisher_death(&publisher_entries_reference, &service_name_clone)
+                        if let Some(self_clone) = self_reference.upgrade() {
+                            self_clone.on_publisher_death(&service_name_clone);
+                        }
                     }),
                 )?;
 
                 v.insert(PublisherEntry {
+                    cancellation_callbacks: vec![],
                     _death_recipient: death_recipient,
                     message_descriptor,
                     publisher: publisher.clone(),
@@ -256,25 +275,30 @@ impl ConfigurablePublisherRegistry {
     }
 
     pub(crate) async fn unregister_publisher(&self, service_name: &str) -> binder::Result<()> {
-        let mut publisher_entries_lock = self.publisher_entries.lock();
-
-        match publisher_entries_lock.entry(service_name.to_string()) {
-            Entry::Occupied(o) => {
-                o.remove_entry();
-            }
-            Entry::Vacant(_) => {
-                info!(
-                    "Unable to unregister service {}. It might have been unregistered already.",
-                    service_name
-                );
-            }
+        if !self.try_unregister_publisher(service_name) {
+            info!(
+                "Unable to unregister service {}. It might have been unregistered already.",
+                service_name
+            );
         }
 
         Ok(())
     }
 
+    fn try_unregister_publisher(&self, service_name: &str) -> bool {
+        let Some(entry) = self.publisher_entries.lock().remove(service_name) else {
+            return false;
+        };
+
+        self.cancellation_sender
+            .send(entry.cancellation_callbacks)
+            .expect("Receiver should have the same lifetime as self");
+
+        true
+    }
+
     fn visit_entry<T>(
-        publisher_entries: &Arc<Mutex<HashMap<String, PublisherEntry>>>,
+        publisher_entries: &Mutex<HashMap<String, PublisherEntry>>,
         service_name: &str,
         visitor: impl FnOnce(&PublisherEntry) -> T,
     ) -> Option<T> {
@@ -283,14 +307,9 @@ impl ConfigurablePublisherRegistry {
         Some(visitor(entry))
     }
 
-    fn on_publisher_death(
-        publisher_entries: &Weak<Mutex<HashMap<String, PublisherEntry>>>,
-        service_name: &str,
-    ) {
-        if let Some(publisher_entries) = publisher_entries.upgrade() {
-            if publisher_entries.lock().remove(service_name).is_some() {
-                info!("Unregistered publisher {service_name} due to Binder death notification.");
-            }
+    fn on_publisher_death(&self, service_name: &str) {
+        if self.try_unregister_publisher(service_name) {
+            info!("Unregistered publisher {service_name} due to Binder death notification.");
         }
     }
 }
@@ -500,10 +519,11 @@ mod tests {
 
     async fn create_configurable_publisher_registry(
         configurable_publisher: MockConfigurablePublisher,
-    ) -> (ConfigurablePublisherRegistry, MockBinderAdapter) {
+    ) -> (Arc<ConfigurablePublisherRegistry>, MockBinderAdapter) {
         let mut configurable_publisher_registry = ConfigurablePublisherRegistry::new();
         let binder_adapter = MockBinderAdapter::new();
         configurable_publisher_registry.binder_adapter = Box::new(binder_adapter.clone());
+        let configurable_publisher_registry = Arc::new(configurable_publisher_registry);
 
         let file_descriptor = sample_publisher::file_descriptor();
         let file_descriptor_proto = file_descriptor.proto();
@@ -519,7 +539,7 @@ mod tests {
         let binder_publisher =
             BnConfigurablePublisher::new_binder(configurable_publisher, BinderFeatures::default());
 
-        configurable_publisher_registry
+        Arc::clone(&configurable_publisher_registry)
             .register_publisher(&publisher_info, &binder_publisher)
             .await
             .unwrap();
