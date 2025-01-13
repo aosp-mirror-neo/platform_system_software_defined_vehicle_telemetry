@@ -420,8 +420,7 @@ impl ServicePublisher {
                 // Subscribe to the service adapter.
                 let (sender, receiver) = mpsc::unbounded_channel();
                 let self_clone = Arc::clone(self);
-                let maybe_subscription = self
-                    .service_adapter
+                let maybe_subscription = Arc::clone(&self.service_adapter)
                     .subscribe(
                         &self.service_name,
                         self.configuration.as_ref(),

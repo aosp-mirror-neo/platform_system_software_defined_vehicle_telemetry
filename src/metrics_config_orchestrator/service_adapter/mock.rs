@@ -75,7 +75,7 @@ impl ServiceAdapter for MockServiceAdapter {
     }
 
     async fn subscribe(
-        &self,
+        self: Arc<Self>,
         _service_name: &str,
         configuration: Option<&Any>,
         _sub_sampling_interval: &SubSamplingInterval,
