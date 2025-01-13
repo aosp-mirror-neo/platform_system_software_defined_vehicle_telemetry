@@ -344,7 +344,9 @@ mod integration_tests {
     use sdv_comms::dt;
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;
+    use sdv_status_rs::SdvStatus;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
+    use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::str::FromStr;
     use std::time::Duration;
@@ -711,6 +713,77 @@ mod integration_tests {
             assert!(elapsed >= min_elapsed, "Elapsed time before notification should be at least {min_elapsed:?}, but was {elapsed:?}");
         }
     }
+
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout(10_000)]
+        #[tokio::test]
+        recovers_after_data_tunnel_overflow,
+
+        |sub_sampling_interval| async move {
+            let ctx = test_utils::make_context(0).await;
+
+            let service_name = test_utils::make_unique_service_name();
+
+            let publisher = test_utils::register_topic_with_message_queue_size(
+                ctx,
+                &service_name,
+                MessageMetadata {
+                    file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                    message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
+                    ..Default::default()
+                },
+                6,
+            )
+            .await
+            .unwrap();
+
+            let subscriber = create_accessor(ctx);
+            let (tx, mut rx) = mpsc::unbounded_channel();
+            let outcome = subscriber
+                .create_subscription(
+                    &service_name,
+                    None,
+                    &sub_sampling_interval,
+                    Box::new(move |message| tx.send(message).unwrap()),
+                    create_empty_fn_box(),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+
+            // Cause an overflow.
+            for i in 1..=30 {
+                write_message(&publisher, TestMessage { int_field: i, ..Default::default() });
+            }
+
+            let message = rx.recv().await.unwrap();
+            let Err(ServiceRuntimeError::MessageRetrievalError(error)) = message else {
+                panic!("Unexpected message: {message:?}");
+            };
+            let Some(error) = error.root_cause().downcast_ref::<SdvStatus>() else {
+                panic!("Unexpected error: {error:?}");
+            };
+            assert_eq!(error.status_code(), SdvStatusCode::DataLoss);
+
+            if sub_sampling_interval == SubSamplingInterval::ZERO {
+                // After the overflow occurred, we should be able to read the last `n/2` (=3)
+                // messages, where `n` (=6) is the message queue size.
+                let message = rx.recv().await.unwrap();
+                assert_eq!(get_int_field_value(message.unwrap()), 28);
+                let message = rx.recv().await.unwrap();
+                assert_eq!(get_int_field_value(message.unwrap()), 29);
+                let message = rx.recv().await.unwrap();
+                assert_eq!(get_int_field_value(message.unwrap()), 30);
+            } else {
+                // After the overflow occurred, we should only receive the latest message.
+                let message = rx.recv().await.unwrap();
+                assert_eq!(get_int_field_value(message.unwrap()), 30);
+            }
+        },
+
+        no_sub_sampling: (SubSamplingInterval::ZERO,),
+        with_sub_sampling: (SubSamplingInterval::try_from(Duration::from_secs(1)).unwrap(),),
+    );
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]

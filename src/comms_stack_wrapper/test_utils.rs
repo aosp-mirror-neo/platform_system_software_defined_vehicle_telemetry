@@ -60,11 +60,20 @@ pub(super) async fn register_topic(
     service_name: &str,
     publisher_metadata: MessageMetadata,
 ) -> SdvResult<dt::Publisher> {
+    register_topic_with_message_queue_size(ctx, service_name, publisher_metadata, 2).await
+}
+
+pub(super) async fn register_topic_with_message_queue_size(
+    ctx: ContextRef,
+    service_name: &str,
+    publisher_metadata: MessageMetadata,
+    message_queue_size: u32,
+) -> SdvResult<dt::Publisher> {
     let mut unit_registration_args = create_registration_args(service_name, publisher_metadata);
 
     let mut publisher_unit_metadata = PublisherUnitMetadata::new();
     publisher_unit_metadata.set_message_size(3);
-    publisher_unit_metadata.set_message_count(2);
+    publisher_unit_metadata.set_message_count(message_queue_size);
     unit_registration_args.set_unit_metadata(&UnitMetadata::Publisher(publisher_unit_metadata));
 
     dt::Publisher::create(ctx, unit_registration_args).await
