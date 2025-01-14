@@ -796,8 +796,13 @@ mod tests {
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
     use sdv_telemetry_test_utils::parameterized_test;
+    use std::f32::consts::PI as PIf32;
+    use std::f64::consts::PI as PIf64;
 
     use crate::expr::mock::*;
+
+    const ONE: NodeValue = NodeValue::Double(1.0);
+    const ONE_EPSILON: NodeValue = NodeValue::Double(1.0 + f64::EPSILON);
 
     fn unary_right_operand_provider() -> Result<NodeValue, NodeEvaluationError> {
         panic!("Unary operator should not call right operand provider");
@@ -805,6 +810,15 @@ mod tests {
 
     fn provide(value: &NodeValue) -> Result<NodeValue, NodeEvaluationError> {
         Ok(value.clone())
+    }
+
+    #[test]
+    fn one_and_one_epsilon_are_valid() {
+        assert_ne!(
+            ONE.get_double().unwrap(),
+            ONE_EPSILON.get_double().unwrap(),
+            "These values must be very close but not equal so that the following tests can verify the correct handling of approximately equal values."
+        );
     }
 
     #[test]
@@ -1269,477 +1283,111 @@ mod tests {
         power_non_numeric_right_fails: (&OP_POWER, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
     );
 
-    #[test]
-    fn operate_sync_relational_propagates_up_none_values() {
-        let int_val = NodeValue::Int32(1);
-        let none_val = NodeValue::None;
+    parameterized_test!(
+        #[test]
+        operate_sync_relational,
 
-        // 1 > None = None
-        assert_eq!(
-            int_val.clone().operate_sync(&OP_GT, || provide(&none_val)).unwrap(),
-            NodeValue::None
-        );
-        // None > 1 = None
-        assert_eq!(none_val.operate_sync(&OP_GT, || provide(&int_val)).unwrap(), NodeValue::None);
-    }
+        |operator, a: NodeValue, b: NodeValue, matcher| {
+            assert_that!(
+                a.operate_sync(operator, || Ok(b)),
+                matcher
+            );
+        },
 
-    #[test]
-    fn operate_sync_relational_eq() {
-        let one = NodeValue::Double(1.0);
-        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
-        assert_ne!(
-            one.get_double().unwrap(),
-            one_epsilon.get_double().unwrap(),
-            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
-        );
-        let two = NodeValue::Int32(2);
-        let two_i64 = NodeValue::Int64(2);
-        let two_f32 = NodeValue::Float(2.0);
-        let two_f64 = NodeValue::Double(2.0);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
+        eq_1: (&OP_EQ, ONE, ONE_EPSILON, ok(eq(&NodeValue::Bool(true))),),
+        eq_2: (&OP_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
+        eq_3: (&OP_EQ, NodeValue::Int32(2), NodeValue::Int64(2), ok(eq(&NodeValue::Bool(true))),),
+        eq_4: (&OP_EQ, NodeValue::Int32(2), NodeValue::Float(2.0), ok(eq(&NodeValue::Bool(true))),),
+        eq_5: (&OP_EQ, NodeValue::Int32(2), NodeValue::Double(2.0), ok(eq(&NodeValue::Bool(true))),),
+        eq_6: (&OP_EQ, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(false))),),
+        eq_7: (&OP_EQ, NodeValue::Int32(2), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        eq_none_left: (&OP_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        eq_none_right: (&OP_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-        assert_eq!(
-            one.operate_sync(&OP_EQ, || provide(&one_epsilon)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_EQ, || provide(&two)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_EQ, || provide(&two_i64)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_EQ, || provide(&two_f32)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_EQ, || provide(&two_f64)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_EQ, || provide(&five)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.operate_sync(&OP_EQ, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-    }
+        ne_1: (&OP_NOT_EQ, ONE, ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
+        ne_2: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
+        ne_3: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Int64(2), ok(eq(&NodeValue::Bool(false))),),
+        ne_4: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Float(2.0), ok(eq(&NodeValue::Bool(false))),),
+        ne_5: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Double(2.0), ok(eq(&NodeValue::Bool(false))),),
+        ne_6: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(true))),),
+        ne_7: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        ne_none_left: (&OP_NOT_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        ne_none_right: (&OP_NOT_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-    #[test]
-    fn operate_sync_relational_not_eq() {
-        let one = NodeValue::Double(1.0);
-        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
-        assert_ne!(
-            one.get_double().unwrap(),
-            one_epsilon.get_double().unwrap(),
-            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
-        );
-        let two = NodeValue::Int32(2);
-        let two_f32 = NodeValue::Float(2.0);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
+        gt_1: (&OP_GT, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
+        gt_2: (&OP_GT, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        gt_3: (&OP_GT, ONE_EPSILON, ONE, ok(eq(&NodeValue::Bool(false))),),
+        gt_4: (&OP_GT, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
+        gt_5: (&OP_GT, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(false))),),
+        gt_6: (&OP_GT, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
+        gt_7: (&OP_GT, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        gt_none_left: (&OP_GT, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        gt_none_right: (&OP_GT, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-        assert_eq!(
-            one.operate_sync(&OP_NOT_EQ, || provide(&one_epsilon)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_NOT_EQ, || provide(&two)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_NOT_EQ, || provide(&two_f32)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_NOT_EQ, || provide(&five)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.operate_sync(&OP_NOT_EQ, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
+        gte_1: (&OP_GT_OR_EQ, NodeValue::Bool(true), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        gte_2: (&OP_GT_OR_EQ, ONE_EPSILON, ONE, ok(eq(&NodeValue::Bool(true))),),
+        gte_3: (&OP_GT_OR_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
+        gte_4: (&OP_GT_OR_EQ, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(false))),),
+        gte_5: (&OP_GT_OR_EQ, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
+        gte_6: (&OP_GT_OR_EQ, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        gte_none_left: (&OP_GT_OR_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        gte_none_right: (&OP_GT_OR_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-    #[test]
-    fn operate_sync_relational_gt() {
-        let one = NodeValue::Double(1.0);
-        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
-        assert_ne!(
-          one.get_double().unwrap(),
-          one_epsilon.get_double().unwrap(),
-          "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
-        );
-        let two = NodeValue::Int32(2);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
+        lt_1: (&OP_LT, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        lt_2: (&OP_LT, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        lt_3: (&OP_LT, ONE, ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
+        lt_4: (&OP_LT, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
+        lt_5: (&OP_LT, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(true))),),
+        lt_6: (&OP_LT, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
+        lt_7: (&OP_LT, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        lt_none_left: (&OP_LT, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        lt_none_right: (&OP_LT, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_GT, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            one_epsilon.operate_sync(&OP_GT, || provide(&one)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_GT, || provide(&two)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_GT, || provide(&five)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            five.clone().operate_sync(&OP_GT, || provide(&two)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert!(matches!(
-            five.operate_sync(&OP_GT, || provide(&true_val)).unwrap_err(),
-            NodeEvaluationError::ComparisonOperatorIncomptaibleOperands
-        ));
-    }
+        lte_1: (&OP_LT_OR_EQ, NodeValue::Bool(true), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        lte_2: (&OP_LT_OR_EQ, ONE_EPSILON, ONE, ok(eq(&NodeValue::Bool(true))),),
+        lte_3: (&OP_LT_OR_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
+        lte_4: (&OP_LT_OR_EQ, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(true))),),
+        lte_5: (&OP_LT_OR_EQ, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
+        lte_6: (&OP_LT_OR_EQ, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        lte_none_left: (&OP_LT_OR_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
+        lte_none_right: (&OP_LT_OR_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-    #[test]
-    fn operate_sync_relational_gt_or_eq() {
-        let one = NodeValue::Double(1.0);
-        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
-        assert_ne!(
-            one.get_double().unwrap(),
-            one_epsilon.get_double().unwrap(),
-            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
-        );
-        let two = NodeValue::Int32(2);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
+        contains_bool_1: (&OP_CONTAINS, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        contains_bool_2: (&OP_CONTAINS, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        contains_int_1: (&OP_CONTAINS, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(30), ok(eq(&NodeValue::Bool(true))),),
+        contains_int_2: (&OP_CONTAINS, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int64(30), ok(eq(&NodeValue::Bool(true))),),
+        contains_int_3: (&OP_CONTAINS, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
+        contains_float_1: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(0.5), ok(eq(&NodeValue::Bool(true))),),
+        contains_float_2: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Double(PIf64), ok(eq(&NodeValue::Bool(true))),),
+        contains_float_3: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Int32(10), ok(eq(&NodeValue::Bool(true))),),
+        contains_float_4: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(30.0), ok(eq(&NodeValue::Bool(false))),),
+        contains_approximately_equal: (&OP_CONTAINS, NodeValue::DoubleList(vec![ONE.get_double().unwrap()]), ONE_EPSILON, ok(eq(&NodeValue::Bool(true))),),
+        contains_message_1: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TEST_MESSAGE.clone())), ok(eq(&NodeValue::Bool(true))),),
+        contains_message_2: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TestMessage::new())), ok(eq(&NodeValue::Bool(false))),),
+        contains_none_left: (&OP_CONTAINS, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
+        contains_none_right: (&OP_CONTAINS, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
+        contains_not_a_list: (&OP_CONTAINS, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        contains_incompatible_types_1: (&OP_CONTAINS, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        contains_incompatible_types_2: (&OP_CONTAINS, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
 
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_GT_OR_EQ, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            one.operate_sync(&OP_GT_OR_EQ, || provide(&one_epsilon)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_GT_OR_EQ, || provide(&two)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_GT_OR_EQ, || provide(&five)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            five.clone().operate_sync(&OP_GT_OR_EQ, || provide(&two)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert!(matches!(
-            five.operate_sync(&OP_GT_OR_EQ, || provide(&true_val)).unwrap_err(),
-            NodeEvaluationError::ComparisonOperatorIncomptaibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_lt() {
-        let one = NodeValue::Double(1.0);
-        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
-        assert_ne!(
-            one.get_double().unwrap(),
-            one_epsilon.get_double().unwrap(),
-            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
-        );
-        let two = NodeValue::Int32(2);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_LT, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            one.operate_sync(&OP_LT, || provide(&one_epsilon)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_LT, || provide(&two)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_LT, || provide(&five)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            five.clone().operate_sync(&OP_LT, || provide(&two)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert!(matches!(
-            five.operate_sync(&OP_LT, || provide(&true_val)).unwrap_err(),
-            NodeEvaluationError::ComparisonOperatorIncomptaibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_lt_or_eq() {
-        let one = NodeValue::Double(1.0);
-        let one_epsilon = NodeValue::Double(1.0 + f64::EPSILON);
-        assert_ne!(
-            one.get_double().unwrap(),
-            one_epsilon.get_double().unwrap(),
-            "These values must be very close but not equal so that this test can verify the correct handling of approximately equal values."
-        );
-        let two = NodeValue::Int32(2);
-        let five = NodeValue::Float(5.5);
-        let true_val = NodeValue::Bool(true);
-
-        assert_eq!(
-            true_val.clone().operate_sync(&OP_LT_OR_EQ, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            one_epsilon.operate_sync(&OP_LT_OR_EQ, || provide(&one)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_LT_OR_EQ, || provide(&two)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            two.clone().operate_sync(&OP_LT_OR_EQ, || provide(&five)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            five.clone().operate_sync(&OP_LT_OR_EQ, || provide(&two)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert!(matches!(
-            five.operate_sync(&OP_LT_OR_EQ, || provide(&true_val)).unwrap_err(),
-            NodeEvaluationError::ComparisonOperatorIncomptaibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_contains_errs_if_left_operand_not_a_list() {
-        let two = NodeValue::Int32(2);
-
-        assert!(matches!(
-            two.clone().operate_sync(&OP_CONTAINS, || provide(&two)).unwrap_err(),
-            NodeEvaluationError::ContainsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_contains_errs_if_operands_have_incompatible_types() {
-        let bool_list = NodeValue::BoolList(vec![true, true, false]);
-        let five = NodeValue::Float(5.5);
-
-        assert!(matches!(
-            bool_list.operate_sync(&OP_CONTAINS, || provide(&five)).unwrap_err(),
-            NodeEvaluationError::ContainsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_contains_bool_type_ok() {
-        let bool_list = NodeValue::BoolList(vec![true, true, true]);
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-
-        assert_eq!(
-            bool_list.clone().operate_sync(&OP_CONTAINS, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            bool_list.operate_sync(&OP_CONTAINS, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_contains_int_type_ok() {
-        let int_list = NodeValue::Int32List(vec![3, 30, 300]);
-        let zero = NodeValue::Int32(0);
-        let three = NodeValue::Int32(3);
-        let thirty = NodeValue::Int64(30);
-        // not int
-        let three_hundred = NodeValue::Double(300.0);
-
-        assert_eq!(
-            int_list.clone().operate_sync(&OP_CONTAINS, || provide(&zero)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            int_list.clone().operate_sync(&OP_CONTAINS, || provide(&three)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            int_list.clone().operate_sync(&OP_CONTAINS, || provide(&thirty)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert!(matches!(
-            int_list.operate_sync(&OP_CONTAINS, || provide(&three_hundred)).unwrap_err(),
-            NodeEvaluationError::ContainsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_contains_float_type_ok() {
-        let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
-        let point_five = NodeValue::Float(0.5);
-        // f64 PI, not f32 PI
-        let pi = NodeValue::Double(std::f64::consts::PI);
-        // not float but is a numeric type
-        let ten = NodeValue::Int32(10);
-        let thirty = NodeValue::Float(30.0);
-
-        assert_eq!(
-            float_list.clone().operate_sync(&OP_CONTAINS, || provide(&point_five)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            float_list.clone().operate_sync(&OP_CONTAINS, || provide(&pi)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            float_list.clone().operate_sync(&OP_CONTAINS, || provide(&ten)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            float_list.operate_sync(&OP_CONTAINS, || provide(&thirty)).unwrap(),
-            NodeValue::Bool(false)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_contains_message_type_ok() {
-        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
-        let msg_list = NodeValue::MessageList(vec![Arc::clone(&message)]);
-        let msg_1 = NodeValue::Message(message);
-        let msg_2 = NodeValue::Message(Arc::new(TestMessage::new()));
-
-        assert_eq!(
-            msg_list.clone().operate_sync(&OP_CONTAINS, || provide(&msg_1)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            msg_list.operate_sync(&OP_CONTAINS, || provide(&msg_2)).unwrap(),
-            NodeValue::Bool(false)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_does_not_contain_errs_if_left_operand_not_a_list() {
-        let two = NodeValue::Int32(2);
-
-        assert!(matches!(
-            two.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&two)).unwrap_err(),
-            NodeEvaluationError::ContainsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_does_not_contain_errs_if_operands_have_incompatible_types() {
-        let bool_list = NodeValue::BoolList(vec![true, true, false]);
-        let five = NodeValue::Float(5.5);
-
-        assert!(matches!(
-            bool_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&five)).unwrap_err(),
-            NodeEvaluationError::ContainsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_does_not_contain_bool_type_ok() {
-        let bool_list = NodeValue::BoolList(vec![true, true, true]);
-        let true_val = NodeValue::Bool(true);
-        let false_val = NodeValue::Bool(false);
-
-        assert_eq!(
-            bool_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&true_val)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            bool_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&false_val)).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_does_not_contain_int_type_ok() {
-        let int_list = NodeValue::Int32List(vec![3, 30, 300]);
-        let zero = NodeValue::Int32(0);
-        let three = NodeValue::Int32(3);
-        let thirty = NodeValue::Int64(30);
-        // not int
-        let three_hundred = NodeValue::Double(300.0);
-
-        assert_eq!(
-            int_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&zero)).unwrap(),
-            NodeValue::Bool(true)
-        );
-        assert_eq!(
-            int_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&three)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            int_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&thirty)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert!(matches!(
-            int_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&three_hundred)).unwrap_err(),
-            NodeEvaluationError::ContainsOperatorIncompatibleOperands
-        ));
-    }
-
-    #[test]
-    fn operate_sync_relational_does_not_contain_float_type_ok() {
-        let float_list = NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]);
-        let point_five = NodeValue::Float(0.5);
-        // f64 PI, not f32 PI
-        let pi = NodeValue::Double(std::f64::consts::PI);
-        // not float but is a numeric type
-        let ten = NodeValue::Int32(10);
-        let thirty = NodeValue::Float(30.0);
-
-        assert_eq!(
-            float_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&point_five)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            float_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&pi)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            float_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&ten)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            float_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&thirty)).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
-
-    #[test]
-    fn operate_sync_relational_does_not_contain_message_type_ok() {
-        let message: Arc<dyn MessageDyn> = Arc::new(TEST_MESSAGE.clone());
-        let msg_list = NodeValue::MessageList(vec![Arc::clone(&message)]);
-        let msg_1 = NodeValue::Message(message);
-        let msg_2 = NodeValue::Message(Arc::new(TestMessage::new()));
-
-        assert_eq!(
-            msg_list.clone().operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&msg_1)).unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            msg_list.operate_sync(&OP_DOES_NOT_CONTAIN, || provide(&msg_2)).unwrap(),
-            NodeValue::Bool(true)
-        );
-    }
+        not_contains_bool_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_bool_2: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_int_1: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(30), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_int_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int64(30), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_int_3: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_float_1: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(0.5), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_float_2: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Double(PIf64), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_float_3: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Int32(10), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_float_4: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(30.0), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_approximately_equal: (&OP_DOES_NOT_CONTAIN, NodeValue::DoubleList(vec![ONE.get_double().unwrap()]), ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
+        not_contains_message_1: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TEST_MESSAGE.clone())), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_message_2: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TestMessage::new())), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_none_left: (&OP_DOES_NOT_CONTAIN, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
+        not_contains_none_right: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
+        not_contains_not_a_list: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        not_contains_incompatible_types_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        not_contains_incompatible_types_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+    );
 
     #[test]
     fn operate_sync_relational_all_eq_errs_if_left_operand_not_a_list() {
