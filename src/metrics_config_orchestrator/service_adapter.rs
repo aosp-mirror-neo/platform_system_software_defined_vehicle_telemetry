@@ -454,8 +454,8 @@ pub(super) mod tests {
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageFull;
+    use sdv_telemetry_test_utils::oneshot_callback;
     use tokio::sync::mpsc;
-    use tokio::sync::oneshot;
 
     use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
 
@@ -878,8 +878,8 @@ pub(super) mod tests {
     async fn subscribe_shared_calls_cancellation_callbacks() {
         let accessor = Arc::new(MockServicePublisherAccessor::new());
         let service_adapter = create_service_adapter(Arc::clone(&accessor));
-        let (tx1, rx1) = oneshot::channel();
-        let (tx2, rx2) = oneshot::channel();
+        let (tx1, rx1) = oneshot_callback();
+        let (tx2, rx2) = oneshot_callback();
 
         let _subscription = Arc::clone(&service_adapter)
             .subscribe(
@@ -887,7 +887,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                Box::new(move || tx1.send(()).unwrap()),
+                Box::new(move || tx1(())),
             )
             .await
             .unwrap()
@@ -899,7 +899,7 @@ pub(super) mod tests {
                 None,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                Box::new(move || tx2.send(()).unwrap()),
+                Box::new(move || tx2(())),
             )
             .await
             .unwrap()
@@ -907,8 +907,8 @@ pub(super) mod tests {
 
         accessor.notify_cancellation();
 
-        rx1.await.unwrap();
-        rx2.await.unwrap();
+        rx1.await;
+        rx2.await;
     }
 
     #[sdv_telemetry_test_utils::timeout]

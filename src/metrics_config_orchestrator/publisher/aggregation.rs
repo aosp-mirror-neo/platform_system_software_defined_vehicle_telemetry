@@ -268,8 +268,8 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::Arc};
-    use tokio::sync::oneshot;
 
     use super::*;
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
@@ -405,8 +405,7 @@ mod tests {
         ));
         let (publisher, _) =
             create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
+        let (tx, rx) = oneshot_callback();
 
         publisher
             .subscribe(
@@ -415,16 +414,14 @@ mod tests {
                     let msg = context
                         .get_message(PUBLISHER_NAME)
                         .expect("Publisher message should be present in the context");
-                    maybe_tx.take().unwrap().send(Arc::clone(msg)).unwrap()
+                    tx(Arc::clone(msg));
                 }),
             )
             .await;
         trigger.fire().await;
 
-        let messages = [
-            rx.await.unwrap(),
-            Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap(),
-        ];
+        let messages =
+            [rx.await, Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap()];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
@@ -443,14 +440,8 @@ mod tests {
             create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
         let msg = Int32Value { value: 42, ..Default::default() };
 
-        let (context_tx, context_rx) = oneshot::channel();
-        let mut context_tx = Some(context_tx);
-        publisher
-            .subscribe(
-                DATA_TRIGGER_NAME,
-                Box::new(move |context| context_tx.take().unwrap().send(context).unwrap()),
-            )
-            .await;
+        let (tx, rx) = oneshot_callback();
+        publisher.subscribe(DATA_TRIGGER_NAME, Box::new(tx)).await;
 
         let trigger_context = Arc::new(NodeEvaluationContext::with_publisher_message(
             PUBLISHER_NAME_2.to_owned(),
@@ -458,7 +449,7 @@ mod tests {
         ));
         trigger.fire_with_context(Arc::clone(&trigger_context)).await;
 
-        let context = context_rx.await.unwrap();
+        let context = rx.await;
 
         assert_eq!(context.root_id(), trigger_context.root_id());
         let context_msg = context
@@ -479,8 +470,7 @@ mod tests {
         ));
         let (publisher, message_builder) =
             create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
+        let (tx, rx) = oneshot_callback();
         publisher
             .subscribe(
                 DATA_TRIGGER_NAME,
@@ -488,7 +478,7 @@ mod tests {
                     let msg = context
                         .get_message(PUBLISHER_NAME)
                         .expect("Publisher message should be present in the context");
-                    maybe_tx.take().unwrap().send(Arc::clone(msg)).unwrap()
+                    tx(Arc::clone(msg));
                 }),
             )
             .await;
@@ -501,8 +491,7 @@ mod tests {
         );
         trigger.fire().await;
 
-        let messages =
-            [rx.await.unwrap(), publisher.get_latest_message().unwrap_sync().unwrap().unwrap()];
+        let messages = [rx.await, publisher.get_latest_message().unwrap_sync().unwrap().unwrap()];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();

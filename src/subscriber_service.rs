@@ -52,22 +52,16 @@ mod tests {
 
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::{Message, MessageFull};
-    use tokio::sync::oneshot;
+    use sdv_telemetry_test_utils::oneshot_callback;
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscriber_wrapper_send_data_invalid_message_fails() {
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
-        let wrapper = SubscriberService::new(
-            Int32Value::descriptor(),
-            Box::new(move |res| {
-                maybe_tx.take().expect("Callback should only be called once").send(res).unwrap()
-            }),
-        );
+        let (tx, rx) = oneshot_callback();
+        let wrapper = SubscriberService::new(Int32Value::descriptor(), Box::new(tx));
 
         let err_binder = wrapper.sendData(&[0xFF]).await.unwrap_err();
-        let err_callback = rx.await.unwrap().unwrap_err();
+        let err_callback = rx.await.unwrap_err();
 
         assert_eq!(err_binder.service_specific_error(), -1, "Unexpected error: {err_binder:?}");
         assert!(
@@ -79,18 +73,12 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn subscriber_wrapper_send_data_success() {
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
-        let wrapper = SubscriberService::new(
-            Int32Value::descriptor(),
-            Box::new(move |res| {
-                maybe_tx.take().expect("Callback should only be called once").send(res).unwrap()
-            }),
-        );
+        let (tx, rx) = oneshot_callback();
+        let wrapper = SubscriberService::new(Int32Value::descriptor(), Box::new(tx));
         let value = Box::new(Int32Value { value: 42, ..Default::default() });
 
         wrapper.sendData(&value.write_to_bytes().unwrap()).await.unwrap();
-        let recv_val = rx.await.unwrap().unwrap().downcast_box::<Int32Value>().unwrap();
+        let recv_val = rx.await.unwrap().downcast_box::<Int32Value>().unwrap();
 
         assert_eq!(recv_val, value);
     }

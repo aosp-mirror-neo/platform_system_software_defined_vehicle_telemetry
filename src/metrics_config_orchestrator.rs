@@ -976,9 +976,9 @@ mod tests {
         PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Publisher as PublisherProto,
         ServicePublisher as ServicePublisherProto, Trigger as TriggerProto,
     };
+    use sdv_telemetry_test_utils::oneshot_callback;
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
-    use tokio::sync::oneshot;
 
     use crate::expr::node_factory::MessageProvider;
     use crate::expr::node_value::NodeValue;
@@ -2405,10 +2405,8 @@ mod tests {
             TriggerSubscriber::MetricsConfigFinish,
         ));
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
-        let (tx, rx) = oneshot::channel();
-        let maybe_tx = Mutex::new(Some(tx));
-        orchestrator.finish_trigger_fired_callback =
-            Arc::new(move |uuid, _context| maybe_tx.lock().take().unwrap().send(uuid).unwrap());
+        let (tx, rx) = oneshot_callback();
+        orchestrator.finish_trigger_fired_callback = Arc::new(move |uuid, _context| tx(uuid));
         orchestrator.trigger_factory().add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
 
         // Setup Metrics Config.
@@ -2427,7 +2425,7 @@ mod tests {
         finish_trigger_mock.fire().await;
 
         // Verify uuid that was received by the callback.
-        assert_eq!(&rx.await.unwrap(), UUID);
+        assert_eq!(&rx.await, UUID);
     }
 
     #[sdv_telemetry_test_utils::timeout]

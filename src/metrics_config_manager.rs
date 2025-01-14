@@ -519,7 +519,7 @@ mod tests {
     use protobuf::Message;
     use rand::prelude::SliceRandom;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
-    use tokio::sync::oneshot;
+    use sdv_telemetry_test_utils::oneshot_callback;
 
     static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -750,10 +750,7 @@ mod tests {
             panic!("An error occurred in writing corrupt config: {:?} {}", file_path, e)
         });
 
-        let (add_config_sender, add_config_receiver) = oneshot::channel();
-        let sender_wrapper = Arc::new(Mutex::new(Some(add_config_sender)));
-        let sender_clone = Arc::clone(&sender_wrapper);
-
+        let (tx, rx) = oneshot_callback();
         MetricsConfigManagerImpl::new(
             active_data_dir.clone(),
             inactive_data_dir.clone(),
@@ -761,14 +758,13 @@ mod tests {
             Arc::new(MockServicePublisherAccessor::new()),
             |_| {},
             move |status_code, status_msg| {
-                let mut maybe_sender = sender_clone.lock();
-                maybe_sender.take().unwrap().send((status_code, status_msg.to_owned())).unwrap();
+                tx((status_code, status_msg.to_owned()));
             },
         )
         .await
         .unwrap();
 
-        let (status, _) = add_config_receiver.await.unwrap();
+        let (status, _) = rx.await;
         assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
     }
 

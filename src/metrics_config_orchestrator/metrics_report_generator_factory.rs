@@ -205,11 +205,10 @@ impl MetricsReportGeneratorFactoryImpl {
 mod tests {
     use super::*;
 
-    use parking_lot::Mutex;
     use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
+    use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
-    use tokio::sync::oneshot;
 
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
@@ -413,15 +412,8 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             TriggerSubscriber::MetricsReportGenerator { name: report_config.name.clone() },
         );
-        let (tx, rx) = oneshot::channel();
-        let tx = Mutex::new(Some(tx));
-        trigger.set_subscribe_callback(move |name| {
-            tx.lock()
-                .take()
-                .expect("Callback should only be called once")
-                .send(name.to_owned())
-                .unwrap()
-        });
+        let (tx, rx) = oneshot_callback();
+        trigger.set_subscribe_callback(move |name| tx(name.to_owned()));
         let trigger = Arc::new(trigger);
 
         let res = factory
@@ -434,7 +426,7 @@ mod tests {
             .unwrap();
         res.activate().await;
 
-        assert_eq!(rx.await.unwrap(), TRIGGER_NAME);
+        assert_eq!(rx.await, TRIGGER_NAME);
     }
 
     #[test]
