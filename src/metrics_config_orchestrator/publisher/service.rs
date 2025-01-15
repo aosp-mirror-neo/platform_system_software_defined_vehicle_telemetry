@@ -512,8 +512,8 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
+    use sdv_telemetry_test_utils::oneshot_callback;
     use std::sync::Arc;
-    use tokio::sync::oneshot;
 
     use super::*;
     use crate::metrics_config_orchestrator::service_adapter::mock::{
@@ -812,8 +812,7 @@ mod tests {
 
         Arc::clone(&publisher).activate().await.unwrap();
 
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
+        let (tx, rx) = oneshot_callback();
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
         publisher
             .subscribe(
@@ -822,7 +821,7 @@ mod tests {
                     let msg = context
                         .get_message(PUBLISHER_NAME)
                         .expect("Publisher message should be present in the context");
-                    maybe_tx.take().unwrap().send(Arc::clone(msg)).unwrap()
+                    tx(Arc::clone(msg));
                 }),
             )
             .await;
@@ -832,7 +831,7 @@ mod tests {
         subscribe_receiver.await.unwrap();
 
         service_adapter.publish_new_message(&msg).await;
-        let received_message = rx.await.unwrap();
+        let received_message = rx.await;
 
         assert!(
             Arc::ptr_eq(&received_message, &msg),
@@ -1017,8 +1016,7 @@ mod tests {
         let publisher =
             create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
 
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
+        let (tx, rx) = oneshot_callback();
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
         publisher
             .subscribe(
@@ -1027,13 +1025,13 @@ mod tests {
                     let msg = context
                         .get_message(PUBLISHER_NAME)
                         .expect("Publisher message should be present in the context");
-                    maybe_tx.take().unwrap().send(Arc::clone(msg)).unwrap()
+                    tx(Arc::clone(msg));
                 }),
             )
             .await;
         service_adapter.publish_new_message(&msg).await;
 
-        let received_message = rx.await.unwrap();
+        let received_message = rx.await;
         let latest_message = publisher.get_latest_message().unwrap_sync().unwrap().unwrap();
         assert!(
             Arc::ptr_eq(&received_message, &msg),

@@ -346,11 +346,11 @@ mod integration_tests {
     use sdv_comms::rpc;
     use sdv_status_rs::SdvStatus;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
-    use sdv_telemetry_test_utils::parameterized_test;
+    use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::str::FromStr;
     use std::time::Duration;
-    use tokio::sync::{mpsc, oneshot};
+    use tokio::sync::mpsc;
     use tokio::time::Instant;
 
     use crate::test_utils::{self, UNIT_NAME};
@@ -814,27 +814,18 @@ mod integration_tests {
         .unwrap();
 
         let subscriber = create_accessor(ctx);
-        let (sender, receiver) = oneshot::channel();
-        let mut sender = Some(sender);
+        let (tx, rx) = oneshot_callback();
         let outcome = subscriber
             .create_subscription(
                 &service_name,
                 None,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| {
-                    sender
-                        .take()
-                        .unwrap_or_else(|| {
-                            panic!("Callback should only be called once, got {msg:?}")
-                        })
-                        .send(msg)
-                        .unwrap();
-                }),
+                Box::new(tx),
                 create_empty_fn_box(),
             )
             .await
             .unwrap();
-        let received_msg = receiver.await.unwrap().unwrap();
+        let received_msg = rx.await.unwrap();
 
         let CreateSubscriptionOutcome::Subscribed(subscription) = outcome else {
             panic!("Unexpected outcome");

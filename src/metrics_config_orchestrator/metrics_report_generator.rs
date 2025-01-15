@@ -179,11 +179,11 @@ mod test {
     use super::*;
 
     use futures::FutureExt;
-    use parking_lot::Mutex;
     use protobuf::MessageDyn;
     use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
-    use tokio::sync::{mpsc, oneshot};
+    use tokio::sync::mpsc;
 
     use crate::metrics_config_orchestrator::message_builder::{
         mock::MockMessageBuilder, MessageBuilderError,
@@ -319,11 +319,8 @@ mod test {
             .into()
         });
         let mut generator = create_generator(Arc::new(message_builder));
-        let (tx, rx) = oneshot::channel();
-        let maybe_tx = Mutex::new(Some(tx));
-        generator.report_ready_callback = Arc::new(move |report| {
-            maybe_tx.lock().take().expect("tx should only be extracted once").send(report).unwrap()
-        });
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
 
         // Activate the generator.
@@ -333,7 +330,7 @@ mod test {
         trigger.fire_with_context(Arc::clone(&context)).await;
 
         // Wait for the report to be delivered.
-        let report = rx.await.unwrap();
+        let report = rx.await;
 
         // Verify the report.
         let test_message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
@@ -353,16 +350,13 @@ mod test {
             .boxed(),
         );
         let mut generator = create_generator(Arc::clone(&message_builder));
-        let (tx, rx) = oneshot::channel();
-        let maybe_tx = Mutex::new(Some(tx));
-        generator.report_ready_callback = Arc::new(move |report| {
-            maybe_tx.lock().take().expect("tx should only be extracted once").send(report).unwrap()
-        });
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
 
         Arc::new(generator).activate().await;
         trigger.fire().await;
-        let report = rx.await.unwrap();
+        let report = rx.await;
 
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(message.int_field, 2);
@@ -415,16 +409,13 @@ mod test {
     async fn deactivate_generates_incomplete_report() {
         let mut generator = create_default_generator();
         generator.report_incomplete = true;
-        let (tx, rx) = oneshot::channel();
-        let maybe_tx = Mutex::new(Some(tx));
-        generator.report_ready_callback = Arc::new(move |report| {
-            maybe_tx.lock().take().expect("tx should only be extracted once").send(report).unwrap()
-        });
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
         let generator = Arc::new(generator);
 
         Arc::clone(&generator).activate().await;
         generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
-        let report = rx.await.unwrap();
+        let report = rx.await;
 
         assert_eq!(report.report_reason, ReportReason::INCOMPLETE_FINISHED.into());
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();

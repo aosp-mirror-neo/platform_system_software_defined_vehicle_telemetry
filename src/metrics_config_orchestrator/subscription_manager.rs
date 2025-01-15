@@ -157,7 +157,7 @@ mod tests {
     use super::*;
 
     use mockall::predicate::eq;
-    use tokio::sync::oneshot;
+    use sdv_telemetry_test_utils::oneshot_callback;
 
     const KEY: &str = "test_key";
     const KEY2: &str = "test_key2";
@@ -335,18 +335,12 @@ mod tests {
             .await;
         manager.unsubscribe(&KEY.to_owned()).await;
 
-        let (tx, rx) = oneshot::channel();
-        let mut maybe_tx = Some(tx);
-        manager
-            .subscribe(
-                KEY.to_owned(),
-                Box::new(move |value| maybe_tx.take().unwrap().send(value).unwrap()),
-            )
-            .await;
+        let (tx, rx) = oneshot_callback();
+        manager.subscribe(KEY.to_owned(), Box::new(tx)).await;
 
         manager.notify(ActivationId(1), 123).await;
 
-        assert_eq!(123, rx.await.unwrap());
+        assert_eq!(123, rx.await);
     }
 
     #[sdv_telemetry_test_utils::timeout]

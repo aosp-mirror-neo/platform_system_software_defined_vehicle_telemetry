@@ -3,7 +3,11 @@
 //! Utility functions for unit tests.
 
 use log::trace;
+use parking_lot::Mutex;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use std::fmt::Debug;
+use std::future::Future;
+use tokio::sync::oneshot;
 
 pub use sdv_telemetry_test_utils_macros::parameterized_test;
 pub use sdv_telemetry_test_utils_macros::timeout;
@@ -30,6 +34,27 @@ pub fn unique_dt_topic_name() -> String {
     eprintln!("{msg}");
 
     name
+}
+
+/// A thin wrapper around `tokio::sync::oneshot::channel`, which wraps the sending side into a
+/// callback, and handles all errors by `panic!`ing with appropriate messages. The returned callback
+/// is deliberately typed as `Fn`, not `FnOnce`, but will `panic!` when called more than once.
+pub fn oneshot_callback<T: Debug>() -> (impl Fn(T), impl Future<Output = T>) {
+    let (tx, rx) = oneshot::channel();
+
+    let tx = Mutex::new(Some(tx));
+    let tx = move |value: T| {
+        let Some(tx) = tx.lock().take() else {
+            panic!("Callback should only be called once. Value: {value:?}")
+        };
+        tx.send(value).unwrap_or_else(|value: T| {
+            panic!("Callback should not be called after receiver was dropped. Value: {value:?}")
+        });
+    };
+
+    let rx = async { rx.await.expect("Callback should not be dropped before being called.") };
+
+    (tx, rx)
 }
 
 #[cfg(test)]
