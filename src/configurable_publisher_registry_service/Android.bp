@@ -1,0 +1,81 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_configurable_publisher_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "libanyhow",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "liblog_rust",
+        "libparking_lot",
+        "libprotobuf",
+        "libsdv_telemetry",
+        "libsdv_telemetry_utils",
+        "libthiserror",
+        "libtokio",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        "libclap_derive",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_configurable_publisher",
+    defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
+    crate_name: "sdv_telemetry_configurable_publisher",
+}
+
+rust_test {
+    name: "libsdv_telemetry_configurable_publisher_unit_tests",
+    defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libsample_publisher_proto",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    target: {
+        host: {
+            data_libs: [
+                // keep-sorted start
+                "libbase",
+                "libbinder",
+                "libbinder_ndk",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
+            ],
+        },
+    },
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}

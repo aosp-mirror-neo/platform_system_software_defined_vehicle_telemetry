@@ -1,0 +1,70 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+filegroup {
+    name: "sdv_telemetry_integration_test_config_template",
+    srcs: ["integration_tests_config_template.config"],
+}
+
+rust_test {
+    name: "sdv_telemetry_integration_tests",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    test_options: {
+        unit_test: false,
+    },
+    srcs: [
+        "integration_tests.rs",
+    ],
+    // Use a custom test config template as per
+    // https://source.android.com/docs/core/tests/vts/setup11, because we need
+    // to ensure that the integration tests are run serially, not in parallel,
+    // by adding the `--test-threads=1` flag to the test execution.
+    test_config_template: ":sdv_telemetry_integration_test_config_template",
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "libbinder_rs",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libsdv_comms_rs",
+        "libsdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader",
+        "libsdv_mw_rs_sdv_comms",
+        "libsdv_proto_reflection_rs",
+        "libsdv_someip_integration_test",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_rust_wrapper",
+        "libsdv_telemetry_sample_middleware_proto",
+        "libsdv_telemetry_sample_utils",
+        "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_utils",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    data: [
+        // keep-sorted start
+        ":sdv_telemetry_metrics_config_textprotos",
+        // keep-sorted end
+    ],
+    ld_flags: ["-Wl,--no-as-needed"],
+    auto_gen_config: true,
+    // Requires root so the test can perform Binder calls.
+    require_root: true,
+    vendor: true,
+}

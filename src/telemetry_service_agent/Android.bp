@@ -1,0 +1,82 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "sdv_telemetry_service_agent_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+
+    rustlibs: [
+        // keep-sorted start
+        "google.sdv.telemetry-V1-rust",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "liblog_rust",
+        "librustutils",
+        "libsdv_log_rust",
+        "libsdv_telemetry",
+        "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        // keep-sorted end
+    ],
+    vintf_fragment_modules: [
+        // keep-sorted start
+        "google.sdv.telemetry-service.xml",
+        // keep-sorted end
+    ],
+    vendor: true,
+}
+
+rust_binary {
+    name: "sdv_telemetry_service_agent",
+    defaults: ["sdv_telemetry_service_agent_defaults"],
+    srcs: [
+        "main.rs",
+    ],
+    vintf_fragment_modules: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-service.xml",
+        // keep-sorted end
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libfutures",
+        "libsdv_comms_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_dt_wrapper",
+        // keep-sorted end
+
+        // TODO (b/343460855): Remove configurable publisher from SDV after RPC support
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "libsdv_telemetry_configurable_publisher",
+        // End of configurable publisher deps
+    ],
+}
+
+rust_binary {
+    name: "sdv_ivi_telemetry_service_agent",
+    defaults: ["sdv_telemetry_service_agent_defaults"],
+    srcs: [
+        "main_ivi.rs",
+    ],
+    vintf_fragment_modules: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-service.xml",
+        // keep-sorted end
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "libsdv_telemetry_configurable_publisher",
+        // keep-sorted end
+    ],
+}
