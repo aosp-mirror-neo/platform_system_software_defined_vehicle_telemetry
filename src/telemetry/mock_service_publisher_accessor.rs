@@ -1,10 +1,14 @@
 // Copyright 2023 Google LLC
 
-use super::*;
-
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use protobuf::{reflect::MessageDescriptor, well_known_types::any::Any, MessageDyn};
+use sdv_telemetry_service_publisher_accessor::{
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
+    GetLatestMessageError, GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError,
+    ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
+    ServicePublisherSubscription, ServiceRuntimeError, SubSamplingInterval,
+};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};

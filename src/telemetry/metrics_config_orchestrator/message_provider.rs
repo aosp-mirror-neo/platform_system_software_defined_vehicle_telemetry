@@ -49,11 +49,11 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageDyn;
+    use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
     use std::collections::HashMap;
 
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::MetricsConfigState;
-    use crate::service_publisher_accessor::GetLatestMessageError;
 
     const ERROR_MESSAGE: &str = "error message";
     const PUBLISHER_NAME: &str = "publisher";

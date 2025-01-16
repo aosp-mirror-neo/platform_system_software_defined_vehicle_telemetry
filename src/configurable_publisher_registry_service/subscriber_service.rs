@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriberAsyncServer;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
+use sdv_telemetry_service_publisher_accessor::ServiceRuntimeError;
 
 /// Implementation of ISubscriber interface that calls associated callback on a new message.
 pub struct SubscriberService {

@@ -7,6 +7,10 @@ use futures::FutureExt;
 use log::{debug, info, warn};
 use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
+use sdv_telemetry_service_publisher_accessor::{
+    AvailabilityCallbackRegistration, CreateSubscriptionError, GetLatestMessageError,
+    GetMessageProviderError, SubSamplingInterval,
+};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
@@ -26,11 +30,6 @@ use crate::metrics_config_orchestrator::service_adapter::{
 use crate::metrics_config_runtime_error::{
     ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
 };
-use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, GetLatestMessageError,
-    GetMessageProviderError,
-};
-use crate::sub_sampling_interval::SubSamplingInterval;
 
 pub(crate) enum ConnectionType {
     Subscription,

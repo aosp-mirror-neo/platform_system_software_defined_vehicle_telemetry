@@ -9,6 +9,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     AggregationPublisher as AggregationPublisherProto, Publisher as PublisherProto,
     ServicePublisher as ServicePublisherProto,
 };
+use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
@@ -25,7 +26,6 @@ use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
 use crate::metrics_config_runtime_error::{
     AggregationPublisherRuntimeError, ServicePublisherRuntimeError,
 };
-use crate::sub_sampling_interval::SubSamplingInterval;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait PublisherFactory: Send + Sync {
@@ -228,6 +228,9 @@ mod tests {
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
     use sdv_telemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
+    use sdv_telemetry_service_publisher_accessor::{
+        AvailabilityCallbackRegistration, CreateSubscriptionError, GetMessageProviderError,
+    };
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::collections::HashMap;
@@ -238,9 +241,6 @@ mod tests {
         GetMessageProviderOutcome, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
-    use crate::service_publisher_accessor::{
-        AvailabilityCallbackRegistration, CreateSubscriptionError, GetMessageProviderError,
-    };
 
     const INTERVAL: Duration = Duration::from_millis(42);
     const PUBLISHER_NAME: &str = "publisher";

@@ -2,7 +2,10 @@
 
 //! Provides access to Service Publishers.
 
-// External dependencies.
+mod sub_sampling_interval;
+
+pub use sub_sampling_interval::SubSamplingInterval;
+
 use async_trait::async_trait;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
@@ -10,9 +13,6 @@ use protobuf::MessageDyn;
 use sdv_status_rs::SdvStatus;
 use std::fmt;
 use std::sync::Arc;
-
-use crate::metrics_config_runtime_error::ServiceRuntimeError;
-use crate::sub_sampling_interval::SubSamplingInterval;
 
 /// get_metadata error.
 #[derive(Debug, thiserror::Error)]
@@ -55,6 +55,17 @@ pub enum GetLatestMessageError {
     FailedToRetrieveMessage(anyhow::Error),
     /// Failed to parse the message.
     #[error("failed to parse message: {0:#}")]
+    MessageParsingError(anyhow::Error),
+}
+
+/// Runtime errors related to a service.
+#[derive(thiserror::Error, Debug)]
+pub enum ServiceRuntimeError {
+    /// Failure to retrieve a message.
+    #[error("Message retrieval error: {0:#}")]
+    MessageRetrievalError(anyhow::Error),
+    /// Failure to parse a retrieved message.
+    #[error("Message parsing error: {0:#}")]
     MessageParsingError(anyhow::Error),
 }
 
@@ -179,6 +190,3 @@ impl CreateSubscriptionOutcome {
         }
     }
 }
-
-#[cfg(test)]
-pub(crate) mod mock;

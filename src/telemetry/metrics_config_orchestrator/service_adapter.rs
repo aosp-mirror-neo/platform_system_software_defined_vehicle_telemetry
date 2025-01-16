@@ -3,6 +3,13 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
+use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
+use sdv_telemetry_service_publisher_accessor::{
+    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
+    GetLatestMessageError, GetMessageProviderError,
+    GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
+};
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -13,13 +20,6 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
-use crate::service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetLatestMessageError, GetMessageProviderError,
-    GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherSubscription,
-};
-use crate::sub_sampling_interval::SubSamplingInterval;
 
 type CallbackContainer = Arc<
     AsyncMutex<
@@ -457,7 +457,7 @@ pub(super) mod tests {
     use sdv_telemetry_test_utils::oneshot_callback;
     use tokio::sync::mpsc;
 
-    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     const ERROR_MESSAGE: &str = "Error 42";
     const SERVICE_NAME: &str = "service";

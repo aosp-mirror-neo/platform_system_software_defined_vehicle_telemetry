@@ -281,6 +281,7 @@ mod tests {
         conditional_trigger::ConditionType as ConditionTypeProto,
         ServicePublisher as ServicePublisherProto,
     };
+    use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::collections::HashMap;
@@ -291,7 +292,6 @@ mod tests {
         ConnectionType, ServicePublisher,
     };
     use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
-    use crate::sub_sampling_interval::SubSamplingInterval;
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
     const NODE_INDEX: u32 = 42;

@@ -3,12 +3,13 @@
 //! This module represents runtime errors of a metrics config.
 
 use either::Either;
+use sdv_telemetry_service_publisher_accessor::{
+    CreateSubscriptionError, GetMessageProviderError, ServiceRuntimeError,
+};
 
 use crate::{
     expr::node_error::NodeEvaluationError,
     metrics_config_orchestrator::message_builder::MessageBuilderError,
-    service_publisher_accessor::CreateSubscriptionError,
-    service_publisher_accessor::GetMessageProviderError,
 };
 
 /// Runtime errors of a metrics config.
@@ -67,17 +68,6 @@ pub(crate) struct MetricsReportGeneratorError {
     pub(crate) metrics_report_name: String,
     /// Message builder error.
     pub(crate) message_builder_error: MessageBuilderError,
-}
-
-/// Runtime errors related to a service.
-#[derive(thiserror::Error, Debug)]
-pub enum ServiceRuntimeError {
-    /// Failure to retrieve a message.
-    #[error("Message retrieval error: {0:#}")]
-    MessageRetrievalError(anyhow::Error),
-    /// Failure to parse a retrieved message.
-    #[error("Message parsing error: {0:#}")]
-    MessageParsingError(anyhow::Error),
 }
 
 #[derive(thiserror::Error, Debug)]

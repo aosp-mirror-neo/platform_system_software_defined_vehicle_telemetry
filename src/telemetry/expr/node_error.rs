@@ -3,10 +3,9 @@
 //! Errors that can arise from incorrect node setup and from AST traversal.
 
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
+use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
 use std::sync::Arc;
 use thiserror::Error;
-
-use crate::service_publisher_accessor::GetLatestMessageError;
 
 /// A wrapper for NodeEvaluationError containing index of the node causing it
 #[derive(Error, Debug)]

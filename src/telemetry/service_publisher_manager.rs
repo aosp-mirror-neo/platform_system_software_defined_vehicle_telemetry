@@ -6,15 +6,12 @@
 use async_trait::async_trait;
 use futures::future;
 use protobuf::{well_known_types::any::Any, MessageDyn};
-use std::sync::Arc;
-
-use crate::metrics_config_runtime_error::ServiceRuntimeError;
-use crate::service_publisher_accessor::{
+use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
     GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
-    ServicePublisherMetadata,
+    ServicePublisherMetadata, ServiceRuntimeError, SubSamplingInterval,
 };
-use crate::sub_sampling_interval::SubSamplingInterval;
+use std::sync::Arc;
 
 /// Struct for managing all implementations of ServicePublisherAccessor trait.
 pub struct ServicePublisherManager {
@@ -151,7 +148,7 @@ mod tests {
     use protobuf::MessageFull;
     use std::sync::Arc;
 
-    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     const ERROR_MESSAGE: &str = "ERROR_MESSAGE";
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";

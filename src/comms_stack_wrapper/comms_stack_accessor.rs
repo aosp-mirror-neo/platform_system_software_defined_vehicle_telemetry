@@ -17,13 +17,11 @@ use sdv_comms::sd::{
 use sdv_comms::ContextRef;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
-use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
-use sdv_telemetry::service_publisher_accessor::{
+use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
     GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
-    ServicePublisherMetadata,
+    ServicePublisherMetadata, ServiceRuntimeError, SubSamplingInterval,
 };
-use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::descriptor_utils;
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, option_extension::OptionExtension,

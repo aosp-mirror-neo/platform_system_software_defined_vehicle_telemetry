@@ -12,11 +12,10 @@ use protobuf::{Message, MessageDyn};
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::ContextRef;
-use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
-use sdv_telemetry::service_publisher_accessor::{
+use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError,
     GetMessageProviderError, GetMessageProviderOutcome, ServicePublisherMessageProvider,
-    ServicePublisherSubscription,
+    ServicePublisherSubscription, ServiceRuntimeError,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};

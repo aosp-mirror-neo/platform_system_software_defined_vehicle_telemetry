@@ -8,11 +8,11 @@ mod metrics_config_orchestrator;
 mod metrics_report_listener;
 mod status_listener;
 
-pub mod binder_adapter;
 pub mod metrics_config_runtime_error;
-pub mod service_publisher_accessor;
 pub mod service_publisher_manager;
-pub mod sub_sampling_interval;
+
+#[cfg(test)]
+mod mock_service_publisher_accessor;
 
 // External dependencies.
 use async_trait::async_trait;
@@ -28,19 +28,18 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
 };
 use log::{error, info, warn};
 use protobuf::Message;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use std::marker::{Send, Sync};
 use std::ops::Deref;
 use std::sync::Arc;
 use tracing::instrument;
 
 // Child module dependencies.
-use metrics_config_manager::MetricsConfigManager;
 use metrics_config_manager::{
-    MetricsConfigManagerError as ConfigManagerError, MetricsConfigManagerImpl,
+    MetricsConfigManager, MetricsConfigManagerError as ConfigManagerError, MetricsConfigManagerImpl,
 };
 use metrics_config_orchestrator::MetricsConfigOrchestratorError as ConfigOrchestratorError;
 use metrics_report_listener::MetricsReportListener;
-use service_publisher_accessor::ServicePublisherAccessor;
 use status_listener::{StatusListener, StatusListenerImpl};
 
 const ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
@@ -459,7 +458,7 @@ mod tests {
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 
     use crate::metrics_config_manager::mock::MockMetricsConfigManager;
-    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     const DUMMY_API_CALL_ID: i32 = -1;
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs

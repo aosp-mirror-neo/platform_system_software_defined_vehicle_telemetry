@@ -8,11 +8,11 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     BnConfigurablePublisherRegistry, BpConfigurablePublisherRegistry, IConfigurablePublisherRegistry,
 };
 
-use sdv_telemetry::service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry_configurable_publisher::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistryService,
 };
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry_utils::logging::validated_log_tag;
 
 use binder_tokio::TokioRuntime;

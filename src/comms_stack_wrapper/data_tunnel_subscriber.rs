@@ -13,13 +13,11 @@ use protobuf::MessageDyn;
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
-use sdv_telemetry::metrics_config_runtime_error::ServiceRuntimeError;
-use sdv_telemetry::service_publisher_accessor::{
+use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError,
     GetMessageProviderError, GetMessageProviderOutcome, ServicePublisherMessageProvider,
-    ServicePublisherSubscription,
+    ServicePublisherSubscription, ServiceRuntimeError, SubSamplingInterval,
 };
-use sdv_telemetry::sub_sampling_interval::SubSamplingInterval;
 use sdv_telemetry_utils::conversions::u32_into_usize;
 use std::iter::Iterator;
 use tokio::select;

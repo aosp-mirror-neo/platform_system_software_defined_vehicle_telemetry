@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
+use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
@@ -17,7 +18,6 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 use crate::metrics_config_runtime_error::AggregationPublisherRuntimeError;
-use crate::service_publisher_accessor::GetLatestMessageError;
 
 pub(crate) struct AggregationPublisher {
     pub(crate) reset_on_get: bool,

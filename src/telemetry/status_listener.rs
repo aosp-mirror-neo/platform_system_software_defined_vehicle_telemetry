@@ -7,10 +7,9 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
 };
 use log::warn;
 use parking_lot::Mutex;
+use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use std::collections::VecDeque;
 use std::sync::Arc;
-
-use crate::binder_adapter::{BinderAdapter, BinderAdapterImpl};
 
 const MAX_MISC_ERROR_STORE_SIZE: usize = 128;
 

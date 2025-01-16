@@ -27,6 +27,10 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
     Publisher as PublisherProto, Trigger as TriggerProto,
 };
+use sdv_telemetry_service_publisher_accessor::{
+    CreateSubscriptionError, GetLatestMessageError, GetMessageProviderError,
+    ServicePublisherAccessor, ServiceRuntimeError,
+};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
 };
@@ -45,14 +49,6 @@ use crate::expr::node_value_type::NodeValueType;
 use crate::metrics_config_runtime_error::{
     AggregationPublisherRuntimeError, ConditionalTriggerRuntimeError, MetricsConfigRuntimeError,
     MetricsReportGeneratorError, ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
-    ServiceRuntimeError,
-};
-use crate::service_publisher_accessor::{
-    CreateSubscriptionError,
-    GetLatestMessageError,
-    GetMessageProviderError,
-    // ServiceDiscoveryError,
-    ServicePublisherAccessor,
 };
 use crate::StatusCodes;
 
@@ -991,7 +987,7 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::metrics_config_orchestrator::trigger_factory::TriggerFactory;
     use crate::metrics_config_orchestrator::MetricsConfigOrchestratorImpl;
-    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     type MockedMetricsConfigOrchestratorImpl = MetricsConfigOrchestratorImpl;
 

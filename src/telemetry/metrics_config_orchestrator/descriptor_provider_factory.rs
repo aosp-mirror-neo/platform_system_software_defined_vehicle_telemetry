@@ -5,6 +5,7 @@ use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
 };
+use sdv_telemetry_service_publisher_accessor::{GetMetadataError, ServicePublisherAccessor};
 use sdv_telemetry_utils::descriptor_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -12,7 +13,6 @@ use thiserror::Error;
 
 use crate::expr::node_factory::DescriptorProvider;
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
-use crate::service_publisher_accessor::{GetMetadataError, ServicePublisherAccessor};
 
 #[async_trait]
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
@@ -104,7 +104,7 @@ mod tests {
 
     use crate::expr::node_error::DescriptorProviderError;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
-    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     const PUBLISHER_1: &str = "pub_1";
     const PUBLISHER_2: &str = "pub_2";

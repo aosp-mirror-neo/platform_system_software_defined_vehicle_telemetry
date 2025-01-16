@@ -23,6 +23,7 @@ rust_defaults {
         "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
         "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_service_publisher_accessor",
         "libsdv_telemetry_utils",
         "libtokio",
         // keep-sorted end

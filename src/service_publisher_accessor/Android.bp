@@ -1,0 +1,62 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_service_publisher_accessor_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "libeither",
+        "libnum_integer",
+        "libparking_lot",
+        "libprotobuf",
+        "libsdv_status_rs",
+        "libthiserror",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        // keep-sorted end
+    ],
+    ld_flags: ["-Wl,--no-as-needed"],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_service_publisher_accessor",
+    defaults: ["libsdv_telemetry_service_publisher_accessor_defaults"],
+    crate_name: "sdv_telemetry_service_publisher_accessor",
+}
+
+rust_test {
+    name: "libsdv_telemetry_service_publisher_accessor_unit_tests",
+    defaults: ["libsdv_telemetry_service_publisher_accessor_defaults"],
+    crate_name: "sdv_telemetry_service_publisher_accessor_unit_tests",
+    test_options: {
+        unit_test: true,
+    },
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}

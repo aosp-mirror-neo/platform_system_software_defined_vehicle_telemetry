@@ -5,6 +5,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCo
 use log::{error, info};
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry_utils::file_io_utils;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
@@ -22,7 +23,6 @@ use crate::metrics_config_orchestrator::{
     MetricsConfigOrchestrator, MetricsConfigOrchestratorError as ConfigOrchestratorError,
     MetricsConfigOrchestratorImpl,
 };
-use crate::service_publisher_accessor::ServicePublisherAccessor;
 
 /// Interface of a service that manages Metrics Configurations.
 #[async_trait]
@@ -514,7 +514,7 @@ pub(crate) mod mock;
 mod tests {
     use super::*;
 
-    use crate::service_publisher_accessor::mock::MockServicePublisherAccessor;
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
     use protobuf::Message;
     use rand::prelude::SliceRandom;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
