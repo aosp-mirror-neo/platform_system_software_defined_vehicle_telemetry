@@ -1,6 +1,6 @@
 // Copyright 2023 Google LLC
 
-#![allow(missing_docs)]
+//! A sample service that publishes information about a car's tire pressure.
 
 use sdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader::{publisher, TireSensorsReader};
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;

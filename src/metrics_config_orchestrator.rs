@@ -107,8 +107,7 @@ pub trait MetricsConfigOrchestrator {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum MetricsConfigOrchestratorError {
+pub(crate) enum MetricsConfigOrchestratorError {
     #[error("Cycle detected in the publisher and trigger dependency graph")]
     CycledPublishersTriggers,
     #[error("Duplicate definition of publisher {publisher_name}")]

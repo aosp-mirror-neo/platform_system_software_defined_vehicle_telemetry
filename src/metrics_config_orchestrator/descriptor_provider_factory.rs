@@ -27,7 +27,6 @@ pub(crate) trait DescriptorProviderFactory: Send + Sync {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum DescriptorProviderFactoryError {
     #[error("AggregationPublisher {pub_name} is invalid because it did not specify a ProtoMessageBuilder")]
     InvalidAggregationPublisher { pub_name: String },

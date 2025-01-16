@@ -18,7 +18,6 @@ use crate::metrics_config_orchestrator::message_builder::value_aggregator::{
 use crate::metrics_config_orchestrator::message_builder::ValueAggregator;
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum ValueAggregatorFactoryError {
     #[error(
         "Cannot assign values to unsupported protobuf field types, such as strings, bytes, maps"

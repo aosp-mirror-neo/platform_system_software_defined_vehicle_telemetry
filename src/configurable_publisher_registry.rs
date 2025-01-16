@@ -51,8 +51,7 @@ pub struct ConfigurablePublisherRegistrySubscription {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum ConfigurablePublisherRegistryRegisterError {
+pub(crate) enum ConfigurablePublisherRegistryRegisterError {
     #[error("Error when making a call to Binder: {error:?}")]
     BinderError {
         #[from]

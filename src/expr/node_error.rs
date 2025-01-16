@@ -11,15 +11,13 @@ use crate::service_publisher_accessor::GetLatestMessageError;
 /// A wrapper for NodeEvaluationError containing index of the node causing it
 #[derive(Error, Debug)]
 #[error("Processing node at index {index} failed: {err}")]
-pub struct NodeError {
+pub(crate) struct NodeError {
     pub index: usize,
     pub err: NodeEvaluationError,
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
-#[allow(missing_docs)]
-pub enum NodeEvaluationError {
+pub(crate) enum NodeEvaluationError {
     // general errors
     #[error("Node is out of bounds, expression nodes have size {n}")]
     IndexOutOfBound { n: usize },
@@ -107,8 +105,7 @@ pub enum NodeEvaluationError {
 
 /// Error returned by MessageProvider
 #[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum MessageProviderError {
+pub(crate) enum MessageProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
@@ -121,25 +118,20 @@ pub enum MessageProviderError {
 
 /// Error returned by DescriptorProvider
 #[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum DescriptorProviderError {
+pub(crate) enum DescriptorProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
-#[allow(missing_docs)]
-pub enum FunctionLeafNodeArgumentError {
+pub(crate) enum FunctionLeafNodeArgumentError {
     #[error("GetCurrentTimestampError: {0}")]
     GetCurrentTimestampError(FunctionLeafNodeGetCurrentTimestampArgumentError),
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
-#[allow(missing_docs)]
-pub enum FunctionLeafNodeGetCurrentTimestampArgumentError {
+pub(crate) enum FunctionLeafNodeGetCurrentTimestampArgumentError {
     #[error("Time source is not set")]
     TimeSourceNotSet,
     #[error("Time source is unsupported")]

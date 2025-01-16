@@ -58,7 +58,6 @@ pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum MetricsReportGeneratorFactoryError {
     #[error("MetricsReportConfig doesn't have a name")]
     NameNotSet,

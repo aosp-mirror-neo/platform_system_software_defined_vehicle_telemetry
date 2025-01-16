@@ -62,8 +62,7 @@ pub trait MetricsConfigManager {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
-pub enum MetricsConfigManagerError {
+pub(crate) enum MetricsConfigManagerError {
     #[error("Config Orchestrator Error: {error}")]
     ConfigOrchestratorError {
         #[from]

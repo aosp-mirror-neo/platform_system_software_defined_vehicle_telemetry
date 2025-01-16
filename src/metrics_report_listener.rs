@@ -22,7 +22,6 @@ pub(crate) struct MetricsReportListener {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum MetricsReportListenerError {
     #[error("Report Ready Listener already exists")]
     ReportReadyListenerExists,

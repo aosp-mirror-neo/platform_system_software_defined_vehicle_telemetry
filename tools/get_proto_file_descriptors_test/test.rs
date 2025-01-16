@@ -1,6 +1,5 @@
 // Copyright 2024 Google LLC
 
-#![allow(missing_docs)]
 #![cfg(test)]
 
 use protobuf::descriptor::{FileDescriptorProto, FileDescriptorSet};

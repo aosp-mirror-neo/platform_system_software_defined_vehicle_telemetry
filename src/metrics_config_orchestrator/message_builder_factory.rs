@@ -47,7 +47,6 @@ pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum MessageBuilderFactoryError {
     #[error("Message {message_type} is not found in the provided file descriptor protos")]
     MessageNotFound { message_type: String },

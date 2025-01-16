@@ -66,7 +66,6 @@ pub(crate) struct PublisherFactoryValidateContext<'a> {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum PublisherFactoryError {
     #[error("ServicePublisher contains invalid connection type {connection_type}")]
     InvalidConnectionType { connection_type: i32 },

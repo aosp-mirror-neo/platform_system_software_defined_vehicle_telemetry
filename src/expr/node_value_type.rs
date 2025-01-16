@@ -17,8 +17,7 @@ use crate::expr::{node_error::NodeEvaluationError, node_factory::DescriptorProvi
 /// Used for compatibility type checking in expression nodes, such as
 /// operator-operand compatibility and protobuf field assignment compatibility.
 #[derive(Clone, PartialEq, Eq, Debug)]
-#[allow(missing_docs)]
-pub enum NodeValueType {
+pub(crate) enum NodeValueType {
     Bool,
     Int,
     Float,

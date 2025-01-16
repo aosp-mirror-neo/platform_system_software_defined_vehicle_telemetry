@@ -1,7 +1,6 @@
 // Copyright 2023 Google LLC
 
 //! Binary for testing Telemetry service.
-#![allow(missing_docs)]
 
 use anyhow::{anyhow, Context};
 use clap::Parser;

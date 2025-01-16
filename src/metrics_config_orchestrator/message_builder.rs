@@ -46,7 +46,6 @@ pub(crate) struct MessageBuilderImpl {
 }
 
 #[derive(Error, Debug)]
-#[non_exhaustive]
 pub(crate) enum MessageBuilderError {
     #[error("Unable to assign value to field {field_name} because of: {e}")]
     BadAggregation { field_name: String, e: AggregationError },
