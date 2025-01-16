@@ -1,8 +1,6 @@
 // Copyright 2023 Google LLC
-#![allow(dead_code, unused_variables, unused_imports)]
 
 use async_trait::async_trait;
-use futures::stream::{self, TryStreamExt};
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,

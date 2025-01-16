@@ -2,7 +2,6 @@
 
 //! This module implements code extensions for HashMaps and Vector
 
-#![allow(clippy::result_unit_err)]
 use std::collections::hash_map::{Entry, OccupiedEntry};
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;

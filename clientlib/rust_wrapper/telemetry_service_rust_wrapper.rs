@@ -409,7 +409,7 @@ mod test {
     ///
     /// This function is deliberately not run as part of a test, since its sole purpose is to verify
     /// the invariant described above.
-    #[allow(unused)]
+    #[expect(unused)]
     fn check_all_function_results_are_send_sync() {
         let service = assert_send_sync(TelemetryServiceHolder::get()).unwrap();
 

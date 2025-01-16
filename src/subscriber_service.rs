@@ -17,7 +17,6 @@ impl binder::Interface for SubscriberService {}
 
 #[async_trait]
 impl ISubscriberAsyncServer for SubscriberService {
-    #[allow(non_snake_case)]
     async fn sendData(&self, data: &[u8]) -> binder::Result<()> {
         self.message_descriptor.parse_from_bytes(data).map_or_else(
             |err| {

@@ -14,7 +14,6 @@ pub struct RandomIntegerPublisherService {
 impl binder::Interface for RandomIntegerPublisherService {}
 
 impl IConfigurablePublisher for RandomIntegerPublisherService {
-    #[allow(non_snake_case)]
     fn createSubscription(
         &self,
         subscriber: &binder::Strong<dyn ISubscriber>,
@@ -24,7 +23,6 @@ impl IConfigurablePublisher for RandomIntegerPublisherService {
         Ok(BnConfigurablePublisherSubscription::new_binder(subscription, BinderFeatures::default()))
     }
 
-    #[allow(non_snake_case)]
     fn getLatestMessage(&self, _configuration: Option<&[u8]>) -> binder::Result<Option<Vec<u8>>> {
         Ok(self.publisher.get_latest_message())
     }

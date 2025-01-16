@@ -90,7 +90,7 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
 }
 
 impl MetricsReportGeneratorImpl {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub(super) fn new(
         metrics_report_config: &MetricsReportConfig,
         config_activation_timestamp: Timestamp,

@@ -141,7 +141,7 @@ impl fmt::Display for CliArgs {
     }
 }
 
-#[allow(clippy::as_conversions, reason = "No alternatives for casting from float to int exist")]
+#[expect(clippy::as_conversions, reason = "No alternatives for casting from float to int exist")]
 fn parse_duration(s: &str) -> Result<Duration, Error> {
     let Some((text, value)) = s.split_once(':') else {
         return Err(clap::Error::new(ErrorKind::InvalidValue));
