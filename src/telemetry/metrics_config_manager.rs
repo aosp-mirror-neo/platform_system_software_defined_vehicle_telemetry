@@ -739,6 +739,44 @@ mod tests {
         assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
     }
 
+    #[sdv_telemetry_test_utils::timeout(2_000)]
+    #[tokio::test]
+    async fn create_active_dir_on_file_path_fail() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let file = Builder::new().tempfile_in(root_dir.path()).unwrap();
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+
+        // We provide a path to a file as a directory path
+        let test_environment = TestEnvironment::new(
+            file.path(),
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let (status, _) = test_environment.error_receiver.await;
+        assert_eq!(status, StatusCodes::FILE_IO_ERROR);
+    }
+
+    #[sdv_telemetry_test_utils::timeout(2_000)]
+    #[tokio::test]
+    async fn create_inactive_dir_on_file_path_fail() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let file = Builder::new().tempfile_in(root_dir.path()).unwrap();
+
+        // We provide a path to a file as a directory path
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            file.path(),
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let (status, _) = test_environment.error_receiver.await;
+        assert_eq!(status, StatusCodes::FILE_IO_ERROR);
+    }
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn add_metrics_config_validate_config_calls_received() {
