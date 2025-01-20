@@ -10,7 +10,6 @@ use sdv_telemetry_proto_rust::expression::{
     function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
     ConstantLeafNode, FieldLeafNode, FunctionLeafNode,
 };
-use sdv_telemetry_utils::option_extension::OptionExtension;
 
 use crate::expr::{node_error::NodeEvaluationError, node_factory::DescriptorProvider};
 
@@ -51,12 +50,12 @@ impl NodeValueType {
     // type to the list
     fn can_apply_list_operator(&self, other: Option<&NodeValueType>) -> bool {
         match self {
-            NodeValueType::BoolList => OptionExtension::is_none_or(&other, |o| o.is_bool()),
+            NodeValueType::BoolList => other.is_none_or(|o| o.is_bool()),
             NodeValueType::IntList | NodeValueType::FloatList => {
-                OptionExtension::is_none_or(&other, |o| o.is_numeric())
+                other.is_none_or(|o| o.is_numeric())
             }
             NodeValueType::MessageList { descriptor } => {
-                OptionExtension::is_none_or(&other, |o| {
+                other.is_none_or(|o| {
                     // Compatible if the other type is a message and the descriptors
                     // match or not specified in either.
                     let NodeValueType::Message { descriptor: other_descriptor } = o else {
@@ -235,8 +234,8 @@ impl OperatorProtoExtension for OperatorProto {
                     | RelationalOperator::GT_OR_EQ
                     | RelationalOperator::LT
                     | RelationalOperator::LT_OR_EQ => {
-                        if (left.is_none_or(|l| l.is_numeric()))
-                            && OptionExtension::is_none_or(&get_right(), |r| r.is_numeric())
+                        if (left.as_ref().is_none_or(|l| l.is_numeric()))
+                            && get_right().as_ref().is_none_or(|r| r.is_numeric())
                         {
                             Ok(Some(NodeValueType::Bool))
                         } else {
@@ -244,14 +243,14 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                     RelationalOperator::CONTAINS | RelationalOperator::DOES_NOT_CONTAIN => {
-                        if left.is_none_or(|l| l.can_apply_list_operator(get_right())) {
+                        if left.as_ref().is_none_or(|l| l.can_apply_list_operator(get_right())) {
                             Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeEvaluationError::ContainsOperatorIncompatibleOperands)
                         }
                     }
                     RelationalOperator::ALL_EQ => {
-                        if left.is_none_or(|l| l.can_apply_list_operator(get_right())) {
+                        if left.as_ref().is_none_or(|l| l.can_apply_list_operator(get_right())) {
                             Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeEvaluationError::AllEqualsOperatorIncompatibleOperands)
@@ -265,8 +264,8 @@ impl OperatorProtoExtension for OperatorProto {
                     op: format!("Logical operator with enum value {}", i),
                 })? {
                     LogicalOperator::AND | LogicalOperator::OR | LogicalOperator::XOR => {
-                        if left.is_none_or(|l| l.is_bool())
-                            && OptionExtension::is_none_or(&get_right(), |r| r.is_bool())
+                        if left.as_ref().is_none_or(|l| l.is_bool())
+                            && get_right().as_ref().is_none_or(|r| r.is_bool())
                         {
                             Ok(Some(NodeValueType::Bool))
                         } else {
@@ -274,7 +273,7 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                     LogicalOperator::NOT => {
-                        if left.is_none_or(|l| l.is_bool()) {
+                        if left.as_ref().is_none_or(|l| l.is_bool()) {
                             Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeEvaluationError::LogicalOperatorIncompatibleOperands)
@@ -311,13 +310,13 @@ impl OperatorProtoExtension for OperatorProto {
                             && get_right().as_ref().is_some_and(|l| l.is_numeric())
                         {
                             Ok(Some(NodeValueType::Float))
-                        } else if left.is_none_or(|l| l.is_int())
-                            && OptionExtension::is_none_or(&get_right(), |r| r.is_int())
+                        } else if left.as_ref().is_none_or(|l| l.is_int())
+                            && get_right().as_ref().is_none_or(|r| r.is_int())
                         {
                             // Type cannot be determined because it can be either int or float.
                             Ok(None)
-                        } else if left.is_none_or(|l| l.is_numeric())
-                            && OptionExtension::is_none_or(&get_right(), |r| r.is_numeric())
+                        } else if left.as_ref().is_none_or(|l| l.is_numeric())
+                            && get_right().as_ref().is_none_or(|r| r.is_numeric())
                         {
                             // If the known argument is a float, the result will
                             // always be float, not int.
@@ -327,8 +326,8 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                     ArithmeticOperator::DIVIDE => {
-                        if left.is_none_or(|l| l.is_numeric())
-                            && OptionExtension::is_none_or(&get_right(), |r| r.is_numeric())
+                        if left.as_ref().is_none_or(|l| l.is_numeric())
+                            && get_right().as_ref().is_none_or(|r| r.is_numeric())
                         {
                             Ok(Some(NodeValueType::Float))
                         } else {
@@ -336,8 +335,8 @@ impl OperatorProtoExtension for OperatorProto {
                         }
                     }
                     ArithmeticOperator::MODULO_TRUNC => {
-                        if left.is_none_or(|l| l.is_int())
-                            && OptionExtension::is_none_or(&get_right(), |r| r.is_int())
+                        if left.as_ref().is_none_or(|l| l.is_int())
+                            && get_right().as_ref().is_none_or(|r| r.is_int())
                         {
                             Ok(Some(NodeValueType::Int))
                         } else {
@@ -372,7 +371,7 @@ impl OperatorProtoExtension for OperatorProto {
             }
             // rounding operator output type = int
             OperatorProto::RoundingOperator(_) => {
-                if left.is_none_or(|l| l.is_float()) {
+                if left.as_ref().is_none_or(|l| l.is_float()) {
                     Ok(Some(NodeValueType::Int))
                 } else {
                     Err(NodeEvaluationError::RoundingOperatorIncompatibleOperands)
