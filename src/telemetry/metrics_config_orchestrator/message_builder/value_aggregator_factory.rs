@@ -2,7 +2,6 @@
 
 use protobuf::{reflect::FieldDescriptor, well_known_types::any::Any, MessageFull};
 use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
-use sdv_telemetry_utils::option_extension::OptionExtension;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -154,9 +153,8 @@ impl ValueAggregatorFactoryImpl {
         let value_type = aggregated_field_value.get_node_value_type(node_types)?;
 
         // check value type for compatibility if it's available
-        if OptionExtension::is_none_or(&value_type, |value_type| {
-            Self::is_compatible(&field_type, value_type)
-        }) {
+        if value_type.as_ref().is_none_or(|value_type| Self::is_compatible(&field_type, value_type))
+        {
             Ok(())
         } else {
             Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment {
@@ -255,7 +253,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             }
             AggregatedFieldValueProto::MaxAggregation(aggr_proto) => {
                 let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
-                if node_type.is_none_or(|t| t.is_numeric()) {
+                if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
@@ -268,7 +266,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             }
             AggregatedFieldValueProto::MinAggregation(aggr_proto) => {
                 let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
-                if node_type.is_none_or(|t| t.is_numeric()) {
+                if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
@@ -281,7 +279,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             }
             AggregatedFieldValueProto::AvgAggregation(aggr_proto) => {
                 let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
-                if node_type.is_none_or(|t| t.is_numeric()) {
+                if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     Some(NodeValueType::Float)
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
@@ -294,7 +292,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             }
             AggregatedFieldValueProto::SumAggregation(aggr_proto) => {
                 let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
-                if node_type.is_none_or(|t| t.is_numeric()) {
+                if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
@@ -307,7 +305,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             }
             AggregatedFieldValueProto::StdDevAggregation(aggr_proto) => {
                 let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
-                if node_type.is_none_or(|t| t.is_numeric()) {
+                if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     Some(NodeValueType::Float)
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
@@ -320,7 +318,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             }
             AggregatedFieldValueProto::DeltaAggregation(aggr_proto) => {
                 let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
-                if node_type.is_none_or(|t| t.is_numeric()) {
+                if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {

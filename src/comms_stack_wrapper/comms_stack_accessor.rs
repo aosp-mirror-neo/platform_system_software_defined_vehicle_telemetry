@@ -23,9 +23,7 @@ use sdv_telemetry_service_publisher_accessor::{
     ServicePublisherMetadata, ServiceRuntimeError, SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils;
-use sdv_telemetry_utils::{
-    descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, option_extension::OptionExtension,
-};
+use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
 use tokio::{select, sync::Mutex as AsyncMutex};
@@ -183,7 +181,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 .with_context(|| "Failed to subscribe to changes for unit type {unit_type}")?
                 .filter(move |event| {
                     let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
-                        OptionExtension::is_none_or(&unit_name, |unit_name| {
+                        unit_name.as_ref().is_none_or(|unit_name| {
                             service_unit.get_unit_identifier().get_unit_name() == unit_name
                         })
                     } else {
@@ -264,7 +262,7 @@ impl CommsStackAccessor {
                 let mut units = sd
                     .list_units_by_type(unit_type)
                     .filter(|service_unit| {
-                        future::ready(OptionExtension::is_none_or(unit_name, |unit_name| {
+                        future::ready(unit_name.as_ref().is_none_or(|unit_name| {
                             service_unit.get_unit_identifier().get_unit_name() == unit_name
                         }))
                     })
