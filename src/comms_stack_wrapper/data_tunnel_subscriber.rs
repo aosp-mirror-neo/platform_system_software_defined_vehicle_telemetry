@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for DT.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -45,9 +45,10 @@ impl DataTunnelSubscriber {
         unit_identifier: UnitIdentifier,
         sub_sampling_interval: &SubSamplingInterval,
         message_descriptor: MessageDescriptor,
-        mut callback: Box<
+        mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let mut subscriber_stream = dt::SubscriberStream::create(
             self.ctx.clone().await,
@@ -69,48 +70,59 @@ impl DataTunnelSubscriber {
             // while message parsing, the data is lost, as data was retrieved successfully from the
             // data tunnel. In case of data tunnel errors, data is not lost, and can be fetched in
             // the next iteration of the loop.
-            while let Some(result) = select! {
-                biased;
-                _ = cancellation_token.cancelled() => None,
-                result = async {
-                    let result = subscriber_stream.next().await;
-                    if result.is_none() {
-                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(anyhow!("Subscription ended unexpectedly"))));
+            loop {
+                match select! {
+                    biased;
+                    _ = cancellation_token.cancelled() => None,
+                    result = subscriber_stream.next() => Some(result),
+                } {
+                    None => {
+                        // Subscription is cancelled on the Telemetry Service side.
+                        return;
                     }
-                    result
-                } => result,
-            } {
-                let (number_of_messages, buffer) = match result
-                    .with_context(|| "Data Tunnel message stream produced an intermittent error")
-                {
-                    Ok(result) => result,
-                    Err(err) => {
-                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(err)));
-                        continue;
+                    Some(None) => {
+                        // Subscription is cancelled on the publisher side.
+                        (cancellation_callback)();
+                        return;
                     }
-                };
+                    Some(Some(result)) => {
+                        let (number_of_messages, buffer) = match result.with_context(|| {
+                            "Data Tunnel message stream produced an intermittent error"
+                        }) {
+                            Ok(result) => result,
+                            Err(err) => {
+                                (new_message_callback)(Err(
+                                    ServiceRuntimeError::MessageRetrievalError(err),
+                                ));
+                                continue;
+                            }
+                        };
 
-                let messages: Box<dyn Iterator<Item = _>> = {
-                    let all_messages = buffer
-                        .chunks(u32_into_usize(message_size))
-                        .take(u32_into_usize(number_of_messages));
-                    if sub_sampling_interval == SubSamplingInterval::ZERO {
-                        Box::new(all_messages)
-                    } else {
-                        // Only process the last (=newest) message.
-                        Box::new(all_messages.rev().take(1))
-                    }
-                };
+                        let messages: Box<dyn Iterator<Item = _>> = {
+                            let all_messages = buffer
+                                .chunks(u32_into_usize(message_size))
+                                .take(u32_into_usize(number_of_messages));
+                            if sub_sampling_interval == SubSamplingInterval::ZERO {
+                                Box::new(all_messages)
+                            } else {
+                                // Only process the last (=newest) message.
+                                Box::new(all_messages.rev().take(1))
+                            }
+                        };
 
-                info!(
-                    "Received {number_of_messages} messages from service unit '{}'.",
-                    Self::to_debug_string(&unit_identifier)
-                );
-                for message_bytes in messages {
-                    let message =
-                        Self::read_length_delimited_proto(message_bytes, &message_descriptor)
+                        info!(
+                            "Received {number_of_messages} messages from service unit '{}'.",
+                            Self::to_debug_string(&unit_identifier)
+                        );
+                        for message_bytes in messages {
+                            let message = Self::read_length_delimited_proto(
+                                message_bytes,
+                                &message_descriptor,
+                            )
                             .map_err(ServiceRuntimeError::MessageParsingError);
-                    (callback)(message);
+                            (new_message_callback)(message);
+                        }
+                    }
                 }
             }
         });
