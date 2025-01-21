@@ -1,8 +1,8 @@
 // Copyright 2023 Google LLC
 
 use anyhow::{anyhow, Context};
-use protobuf::well_known_types::duration::Duration as DurationProto;
-use protobuf::Message;
+use protobuf::{well_known_types::duration::Duration as DurationProto, Message};
+use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionTypeAllChanges, conditional_trigger::ConditionTypeFallingEdge,
     conditional_trigger::ConditionTypeRisingEdge,
@@ -20,9 +20,9 @@ use thiserror::Error;
 use super::trigger::conditional::{ConditionType, ConditionalTrigger, EdgeOptions};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
-use crate::expr::{node::Node, node_value_type::NodeValueType};
-use crate::metrics_config_orchestrator::{Publisher, Trigger};
+use crate::metrics_config_orchestrator::{
+    node_evaluation_context_factory::NodeEvaluationContextFactory, Publisher, Trigger,
+};
 use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
@@ -347,8 +347,12 @@ mod tests {
     use googletest::assert_that;
     use googletest::matchers::{contains_substring, eq, err, matches_pattern, ok, result_of_ref};
     use protobuf::MessageField;
+    use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
-    use sdv_telemetry_proto_rust::metrics_configuration::ServicePublisher as ServicePublisherProto;
+    use sdv_telemetry_proto_rust::metrics_configuration::{
+        conditional_trigger::Condition_type as ConditionTypeProto,
+        ServicePublisher as ServicePublisherProto,
+    };
     use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
@@ -356,12 +360,13 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
-    use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::publisher::service::{
         ConnectionType, ServicePublisher,
     };
-    use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
+    use crate::metrics_config_orchestrator::{
+        node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
+        service_adapter::mock::MockServiceAdapter,
+    };
     use crate::StatusReporterImpl;
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);

@@ -4,6 +4,7 @@ mod async_event_processor;
 mod descriptor_provider;
 mod descriptor_provider_factory;
 mod error_status_codes;
+mod node_evaluation_context_factory;
 
 pub(crate) mod message_builder;
 mod message_builder_factory;
@@ -23,6 +24,11 @@ use log::{debug, error};
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
+use sdv_telemetry_expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
+use sdv_telemetry_expr::{
+    node::Node, node_error::NodeError, node_evaluation_context::NodeEvaluationContext,
+    node_value_type::NodeValueType,
+};
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
@@ -42,14 +48,6 @@ use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
-use crate::expr::node::Node;
-use crate::expr::node_error::NodeError;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_context_factory::{
-    NodeEvaluationContextFactory, NodeEvaluationContextFactoryImpl,
-};
-use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
-use crate::expr::node_value_type::NodeValueType;
 use crate::status_reporter::StatusReporter;
 
 // Child module dependencies.
@@ -63,6 +61,9 @@ use metrics_report_generator_factory::{
     MetricsReportGeneratorFactory, MetricsReportGeneratorFactoryCreateContext,
     MetricsReportGeneratorFactoryError, MetricsReportGeneratorFactoryImpl,
     MetricsReportGeneratorFactoryValidateContext,
+};
+use node_evaluation_context_factory::{
+    NodeEvaluationContextFactory, NodeEvaluationContextFactoryImpl,
 };
 use publisher::Publisher;
 use publisher_factory::{
@@ -857,6 +858,10 @@ mod tests {
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::MessageDyn;
     use protobuf::{well_known_types, MessageFull};
+    use sdv_telemetry_expr::{
+        node_error::NodeEvaluationError, node_factory::MessageProvider, node_value::NodeValue,
+        node_value_type::NodeValueType,
+    };
     use sdv_telemetry_proto_rust::expression::Node as NodeProto;
     use sdv_telemetry_proto_rust::metrics_configuration::{
         AggregationPublisher as AggregationPublisherProto,
@@ -869,10 +874,6 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
 
-    use crate::expr::node_error::NodeEvaluationError;
-    use crate::expr::node_factory::MessageProvider;
-    use crate::expr::node_value::NodeValue;
-    use crate::expr::node_value_type::NodeValueType;
     use crate::metrics_config_orchestrator::descriptor_provider_factory::mock::MockDescriptorProviderFactory;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::get_test_file_descriptors;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;

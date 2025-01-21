@@ -11,9 +11,8 @@ pub(super) mod std_dev_aggregator;
 pub(super) mod sum_aggregator;
 pub(super) mod vector_aggregator;
 
+use sdv_telemetry_expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 use thiserror::Error;
-
-use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 pub(crate) enum AggregationError {

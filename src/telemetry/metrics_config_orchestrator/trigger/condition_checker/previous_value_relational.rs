@@ -1,10 +1,10 @@
 // Copyright 2025 Google LLC
 
+use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::RelationalOperator;
 use sdv_telemetry_utils::option_extension::OptionExtension;
 
 use super::{apply_relational_operator, ConditionChecker};
-use crate::expr::node_value::NodeValue;
 
 /// Compares current value with the previous value using provided operator.
 pub(crate) struct PreviousValueRelationalConditionChecker {

@@ -8,13 +8,13 @@ use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::expr::node_error::NodeEvaluationError;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_state::NodeEvaluationState;
-use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
-use crate::expr::node_factory::MessageProvider;
-use crate::expr::node_value::{NodeValue, OperationState};
-use crate::expr::node_value_type::OperatorProtoExtension;
+use crate::node_error::NodeEvaluationError;
+use crate::node_evaluation_context::NodeEvaluationContext;
+use crate::node_evaluation_state::NodeEvaluationState;
+use crate::node_evaluation_state_ext::WithNodeEvaluationState;
+use crate::node_factory::MessageProvider;
+use crate::node_value::{NodeValue, OperationState};
+use crate::node_value_type::OperatorProtoExtension;
 
 const EMPTY: &str = "Empty";
 
@@ -263,8 +263,8 @@ mod tests {
     };
     use std::time::SystemTime;
 
-    use crate::expr::mock::*;
-    use crate::expr::node_error::MessageProviderError;
+    use crate::mock::*;
+    use crate::node_error::MessageProviderError;
 
     const FLOAT_FIELD_NAME: &str = "float_field";
     const INT_FIELD_NAME: &str = "int_field";

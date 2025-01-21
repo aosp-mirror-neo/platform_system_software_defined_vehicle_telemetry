@@ -1,12 +1,12 @@
 // Copyright 2024 Google LLC
 
 use protobuf::{reflect::FieldDescriptor, well_known_types::any::Any, MessageFull};
+use sdv_telemetry_expr::node::Node;
+use sdv_telemetry_expr::node_value_type::{NodeValueType, NodeValueTypeExtension};
 use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::node::Node;
-use crate::expr::node_value_type::{NodeValueType, NodeValueTypeExtension};
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::{
     avg_aggregator::AvgAggregator, count_aggregator::CountAggregator,
     delta_aggregator::DeltaAggregator, max_aggregator::MaxAggregator,
@@ -359,14 +359,13 @@ mod tests {
     use super::*;
 
     use protobuf::well_known_types::timestamp::Timestamp;
+    use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::{
         AvgAggregation, CountAggregation, DeltaAggregation, MaxAggregation, MinAggregation,
         NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
     };
     use sdv_telemetry_test_utils::parameterized_test;
-
-    use crate::expr::node_value::NodeValue;
 
     // See all valid field names in src/utils/test_utils/test_message.proto
     const ANY_FIELD_NAME: &str = "any_field";

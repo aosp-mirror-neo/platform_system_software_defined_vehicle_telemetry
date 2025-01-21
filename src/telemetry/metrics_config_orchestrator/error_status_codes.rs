@@ -1,15 +1,16 @@
 // Copyright 2025 Google LLC
 
-use crate::expr::node_error::{
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+
+use sdv_telemetry_expr::node_error::{
     DescriptorProviderError, FunctionLeafNodeArgumentError,
     FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeEvaluationError,
 };
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
+
 use crate::metrics_config_orchestrator::message_builder::{
     AggregationError, MessageBuilderError, MessageBuilderErrorType,
 };
-use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
-
-use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
 
 // This trait specifies status codes of errors which are sent back to the client via Misc Status Listener
 pub(crate) trait ErrorStatusCodes {

@@ -2,6 +2,7 @@
 
 use lazy_static::lazy_static;
 use protobuf::reflect::FileDescriptor;
+use sdv_telemetry_expr::{node::Node, node_value::NodeValue, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use sdv_telemetry_test_proto::test_message;
 use std::sync::Arc;
@@ -10,7 +11,6 @@ use super::{
     MessageBuilder, MessageBuilderFactory, MessageBuilderFactoryCreateContext,
     MessageBuilderFactoryError, MessageBuilderFactoryValidateContext,
 };
-use crate::expr::{node::Node, node_value::NodeValue, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
 
 lazy_static! {

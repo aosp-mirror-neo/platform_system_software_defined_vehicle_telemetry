@@ -6,8 +6,8 @@ use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::expr::node_error::MessageProviderError;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::node_error::MessageProviderError;
+use crate::node_evaluation_context::NodeEvaluationContext;
 
 /// Stores expression evaluation state to ensure expression evaluation uses the same message
 /// in different branches.

@@ -2,12 +2,11 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
-
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 mod base;
 

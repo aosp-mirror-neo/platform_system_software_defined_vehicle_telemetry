@@ -11,7 +11,7 @@ use protobuf::{
 };
 use std::sync::Arc;
 
-use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
+use crate::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 pub trait MessageDescriptorExt {
     fn get_field_value(

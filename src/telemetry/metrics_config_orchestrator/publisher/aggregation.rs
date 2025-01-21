@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
@@ -13,7 +14,6 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
@@ -299,11 +299,11 @@ mod tests {
     use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::Int32Value;
+    use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::{future, sync::Arc};
 
-    use crate::expr::node_error::NodeEvaluationError;
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
     use crate::metrics_config_orchestrator::message_builder::MessageBuilderErrorType;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;

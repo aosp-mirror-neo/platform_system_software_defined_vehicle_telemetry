@@ -8,18 +8,17 @@ pub(super) use value_aggregator::AggregationError;
 use log::trace;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use sdv_telemetry_expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
+    ReflectRepeatedMutExt, ToReflectValueBox,
+};
+use sdv_telemetry_expr::{
+    node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
+    node_value::NodeValue,
+};
 use sdv_telemetry_utils::value_holder::ValueHolder;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
-
-use crate::expr::node::Node;
-use crate::expr::node_error::NodeEvaluationError;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_value::NodeValue;
-use crate::expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
-    ReflectRepeatedMutExt, ToReflectValueBox,
-};
 
 use value_aggregator::ValueAggregator;
 
@@ -184,14 +183,14 @@ mod tests {
     use lazy_static::lazy_static;
     use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
+    use sdv_telemetry_expr::mock::{MockMessageProvider, TEST_MESSAGE};
+    use sdv_telemetry_expr::node_error::MessageProviderError;
+    use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdv_telemetry_test_utils::msg_dyn_eq;
     use std::sync::Arc;
 
-    use crate::expr::mock::{MockMessageProvider, TEST_MESSAGE};
-    use crate::expr::node_error::MessageProviderError;
-    use crate::expr::node_value::NodeValue;
     use value_aggregator::mock::MockValueAggregator;
 
     lazy_static! {

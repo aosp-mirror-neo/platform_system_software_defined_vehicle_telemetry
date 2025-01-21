@@ -1,9 +1,9 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_expr::node::Node;
 use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
 use std::sync::Arc;
 
-use crate::expr::node::Node;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::mock::MockValueAggregator;
 use crate::metrics_config_orchestrator::message_builder::value_aggregator_factory::{
     ValueAggregatorFactory, ValueAggregatorFactoryCreateContext, ValueAggregatorFactoryError,

@@ -19,11 +19,11 @@ use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
+use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
@@ -524,6 +524,8 @@ impl ServicePublisher {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use anyhow::anyhow;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
         TelemetryServiceStatus::TelemetryServiceStatus,
@@ -537,8 +539,7 @@ mod tests {
     use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::sync::Arc;
 
-    use super::*;
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
+    use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::service_adapter::mock::{
         MockServiceAdapter, MockServiceMessageProvider,
     };

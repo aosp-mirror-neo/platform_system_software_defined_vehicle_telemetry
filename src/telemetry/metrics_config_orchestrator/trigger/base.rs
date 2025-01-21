@@ -1,10 +1,10 @@
 // Copyright 2024 Google LLC
 
 use log::trace;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::sync::{Arc, Weak};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::AsyncEventProcessor;
 use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, ActivationId, SubscriptionManager, SubscriptionManagerImpl,

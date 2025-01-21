@@ -2,6 +2,7 @@
 
 use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
+use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
 };
@@ -9,14 +10,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
-use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,
 };
 use crate::metrics_config_orchestrator::{
-    MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
+    node_evaluation_context_factory::NodeEvaluationContextFactory, MetricsReportGenerator,
+    MetricsReportGeneratorImpl, Trigger,
 };
 use crate::status_reporter::StatusReporter;
 
@@ -214,10 +214,10 @@ mod tests {
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
 
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
+    use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::trigger::{
         mock::MockTrigger, periodic::PeriodicTrigger, TriggerSubscriber,
     };

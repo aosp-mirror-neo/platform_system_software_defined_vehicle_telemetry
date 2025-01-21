@@ -1,5 +1,7 @@
 // Copyright 2024 Google LLC
 
+#![cfg(any(test, feature = "test_utils"))]
+
 use futures::future::BoxFuture;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
@@ -13,8 +15,8 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::expr::node_error::{DescriptorProviderError, MessageProviderError};
-use crate::expr::node_factory::{DescriptorProvider, MessageProvider};
+use crate::node_error::{DescriptorProviderError, MessageProviderError};
+use crate::node_factory::{DescriptorProvider, MessageProvider};
 
 // Common constants to be reused across tests.
 
@@ -110,6 +112,12 @@ pub struct MockMessageProvider {
     return_default_message: bool,
 }
 
+impl Default for MockMessageProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockMessageProvider {
     pub fn new() -> Self {
         Self { next_result: None.into(), return_default_message: false }
@@ -164,6 +172,12 @@ pub struct MockDescriptorProvider {
 
     /// Known message descriptors.
     pub descriptors: HashMap<String, MessageDescriptor>,
+}
+
+impl Default for MockDescriptorProvider {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockDescriptorProvider {

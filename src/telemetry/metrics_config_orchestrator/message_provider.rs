@@ -1,11 +1,11 @@
 // Copyright 2023 Google LLC
 
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_error::MessageProviderError;
+use sdv_telemetry_expr::node_factory::MessageProvider;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, OnceLock};
 
-use crate::expr::node_error::MessageProviderError;
-use crate::expr::node_factory::MessageProvider;
 use crate::metrics_config_orchestrator::MetricsConfig;
 
 pub(super) struct MessageProviderImpl {

@@ -1,6 +1,10 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
+use sdv_telemetry_expr::{
+    node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
+    node_value::NodeValue,
+};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -9,19 +13,17 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::base::{BaseTrigger, TriggerState};
 use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
-use crate::expr::node::Node;
-use crate::expr::node_error::NodeEvaluationError;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
-use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
-use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::condition_checker::{
     ConditionChecker, ConstantConditionChecker, EdgeConditionChecker,
     PreviousValueRelationalConditionChecker,
+};
+use crate::metrics_config_orchestrator::{
+    error_status_codes::ErrorStatusCodes,
+    node_evaluation_context_factory::NodeEvaluationContextFactory,
 };
 use crate::status_reporter::StatusReporter;
 
@@ -320,6 +322,9 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
+    use sdv_telemetry_expr::{
+        mock::MockMessageProvider, node::Node, node_error::MessageProviderError,
+    };
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
@@ -327,14 +332,13 @@ mod tests {
     use std::collections::HashMap;
     use std::future;
 
-    use crate::expr::mock::MockMessageProvider;
-    use crate::expr::node::Node;
-    use crate::expr::node_error::MessageProviderError;
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::trigger::mock::{
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
     };
-    use crate::metrics_config_orchestrator::ServicePublisherAccessorError;
+    use crate::metrics_config_orchestrator::{
+        node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
+        ServicePublisherAccessorError,
+    };
     use crate::StatusReporterImpl;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";

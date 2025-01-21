@@ -1,6 +1,7 @@
 // Copyright 2023 Google LLC
 
 use protobuf::reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor};
+use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto,
     ProtoMessageBuilder,
@@ -11,7 +12,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
-use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::message_builder::value_aggregator_factory::{
     ValueAggregatorFactory, ValueAggregatorFactoryCreateContext, ValueAggregatorFactoryError,
     ValueAggregatorFactoryImpl, ValueAggregatorFactoryValidateContext,

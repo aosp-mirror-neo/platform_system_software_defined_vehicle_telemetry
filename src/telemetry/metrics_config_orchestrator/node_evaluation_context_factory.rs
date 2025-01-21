@@ -1,12 +1,11 @@
 // Copyright 2025 Google LLC
 
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use std::sync::Arc;
 
-use super::node_evaluation_context::NodeEvaluationContext;
-
-pub(crate) trait NodeEvaluationContextFactory: Send + Sync {
+pub trait NodeEvaluationContextFactory: Send + Sync {
     fn create(&self) -> NodeEvaluationContext;
 
     fn create_with_publisher_message(
@@ -16,7 +15,7 @@ pub(crate) trait NodeEvaluationContextFactory: Send + Sync {
     ) -> NodeEvaluationContext;
 }
 
-pub(crate) struct NodeEvaluationContextFactoryImpl {
+pub struct NodeEvaluationContextFactoryImpl {
     pal: Arc<dyn PlatformAbstractionLayer>,
 }
 

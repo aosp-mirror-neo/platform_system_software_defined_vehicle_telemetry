@@ -3,13 +3,13 @@
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::Publisher;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::publisher::CallbackFn;
 
 pub(crate) struct MockPublisher {

@@ -1,8 +1,8 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
 
-use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 const DEFAULT_SUM_VALUE: NodeValue = NodeValue::Int32(0);

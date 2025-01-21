@@ -1,7 +1,8 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_expr::node_value::NodeValue;
+
 use super::node_value_extension::NodeValueExtension;
-use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 const DEFAULT_DOUBLE_VALUE: NodeValue = NodeValue::Double(0.0);
