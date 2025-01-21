@@ -148,6 +148,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                         sub_sampling_interval,
                         message_descriptor,
                         new_message_callback,
+                        cancellation_callback,
                     )
                     .await
             }
