@@ -291,8 +291,15 @@ mod tests {
     use super::*;
 
     use futures::FutureExt;
+    use googletest::matchers::{eq, none, result_of_ref, some};
+    use googletest::{assert_that, expect_that};
+    use lazy_static::lazy_static;
+    use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
+    use sdv_telemetry_utils::conversions::u32_into_usize;
+    use std::collections::HashMap;
     use std::future;
 
     use crate::expr::mock::MockMessageProvider;
@@ -305,6 +312,19 @@ mod tests {
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const ACTIVATION_ID: ActivationId = ActivationId::new(3);
+
+    lazy_static! {
+        static ref FALSE_MSG: Arc<dyn MessageDyn> =
+            Arc::new(BoolValue { value: false, ..Default::default() });
+        static ref TRUE_MSG: Arc<dyn MessageDyn> =
+            Arc::new(BoolValue { value: true, ..Default::default() });
+        static ref INT_0_MSG: Arc<dyn MessageDyn> =
+            Arc::new(Int32Value { value: 0, ..Default::default() });
+        static ref INT_1_MSG: Arc<dyn MessageDyn> =
+            Arc::new(Int32Value { value: 1, ..Default::default() });
+        static ref INT_2_MSG: Arc<dyn MessageDyn> =
+            Arc::new(Int32Value { value: 2, ..Default::default() });
+    }
 
     fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {
         Node::FieldLeaf {
@@ -363,13 +383,8 @@ mod tests {
         Arc<MockTrigger>,
         Arc<MockCallbackListener<(ActivationId, Arc<NodeEvaluationContext>)>>,
     ) {
-        let (trigger, message_provider, parent_trigger) =
-            create_valid_conditional_trigger(condition_type, None);
-
-        let mut trigger = Arc::into_inner(trigger).unwrap();
-        let subscription_manager = MockSubscriptionManager::new();
-        trigger.base.subscription_manager = Box::new(subscription_manager.clone());
-        let trigger = Arc::new(trigger);
+        let (trigger, message_provider, parent_trigger, subscription_manager) =
+            create_valid_conditional_trigger_with_mock_subscription_manager(condition_type, None);
 
         let callback_listener = Arc::new(MockCallbackListener::new());
         subscription_manager
@@ -480,271 +495,63 @@ mod tests {
         assert!(Arc::ptr_eq(&parent_context, &child_context2));
     }
 
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_filters_none() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::AllChanges).await;
-
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
-
-        // Fire parent trigger three times.
-        message_provider.set_next_sync_result(Ok(Some(msg1)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(None));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg2)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire once.
-        let (activation_id, _context) = callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(activation_id, ACTIVATION_ID);
-        assert_eq!(callback_listener.get_fired_count(), 1);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_filters_all_changes() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::AllChanges).await;
-
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
-
-        // Fire parent trigger three times with the message changing once.
-        message_provider.set_next_sync_result(Ok(Some(msg1)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg2) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg2)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire once.
-        callback_listener.wait_for_callback_fired().await;
-
-        // Verify that the trigger fired once.
-        assert_eq!(callback_listener.get_fired_count(), 1);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_filters_falling_edge() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::FallingEdge).await;
-
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
-
-        // Fire parent trigger three times.
-        // The first change is the rising edge and the second change is the falling edge.
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg1) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg2)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg1)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire once.
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 1);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_filters_rising_edge() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::RisingEdge).await;
-
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
-
-        // Fire parent trigger three times.
-        // The first change is the falling edge and the second change is the rising edge.
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg2) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg1)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg2)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire once.
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 1);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_is_true_filters_true() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IsTrue).await;
-
-        let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
-        let true_msg = Arc::new(BoolValue { value: true, ..Default::default() });
-
-        // Fire parent trigger three times: [false, true, true].
-        // This is to verify it filters out false and lets repeated true go through.
-        message_provider.set_next_sync_result(Ok(Some(false_msg)));
-        parent_trigger.fire().await;
-
-        message_provider
-            .set_next_sync_result(Ok(Some(Arc::clone(&true_msg) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(true_msg)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire twice.
-        callback_listener.wait_for_callback_fired().await;
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 2);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_is_false_filters_false() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IsFalse).await;
-
-        let false_msg = Arc::new(BoolValue { value: false, ..Default::default() });
-        let true_msg = Arc::new(BoolValue { value: true, ..Default::default() });
-
-        // Fire parent trigger three times: [true, false, false].
-        // This is to verify it filters out false and lets repeated true go through.
-        message_provider.set_next_sync_result(Ok(Some(true_msg)));
-        parent_trigger.fire().await;
-
-        message_provider
-            .set_next_sync_result(Ok(Some(Arc::clone(&false_msg) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(false_msg)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire twice.
-        callback_listener.wait_for_callback_fired().await;
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 2);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_is_true_filters_non_zero() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IsTrue).await;
-
-        let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-
-        // Fire parent trigger three times: [0, 1, 1].
-        // This is to verify it filters out zeo and lets repeated non-zeroes go through.
-        message_provider.set_next_sync_result(Ok(Some(msg0)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg1) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg1)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire twice.
-        callback_listener.wait_for_callback_fired().await;
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 2);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_is_false_filters_zero() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IsFalse).await;
-
-        let msg0 = Arc::new(Int32Value { value: 0, ..Default::default() });
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-
-        // Fire parent trigger three times: [1, 0, 0].
-        // This is to verify it filters out non-zero and lets repeated zero go through.
-        message_provider.set_next_sync_result(Ok(Some(msg1)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg0) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg0)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire twice.
-        callback_listener.wait_for_callback_fired().await;
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 2);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_is_true_filters_none() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IsTrue).await;
-
-        let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
-
-        // Fire parent trigger three times: [None, 1, 1].
-        // This is to verify it filters out None and lets repeated non-zeroes go through.
-        message_provider.set_next_sync_result(Ok(None));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire twice.
-        callback_listener.wait_for_callback_fired().await;
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 2);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn activate_is_false_filters_none() {
-        let (_trigger, message_provider, parent_trigger, callback_listener) =
-            setup_active_conditional_trigger(ConditionType::IsFalse).await;
-
-        let msg = Arc::new(Int32Value { value: 0, ..Default::default() });
-
-        // Fire parent trigger three times: [None, 0, 0].
-        // This is to verify it filters out None and lets repeated zero go through.
-        message_provider.set_next_sync_result(Ok(None));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(Arc::clone(&msg) as Arc<dyn MessageDyn>)));
-        parent_trigger.fire().await;
-
-        message_provider.set_next_sync_result(Ok(Some(msg)));
-        parent_trigger.fire().await;
-
-        // Wait for trigger to fire twice.
-        callback_listener.wait_for_callback_fired().await;
-        callback_listener.wait_for_callback_fired().await;
-
-        assert_eq!(callback_listener.get_fired_count(), 2);
-    }
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        activate,
+
+        |condition_type, messages: &[Option<&Arc<dyn MessageDyn>>], expected| async move {
+            let (_trigger, message_provider, parent_trigger, callback_listener) =
+                setup_active_conditional_trigger(condition_type).await;
+
+            let mut ctx_to_msg_map = HashMap::new();
+            for msg in messages.iter() {
+                message_provider.set_next_sync_result(Ok(msg.cloned()));
+
+                let context = NodeEvaluationContext::new();
+                if let Some(msg) = msg {
+                    assert_that!(ctx_to_msg_map.insert(context.root_id(), msg.as_ref()), none());
+                }
+                parent_trigger.fire_with_context(context.into()).await;
+            }
+
+            for msg in expected.iter() {
+                expect_that!(
+                    callback_listener.wait_for_callback_fired().await,
+                    (
+                        eq(&ACTIVATION_ID),
+                        result_of_ref!(
+                            |context: &Arc<NodeEvaluationContext>| ctx_to_msg_map
+                                .get(&context.root_id())
+                                .cloned(),
+                            some(msg_dyn_eq(msg.as_ref(), &ReflectEqMode::default()))
+                        )
+                    )
+                );
+            }
+            expect_that!(u32_into_usize(callback_listener.get_fired_count()), eq(expected.len()));
+        },
+
+        all_changes:      (ConditionType::AllChanges, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        all_changes_none: (ConditionType::AllChanges, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+
+        falling_edge: (ConditionType::FallingEdge, &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+
+        rising_edge: (ConditionType::RisingEdge, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+
+        is_true_bool_1:    (ConditionType::IsTrue, &[Some(&*TRUE_MSG)], &[&*TRUE_MSG],),
+        is_true_bool_2:    (ConditionType::IsTrue, &[Some(&*FALSE_MSG), Some(&*TRUE_MSG), Some(&*FALSE_MSG), Some(&*TRUE_MSG)], &[&*TRUE_MSG, &*TRUE_MSG],),
+        is_true_numeric_1: (ConditionType::IsTrue, &[Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+        is_true_numeric_2: (ConditionType::IsTrue, &[Some(&*INT_0_MSG), Some(&*INT_1_MSG), Some(&*INT_0_MSG), Some(&*INT_1_MSG)], &[&*INT_1_MSG, &*INT_1_MSG],),
+        is_true_none:      (ConditionType::IsTrue, &[None, Some(&*TRUE_MSG), None, Some(&*INT_1_MSG)], &[&*TRUE_MSG, &*INT_1_MSG],),
+
+        is_false_bool_1:    (ConditionType::IsFalse, &[Some(&*FALSE_MSG)], &[&*FALSE_MSG],),
+        is_false_bool_2:    (ConditionType::IsFalse, &[Some(&*TRUE_MSG), Some(&*FALSE_MSG), Some(&*TRUE_MSG), Some(&*FALSE_MSG)], &[&*FALSE_MSG, &*FALSE_MSG],),
+        is_false_numeric_1: (ConditionType::IsFalse, &[Some(&*INT_0_MSG)], &[&*INT_0_MSG],),
+        is_false_numeric_2: (ConditionType::IsFalse, &[Some(&*INT_1_MSG), Some(&*INT_0_MSG), Some(&*INT_1_MSG), Some(&*INT_0_MSG)], &[&*INT_0_MSG, &*INT_0_MSG],),
+        is_false_none:      (ConditionType::IsFalse, &[None, Some(&*FALSE_MSG), None, Some(&*INT_0_MSG)], &[&*FALSE_MSG, &*INT_0_MSG],),
+    );
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
