@@ -144,10 +144,12 @@ mod tests {
     use super::*;
 
     use futures::{future, FutureExt};
+    use googletest::assert_that;
     use lazy_static::lazy_static;
     use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
+    use sdv_telemetry_test_utils::msg_dyn_eq;
     use std::sync::Arc;
 
     use crate::expr::mock::{MockMessageProvider, TEST_MESSAGE};
@@ -227,8 +229,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         let res = builder.build(&context).unwrap_sync().unwrap();
 
-        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]
@@ -250,8 +251,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         let res = builder.build(&context).unwrap_sync().unwrap();
 
-        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]
@@ -282,8 +282,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         let res = builder.build(&context).unwrap_sync().unwrap();
 
-        // compare `Box<dyn MessageDyn>` with `MessageFull` using reflect_eq_dyn
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]
@@ -315,7 +314,7 @@ mod tests {
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         // verify the newly-built message does set the fields to the expected values
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]
@@ -337,7 +336,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         let res = builder.build(&context).unwrap_sync().unwrap();
 
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]
@@ -356,7 +355,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         let res = builder.build(&context).unwrap_sync().unwrap();
 
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]
@@ -378,7 +377,7 @@ mod tests {
         let context = Arc::new(NodeEvaluationContext::new());
         let res = builder.build(&context).unwrap_sync().unwrap();
 
-        assert!(res.reflect_eq_dyn(&expected_message, &REFLECT_EQ_MODE));
+        assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
     }
 
     #[test]

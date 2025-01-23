@@ -265,10 +265,11 @@ impl AggregationPublisher {
 #[cfg(test)]
 mod tests {
     use futures::FutureExt;
+    use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use sdv_telemetry_test_utils::oneshot_callback;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::{future, sync::Arc};
 
     use super::*;
@@ -455,10 +456,7 @@ mod tests {
         let context_msg = context
             .get_message(PUBLISHER_NAME_2)
             .expect("Publisher message should be present in the context");
-        assert!(
-            context_msg.reflect_eq_dyn(&msg, &ReflectEqMode::default()),
-            "Expected {context_msg:?} to equal {msg:?}"
-        );
+        assert_that!(context_msg, msg_dyn_eq(&msg, &ReflectEqMode::default()));
     }
 
     #[sdv_telemetry_test_utils::timeout]

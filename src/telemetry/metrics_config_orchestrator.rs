@@ -955,6 +955,7 @@ mod tests {
     use super::*;
 
     use anyhow::anyhow;
+    use googletest::assert_that;
     use parking_lot::Mutex;
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
@@ -971,7 +972,7 @@ mod tests {
         PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Publisher as PublisherProto,
         ServicePublisher as ServicePublisherProto, Trigger as TriggerProto,
     };
-    use sdv_telemetry_test_utils::oneshot_callback;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -1984,19 +1985,13 @@ mod tests {
                 .unwrap_sync()
                 .unwrap()
                 .unwrap();
-            assert!(
-                message.reflect_eq_dyn(value1.as_ref(), &ReflectEqMode::default()),
-                "Expected {message:?} to equal {value1:?}"
-            );
+            assert_that!(message, msg_dyn_eq(value1.as_ref(), &ReflectEqMode::default()));
             let message = message_providers[0]
                 .get_message(AGGREGATION_PUBLISHER_NAME)
                 .unwrap_sync()
                 .unwrap()
                 .unwrap();
-            assert!(
-                message.reflect_eq_dyn(value2.as_ref(), &ReflectEqMode::default()),
-                "Expected {message:?} to equal {value2:?}"
-            );
+            assert_that!(message, msg_dyn_eq(value2.as_ref(), &ReflectEqMode::default()));
         }
         let config = {
             let configs = orchestrator.configs.lock();

@@ -508,10 +508,11 @@ impl ServicePublisher {
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
+    use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
-    use sdv_telemetry_test_utils::oneshot_callback;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::sync::Arc;
 
     use super::*;
@@ -1053,10 +1054,7 @@ mod tests {
         let latest_message =
             Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap().unwrap();
 
-        assert!(
-            latest_message.reflect_eq_dyn(message.as_ref(), &ReflectEqMode::default()),
-            "Expected {latest_message:?} to equal {message:?}"
-        );
+        assert_that!(latest_message, msg_dyn_eq(message.as_ref(), &ReflectEqMode::default()));
     }
 
     #[sdv_telemetry_test_utils::timeout]

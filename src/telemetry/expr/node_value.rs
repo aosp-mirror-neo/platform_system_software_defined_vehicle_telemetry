@@ -795,7 +795,7 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
-    use sdv_telemetry_test_utils::parameterized_test;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
     use std::f32::consts::PI as PIf32;
     use std::f64::consts::PI as PIf64;
 
@@ -871,11 +871,10 @@ mod tests {
         let node_value = NodeValue::extract_value(Cow::Borrowed(&msg), &[]).unwrap();
 
         // assert
-        if let NodeValue::Message(node_msg) = node_value {
-            assert!(node_msg.reflect_eq_dyn(msg.as_ref(), &ReflectEqMode::default()));
-        } else {
-            panic!("Expect Message variant of NodeValue, got {node_value:?}");
-        }
+        assert_that!(
+            node_value,
+            pat!(NodeValue::Message(msg_dyn_eq(msg.as_ref(), &ReflectEqMode::default())))
+        );
     }
 
     #[test]
