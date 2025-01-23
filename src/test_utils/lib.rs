@@ -123,21 +123,35 @@ mod tests {
     );
 
     parameterized_test!(
-        #[tokio::test]
         #[timeout]
+        #[tokio::test]
         parameterized_async_no_args,
         || async {},
         test_case: (),
     );
 
     parameterized_test!(
-        #[tokio::test]
         #[timeout]
+        #[tokio::test]
         parameterized_async_args,
         |n| async move {
             assert_eq!(n % 2, 1);
         },
         one: (1,),
         three: (3,),
+    );
+
+    parameterized_test!(
+        #[timeout]
+        #[tokio::test]
+        parameterized_async_args_references,
+        |arg: &[&std::time::Duration]| async move {
+            let _ = format!("{arg:?}");
+            sleep(Duration::from_millis(1)).await;
+            let _ = format!("{arg:?}");
+            sleep(Duration::from_millis(1)).await;
+            let _ = format!("{arg:?}");
+        },
+        zero: (&[&std::time::Duration::ZERO],),
     );
 }
