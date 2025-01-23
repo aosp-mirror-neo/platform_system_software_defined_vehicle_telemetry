@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for SDV RPC.
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -86,9 +86,10 @@ impl SdvRpcClient {
         unit_identifier: UnitIdentifier,
         configuration: Option<&Any>,
         message_descriptor: MessageDescriptor,
-        mut callback: Box<
+        mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
         >,
+        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
@@ -108,32 +109,41 @@ impl SdvRpcClient {
         let subscription_drop_guard = cancellation_token.clone().drop_guard();
 
         tokio::spawn(async move {
-            while let Some(result) = select! {
-                biased;
-                _ = cancellation_token.cancelled() => None,
-                result = async {
-                    let result = response_stream.next().await;
-                    if result.is_none() {
-                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(anyhow!("Subscription ended unexpectedly"))));
+            loop {
+                match select! {
+                    biased;
+                    _ = cancellation_token.cancelled() => None,
+                    result = response_stream.next() => Some(result),
+                } {
+                    None => {
+                        // Subscription is cancelled on the Telemetry Service side.
+                        return;
                     }
-                    result
-                } => result,
-            } {
-                let buffer = match result
-                    .with_context(|| "RPC server stream produced an intermittent error")
-                {
-                    Ok(buffer) => buffer,
-                    Err(err) => {
-                        (callback)(Err(ServiceRuntimeError::MessageRetrievalError(err)));
-                        continue;
+                    Some(None) => {
+                        // Subscription is cancelled on the publisher side.
+                        (cancellation_callback)();
+                        return;
                     }
-                };
+                    Some(Some(result)) => {
+                        let buffer = match result
+                            .with_context(|| "RPC server stream produced an intermittent error")
+                        {
+                            Ok(buffer) => buffer,
+                            Err(err) => {
+                                (new_message_callback)(Err(
+                                    ServiceRuntimeError::MessageRetrievalError(err),
+                                ));
+                                continue;
+                            }
+                        };
 
-                let message = message_descriptor
-                    .parse_from_bytes(&buffer)
-                    .with_context(|| "Failed to parse the protobuf message")
-                    .map_err(ServiceRuntimeError::MessageParsingError);
-                (callback)(message);
+                        let message = message_descriptor
+                            .parse_from_bytes(&buffer)
+                            .with_context(|| "Failed to parse the protobuf message")
+                            .map_err(ServiceRuntimeError::MessageParsingError);
+                        (new_message_callback)(message);
+                    }
+                }
             }
         });
 

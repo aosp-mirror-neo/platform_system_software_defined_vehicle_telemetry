@@ -159,6 +159,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                         configuration,
                         message_descriptor,
                         new_message_callback,
+                        cancellation_callback,
                     )
                     .await
             }
