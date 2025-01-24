@@ -792,6 +792,45 @@ mod tests {
     }
 
     #[test]
+    fn validate_deprecated_all_eq_operator_fails() {
+        let mut combination_node = CombinationNode::new();
+        combination_node.set_relational_operator(RelationalOperator::ALL_EQ);
+        combination_node.left_index = Some(1);
+        combination_node.right_index = Some(2);
+
+        let mut node_0 = NodeProto::new();
+        node_0.set_combination_node(combination_node);
+
+        // Children are required to be set (values don't matter) because their validation happens first
+        let mut constant_leaf_node = ConstantLeafNode::new();
+        constant_leaf_node.set_double_value(1.0);
+        let mut node_1 = NodeProto::new();
+        node_1.set_constant_leaf_node(constant_leaf_node.clone());
+        let mut node_2 = NodeProto::new();
+        node_2.set_constant_leaf_node(constant_leaf_node);
+
+        let all_proto_nodes = vec![node_0, node_1, node_2];
+        let node_factory = NodeFactoryImpl::new();
+        let context = create_factory_context();
+
+        // action
+        let err = node_factory.validate(&all_proto_nodes, &context).unwrap_err();
+
+        assert!(
+            matches!(
+                &err, NodeError {
+                    err: NodeEvaluationError::DeprecatedOperator {
+                        op: OperatorProto::RelationalOperator(r_op)
+                    },
+                    index: 0,
+                }
+                if r_op.enum_value().unwrap() == RelationalOperator::ALL_EQ),
+            "Unexpected error: {:?}",
+            err
+        );
+    }
+
+    #[test]
     fn validate_node_has_string_field_success() {
         let mut node_0 = NodeProto::new();
         let mut leaf = FieldLeafNode::new();

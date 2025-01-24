@@ -266,6 +266,9 @@ impl OperatorProtoExtension for OperatorProto {
                             Err(NodeEvaluationError::ContainsOperatorIncompatibleOperands)
                         }
                     }
+                    RelationalOperator::ALL_EQ => {
+                        Err(NodeEvaluationError::DeprecatedOperator { op: self.clone() })
+                    }
                 }
             }
             // logical operator output type = boolean

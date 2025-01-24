@@ -620,6 +620,9 @@ impl NodeValue {
                 // negate the boolean in a Result<bool, E>
                 self.contains(other).map(|x| !x)
             }
+            RelationalOperator::ALL_EQ => {
+                panic!("ALL_EQ operator usage: this expression should have been skipped after validation");
+            }
         }?))
     }
 
@@ -1163,6 +1166,14 @@ mod tests {
             NodeValue::extract_value(Cow::Owned(msg), &field_names).unwrap_err(),
             NodeEvaluationError::FieldNotFound { .. }
         ));
+    }
+
+    #[test]
+    #[should_panic]
+    fn all_eq_operator_fail() {
+        let list = NodeValue::BoolList(vec![true, true, true]);
+        let value = NodeValue::Bool(true);
+        let _ = list.operate_sync(&OP_ALL_EQ, || Ok(value));
     }
 
     parameterized_test!(

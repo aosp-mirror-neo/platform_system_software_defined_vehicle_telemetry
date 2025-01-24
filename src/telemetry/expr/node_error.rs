@@ -2,6 +2,7 @@
 
 //! Errors that can arise from incorrect node setup and from AST traversal.
 
+use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
 use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
 use std::sync::Arc;
@@ -68,6 +69,8 @@ pub(crate) enum NodeEvaluationError {
     // error related to CombinationNode
     #[error("Combination node does not set operator")]
     OperatorNotSet,
+    #[error("Deprecated operator type: {op:?}")]
+    DeprecatedOperator { op: OperatorProto },
     #[error("Unknown operator type: {op}")]
     UnknownOperator { op: String },
     #[error("Combination node does not set left child")]
