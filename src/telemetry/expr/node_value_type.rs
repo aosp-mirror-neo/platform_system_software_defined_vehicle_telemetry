@@ -46,6 +46,16 @@ impl NodeValueType {
         matches!(self, NodeValueType::Int)
     }
 
+    fn is_list(&self) -> bool {
+        matches!(
+            self,
+            NodeValueType::BoolList
+                | NodeValueType::IntList
+                | NodeValueType::FloatList
+                | NodeValueType::MessageList { .. }
+        )
+    }
+
     // returns true if `self` is a list type, and `other` is a singular & compatible
     // type to the list
     fn can_apply_list_operator(&self, other: Option<&NodeValueType>) -> bool {
@@ -227,6 +237,13 @@ impl OperatorProtoExtension for OperatorProto {
                 match op.enum_value().map_err(|i| NodeEvaluationError::UnknownOperator {
                     op: format!("Relational operator with enum value {}", i),
                 })? {
+                    RelationalOperator::EQ if left.as_ref().is_none_or(|l| l.is_list()) => {
+                        if left.as_ref().is_none_or(|l| l.can_apply_list_operator(get_right())) {
+                            Ok(Some(NodeValueType::Bool))
+                        } else {
+                            Err(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)
+                        }
+                    }
                     RelationalOperator::EQ | RelationalOperator::NOT_EQ => {
                         Ok(Some(NodeValueType::Bool))
                     }
@@ -247,13 +264,6 @@ impl OperatorProtoExtension for OperatorProto {
                             Ok(Some(NodeValueType::Bool))
                         } else {
                             Err(NodeEvaluationError::ContainsOperatorIncompatibleOperands)
-                        }
-                    }
-                    RelationalOperator::ALL_EQ => {
-                        if left.as_ref().is_none_or(|l| l.can_apply_list_operator(get_right())) {
-                            Ok(Some(NodeValueType::Bool))
-                        } else {
-                            Err(NodeEvaluationError::AllEqualsOperatorIncompatibleOperands)
                         }
                     }
                 }

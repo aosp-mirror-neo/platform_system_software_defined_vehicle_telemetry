@@ -82,6 +82,8 @@ pub(crate) enum NodeEvaluationError {
     LogicalOperatorIncompatibleOperands,
     #[error("Comparison operators requires numeric operands")]
     ComparisonOperatorIncomptaibleOperands,
+    #[error("EQ operator with left operand being a list requires right operand to be a scalar of a type compatible to the list values")]
+    ComparisonOperatorListIncompatibleOperands,
     #[error("Arithmetic operator requires numeric operands")]
     ArithmeticOperatorIncompatibleOperands,
     #[error("Rounding operator requires a floating point operand")]
@@ -92,8 +94,6 @@ pub(crate) enum NodeEvaluationError {
     DivideByZero,
     #[error("Contains operator requires left operand is a list, right operand is a scalar of compatible type to the list value")]
     ContainsOperatorIncompatibleOperands,
-    #[error("ALL_EQ operator requires left operand is a list, right operand is a scalar of compatible type to the list value")]
-    AllEqualsOperatorIncompatibleOperands,
 
     // errors related to converting a node value into a protobuf reflection object
     #[error("Cannot assign {value} to a repeated field")]

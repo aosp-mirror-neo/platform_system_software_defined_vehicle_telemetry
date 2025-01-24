@@ -73,7 +73,6 @@ message CombinationNode {
     // singular.
     CONTAINS = 6;
     DOES_NOT_CONTAIN = 7;
-    ALL_EQ = 8;
   }
 
   // Output: boolean
