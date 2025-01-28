@@ -252,7 +252,7 @@ impl OperatorProtoExtension for OperatorProto {
                     | RelationalOperator::LT
                     | RelationalOperator::LT_OR_EQ => {
                         if (left.as_ref().is_none_or(|l| l.is_numeric()))
-                            && get_right().as_ref().is_none_or(|r| r.is_numeric())
+                            && get_right().is_none_or(|r| r.is_numeric())
                         {
                             Ok(Some(NodeValueType::Bool))
                         } else {
@@ -278,7 +278,7 @@ impl OperatorProtoExtension for OperatorProto {
                 })? {
                     LogicalOperator::AND | LogicalOperator::OR | LogicalOperator::XOR => {
                         if left.as_ref().is_none_or(|l| l.is_bool())
-                            && get_right().as_ref().is_none_or(|r| r.is_bool())
+                            && get_right().is_none_or(|r| r.is_bool())
                         {
                             Ok(Some(NodeValueType::Bool))
                         } else {
@@ -304,7 +304,7 @@ impl OperatorProtoExtension for OperatorProto {
                     | ArithmeticOperator::MULTIPLY
                     | ArithmeticOperator::POWER => {
                         if left.as_ref().is_some_and(|l| l.is_int())
-                            && get_right().as_ref().is_some_and(|r| r.is_int())
+                            && get_right().is_some_and(|r| r.is_int())
                         {
                             // TODO: b/389623348 - For `ArithmeticOperator::POWER`, ideally, we'd
                             // return `Int` if `get_right()` fits into a `u32`, and only return
@@ -320,16 +320,16 @@ impl OperatorProtoExtension for OperatorProto {
                             // See ag/31234259 for the CL that made this change.
                             Ok(Some(NodeValueType::Int))
                         } else if left.as_ref().is_some_and(|l| l.is_numeric())
-                            && get_right().as_ref().is_some_and(|l| l.is_numeric())
+                            && get_right().is_some_and(|l| l.is_numeric())
                         {
                             Ok(Some(NodeValueType::Float))
                         } else if left.as_ref().is_none_or(|l| l.is_int())
-                            && get_right().as_ref().is_none_or(|r| r.is_int())
+                            && get_right().is_none_or(|r| r.is_int())
                         {
                             // Type cannot be determined because it can be either int or float.
                             Ok(None)
                         } else if left.as_ref().is_none_or(|l| l.is_numeric())
-                            && get_right().as_ref().is_none_or(|r| r.is_numeric())
+                            && get_right().is_none_or(|r| r.is_numeric())
                         {
                             // If the known argument is a float, the result will
                             // always be float, not int.
@@ -340,7 +340,7 @@ impl OperatorProtoExtension for OperatorProto {
                     }
                     ArithmeticOperator::DIVIDE => {
                         if left.as_ref().is_none_or(|l| l.is_numeric())
-                            && get_right().as_ref().is_none_or(|r| r.is_numeric())
+                            && get_right().is_none_or(|r| r.is_numeric())
                         {
                             Ok(Some(NodeValueType::Float))
                         } else {
@@ -349,7 +349,7 @@ impl OperatorProtoExtension for OperatorProto {
                     }
                     ArithmeticOperator::MODULO_TRUNC => {
                         if left.as_ref().is_none_or(|l| l.is_int())
-                            && get_right().as_ref().is_none_or(|r| r.is_int())
+                            && get_right().is_none_or(|r| r.is_int())
                         {
                             Ok(Some(NodeValueType::Int))
                         } else {
