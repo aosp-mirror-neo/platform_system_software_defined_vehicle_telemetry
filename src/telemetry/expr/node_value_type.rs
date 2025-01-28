@@ -301,23 +301,10 @@ impl OperatorProtoExtension for OperatorProto {
                 })? {
                     ArithmeticOperator::ADD
                     | ArithmeticOperator::SUBTRACT
-                    | ArithmeticOperator::MULTIPLY
-                    | ArithmeticOperator::POWER => {
+                    | ArithmeticOperator::MULTIPLY => {
                         if left.as_ref().is_some_and(|l| l.is_int())
                             && get_right().is_some_and(|r| r.is_int())
                         {
-                            // TODO: b/389623348 - For `ArithmeticOperator::POWER`, ideally, we'd
-                            // return `Int` if `get_right()` fits into a `u32`, and only return
-                            // `Float` if it doesn't, to match the implementation. However, at this
-                            // point we don't have any runtime value information and no concept of
-                            // "unsigned" integers.
-                            //
-                            // Therefore, the best we can do is continue to return `Int` (which is
-                            // assignable to `Float`). This is not perfect, because validation will
-                            // not catch the case when `2^(-2) = 0.25` is being assigned to an Int
-                            // field (which will fail with a runtime error).
-                            //
-                            // See ag/31234259 for the CL that made this change.
                             Ok(Some(NodeValueType::Int))
                         } else if left.as_ref().is_some_and(|l| l.is_numeric())
                             && get_right().is_some_and(|l| l.is_numeric())
@@ -333,6 +320,16 @@ impl OperatorProtoExtension for OperatorProto {
                         {
                             // If the known argument is a float, the result will
                             // always be float, not int.
+                            Ok(Some(NodeValueType::Float))
+                        } else {
+                            Err(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)
+                        }
+                    }
+                    ArithmeticOperator::POWER => {
+                        if left.as_ref().is_none_or(|l| l.is_numeric())
+                            && get_right().is_none_or(|r| r.is_numeric())
+                        {
+                            // Any numeric power can potentially be negative, yielding a float value.
                             Ok(Some(NodeValueType::Float))
                         } else {
                             Err(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)

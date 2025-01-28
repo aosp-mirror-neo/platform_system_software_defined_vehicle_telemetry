@@ -475,7 +475,7 @@ impl NodeValue {
                 self.handle_binary(state, right_operand_provider, move |left, right| {
                     left.apply_numeric_binary(
                         right,
-                        |a: i64, b: i64| {
+                        |a, b| {
                             if let Ok(b) = b.try_into() {
                                 // If `b` is positive and fits into `u32`, calculate the power as an
                                 // integer (i64::pow requires a `u32` exponent).
