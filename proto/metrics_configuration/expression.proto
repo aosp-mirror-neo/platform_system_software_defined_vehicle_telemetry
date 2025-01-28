@@ -73,6 +73,8 @@ message CombinationNode {
     // singular.
     CONTAINS = 6;
     DOES_NOT_CONTAIN = 7;
+    // Deprecated and no longer supported: corresponding behavior is supported by EQ
+    ALL_EQ = 8 [deprecated = true];
   }
 
   // Output: boolean
