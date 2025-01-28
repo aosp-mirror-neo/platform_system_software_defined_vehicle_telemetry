@@ -5,8 +5,8 @@
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
-use futures::StreamExt;
-use log::{error, info};
+use futures::{FutureExt, StreamExt};
+use log::{debug, error, info, warn};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
@@ -15,6 +15,7 @@ use sdv_comms::sd::{
     UnitNameDiscoveryArgs,
 };
 use sdv_comms::ContextRef;
+use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProviderV1};
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
@@ -43,6 +44,9 @@ pub struct CommsStackAccessor {
     service_message_descriptors: AsyncMutex<HashMap<ServiceName, MessageDescriptor>>,
 
     sdv_rpc_client: SdvRpcClient,
+
+    vsidl_provider:
+        future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProviderV1 + Send + Sync>>>>,
 }
 
 struct AvailabilityCallbackRegistrationImpl {
@@ -67,9 +71,10 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                         return Ok(None);
                     };
 
-                    let message_descriptor =
-                        Self::parse_telemetry_metadata(v.key(), &service_unit_definition)
-                            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+                    let message_descriptor = self
+                        .parse_telemetry_metadata(v.key(), &service_unit_definition)
+                        .await
+                        .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
                     v.insert(message_descriptor.clone());
                     message_descriptor
                 }
@@ -92,9 +97,10 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(GetMessageProviderOutcome::NotRegistered);
         };
 
-        let message_descriptor =
-            Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let message_descriptor = self
+            .parse_telemetry_metadata(&service_name, &service_unit_definition)
+            .await
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
@@ -134,9 +140,10 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             });
         };
 
-        let message_descriptor =
-            Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let message_descriptor = self
+            .parse_telemetry_metadata(&service_name, &service_unit_definition)
+            .await
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
@@ -249,11 +256,29 @@ impl CommsStackAccessor {
     pub fn new(ctx: future::Shared<BoxFuture<'static, ContextRef>>) -> Self {
         let data_tunnel_subscriber = DataTunnelSubscriber::new(ctx.clone());
         let sdv_rpc_client = SdvRpcClient::new(ctx.clone());
+
+        let ctx_clone = ctx.clone();
+        let vsidl_provider = async move {
+            vsidl_provider::new_for_vendor(ctx_clone.await).map_or_else(
+                || {
+                    warn!(
+                        "Unable to initialize VSIDL provider library.\
+                        Telemetry Service won't be able to retrieve VSIDL metadata"
+                    );
+                    None
+                },
+                |provider| Some(Arc::new(provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>),
+            )
+        }
+        .boxed()
+        .shared();
+
         Self {
             ctx,
             data_tunnel_subscriber,
             service_message_descriptors: HashMap::new().into(),
             sdv_rpc_client,
+            vsidl_provider,
         }
     }
 
@@ -298,10 +323,35 @@ impl CommsStackAccessor {
         }
     }
 
-    fn parse_telemetry_metadata(
+    async fn parse_telemetry_metadata(
+        &self,
         service_name: &ServiceName,
         service_unit_definition: &ServiceUnitDefinition,
     ) -> anyhow::Result<MessageDescriptor> {
+        if let Some(vsidl_provider) = self.vsidl_provider.clone().await {
+            if let Some(message_descriptor) = match service_unit_definition.get_unit_metadata() {
+                UnitMetadata::Publisher(_) => vsidl_provider
+                    .get_publication_descriptor(
+                        service_unit_definition.get_service_bundle_identity().get_fqin(),
+                        &service_unit_definition.get_unit_type(),
+                    )
+                    .await
+                    .map(|descriptor| descriptor.message_descriptor),
+                UnitMetadata::Server(_) => vsidl_provider
+                    .get_rpc_method_descriptor(
+                        service_unit_definition.get_service_bundle_identity().get_fqin(),
+                        &service_unit_definition.get_unit_type(),
+                        "CreateSubscription",
+                    )
+                    .await
+                    .and_then(|descriptor| descriptor.response_message),
+            } {
+                debug!("Found descriptor for {service_name} in VSIDL provider");
+                return Ok(message_descriptor);
+            }
+        }
+
+        debug!("Metadata for {service_name} not found in VSIDL provider, trying to use Service Discovery application metadata");
         let app_metadata = service_unit_definition.get_application_metadata();
         let publisher_metadata = MessageMetadata::parse_from_bytes(app_metadata.as_slice())
             .with_context(|| {
