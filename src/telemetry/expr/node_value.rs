@@ -627,24 +627,27 @@ impl NodeValue {
     }
 
     /// Handle rounding operations.
-    fn handle_rounding(&self, op: &RoundingOperator) -> Result<NodeValue, NodeEvaluationError> {
+    fn handle_rounding(self, op: &RoundingOperator) -> Result<NodeValue, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::RoundingOperatorIncompatibleOperands;
-        if !matches!(self, NodeValue::Float(_) | NodeValue::Double(_)) {
-            return Err(err_provider());
-        }
-        let value = self.get_double().ok_or_else(err_provider)?;
-        Ok(NodeValue::Int64(match op {
-            RoundingOperator::FLOOR => value.floor() as i64,
-            RoundingOperator::ROUND => value.round() as i64,
-            RoundingOperator::CEIL => value.ceil() as i64,
-        }))
+        Ok(match self {
+            val @ NodeValue::Int32(_) | val @ NodeValue::Int64(_) => val,
+            NodeValue::Float(_) | NodeValue::Double(_) => {
+                let value = self.get_double().ok_or_else(err_provider)?;
+                NodeValue::Int64(match op {
+                    RoundingOperator::FLOOR => value.floor() as i64,
+                    RoundingOperator::ROUND => value.round() as i64,
+                    RoundingOperator::CEIL => value.ceil() as i64,
+                })
+            }
+            _ => return Err(err_provider()),
+        })
     }
 
     /// Handles unary operation on self using provided node value handler.
     fn handle_unary(
-        &self,
+        self,
         state: NodeEvaluationState,
-        handler: impl FnOnce(&NodeValue) -> Result<NodeValue, NodeEvaluationError>,
+        handler: impl FnOnce(NodeValue) -> Result<NodeValue, NodeEvaluationError>,
     ) -> OperationResult<'static, NodeEvaluationResult, NodeEvaluationError> {
         handler(self).with_state(state).into()
     }
@@ -1458,6 +1461,7 @@ mod tests {
         floor_3: (&OP_FLOOR, NodeValue::Float(5.0), ok(eq(&NodeValue::Int64(5))),),
         floor_4: (&OP_FLOOR, NodeValue::Double(-0.33), ok(eq(&NodeValue::Int64(-1))),),
         floor_5: (&OP_FLOOR, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(-1))),),
+        floor_6: (&OP_FLOOR, NodeValue::Int64(-1), ok(eq(&NodeValue::Int64(-1))),),
         floor_none: (&OP_FLOOR, NodeValue::None, ok(eq(&NodeValue::None)),),
         floor_non_numeric_fails: (&OP_FLOOR, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
 
@@ -1466,6 +1470,7 @@ mod tests {
         round_3: (&OP_ROUND, NodeValue::Float(5.0), ok(eq(&NodeValue::Int64(5))),),
         round_4: (&OP_ROUND, NodeValue::Double(-0.33), ok(eq(&NodeValue::Int64(0))),),
         round_5: (&OP_ROUND, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(-1))),),
+        round_6: (&OP_ROUND, NodeValue::Int64(-1), ok(eq(&NodeValue::Int64(-1))),),
         round_none: (&OP_ROUND, NodeValue::None, ok(eq(&NodeValue::None)),),
         round_non_numeric_fails: (&OP_ROUND, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
 
@@ -1474,6 +1479,7 @@ mod tests {
         ceil_3: (&OP_CEIL, NodeValue::Float(5.0), ok(eq(&NodeValue::Int64(5))),),
         ceil_4: (&OP_CEIL, NodeValue::Double(-0.33), ok(eq(&NodeValue::Int64(0))),),
         ceil_5: (&OP_CEIL, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(0))),),
+        ceil_6: (&OP_CEIL, NodeValue::Int64(-1), ok(eq(&NodeValue::Int64(-1))),),
         ceil_none: (&OP_ROUND, NodeValue::None, ok(eq(&NodeValue::None)),),
         ceil_non_numeric_fails: (&OP_CEIL, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
     );
