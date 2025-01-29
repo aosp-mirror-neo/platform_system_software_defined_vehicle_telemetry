@@ -22,6 +22,7 @@ use std::sync::Arc;
 use register_services::register_services;
 
 const LOG_TAG: &str = validated_log_tag("SdvTelemetryService");
+const STARTED_SUCCESSFULLY: &str = "sdv_telemetry_service_agent has started successfully";
 
 #[cfg(feature = "comms_stack")]
 fn create_comms_stack_accessor() -> Arc<dyn ServicePublisherAccessor> {
@@ -86,6 +87,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         configurable_publisher_binder.as_binder(),
     )
     .expect("Failed to register service");
+
+    log::debug!("{STARTED_SUCCESSFULLY}");
+    tracing::event!(tracing::Level::DEBUG, STARTED_SUCCESSFULLY);
 
     // Does not return - spawn or perform any work you mean to do before this call.
     tokio::task::block_in_place(binder::ProcessState::join_thread_pool);
