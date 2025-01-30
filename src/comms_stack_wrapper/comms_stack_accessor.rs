@@ -313,15 +313,16 @@ impl CommsStackAccessor {
             publisher_metadata.file_descriptors,
             &WELL_KNOWN_FILE_DESCRIPTORS,
         )
-        .map_err(|e| anyhow!("Invalid Descriptor Protos: {}", e))?;
+        .with_context(|| "Invalid Descriptor Protos")?;
 
         descriptor_utils::find_message_by_full_name(
             &file_descriptors,
             &publisher_metadata.message_full_name,
         )
         .ok_or(anyhow!(
-            "Message Name {} not found in descriptor",
-            publisher_metadata.message_full_name
+            "Message named \"{}\" not found in file descriptors ({} file descriptors provided)",
+            publisher_metadata.message_full_name,
+            file_descriptors.len(),
         ))
     }
 }
