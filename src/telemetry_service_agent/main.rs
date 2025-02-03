@@ -63,7 +63,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create Service Publisher Manager
     let service_publisher_manager_impl = Arc::new(ServicePublisherManager::new(service_publishers));
 
-    let res = register_services(service_publisher_manager_impl).await;
+    #[cfg(all(
+        feature = "platform_abstraction_layer_core",
+        feature = "platform_abstraction_layer_ivi"
+    ))]
+    compile_error!("feature \"platform_abstraction_layer_core\" and feature \"platform_abstraction_layer_ivi\" cannot be enabled at the same time");
+
+    #[cfg(feature = "platform_abstraction_layer_core")]
+    let pal = Arc::new(sdv_telemetry_platform_abstraction_layer_core::CorePal::new());
+    #[cfg(feature = "platform_abstraction_layer_ivi")]
+    let pal = Arc::new(sdv_telemetry_platform_abstraction_layer_ivi::IviPal::new());
+
+    let res = register_services(service_publisher_manager_impl, pal).await;
 
     if res.is_err() {
         error!("Error {:?} in initialization telemetry service", res);

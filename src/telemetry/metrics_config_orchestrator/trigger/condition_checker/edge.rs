@@ -315,8 +315,6 @@ impl EdgeConditionChecker {
 
 #[cfg(test)]
 mod tests {
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
-
     use super::*;
 
     use futures::stream::{self, StreamExt};
@@ -327,12 +325,15 @@ mod tests {
     };
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_utils::parameterized_test;
     use std::future;
     use std::time::{Duration, Instant};
     use tokio::sync::mpsc;
     use tokio::task::JoinError;
     use tokio_stream::wrappers::UnboundedReceiverStream;
+
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
 
     const NONE: NodeValue = NodeValue::None;
     const TRUE: NodeValue = NodeValue::Bool(true);
@@ -474,7 +475,7 @@ mod tests {
 
         let mut checker = condition_checker_factory(
             Box::new(move |_context| tx.send(Instant::now()).unwrap()),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
         );
 
         let start = Instant::now();

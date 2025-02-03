@@ -25,26 +25,35 @@ pub struct NodeEvaluationContext {
     // evaluation query the time.
     pub(super) unix_timestamp: Microseconds,
     pub(super) monotonic_time_since_boot: Microseconds,
+    pub(super) monotonic_time_since_boot_or_resume: Microseconds,
 }
 
 impl NodeEvaluationContext {
     /// Creates a new instance of context with no messages.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(resumed_at: Option<Microseconds>) -> Self {
+        let unix_timestamp = sdv_telemetry_time_wrapper::get_unix_timestamp();
+        let monotonic_time_since_boot = sdv_telemetry_time_wrapper::get_monotonic_time_since_boot();
+
         Self {
             #[cfg(test)]
             root_id: NEXT_NODE_EVALUATION_CONTEXT_ID.next(),
             messages: HashMap::new(),
-            unix_timestamp: sdv_telemetry_time_wrapper::get_unix_timestamp(),
-            monotonic_time_since_boot: sdv_telemetry_time_wrapper::get_monotonic_time_since_boot(),
+            unix_timestamp,
+            monotonic_time_since_boot,
+            monotonic_time_since_boot_or_resume: resumed_at
+                .map_or(monotonic_time_since_boot, |resumed_at| {
+                    Microseconds(monotonic_time_since_boot.0 - resumed_at.0)
+                }),
         }
     }
 
     /// Creates a new instance of context with a publisher message.
     pub(crate) fn with_publisher_message(
+        resumed_at: Option<Microseconds>,
         publisher_name: String,
         publisher_message: Arc<dyn MessageDyn>,
     ) -> Self {
-        let mut res = Self::new();
+        let mut res = Self::new(resumed_at);
         res.messages
             .try_insert_value(publisher_name, publisher_message)
             .expect("Hashmap should be empty");
@@ -76,6 +85,7 @@ impl NodeEvaluationContext {
             messages,
             unix_timestamp: self.unix_timestamp,
             monotonic_time_since_boot: self.monotonic_time_since_boot,
+            monotonic_time_since_boot_or_resume: self.monotonic_time_since_boot_or_resume,
         }
     }
 }
@@ -84,11 +94,51 @@ impl NodeEvaluationContext {
 mod tests {
     use super::*;
 
-    #[test]
-    fn node_evaluation_context_ids_are_ascending() {
-        let context1 = NodeEvaluationContext::new();
-        let context2 = NodeEvaluationContext::new();
-        assert!(context1.root_id() < context2.root_id());
-        assert!(context1.monotonic_time_since_boot <= context2.monotonic_time_since_boot);
+    use googletest::expect_that;
+    use googletest::matchers::{eq, le, lt};
+
+    #[googletest::test]
+    fn ids_are_ascending() {
+        let context1 = NodeEvaluationContext::new(None);
+        let context2 = NodeEvaluationContext::new(None);
+
+        expect_that!(context1.root_id(), lt(context2.root_id()));
+    }
+
+    #[googletest::test]
+    fn monotonic_times_are_ascending() {
+        let context1 = NodeEvaluationContext::new(None);
+        let context2 = NodeEvaluationContext::new(None);
+
+        expect_that!(context1.monotonic_time_since_boot, le(context2.monotonic_time_since_boot));
+        expect_that!(
+            context1.monotonic_time_since_boot_or_resume,
+            le(context2.monotonic_time_since_boot_or_resume)
+        );
+    }
+
+    #[googletest::test]
+    fn monotonic_time_since_boot_or_resume_is_time_since_boot_when_not_provided() {
+        let context = NodeEvaluationContext::new(None);
+
+        expect_that!(
+            context.monotonic_time_since_boot_or_resume,
+            eq(context.monotonic_time_since_boot)
+        );
+    }
+
+    #[googletest::test]
+    fn monotonic_time_since_boot_or_resume_calculated_correctly() {
+        // Pretend that the OS resumed from sleep 100ms after booting (we do not use a more
+        // realistic, bigger number here, because the VM might only have booted shortly before this
+        // test starts executing).
+        const RESUMED_AT: Microseconds = Microseconds(1000 * 100);
+
+        let context = NodeEvaluationContext::new(Some(RESUMED_AT));
+
+        expect_that!(
+            context.monotonic_time_since_boot_or_resume,
+            eq(Microseconds(context.monotonic_time_since_boot.0 - RESUMED_AT.0))
+        );
     }
 }

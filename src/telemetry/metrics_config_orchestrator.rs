@@ -24,6 +24,7 @@ use log::{debug, error};
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
+use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
@@ -526,6 +527,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
+        pal: Arc<dyn PlatformAbstractionLayer>,
         finish_trigger_fired_callback: impl Fn(String, Arc<NodeEvaluationContext>)
             + Send
             + Sync
@@ -538,7 +540,7 @@ impl MetricsConfigOrchestratorImpl {
             Arc::clone(&service_publisher_manager),
             Arc::clone(&misc_error_callback),
         ));
-        let node_evaluation_context_factory = Arc::new(NodeEvaluationContextFactoryImpl::new())
+        let node_evaluation_context_factory = Arc::new(NodeEvaluationContextFactoryImpl::new(pal))
             as Arc<dyn NodeEvaluationContextFactory>;
         Self {
             configs: Mutex::new(HashMap::new()),

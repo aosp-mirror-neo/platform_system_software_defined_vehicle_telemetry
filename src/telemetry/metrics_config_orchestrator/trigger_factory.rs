@@ -348,6 +348,7 @@ mod tests {
     use googletest::assert_that;
     use googletest::matchers::{contains_substring, eq, err, matches_pattern, ok, result_of_ref};
     use protobuf::MessageField;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::ServicePublisher as ServicePublisherProto;
     use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
     use sdv_telemetry_test_utils::parameterized_test;
@@ -373,7 +374,9 @@ mod tests {
 
     fn create_factory() -> TriggerFactoryImpl {
         TriggerFactoryImpl {
-            node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new(
+                new_stub_pal(),
+            )),
             error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")),
         }
     }
@@ -412,7 +415,9 @@ mod tests {
         trigger
     }
 
-    fn create_valid_conditional_trigger() -> (TriggerProto, Option<Vec<Arc<dyn Trigger>>>) {
+    fn create_valid_conditional_trigger(
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    ) -> (TriggerProto, Option<Vec<Arc<dyn Trigger>>>) {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
         conditional_trigger.condition_type =
@@ -424,7 +429,7 @@ mod tests {
             PARENT_TRIGGER_NAME.to_owned(),
             CONFIG_UUID.to_owned(),
             INTERVAL,
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            node_evaluation_context_factory,
         );
 
         (trigger, Some(vec![parent_trigger]))
@@ -551,7 +556,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::new(MockServiceAdapter::new()),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::clone(&factory.node_evaluation_context_factory),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -585,7 +590,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::new(MockServiceAdapter::new()),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::clone(&factory.node_evaluation_context_factory),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -753,7 +758,8 @@ mod tests {
     #[test]
     fn create_conditional_trigger_success() {
         let factory = create_factory();
-        let (trigger, parent_triggers) = create_valid_conditional_trigger();
+        let (trigger, parent_triggers) =
+            create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
 
         let node_0 = Arc::new(create_node());
         let node_1 = Arc::new(create_node());
@@ -783,7 +789,8 @@ mod tests {
     #[test]
     fn create_conditional_trigger_unknown_node_type_success() {
         let factory = create_factory();
-        let (trigger, parent_triggers) = create_valid_conditional_trigger();
+        let (trigger, parent_triggers) =
+            create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
 
         let node = Arc::new(create_node());
         factory
@@ -805,7 +812,7 @@ mod tests {
             let factory = create_factory();
             let node = Arc::new(create_node());
 
-            let (mut trigger, parent_triggers) = create_valid_conditional_trigger();
+            let (mut trigger, parent_triggers) = create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
             trigger.mut_conditional_trigger().condition_type = condition_type;
 
             let result = factory.create_using_context_with(
@@ -1084,7 +1091,8 @@ mod tests {
     #[test]
     fn validate_conditional_trigger_negative_min_duration_fails() {
         let factory = create_factory();
-        let (mut trigger, _) = create_valid_conditional_trigger();
+        let (mut trigger, _) =
+            create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
         trigger.mut_conditional_trigger().condition_type =
             Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
                 rising_options: Some(EdgeOptionsProto {
@@ -1176,7 +1184,8 @@ mod tests {
     #[test]
     fn validate_conditional_trigger_success() {
         let factory = create_factory();
-        let (trigger, _) = create_valid_conditional_trigger();
+        let (trigger, _) =
+            create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
 
         factory
             .validate_using_context_with(&trigger, vec![Some(NodeValueType::Bool)], None)
@@ -1186,7 +1195,8 @@ mod tests {
     #[test]
     fn validate_conditional_trigger_unknown_node_type_success() {
         let factory = create_factory();
-        let (trigger, _) = create_valid_conditional_trigger();
+        let (trigger, _) =
+            create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
 
         factory.validate_using_context_with(&trigger, vec![None], None).unwrap();
     }

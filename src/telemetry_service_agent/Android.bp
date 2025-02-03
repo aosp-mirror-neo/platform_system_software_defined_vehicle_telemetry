@@ -22,6 +22,7 @@ rust_defaults {
         "libsdv_log_rust",
         "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
+        "libsdv_telemetry_platform_abstraction_layer",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_service_publisher_accessor",
         "libsdv_telemetry_utils",
@@ -45,13 +46,17 @@ rust_defaults {
 rust_binary {
     name: "sdv_telemetry_service_agent",
     defaults: ["sdv_telemetry_service_agent_defaults"],
-    features: ["comms_stack"],
+    features: [
+        "comms_stack",
+        "platform_abstraction_layer_core",
+    ],
     rustlibs: [
         // keep-sorted start
         "libfutures",
         "libsdv_comms_rs",
         "libsdv_telemetry_comms_utils",
         "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_platform_abstraction_layer_core",
         // keep-sorted end
     ],
 }
@@ -59,4 +64,12 @@ rust_binary {
 rust_binary {
     name: "sdv_ivi_telemetry_service_agent",
     defaults: ["sdv_telemetry_service_agent_defaults"],
+    features: [
+        "platform_abstraction_layer_ivi",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_telemetry_platform_abstraction_layer_ivi",
+        // keep-sorted end
+    ],
 }

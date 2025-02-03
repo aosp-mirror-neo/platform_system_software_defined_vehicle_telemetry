@@ -78,7 +78,7 @@ impl MockTrigger {
     }
 
     pub(crate) async fn fire(&self) {
-        self.fire_with_context(Arc::new(NodeEvaluationContext::new())).await;
+        self.fire_with_context(Arc::new(NodeEvaluationContext::new(None))).await;
     }
 
     pub(crate) async fn fire_with_context(&self, context: Arc<NodeEvaluationContext>) {

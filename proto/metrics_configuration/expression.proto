@@ -184,13 +184,19 @@ message FunctionLeafNode {
 message GetCurrentTimestampFunction {
   enum TimeSource {
     TIME_SOURCE_UNSPECIFIED = 0;
+
     // Read the timestamp as a UNIX timestamp in microseconds based on the
     // device's realtime clock. This clock source may not be monotonic and can
     // jump around when the system's clock is changed.
     REALTIME_CLOCK = 1;
+
     // Retrieves the amount of time since the device booted, including when it
     // was suspended.
     MONOTONIC_TIME_SINCE_BOOT = 2;
+
+    // Retrieves the amount of time since the device booted or resumed from
+    // suspend, whichever time is more recent.
+    MONOTONIC_TIME_SINCE_BOOT_OR_RESUME = 3;
   }
 
   TimeSource time_source = 1;
