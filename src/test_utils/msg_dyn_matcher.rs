@@ -23,7 +23,7 @@ pub struct MessageDynMatcher<'e> {
     eq_mode: &'e ReflectEqMode,
 }
 
-impl<'a, 'e, A: Deref<Target = dyn MessageDyn> + Debug> Matcher<&'a A> for MessageDynMatcher<'e> {
+impl<'a, A: Deref<Target = dyn MessageDyn> + Debug> Matcher<&'a A> for MessageDynMatcher<'_> {
     fn matches(&self, actual: &'a A) -> MatcherResult {
         actual.reflect_eq_dyn(self.expected, self.eq_mode).into()
     }

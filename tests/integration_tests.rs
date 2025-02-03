@@ -534,6 +534,7 @@ async fn telemetry_service_someip() {
 
     service.remove_metrics_config(&config.uuid).await.unwrap();
     let _ = server.kill();
+    let _ = server.wait();
     service.finish().unwrap();
 
     let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
