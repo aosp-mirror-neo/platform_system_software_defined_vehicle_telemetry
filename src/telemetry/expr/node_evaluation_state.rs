@@ -8,9 +8,6 @@ use std::sync::Arc;
 
 use crate::expr::node_error::MessageProviderError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_value::NodeValue;
-
-pub(super) type NodeEvaluationResult = (NodeValue, NodeEvaluationState);
 
 /// Stores expression evaluation state to ensure expression evaluation uses the same message
 /// in different branches.
@@ -23,12 +20,6 @@ pub(super) struct NodeEvaluationState {
             BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
         >,
     >,
-}
-
-impl Default for NodeEvaluationState {
-    fn default() -> Self {
-        NodeEvaluationState::new(NodeEvaluationContext::new().into())
-    }
 }
 
 impl NodeEvaluationState {

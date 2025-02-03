@@ -1,18 +1,17 @@
 // Copyright 2024 Google LLC
 
-use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
 use crate::expr::node_value::NodeValue;
 
-pub(super) trait WithNodeEvaluationState {
+pub(super) trait WithNodeEvaluationState<S> {
     type Output;
 
-    fn with_state(self, state: NodeEvaluationState) -> Self::Output;
+    fn with_state(self, state: S) -> Self::Output;
 }
 
-impl<E> WithNodeEvaluationState for Result<NodeValue, E> {
-    type Output = Result<NodeEvaluationResult, E>;
+impl<S, E> WithNodeEvaluationState<S> for Result<NodeValue, E> {
+    type Output = Result<(NodeValue, S), E>;
 
-    fn with_state(self, state: NodeEvaluationState) -> Self::Output {
+    fn with_state(self, state: S) -> Self::Output {
         self.map(move |value| (value, state))
     }
 }

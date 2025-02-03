@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
+use crate::expr::node_evaluation_state::NodeEvaluationState;
 use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
 use crate::expr::node_factory::MessageProvider;
 use crate::expr::node_value::NodeValue;
@@ -85,7 +85,7 @@ impl Node {
     fn evaluate_core(
         self: &Arc<Self>,
         mut state: NodeEvaluationState,
-    ) -> OperationResult<'static, NodeEvaluationResult, NodeEvaluationError> {
+    ) -> OperationResult<'static, (NodeValue, NodeEvaluationState), NodeEvaluationError> {
         match self.as_ref() {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value

@@ -16,7 +16,6 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{borrow::Cow, convert::From, sync::Arc};
 
 use crate::expr::node_error::NodeEvaluationError;
-use crate::expr::node_evaluation_state::{NodeEvaluationResult, NodeEvaluationState};
 use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
 use crate::expr::proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt;
 
@@ -133,7 +132,7 @@ impl NodeValue {
         op: &OperatorProto,
         get_right_operand: impl FnOnce() -> Result<NodeValue, NodeEvaluationError> + Send,
     ) -> Result<NodeValue, NodeEvaluationError> {
-        self.operate(op, NodeEvaluationState::default(), move |state| {
+        self.operate(op, (), move |state| {
             OperationResult::Synchronous(get_right_operand().with_state(state))
         })
         .unwrap_sync()
@@ -266,10 +265,10 @@ impl NodeValue {
         Self::extract_field_value(msg.as_ref().as_ref(), fields)
     }
 
-    pub(super) fn into_operation_result(
+    pub(super) fn into_operation_result<S>(
         self,
-        state: NodeEvaluationState,
-    ) -> OperationResult<'static, NodeEvaluationResult, NodeEvaluationError> {
+        state: S,
+    ) -> OperationResult<'static, (NodeValue, S), NodeEvaluationError> {
         Ok((self, state)).into()
     }
 
@@ -284,15 +283,13 @@ impl NodeValue {
     ///          If unary operator, then operates on self.
     ///          If binary operator, then [self] <operator> [right].
     /// * `right_operand_provider` - The function that provides the right operand when called.
-    pub(super) fn operate<'a>(
+    pub(super) fn operate<'a, S: 'a>(
         self,
         op: &OperatorProto,
-        state: NodeEvaluationState,
-        right_operand_provider: impl FnOnce(
-                NodeEvaluationState,
-            ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError>
+        state: S,
+        right_operand_provider: impl FnOnce(S) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError>
             + Send,
-    ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError> {
+    ) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError> {
         // None occurs when message is missing or incomplete, and None propagates up.
         if self.is_none() {
             return NodeValue::None.into_operation_result(state);
@@ -404,15 +401,13 @@ impl NodeValue {
     }
 
     /// Handle arithmetic operations.
-    fn handle_arithmetic<'a>(
+    fn handle_arithmetic<'a, S: 'a>(
         self,
         op: &ArithmeticOperator,
-        state: NodeEvaluationState,
-        right_operand_provider: impl FnOnce(
-                NodeEvaluationState,
-            ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError>
+        state: S,
+        right_operand_provider: impl FnOnce(S) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError>
             + Send,
-    ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError> {
+    ) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::ArithmeticOperatorIncompatibleOperands;
 
         match op {
@@ -509,15 +504,13 @@ impl NodeValue {
     }
 
     /// Handle logical operations.
-    fn handle_logical<'a>(
+    fn handle_logical<'a, S: 'a>(
         self,
         op: &LogicalOperator,
-        state: NodeEvaluationState,
-        right_operand_provider: impl FnOnce(
-                NodeEvaluationState,
-            ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError>
+        state: S,
+        right_operand_provider: impl FnOnce(S) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError>
             + Send,
-    ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError> {
+    ) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::LogicalOperatorIncompatibleOperands;
 
         let Some(left_value) = self.get_bool() else { return Err(err_provider()).into() };
@@ -644,26 +637,24 @@ impl NodeValue {
     }
 
     /// Handles unary operation on self using provided node value handler.
-    fn handle_unary(
+    fn handle_unary<S>(
         self,
-        state: NodeEvaluationState,
+        state: S,
         handler: impl FnOnce(NodeValue) -> Result<NodeValue, NodeEvaluationError>,
-    ) -> OperationResult<'static, NodeEvaluationResult, NodeEvaluationError> {
+    ) -> OperationResult<'static, (NodeValue, S), NodeEvaluationError> {
         handler(self).with_state(state).into()
     }
 
     /// Handles binary operation on self using provided node value handler.
-    fn handle_binary<'a>(
+    fn handle_binary<'a, S: 'a>(
         self,
-        state: NodeEvaluationState,
-        right_operand_provider: impl FnOnce(
-                NodeEvaluationState,
-            ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError>
+        state: S,
+        right_operand_provider: impl FnOnce(S) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError>
             + Send,
         handler: impl FnOnce(&NodeValue, &NodeValue) -> Result<NodeValue, NodeEvaluationError>
             + Send
             + 'a,
-    ) -> OperationResult<'a, NodeEvaluationResult, NodeEvaluationError> {
+    ) -> OperationResult<'a, (NodeValue, S), NodeEvaluationError> {
         right_operand_provider(state).and_then_sync(move |(right, state)| {
             if right.is_none() {
                 // None occurs when message is missing or incomplete, and None propagates up.
