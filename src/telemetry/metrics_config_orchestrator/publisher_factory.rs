@@ -21,7 +21,7 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
 };
 use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPublisher;
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
-use crate::metrics_config_orchestrator::service_adapter::{ServiceAdapter, ServiceAdapterImpl};
+use crate::metrics_config_orchestrator::service_adapter::ServiceAdapter;
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
 use crate::metrics_config_runtime_error::{
     AggregationPublisherRuntimeError, ServicePublisherRuntimeError,
@@ -144,7 +144,7 @@ impl PublisherFactory for PublisherFactoryImpl {
 impl PublisherFactoryImpl {
     pub(super) fn new(
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
-        service_adapter: Arc<ServiceAdapterImpl>,
+        service_adapter: Arc<dyn ServiceAdapter>,
     ) -> Self {
         Self { message_builder_factory, service_adapter }
     }
@@ -289,12 +289,10 @@ mod tests {
     fn create_factory(
         message_builder_factory: Option<MockMessageBuilderFactory>,
     ) -> PublisherFactoryImpl {
-        let message_builder_factory =
-            Arc::new(message_builder_factory.unwrap_or_else(MockMessageBuilderFactory::new));
-        PublisherFactoryImpl {
-            service_adapter: Arc::new(MockServiceAdapter {}),
-            message_builder_factory,
-        }
+        PublisherFactoryImpl::new(
+            Arc::new(message_builder_factory.unwrap_or_else(MockMessageBuilderFactory::new)),
+            Arc::new(MockServiceAdapter {}),
+        )
     }
 
     fn create_publisher(name: &str) -> PublisherProto {

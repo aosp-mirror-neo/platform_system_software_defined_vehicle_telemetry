@@ -35,7 +35,7 @@ type CallbackContainer = Arc<
 
 /// Provides an interface to subscribe to messages published by services.
 #[async_trait]
-pub(crate) trait ServiceAdapter {
+pub(crate) trait ServiceAdapter: Send + Sync {
     /// Returns provider of messages from the publisher specified by the service name.
     async fn get_message_provider(
         &self,
