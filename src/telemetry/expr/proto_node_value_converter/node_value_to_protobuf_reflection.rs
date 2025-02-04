@@ -89,18 +89,8 @@ impl ToReflectValueBox for NodeValue {
             ProtobufRuntimeType::Bool => {
                 self.get_bool().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
-            ProtobufRuntimeType::Message(descriptor) => {
-                let msg = self.get_message().ok_or_else(err_provider)?;
-                let msg_descriptor = msg.descriptor_dyn();
-                if &msg_descriptor != descriptor {
-                    if descriptor == &Any::descriptor() {
-                        Ok(ReflectValueBox::Message(Box::new(Any::pack_dyn(msg.as_ref()).unwrap())))
-                    } else {
-                        Err(err_provider())
-                    }
-                } else {
-                    Ok(ReflectValueBox::Message(msg.clone_box()))
-                }
+            ProtobufRuntimeType::Message(_) => {
+                self.get_message().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
             }
             ProtobufRuntimeType::String => {
                 self.get_string().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
@@ -216,7 +206,10 @@ impl ToReflectValueBox for Arc<dyn MessageDyn> {
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
-            ProtobufRuntimeType::Message(_) => {
+            ProtobufRuntimeType::Message(descriptor) if descriptor == &Any::descriptor() => {
+                Ok(ReflectValueBox::Message(Box::new(Any::pack_dyn(self.as_ref()).unwrap())))
+            }
+            ProtobufRuntimeType::Message(descriptor) if descriptor == &self.descriptor_dyn() => {
                 Ok(ReflectValueBox::Message(self.as_ref().clone_box()))
             }
             _ => Err(NodeEvaluationError::ValueToProtoConversionError {
@@ -265,7 +258,16 @@ mod tests {
 
     use googletest::assert_that;
     use googletest::matchers::{eq, err, matches_pattern, ok};
+    use protobuf::well_known_types::{any::Any, wrappers::Int32Value};
     use sdv_telemetry_test_utils::parameterized_test;
+
+    fn create_int32_value() -> Int32Value {
+        Int32Value { value: 42, ..Default::default() }
+    }
+
+    fn create_int32_value_arc() -> Arc<dyn MessageDyn> {
+        Arc::new(create_int32_value())
+    }
 
     parameterized_test!(
         #[test]
@@ -277,10 +279,14 @@ mod tests {
             assert_that!(result, expected);
         },
 
-        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned()))),),
-        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. })),),
+        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
+        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3]))),),
-        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. })),),
+        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3])))),
+        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        msg_to_msg: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
+        msg_to_any: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
+        msg_to_i32: (&create_int32_value_arc(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
     );
 }
