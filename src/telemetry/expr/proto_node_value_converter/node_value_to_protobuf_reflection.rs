@@ -258,7 +258,7 @@ mod tests {
 
     use googletest::assert_that;
     use googletest::matchers::{eq, err, matches_pattern, ok};
-    use protobuf::well_known_types::{any::Any, wrappers::Int32Value};
+    use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_telemetry_test_utils::parameterized_test;
 
     fn create_int32_value() -> Int32Value {
@@ -279,14 +279,44 @@ mod tests {
             assert_that!(result, expected);
         },
 
-        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
-        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        bool_to_bool: (&true, ProtobufRuntimeType::Bool, ok(eq(&ReflectValueBox::Bool(true)))),
+        bool_to_i32: (&true, ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3])))),
-        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        bool_node_value_to_bool: (&NodeValue::Bool(true), ProtobufRuntimeType::Bool, ok(eq(&ReflectValueBox::Bool(true)))),
+
+        i32_to_i32: (&42, ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(42)))),
+        i32_to_bool: (&42, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        i32_node_value_to_i32: (&NodeValue::Int32(42), ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(42)))),
+
+        i64_to_i64: (&42, ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
+        i64_to_bool: (&42, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        i64_node_value_to_i64: (&NodeValue::Int64(42), ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
+
+        f32_to_f32: (&42.0, ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+        f32_to_bool: (&42.0, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        f32_node_value_to_f32: (&NodeValue::Float(42.0), ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+
+        f64_to_f64: (&42.0, ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        f64_to_bool: (&42.0, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        f64_node_value_to_f64: (&NodeValue::Double(42.0), ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
 
         msg_to_msg: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
         msg_to_any: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
         msg_to_i32: (&create_int32_value_arc(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        msg_node_value_to_msg: (&NodeValue::Message(create_int32_value_arc()), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
+        msg_node_value_to_any: (&NodeValue::Message(create_int32_value_arc()), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
+
+        string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
+        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        string_node_value_to_string: (&NodeValue::String("kukkula".to_owned()), ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
+
+        vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3])))),
+        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
     );
 }
