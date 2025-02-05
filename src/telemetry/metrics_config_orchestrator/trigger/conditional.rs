@@ -1,8 +1,6 @@
 // Copyright 2024 Google LLC
 
-use anyhow::anyhow;
 use async_trait::async_trait;
-use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
@@ -17,6 +15,9 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
+use crate::metrics_config_orchestrator::trigger::condition_checker::{
+    ConditionChecker, ConstantConditionChecker, PreviousValueRelationalConditionChecker,
+};
 use crate::metrics_config_runtime_error::ConditionalTriggerRuntimeError;
 
 pub(crate) enum ConditionType {
@@ -33,7 +34,7 @@ pub(crate) struct ConditionalTrigger {
     pub(crate) triggers: Vec<Arc<dyn Trigger>>,
     pub(crate) selector_expression: Arc<Node>,
 
-    condition_checker: fn(NodeValue, &mut Option<NodeValue>) -> anyhow::Result<bool>,
+    condition_type: ConditionType,
     subscriber: TriggerSubscriber,
     error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
 }
@@ -91,10 +92,29 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                 .await;
         }
 
+        let condition_checker = match self.condition_type {
+            ConditionType::RisingEdge => {
+                Box::new(PreviousValueRelationalConditionChecker::new_rising_edge())
+                    as Box<dyn ConditionChecker>
+            }
+            ConditionType::FallingEdge => {
+                Box::new(PreviousValueRelationalConditionChecker::new_falling_edge())
+                    as Box<dyn ConditionChecker>
+            }
+            ConditionType::AllChanges => {
+                Box::new(PreviousValueRelationalConditionChecker::new_all_changes())
+                    as Box<dyn ConditionChecker>
+            }
+            ConditionType::IsTrue => Box::new(ConstantConditionChecker::new_is_true_or_non_zero())
+                as Box<dyn ConditionChecker>,
+            ConditionType::IsFalse => Box::new(ConstantConditionChecker::new_is_false_or_zero())
+                as Box<dyn ConditionChecker>,
+        };
+
         struct ConditionalTriggerHandler {
             activation_id: ActivationId,
             conditional_trigger: Weak<ConditionalTrigger>,
-            maybe_previous_value: Option<NodeValue>,
+            condition_checker: Box<dyn ConditionChecker>,
         }
 
         #[async_trait]
@@ -119,7 +139,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                         self.activation_id,
                         evaluation_result,
                         context,
-                        &mut self.maybe_previous_value,
+                        self.condition_checker.as_mut(),
                     )
                     .await;
             }
@@ -130,7 +150,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
             ConditionalTriggerHandler {
                 activation_id,
                 conditional_trigger: Arc::downgrade(&self),
-                maybe_previous_value: None,
+                condition_checker,
             },
         );
 
@@ -165,90 +185,14 @@ impl ConditionalTrigger {
         selector_expression: Arc<Node>,
         error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
     ) -> Arc<Self> {
-        let condition_checker: for<'a> fn(
-            NodeValue,
-            &'a mut Option<NodeValue>,
-        ) -> anyhow::Result<bool> = match condition_type {
-            ConditionType::RisingEdge => |current_value, previous_value_holder| {
-                Self::compare_with_previous(
-                    current_value,
-                    previous_value_holder,
-                    &Operator::RelationalOperator(RelationalOperator::GT.into()),
-                )
-            },
-            ConditionType::FallingEdge => |current_value, previous_value_holder| {
-                Self::compare_with_previous(
-                    current_value,
-                    previous_value_holder,
-                    &Operator::RelationalOperator(RelationalOperator::LT.into()),
-                )
-            },
-            ConditionType::AllChanges => |current_value, previous_value_holder| {
-                Self::compare_with_previous(
-                    current_value,
-                    previous_value_holder,
-                    &Operator::RelationalOperator(RelationalOperator::NOT_EQ.into()),
-                )
-            },
-            ConditionType::IsTrue => |current_value, _| Self::is_true(&current_value),
-            ConditionType::IsFalse => |current_value, _| Self::is_false(&current_value),
-        };
-
         Arc::new_cyclic(|me: &Weak<Self>| Self {
             base: BaseTrigger::new(name.clone(), Weak::clone(me) as Weak<dyn Activatable<_, _>>),
             triggers,
             selector_expression,
-            condition_checker,
+            condition_type,
             subscriber: TriggerSubscriber::ConditionalTrigger { name },
             error_callback,
         })
-    }
-
-    /// Compares current value with the previous value using provided operator, stores
-    /// current value in the new previous value holder and returns comparison result.
-    fn compare_with_previous(
-        current_value: NodeValue,
-        previous_value_holder: &mut Option<NodeValue>,
-        operator: &Operator,
-    ) -> anyhow::Result<bool> {
-        // Extract previous value and save current value.
-        let maybe_previous_value = previous_value_holder.replace(current_value.clone());
-
-        // Perform comparison or return false if there's no previous value.
-        if let Some(previous_value) = maybe_previous_value {
-            let result = current_value.operate_sync(operator, || Ok(previous_value)).unwrap();
-            if let NodeValue::Bool(bool_result) = result {
-                Ok(bool_result)
-            } else {
-                Err(anyhow!("Relational operator evaluation returned non-bool result {:?}", result))
-            }
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Returns true if the current value is a false boolean or a zero numeric value.
-    fn is_false(current_value: &NodeValue) -> anyhow::Result<bool> {
-        let res = match current_value {
-            NodeValue::Bool(boolean) => !*boolean,
-            NodeValue::None => false,
-            // If the value is not a bool or None, it's numeric.
-            // Otherwise validation would fail.
-            numeric_value => numeric_value.is_zero()?,
-        };
-        Ok(res)
-    }
-
-    /// Returns true if the current value is a true boolean or a non-zero numeric value.
-    fn is_true(current_value: &NodeValue) -> anyhow::Result<bool> {
-        let res = match current_value {
-            NodeValue::Bool(boolean) => *boolean,
-            NodeValue::None => false,
-            // If the value is not a bool or None, it's numeric.
-            // Otherwise validation would fail.
-            numeric_value => !numeric_value.is_zero()?,
-        };
-        Ok(res)
     }
 
     /// A callback to handle a new message generated from the selector expression as a result of
@@ -258,7 +202,7 @@ impl ConditionalTrigger {
         activation_id: ActivationId,
         evaluation_result: OperationResult<'static, NodeValue, NodeEvaluationError>,
         context: Arc<NodeEvaluationContext>,
-        maybe_previous_value: &mut Option<NodeValue>,
+        condition_checker: &mut dyn ConditionChecker,
     ) {
         let node_value = match evaluation_result.into_future().await {
             Ok(node_value) => node_value,
@@ -271,15 +215,9 @@ impl ConditionalTrigger {
             }
         };
 
-        if node_value.is_none() {
-            // TODO: b/307547570 - properly handle absent values
-            return;
-        }
-
-        let condition_result = (self.condition_checker)(node_value, maybe_previous_value)
-            .unwrap_or_else(|err| {
-                panic!("Failed to perform comparison for trigger {}: {}", self.get_name(), err)
-            });
+        let condition_result = condition_checker.check(node_value).unwrap_or_else(|err| {
+            panic!("Failed to perform comparison for trigger {}: {err:#}", self.get_name())
+        });
         if condition_result {
             self.base.fire_trigger(activation_id, context).await;
         }

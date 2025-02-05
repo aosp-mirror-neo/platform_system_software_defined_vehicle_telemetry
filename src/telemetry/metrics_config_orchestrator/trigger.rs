@@ -8,6 +8,7 @@ use super::subscription_manager::CallbackFn;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 mod base;
+mod condition_checker;
 pub(crate) mod conditional;
 pub(crate) mod data;
 pub(crate) mod periodic;
