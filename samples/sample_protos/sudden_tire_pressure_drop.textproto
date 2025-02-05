@@ -69,7 +69,7 @@ triggers {
     conditional_trigger {
         trigger_names: "new_tire_pressure_change_aggregation"
         selector_node_index: 4
-        condition_type: IS_TRUE
+        is_true {}
     }
 }
 
@@ -78,7 +78,7 @@ triggers {
     conditional_trigger {
         trigger_names: "new_tire_pressure_change_aggregation"
         selector_node_index: 9
-        condition_type: IS_TRUE
+        is_true {}
     }
 }
 
@@ -87,7 +87,7 @@ triggers {
     conditional_trigger {
         trigger_names: "new_tire_pressure_change_aggregation"
         selector_node_index: 14
-        condition_type: IS_TRUE
+        is_true {}
     }
 }
 
@@ -96,7 +96,7 @@ triggers {
     conditional_trigger {
         trigger_names: "new_tire_pressure_change_aggregation"
         selector_node_index: 19
-        condition_type: IS_TRUE
+        is_true {}
     }
 }
 

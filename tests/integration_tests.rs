@@ -6,7 +6,7 @@ use anyhow::anyhow;
 use log::{debug, info};
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
 use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-use protobuf::{text_format::parse_from_str, EnumOrUnknown, Message, MessageDyn, MessageFull};
+use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
@@ -19,7 +19,7 @@ use sdv_telemetry_proto_rust::expression::{
     constant_leaf_node::Node_value, node::Node_type, ConstantLeafNode, Node,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    conditional_trigger::ConditionType, metrics_report::ReportReason, publisher::Publisher_type,
+    conditional_trigger::Condition_type, metrics_report::ReportReason, publisher::Publisher_type,
     trigger::Trigger_type, AggregationPublisher, ConditionalTrigger, MetricsConfig,
     MetricsReportConfig, PeriodicTrigger, ProtoMessageBuilder, Publisher, Trigger,
 };
@@ -248,7 +248,7 @@ async fn telemetry_service_no_conditional_trigger_race_condition_during_metrics_
             trigger_type: Some(Trigger_type::ConditionalTrigger(ConditionalTrigger {
                 trigger_names: vec!["periodic_trigger".to_owned()],
                 selector_node_index: Some(0),
-                condition_type: EnumOrUnknown::new(ConditionType::IS_TRUE),
+                condition_type: Some(Condition_type::IsTrue(Default::default())),
                 ..Default::default()
             })),
             ..Default::default()

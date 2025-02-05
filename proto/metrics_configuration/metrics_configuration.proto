@@ -102,31 +102,32 @@ message ConditionalTrigger {
   // published message.
   optional uint32 selector_node_index = 2;
 
-  // Defines when conditional trigger should fire depending on the expression evaluation result.
-  enum ConditionType {
-    // Condition type is not specified.
-    // Conditional triggers associated with this type are invalid.
-    CONDITION_TYPE_UNSPECIFIED = 0;
+  // Fires if the new value is greater than the previous value.
+  message ConditionTypeRisingEdge {}
 
-    // Fires if the new value is greater than the previous value.
-    RISING_EDGE = 1;
+  // Fires if the new value is less than the previous value.
+  message ConditionTypeFallingEdge {}
 
-    // Fires if the new value is less than the previous value.
-    FALLING_EDGE = 2;
+  // Fires if the new value is different from the previous value.
+  message ConditionTypeAllChanges {}
 
-    // Fires if the new value is different from the previous value.
-    ALL_CHANGES = 3;
+  // Fires if the condition evaluates to true or a non-zero numeric value.
+  message ConditionTypeIsTrue {}
 
-    // Fires if the condition evaluates to true or a non-zero numeric value.
-    IS_TRUE = 4;
-
-    // Fires if the condition evaluates to false or a zero numeric value.
-    IS_FALSE = 5;
-  }
+  // Fires if the condition evaluates to false or a zero numeric value.
+  message ConditionTypeIsFalse {}
 
   // Required.
-  // Associated condition type.
-  ConditionType condition_type = 3;
+  // Defines when conditional trigger should fire depending on the expression
+  // evaluation result.
+  oneof condition_type {
+    ConditionTypeRisingEdge rising_edge = 3;
+    ConditionTypeFallingEdge falling_edge = 4;
+    ConditionTypeAllChanges all_changes = 5;
+
+    ConditionTypeIsTrue is_true = 6;
+    ConditionTypeIsFalse is_false = 7;
+  }
 }
 
 // Publishes messages and stores the latest published message.
