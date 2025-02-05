@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
-use tokio::time::Duration;
+use tokio::time::{Duration, MissedTickBehavior};
 
 use super::base::BaseTrigger;
 use super::Trigger;
@@ -68,6 +68,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrig
         let (sender, receiver) = mpsc::channel(1);
         tokio::spawn(async move {
             let mut timer = tokio::time::interval(interval);
+            timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
             // Trigger first tick that returns immediately.
             timer.tick().await;
