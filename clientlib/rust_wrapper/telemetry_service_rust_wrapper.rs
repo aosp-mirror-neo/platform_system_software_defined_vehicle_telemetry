@@ -22,8 +22,10 @@ use managers::metrics_report_manager;
 #[derive(thiserror::Error, Debug)]
 #[error("{status:?}: {message}")]
 pub struct TelemetryError {
-    status: TelemetryServiceStatusCodes,
-    message: String,
+    /// The error code.
+    pub status: TelemetryServiceStatusCodes,
+    /// The error message.
+    pub message: String,
 }
 
 /// Represents the result of a telemetry service call.
