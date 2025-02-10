@@ -10,7 +10,7 @@ package {
 aidl_interface {
     name: "google.sdv.telemetry",
     srcs: [
-        "google/sdv/telemetry/*.aidl",
+        "google/sdv/telemetry/**/*.aidl",
     ],
     product_available: true,
     vendor_available: true,

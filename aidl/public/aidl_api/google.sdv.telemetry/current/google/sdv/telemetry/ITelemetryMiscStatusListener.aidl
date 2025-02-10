@@ -18,9 +18,7 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry;
-
 @VintfStability
 interface ITelemetryMiscStatusListener {
-    oneway void sendStatus(in google.sdv.telemetry.TelemetryServiceStatusCodes statusCode,
-            in @utf8InCpp String statusMessage);
+    oneway void sendStatus(in google.sdv.telemetry.status.TelemetryServiceStatus status);
 }

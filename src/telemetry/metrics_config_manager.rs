@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use google_sdv_telemetry::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
 use log::{error, info};
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};

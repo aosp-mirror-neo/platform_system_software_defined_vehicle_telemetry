@@ -17,8 +17,7 @@
 // with such a backward incompatible change, it has a high risk of breaking
 // later when a module using the interface is updated, e.g., Mainline modules.
 
-package google.sdv.telemetry;
-
+package google.sdv.telemetry.status;
 @Backing(type="int")
 @VintfStability
 enum TelemetryServiceStatusCodes {

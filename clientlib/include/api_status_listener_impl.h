@@ -6,11 +6,11 @@
 #include "callback_functions.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryApiStatusListener.h>
-#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <aidl/google/sdv/telemetry/status/TelemetryServiceStatusCodes.h>
 
 #include <string>
 
-using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+using ::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 

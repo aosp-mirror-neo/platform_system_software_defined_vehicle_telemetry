@@ -3,6 +3,8 @@
 #ifndef TELEMETRY_CLIENTLIB_INCLUDE_LIB_H
 #define TELEMETRY_CLIENTLIB_INCLUDE_LIB_H
 
+#include "status.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -38,6 +40,16 @@ typedef struct MetricsReportInfo {
  * status messages are not guaranteed to be stable and may change or be removed at any point.
  */
 typedef void (*StatusCallbackFunction)(void*, int32_t, const char*);
+
+/**
+ * The misc status callback function relays the status of the miscellaneous status call back
+ * to the client it was associated with.
+ *
+ * @param void* pointer to the callback object associated with the callback function.
+ * @param const TelemetryServiceStatus* pointer to structured representation of statuses occurred
+ * in Telemetry Service
+ */
+typedef void (*MiscStatusCallbackFunction)(void*, const struct TelemetryServiceStatus*);
 
 /**
  * The report ready listener is called every time a new Metrics Report is ready to be downloaded.
@@ -301,14 +313,13 @@ int32_t get_ready_reports_info(ServiceHolder* holder, void* listener,
                                ReadyReportsInfoCallbackFunction cbFunc);
 
 /**
- * Sets a status listener that receives status codes and messages for misc errors related
- * to the telemetry service.
+ * Sets a status listener that receives detailed misc statuses related to the telemetry service.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
- * @param status_listener pointer to listener passed back to client when the misc status callback
- * function is triggered
- * @param statusCbFunc Function pointer for the cbFunc that is set the misc status listener in
- * telemetry service and is called to send back misc status codes back to the client
+ * @param misc_status_listener pointer to listener passed back to client when the misc status
+ * callback function is triggered
+ * @param miscStatusCbFunc Function pointer for the cbFunc that is set the misc status listener in
+ * telemetry service and is called to send misc statuses back to the client
  *
  * @param api_listener pointer to listener passed back to the rust wrapper when api status callback
  * function is triggered
@@ -321,8 +332,8 @@ int32_t get_ready_reports_info(ServiceHolder* holder, void* listener,
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int32_t set_misc_status_listener(ServiceHolder* holder, void* status_listener,
-                                 StatusCallbackFunction statusCbFunc, void* api_listener,
+int32_t set_misc_status_listener(ServiceHolder* holder, void* misc_status_listener,
+                                 MiscStatusCallbackFunction miscStatusCbFunc, void* api_listener,
                                  StatusCallbackFunction apiCbFunc,
                                  void** outPreviousStatusListener);
 

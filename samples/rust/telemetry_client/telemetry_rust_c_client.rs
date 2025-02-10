@@ -8,6 +8,7 @@ use futures::future::join_all;
 use log::{error, info, trace};
 use protobuf::Message;
 use rust_to_c::TelemetryServiceHolder;
+use rust_to_c::TelemetryServiceStatus;
 use sdv_telemetry_rust_wrapper as rust_to_c;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
@@ -82,23 +83,24 @@ async fn wrapped_main() -> anyhow::Result<()> {
     // Note: Creating an unbounded channel will consume unbounded memory if this
     // sample client does not read misc status fast enough. Consider using a bounded
     // channel in real-world applications.
-    let (misc_status_tx, mut misc_status_rx) = mpsc::unbounded_channel();
+    let (misc_status_tx, mut misc_status_rx) = mpsc::unbounded_channel::<TelemetryServiceStatus>();
 
     // Spawn a task to log all received misc status callbacks.
     // Note: In real world application this should happen in a separate method, and extra logic needs
     // to be added to take appropriate actions based on the status codes received.
     task::spawn(async move {
-        while let Some((status_code, status_msg)) = misc_status_rx.recv().await {
+        while let Some(status) = misc_status_rx.recv().await {
             info!(
-                "Received misc status from service: status code: {status_code:?} status msg: {status_msg}",
+                "Received status from service, status code: {:?} status msg: {}",
+                status.code, status.message
             );
         }
     });
 
     service
         .init(
-            move |status_code, status_msg| {
-                misc_status_tx.send((status_code, status_msg)).expect(
+            move |status| {
+                misc_status_tx.send(status).expect(
                     "Data should be received until the application exits and closes the channel",
                 );
             },

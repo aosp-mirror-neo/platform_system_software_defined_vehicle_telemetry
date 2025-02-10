@@ -11,7 +11,7 @@
 #include "report_ready_listener_impl.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryService.h>
-#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <aidl/google/sdv/telemetry/status/TelemetryServiceStatusCodes.h>
 #include <android-base/expected.h>
 #include <android/binder_manager.h>
 
@@ -27,7 +27,7 @@
 #include <vector>
 
 using aidl::google::sdv::telemetry::ITelemetryService;
-using aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+using aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 
@@ -81,7 +81,7 @@ public:
     Status get_ready_reports_info(void* readyReportsInfoCbData,
                                   ReadyReportsInfoCallbackFunction readyReportsInfoCb);
 
-    Status set_misc_status_listener(void* miscStatusCbData, StatusCallbackFunction miscStatusCb,
+    Status set_misc_status_listener(void* miscStatusCbData, MiscStatusCallbackFunction miscStatusCb,
                                     void* statusCbData, StatusCallbackFunction statusCb,
                                     void** outPreviousMiscStatusCbData);
     Status clear_misc_status_listener(void** outPreviousMiscStatusCbData);

@@ -17,6 +17,7 @@ mod mock_service_publisher_accessor;
 // External dependencies.
 use async_trait::async_trait;
 use google_sdv_telemetry::aidl::google::sdv::telemetry::{
+    status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     ITelemetryApiStatusListener::ITelemetryApiStatusListener,
     ITelemetryConfigListListener::ITelemetryConfigListListener,
     ITelemetryMiscStatusListener::ITelemetryMiscStatusListener,
@@ -24,7 +25,6 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
     ITelemetryService::ITelemetryServiceAsyncServer, MetricsReportInfo::MetricsReportInfo,
-    TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
 use log::{error, info, warn};
 use protobuf::Message;
@@ -444,6 +444,7 @@ mod tests {
     use binder::BinderFeatures;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReadyReportsInfoListener::BnTelemetryReadyReportsInfoListener;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::{
+        status::TelemetryServiceStatus::TelemetryServiceStatus,
         ITelemetryApiStatusListener::BnTelemetryApiStatusListener,
         ITelemetryConfigListListener::BnTelemetryConfigListListener,
         ITelemetryMiscStatusListener::BnTelemetryMiscStatusListener,
@@ -715,7 +716,7 @@ mod tests {
     impl binder::Interface for MockTelemetryMiscStatusListener {}
 
     impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
-        fn sendStatus(&self, _status_code: StatusCodes, _status_msg: &str) -> binder::Result<()> {
+        fn sendStatus(&self, _status: &TelemetryServiceStatus) -> binder::Result<()> {
             Ok(())
         }
     }

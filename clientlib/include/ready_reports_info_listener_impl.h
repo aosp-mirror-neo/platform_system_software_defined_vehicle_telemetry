@@ -8,7 +8,7 @@
 
 #include <aidl/google/sdv/telemetry/BnTelemetryReadyReportsInfoListener.h>
 
-using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+using ::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 

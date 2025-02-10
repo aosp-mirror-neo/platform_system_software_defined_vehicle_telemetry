@@ -1,9 +1,10 @@
 // Copyright 2024 Google LLC
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::{
+    status::TelemetryServiceStatus::TelemetryServiceStatus,
+    status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     ITelemetryApiStatusListener::ITelemetryApiStatusListener,
     ITelemetryMiscStatusListener::ITelemetryMiscStatusListener,
-    TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
 use log::warn;
 use parking_lot::Mutex;
@@ -44,7 +45,7 @@ pub(super) struct StatusListenerImpl {
     /// Adapter to perform operations on binders.
     misc_status_binder_adapter: Box<dyn BinderAdapter<dyn ITelemetryMiscStatusListener>>,
     /// Store for miscellaneous errors.
-    misc_error_store: Mutex<VecDeque<(StatusCodes, String)>>,
+    misc_error_store: Mutex<VecDeque<TelemetryServiceStatus>>,
 }
 
 impl StatusListener for StatusListenerImpl {
@@ -61,16 +62,18 @@ impl StatusListener for StatusListenerImpl {
         }
     }
 
-    /// Uses the global listener object set by the client to send back status codes
-    /// and error messages for API calls
+    /// Uses the global listener object set by the client to send back statuses for API calls
+    /// TODO: Arguments will be changed to TelemetryServiceStatus when status detailed are added
     fn send_misc_status(&self, status_code: StatusCodes, status_message: &str) {
+        let status =
+            TelemetryServiceStatus { code: status_code, message: status_message.to_owned() };
         if let Some((listener_ref, _)) = self.misc_status_listener.lock().as_ref() {
-            if let Err(e) = listener_ref.sendStatus(status_code, status_message) {
-                warn!("Error when sending status code {:?} to the client: {:?}", status_code, e);
+            if let Err(e) = listener_ref.sendStatus(&status) {
+                warn!("Error when sending status code {:?} to the client: {:?}", status.code, e);
             }
         } else {
             let mut guard = self.misc_error_store.lock();
-            guard.push_back((status_code, status_message.to_string()));
+            guard.push_back(status);
             while guard.len() > MAX_MISC_ERROR_STORE_SIZE {
                 guard.pop_front();
             }
@@ -145,8 +148,8 @@ impl StatusListener for StatusListenerImpl {
 
         if status_code == StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
             let mut misc_errors = self.misc_error_store.lock();
-            while let Some((status_code, status_message)) = misc_errors.pop_front() {
-                self.send_misc_status(status_code, &status_message);
+            while let Some(status) = misc_errors.pop_front() {
+                self.send_misc_status(status.code, &status.message);
             }
         }
 
@@ -208,7 +211,7 @@ mod tests {
     /// testing purposes
     #[derive(Clone)]
     struct MockTelemetryMiscStatusListener {
-        last_call: Arc<Mutex<Option<StatusCodes>>>,
+        last_call: Arc<Mutex<Option<TelemetryServiceStatus>>>,
     }
 
     impl binder::Interface for MockTelemetryMiscStatusListener {}
@@ -218,14 +221,14 @@ mod tests {
             Self { last_call: Arc::new(Mutex::new(None)) }
         }
 
-        pub fn get_last_call(&self) -> Option<StatusCodes> {
-            *self.last_call.lock()
+        pub fn get_last_call(&self) -> Option<TelemetryServiceStatus> {
+            self.last_call.lock().clone()
         }
     }
 
     impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
-        fn sendStatus(&self, status_code: StatusCodes, _status_msg: &str) -> binder::Result<()> {
-            self.last_call.lock().replace(status_code);
+        fn sendStatus(&self, status: &TelemetryServiceStatus) -> binder::Result<()> {
+            self.last_call.lock().replace(status.clone());
             Ok(())
         }
     }
@@ -314,8 +317,8 @@ mod tests {
             .send_misc_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error message");
 
         assert_eq!(
-            mock_listener.get_last_call(),
-            Some(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)
+            mock_listener.get_last_call().unwrap().code,
+            StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR
         );
     }
 
@@ -327,8 +330,8 @@ mod tests {
 
         let misc_errors = status_listener.misc_error_store.lock();
         assert_eq!(misc_errors.len(), 1);
-        assert_eq!(misc_errors[0].0, StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR);
-        assert_eq!(misc_errors[0].1, "Error message");
+        assert_eq!(misc_errors[0].code, StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR);
+        assert_eq!(misc_errors[0].message, "Error message");
     }
 
     #[test]
@@ -344,7 +347,7 @@ mod tests {
         assert_eq!(misc_errors.len(), MAX_MISC_ERROR_STORE_SIZE);
 
         // Check that the oldest error ("Error 0") was removed.
-        assert!(!misc_errors.iter().any(|(_, msg)| msg == "Error 0"));
+        assert!(!misc_errors.iter().any(|status| status.message == "Error 0"));
     }
 
     #[test]
@@ -422,8 +425,8 @@ mod tests {
         Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
 
         assert_eq!(
-            mock_listener.get_last_call(),
-            Some(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)
+            mock_listener.get_last_call().unwrap().code,
+            StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR
         );
     }
 

@@ -6,9 +6,9 @@
 #include "callback_functions.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryReportListener.h>
-#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <aidl/google/sdv/telemetry/status/TelemetryServiceStatusCodes.h>
 
-using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+using ::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 

@@ -2,7 +2,7 @@
 
 package google.sdv.telemetry;
 
-import google.sdv.telemetry.TelemetryServiceStatusCodes;
+import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
 
 /**
  * Enables clients to receive status codes and messages for API calls

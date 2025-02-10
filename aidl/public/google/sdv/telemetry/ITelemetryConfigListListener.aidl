@@ -2,7 +2,7 @@
 
 package google.sdv.telemetry;
 
-import google.sdv.telemetry.TelemetryServiceStatusCodes;
+import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
 
 /**
  * Enables clients to receive list of active or inactive configs currently part of the service.

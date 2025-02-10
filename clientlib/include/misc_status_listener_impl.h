@@ -6,23 +6,21 @@
 #include "callback_functions.h"
 
 #include <aidl/google/sdv/telemetry/BnTelemetryMiscStatusListener.h>
-#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
-
-using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+#include <aidl/google/sdv/telemetry/status/TelemetryServiceStatus.h>
 
 namespace google::sdv::telemetry {
 
 class MiscStatusListenerImpl : public aidl::google::sdv::telemetry::BnTelemetryMiscStatusListener {
 public:
-    explicit MiscStatusListenerImpl(Callback<StatusCallbackFunction> callback);
+    explicit MiscStatusListenerImpl(Callback<MiscStatusCallbackFunction> callback);
 
-    ndk::ScopedAStatus sendStatus(TelemetryServiceStatusCodes statusCode,
-                                  const std::string& statusMessage) override;
+    ndk::ScopedAStatus sendStatus(
+            const ::aidl::google::sdv::telemetry::status::TelemetryServiceStatus& status) override;
 
     void* getData() { return mCallback.data; }
 
 private:
-    Callback<StatusCallbackFunction> mCallback;
+    Callback<MiscStatusCallbackFunction> mCallback;
 };
 
 }  // namespace google::sdv::telemetry

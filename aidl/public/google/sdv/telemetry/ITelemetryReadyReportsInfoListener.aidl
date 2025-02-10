@@ -3,7 +3,7 @@
 package google.sdv.telemetry;
 
 import google.sdv.telemetry.MetricsReportInfo;
-import google.sdv.telemetry.TelemetryServiceStatusCodes;
+import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
 
 /**
  * Enables clients to receive info of ready telemetry reports.

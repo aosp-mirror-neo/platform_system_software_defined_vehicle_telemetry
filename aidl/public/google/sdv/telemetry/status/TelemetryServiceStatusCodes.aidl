@@ -1,6 +1,6 @@
 // Copyright 2023 Google LLC
 
-package google.sdv.telemetry;
+package google.sdv.telemetry.status;
 
 /**
  * Exhaustive list of all status codes supported by the telemetry service.

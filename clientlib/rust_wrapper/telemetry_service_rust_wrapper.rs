@@ -4,8 +4,10 @@
 
 mod callbacks;
 mod managers;
+mod status;
 
-pub use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
+use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
+pub use status::TelemetryServiceStatus;
 
 use crate::rust_to_c::ServiceHolder;
 use callbacks::call_api_with_status_callback;
@@ -88,43 +90,44 @@ impl<T: Send + Sync> SendSyncPtr<T> {
 }
 
 /// Callback function that receives status from telemetry service
-///
 /// # Safety
 ///
 /// * `listener` points to a valid `StatusListener` originally sent to the caller as
 ///    part of the `set_misc_status_listener` API call.
 ///
-/// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
-unsafe extern "C" fn on_status(
+/// * `status` points to a valid `TelemetryServiceStatus` instance.
+unsafe extern "C" fn on_misc_status(
     listener: *mut std::ffi::c_void,
-    status_code: i32,
-    status_msg: *const std::ffi::c_char,
+    status: *const sdv_telemetry_bindgen::TelemetryServiceStatus,
 ) {
-    let status_code = TelemetryServiceStatusCodes(status_code);
+    // SAFETY: The caller has provided a valid pointer to `TelemetryServiceStatus`
+    let status = unsafe { *status };
+
+    let status_code = TelemetryServiceStatusCodes(status.code);
 
     // SAFETY: The caller sends back the reference to `StatusListener` that was originally sent to
     // the caller as part of the `set_misc_status_listener` API call.
     //
     // We do not use `Box::from_raw` here, because we do not want to take ownership, so that future
-    // calls to `on_status` can still access the same `listener`.
+    // calls to `on_misc_status` can still access the same `listener`.
     let status_listener = unsafe { &mut *(listener as *mut MiscStatusListener) };
 
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
-    let status_msg = unsafe { CStr::from_ptr(status_msg).to_str().unwrap().to_string() };
+    let status_msg = unsafe { CStr::from_ptr(status.message).to_str().unwrap().to_string() };
 
     info!("Status code: {status_code:?} status message: {status_msg}");
 
-    (status_listener.callback)(status_code, status_msg);
+    (status_listener.callback)(TelemetryServiceStatus { code: status_code, message: status_msg });
 }
 
 /// Struct used to wrap `callback` received from client.
 struct MiscStatusListener {
-    callback: Box<dyn Fn(TelemetryServiceStatusCodes, String) + Send + Sync>,
+    callback: Box<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 impl MiscStatusListener {
-    fn new(callback: Box<dyn Fn(TelemetryServiceStatusCodes, String) + Send + Sync>) -> Self {
+    fn new(callback: Box<dyn Fn(TelemetryServiceStatus) + Send + Sync>) -> Self {
         Self { callback }
     }
 }
@@ -159,7 +162,7 @@ impl TelemetryServiceHolder {
     ///
     /// @param `misc_status_callback` function closure that gets called every time a status catering
     /// to telemetry service needs to be shared with the client. The `misc_status_callback` takes a
-    /// `TelemetryServiceStatusCodes` status_code and a `String` status_message as params.
+    /// `TelemetryServiceStatus` as a parameter.
     ///
     /// @param `report_ready_callback` function closure gets called when a report is ready. The
     /// `report_ready_callback` takes String, String and i32 that specify metrics config uuid,
@@ -168,7 +171,7 @@ impl TelemetryServiceHolder {
     /// @return an error code and error message in case of incorrect parameters
     pub async fn init(
         &self,
-        misc_status_callback: impl Fn(TelemetryServiceStatusCodes, String) + Send + Sync + 'static,
+        misc_status_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
         report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
     ) -> TelemetryResult<()> {
         info!("Initializing telemetry service");
@@ -306,18 +309,17 @@ impl TelemetryServiceHolder {
         metrics_report_manager::get_ready_reports_info(self).await
     }
 
-    /// Sets a status listener that receives status codes and messages for misc errors (such as file
+    /// Sets a status listener that receives miscellaneous statuses (for example, in case of file
     /// IO errors) related to the telemetry service. API calls which do not take a listener and
     /// callback function also send their status back to the client using the status listener.
     ///
     /// @param `misc_status_callback` function closure that gets called every time a status catering
-    /// to telemetry service needs to be shared with the client. The `misc_status_callback` takes an
-    /// `TelemetryServiceStatusCodes` status_code and a `String` status_message as params.
-    ///
+    /// to telemetry service needs to be shared with the client. The `misc_status_callback` takes a
+    /// `TelemetryServiceStatus` as a parameter.
     /// @return an error code and error message in case of incorrect parameters
     async fn set_misc_status_listener(
         &self,
-        misc_status_callback: impl Fn(TelemetryServiceStatusCodes, String) + Send + Sync + 'static,
+        misc_status_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
         let raw_listener = SendSyncPtr(Box::into_raw(Box::new(MiscStatusListener::new(Box::new(
             misc_status_callback,
@@ -337,7 +339,7 @@ impl TelemetryServiceHolder {
                 let status_code = rust_to_c::set_misc_status_listener(
                     self.0,
                     raw_listener.as_void_ptr(),
-                    Some(on_status),
+                    Some(on_misc_status),
                     status_callback_data,
                     status_callback,
                     (&mut previous_raw_listener) as *mut *mut _ as *mut *mut c_void,
@@ -415,13 +417,13 @@ mod test {
     fn check_all_function_results_are_send_sync() {
         let service = assert_send_sync(TelemetryServiceHolder::get()).unwrap();
 
-        assert_send_sync(service.init(|_, _| {}, |_| {}));
+        assert_send_sync(service.init(|_| {}, |_| {}));
         assert_send_sync(service.finish());
 
         assert_send_sync(service.set_report_ready_listener(|_| {}));
         assert_send_sync(service.clear_report_ready_listener());
 
-        assert_send_sync(service.set_misc_status_listener(|_, _| {}));
+        assert_send_sync(service.set_misc_status_listener(|_| {}));
         assert_send_sync(service.clear_misc_status_listener());
 
         assert_send_sync(service.add_metrics_config(&[]));

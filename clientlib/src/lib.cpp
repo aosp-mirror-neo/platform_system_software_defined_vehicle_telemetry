@@ -23,8 +23,9 @@ int32_t callClient(const std::string& name, ServiceHolder* holder, F&& fn) {
     google::sdv::telemetry::Status status = fn(*client);
 
     LOG_IF(ERROR, status.code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS)
-            << name << " failed, error is " << ::aidl::google::sdv::telemetry::toString(status.code)
-            << ": " << status.message;
+            << name << " failed, error is "
+            << ::aidl::google::sdv::telemetry::status::toString(status.code) << ": "
+            << status.message;
 
     return std::to_underlying(status.code);
 }
@@ -132,12 +133,12 @@ int32_t get_ready_reports_info(ServiceHolder* holder, void* listener,
     });
 }
 
-int32_t set_misc_status_listener(ServiceHolder* holder, void* status_listener,
-                                 StatusCallbackFunction statusCbFunc, void* api_listener,
+int32_t set_misc_status_listener(ServiceHolder* holder, void* misc_status_listener,
+                                 MiscStatusCallbackFunction miscStatusCbFunc, void* api_listener,
                                  StatusCallbackFunction apiCbFunc,
                                  void** outPreviousStatusListener) {
     return callClient("registerMiscStatusListener", holder, [&](auto& client) {
-        return client.set_misc_status_listener(status_listener, statusCbFunc, api_listener,
+        return client.set_misc_status_listener(misc_status_listener, miscStatusCbFunc, api_listener,
                                                apiCbFunc, outPreviousStatusListener);
     });
 }

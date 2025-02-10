@@ -2,22 +2,28 @@
 
 #include "misc_status_listener_impl.h"
 
+#include "status.h"
+
 #include <android-base/logging.h>
 
 namespace google::sdv::telemetry {
 
-MiscStatusListenerImpl::MiscStatusListenerImpl(Callback<StatusCallbackFunction> callback) :
+MiscStatusListenerImpl::MiscStatusListenerImpl(Callback<MiscStatusCallbackFunction> callback) :
       mCallback(std::move(callback)) {
     LOG(INFO) << "MiscStatusListenerImpl created";
 }
 
-ndk::ScopedAStatus MiscStatusListenerImpl::sendStatus(TelemetryServiceStatusCodes statusCode,
-                                                      const std::string& statusMessage) {
+ndk::ScopedAStatus MiscStatusListenerImpl::sendStatus(
+        const ::aidl::google::sdv::telemetry::status::TelemetryServiceStatus& status) {
     LOG(DEBUG) << "Sending misc status back to client. Status: "
-               << ::aidl::google::sdv::telemetry::toString(statusCode)
-               << ", Message: " << statusMessage;
+               << ::aidl::google::sdv::telemetry::status::toString(status.code)
+               << ", Message: " << status.message;
 
-    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str());
+    const auto telemetry_status = TelemetryServiceStatus{
+            .code = std::to_underlying(status.code),
+            .message = status.message.c_str(),
+    };
+    mCallback.run(&telemetry_status);
     return ndk::ScopedAStatus::ok();
 }
 

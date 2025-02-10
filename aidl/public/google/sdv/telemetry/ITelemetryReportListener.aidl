@@ -2,7 +2,7 @@
 
 package google.sdv.telemetry;
 
-import google.sdv.telemetry.TelemetryServiceStatusCodes;
+import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
 
 /**
  * Interface implemented by Data logger to receive telemetry reports.

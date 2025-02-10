@@ -23,7 +23,7 @@ use clap::Parser;
 use io::REPORTS_DIR_NAME;
 use protobuf::Message;
 use log::{error, info};
-use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatusCodes};
+use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatus};
 use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
 use std::{
     collections::HashMap, ops::Deref, path::Path, path::PathBuf, sync::Arc, time::Duration
@@ -256,11 +256,11 @@ fn start_simulation_publishers<'a>(
 
 /// Logs miscellaneous telemetry service status updates with info level.
 fn handle_telemetry_service_status_updates(
-    mut misc_status_rx: UnboundedReceiver<(TelemetryServiceStatusCodes, String)>,
+    mut misc_status_rx: UnboundedReceiver<TelemetryServiceStatus>,
 ) {
     task::spawn(async move {
-        while let Some((_, status_msg)) = misc_status_rx.recv().await {
-            info!("Telemetry service sent status update: {status_msg}");
+        while let Some(status) = misc_status_rx.recv().await {
+            info!("Telemetry service sent status update: {}", status.message);
         }
     });
 }

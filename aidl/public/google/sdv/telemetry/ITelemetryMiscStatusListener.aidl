@@ -2,16 +2,15 @@
 
 package google.sdv.telemetry;
 
-import google.sdv.telemetry.TelemetryServiceStatusCodes;
+import google.sdv.telemetry.status.TelemetryServiceStatus;
 
 /**
- * Enables clients to receive error codes and messages for miscellaneous errors
+ * Enables clients to receive miscellaneous statuses
  */
 @VintfStability
 oneway interface ITelemetryMiscStatusListener {
     /**
-     * Called by telemetry service to send back miscellaneous errors to client
+     * Called by telemetry service to send miscellaneous statuses back to client
      */
-    void sendStatus(
-            in TelemetryServiceStatusCodes statusCode, in @utf8InCpp String statusMessage);
+    void sendStatus(in TelemetryServiceStatus status);
 }

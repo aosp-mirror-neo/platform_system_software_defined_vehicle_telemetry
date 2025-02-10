@@ -6,7 +6,7 @@
 
 #include <cstddef>
 
-using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+using ::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 

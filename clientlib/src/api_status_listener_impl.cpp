@@ -16,7 +16,7 @@ ndk::ScopedAStatus ApiStatusListenerImpl::sendStatus(int apiCallId,
                                                      TelemetryServiceStatusCodes statusCode,
                                                      const std::string& statusMessage) {
     LOG(DEBUG) << "Sending API status back to client. API call id: " << apiCallId
-               << ", Status: " << ::aidl::google::sdv::telemetry::toString(statusCode)
+               << ", Status: " << ::aidl::google::sdv::telemetry::status::toString(statusCode)
                << ", Message: " << statusMessage;
 
     auto callback = mCallbackContainer.extract(apiCallId);

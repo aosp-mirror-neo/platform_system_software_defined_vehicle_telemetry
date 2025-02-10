@@ -8,14 +8,14 @@
 #include "ready_reports_info_listener_impl.h"
 
 #include <aidl/google/sdv/telemetry/MetricsReportInfo.h>
-#include <aidl/google/sdv/telemetry/TelemetryServiceStatusCodes.h>
+#include <aidl/google/sdv/telemetry/status/TelemetryServiceStatusCodes.h>
 #include <android-base/expected.h>
 #include <android-base/logging.h>
 
 #include <iostream>
 
 using ::aidl::google::sdv::telemetry::ITelemetryService;
-using ::aidl::google::sdv::telemetry::TelemetryServiceStatusCodes;
+using ::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes;
 
 namespace google::sdv::telemetry {
 
@@ -246,7 +246,7 @@ Status TelemetryServiceClient::get_ready_reports_info(
 }
 
 Status TelemetryServiceClient::set_misc_status_listener(void* miscStatusCbData,
-                                                        StatusCallbackFunction miscStatusCb,
+                                                        MiscStatusCallbackFunction miscStatusCb,
                                                         void* statusCbData,
                                                         StatusCallbackFunction statusCb,
                                                         void** outPreviousMiscStatusCbData) {
@@ -257,7 +257,7 @@ Status TelemetryServiceClient::set_misc_status_listener(void* miscStatusCbData,
         *outPreviousMiscStatusCbData = mMiscStatusListener->getData();
     }
     mMiscStatusListener = ndk::SharedRefBase::make<MiscStatusListenerImpl>(
-            Callback<StatusCallbackFunction>(miscStatusCbData, std::move(miscStatusCb)));
+            Callback<MiscStatusCallbackFunction>(miscStatusCbData, std::move(miscStatusCb)));
 
     return callWithApiCallId(statusCbData, statusCb, [&](ApiCallId apiCallId) {
         return mBinderService->registerMiscStatusListener(apiCallId, mMiscStatusListener);
