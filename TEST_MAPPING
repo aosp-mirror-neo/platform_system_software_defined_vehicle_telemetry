@@ -48,6 +48,12 @@
       "name": "sdv_telemetry_get_proto_file_descriptors_test"
     },
     {
+      "name": "sdv_telemetry_sample_getter_publisher_unit_tests"
+    },
+    {
+      "name": "sdv_telemetry_sample_publisher_unit_tests"
+    },
+    {
       "name": "sdv_telemetry_sample_utils_unit_tests"
     },
     {

@@ -154,7 +154,7 @@ rust_binary {
 }
 
 rust_test {
-    name: "telemetry_sample_getter_publisher_unit_tests",
+    name: "sdv_telemetry_sample_getter_publisher_unit_tests",
     defaults: ["telemetry_sample_getter_publisher_defaults"],
     test_suites: [
         // keep-sorted start
@@ -199,7 +199,7 @@ rust_binary {
 }
 
 rust_test {
-    name: "telemetry_sample_publisher_unit_tests",
+    name: "sdv_telemetry_sample_publisher_unit_tests",
     defaults: ["telemetry_sample_publisher_defaults"],
     test_suites: [
         // keep-sorted start
