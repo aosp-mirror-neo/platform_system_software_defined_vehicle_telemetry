@@ -32,6 +32,7 @@ pub(crate) trait PublisherFactory: Send + Sync {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
+        metrics_config_uuid: String,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError>;
@@ -90,6 +91,7 @@ pub(crate) struct PublisherFactoryImpl {
 impl PublisherFactory for PublisherFactoryImpl {
     fn create(
         &self,
+        metrics_config_uuid: String,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
@@ -100,6 +102,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                 let error_callback = Arc::clone(&context.error_callback);
                 Ok(Arc::new(ServicePublisher::new(
                     publisher_name,
+                    metrics_config_uuid,
                     service_publisher.service_name.clone(),
                     service_publisher.configuration.as_ref().cloned(),
                     Self::get_sub_sampling_interval(service_publisher)?,
@@ -109,7 +112,12 @@ impl PublisherFactory for PublisherFactoryImpl {
                 )))
             }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
-                .create_aggregation_publisher(publisher_name, aggregation_publisher_proto, context)?
+                .create_aggregation_publisher(
+                    publisher_name,
+                    metrics_config_uuid,
+                    aggregation_publisher_proto,
+                    context,
+                )?
                 .into()),
             _ => Err(PublisherFactoryError::UnknownPublisherType),
         }
@@ -153,6 +161,7 @@ impl PublisherFactoryImpl {
     fn create_aggregation_publisher(
         &self,
         publisher_name: String,
+        metrics_config_uuid: String,
         aggregation_publisher_proto: &AggregationPublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Box<dyn Publisher>, PublisherFactoryError> {
@@ -173,6 +182,7 @@ impl PublisherFactoryImpl {
         let error_callback = Arc::clone(&context.error_callback);
         let publisher = AggregationPublisher::new(
             publisher_name,
+            metrics_config_uuid,
             message_builder.into(),
             aggregation_publisher_proto.reset_on_get,
             triggers,
@@ -243,6 +253,7 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
 
     const INTERVAL: Duration = Duration::from_millis(42);
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
     const TRIGGER_NAME: &str = "trigger";
@@ -341,7 +352,8 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), INTERVAL);
+        let trigger =
+            PeriodicTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), INTERVAL);
 
         (publisher, trigger)
     }
@@ -378,7 +390,7 @@ mod tests {
                     panic!("Unexpected error: {err:?}");
                 }),
             };
-            self.create(publisher_proto, &context)
+            self.create(CONFIG_UUID.to_owned(), publisher_proto, &context)
         }
 
         fn validate_using_default_context(
@@ -456,6 +468,7 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
+        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
         let res_publisher = res.downcast_arc::<ServicePublisher>().ok().unwrap();
 
         let configuration_value =
@@ -491,6 +504,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
+        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
         let res_publisher = res.downcast_arc::<AggregationPublisher>().ok().unwrap();
         assert_eq!(res_publisher.triggers.len(), 1);
         assert!(Arc::ptr_eq(&res_publisher.triggers[0], &(trigger as Arc<dyn Trigger>)));

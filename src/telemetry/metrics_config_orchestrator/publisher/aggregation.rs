@@ -53,6 +53,10 @@ impl Publisher for AggregationPublisher {
         self.base.get_name()
     }
 
+    fn get_metrics_config_uuid(&self) -> &str {
+        self.base.get_metrics_config_uuid()
+    }
+
     fn is_subscribable(&self) -> bool {
         true
     }
@@ -216,13 +220,14 @@ impl Publisher for AggregationPublisher {
 impl AggregationPublisher {
     pub(crate) fn new(
         name: String,
+        metrics_config_uuid: String,
         message_builder: Arc<dyn MessageBuilder>,
         reset_on_get: bool,
         triggers: Vec<Arc<dyn Trigger>>,
         error_callback: Arc<dyn Fn(AggregationPublisherRuntimeError) + Send + Sync>,
     ) -> Self {
         Self {
-            base: BasePublisher::new(name.clone()),
+            base: BasePublisher::new(name.clone(), metrics_config_uuid),
             state: AggregationPublisherState::Inactive.into(),
 
             message_builder,
@@ -276,6 +281,7 @@ mod tests {
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
 
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const PUBLISHER_NAME: &str = "publisher";
     const PUBLISHER_NAME_2: &str = "publisher2";
@@ -287,6 +293,7 @@ mod tests {
         let message_builder = Arc::new(MockMessageBuilder::new());
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
             false,
             triggers,
@@ -325,11 +332,13 @@ mod tests {
     async fn get_latest_message_resets() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let message_builder = Arc::new(MockMessageBuilder::new());
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             Arc::<MockMessageBuilder>::clone(&message_builder),
             true,
             vec![Arc::<MockTrigger>::clone(&trigger)],
@@ -402,6 +411,7 @@ mod tests {
     async fn subscribe_notifies_subscriber_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let (publisher, _) =
@@ -435,6 +445,7 @@ mod tests {
     async fn subscribe_passes_trigger_context_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let (publisher, _) =
@@ -464,6 +475,7 @@ mod tests {
     async fn subscribe_handles_async_expression_result() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let (publisher, message_builder) =

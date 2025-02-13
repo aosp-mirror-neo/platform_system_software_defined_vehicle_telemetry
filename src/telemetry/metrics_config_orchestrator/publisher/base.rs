@@ -9,16 +9,22 @@ use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 pub(super) struct BasePublisher {
     name: String,
+    metrics_config_uuid: String,
     latest_message: Mutex<Option<Arc<dyn MessageDyn>>>,
 }
 
 impl BasePublisher {
-    pub(super) fn new(name: String) -> Self {
-        Self { name, latest_message: None.into() }
+    pub(super) fn new(name: String, metrics_config_uuid: String) -> Self {
+        Self { name, metrics_config_uuid, latest_message: None.into() }
     }
 
     pub(super) fn get_name(&self) -> &str {
         &self.name
+    }
+
+    #[allow(dead_code)]
+    pub(super) fn get_metrics_config_uuid(&self) -> &str {
+        &self.metrics_config_uuid
     }
 
     pub(super) fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {

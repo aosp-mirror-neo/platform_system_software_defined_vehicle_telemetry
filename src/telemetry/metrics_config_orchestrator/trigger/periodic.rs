@@ -23,9 +23,13 @@ pub(crate) struct PeriodicTrigger {
 }
 
 impl PeriodicTrigger {
-    pub(crate) fn new(name: String, interval: Duration) -> Arc<Self> {
+    pub(crate) fn new(name: String, metrics_config_uuid: String, interval: Duration) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
-            base: BaseTrigger::new(name, Weak::clone(me) as Weak<dyn Activatable<_, _>>),
+            base: BaseTrigger::new(
+                name,
+                metrics_config_uuid,
+                Weak::clone(me) as Weak<dyn Activatable<_, _>>,
+            ),
             interval,
         })
     }
@@ -35,6 +39,10 @@ impl PeriodicTrigger {
 impl Trigger for PeriodicTrigger {
     fn get_name(&self) -> &str {
         self.base.get_name()
+    }
+
+    fn get_metrics_config_uuid(&self) -> &str {
+        self.base.get_metrics_config_uuid()
     }
 
     async fn subscribe(
@@ -137,12 +145,13 @@ mod tests {
         MockCallbackListener, MockSubscriptionManager,
     };
 
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const TRIGGER_NAME: &str = "trigger";
     const INTERVAL: Duration = Duration::from_millis(300);
     const ACTIVATION_ID: ActivationId = ActivationId::new(3);
 
     fn create_valid_periodic_trigger() -> Arc<PeriodicTrigger> {
-        PeriodicTrigger::new(TRIGGER_NAME.to_owned(), INTERVAL)
+        PeriodicTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), INTERVAL)
     }
 
     fn create_valid_periodic_trigger_with_mock_subscription_manager(

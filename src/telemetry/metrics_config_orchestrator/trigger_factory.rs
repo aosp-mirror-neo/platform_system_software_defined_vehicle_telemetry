@@ -25,6 +25,7 @@ pub(crate) trait TriggerFactory: Send + Sync {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
+        metrics_config_uuid: String,
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<dyn Trigger>, TriggerFactoryError>;
@@ -86,6 +87,7 @@ pub(crate) struct TriggerFactoryImpl {}
 impl TriggerFactory for TriggerFactoryImpl {
     fn create(
         &self,
+        metrics_config_uuid: String,
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
@@ -105,11 +107,17 @@ impl TriggerFactory for TriggerFactoryImpl {
                     });
                 }
 
-                DataTrigger::new(trigger_name, Arc::<dyn Publisher>::clone(publisher))
+                DataTrigger::new(
+                    trigger_name,
+                    metrics_config_uuid,
+                    Arc::<dyn Publisher>::clone(publisher),
+                )
             }
-            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
-                PeriodicTrigger::new(trigger_name, Self::get_periodic_interval(periodic_trigger)?)
-            }
+            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => PeriodicTrigger::new(
+                trigger_name,
+                metrics_config_uuid,
+                Self::get_periodic_interval(periodic_trigger)?,
+            ),
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
 
@@ -131,6 +139,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     .collect();
                 ConditionalTrigger::new(
                     trigger_name,
+                    metrics_config_uuid,
                     condition_type,
                     triggers,
                     Arc::clone(selector_expression),
@@ -294,6 +303,7 @@ mod tests {
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
     const NODE_INDEX: u32 = 42;
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service_name";
@@ -345,7 +355,8 @@ mod tests {
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
-        let parent_trigger = PeriodicTrigger::new(PARENT_TRIGGER_NAME.to_owned(), INTERVAL);
+        let parent_trigger =
+            PeriodicTrigger::new(PARENT_TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), INTERVAL);
 
         (trigger, Some(vec![parent_trigger]))
     }
@@ -411,7 +422,7 @@ mod tests {
                 triggers: &triggers,
                 error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")),
             };
-            self.create(trigger_proto, &context)
+            self.create(CONFIG_UUID.to_owned(), trigger_proto, &context)
         }
 
         fn validate_using_default_context(
@@ -466,6 +477,7 @@ mod tests {
         let trigger = create_valid_data_trigger();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -498,6 +510,7 @@ mod tests {
         let trigger = create_valid_data_trigger();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -517,6 +530,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
+        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
         let res_trigger = res.downcast_arc::<DataTrigger>().ok().unwrap();
         assert!(Arc::ptr_eq(&res_trigger.publisher, &(publisher as Arc<dyn Publisher>)));
     }
@@ -529,6 +543,7 @@ mod tests {
         let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
+        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
         let res_trigger = res.downcast_arc::<PeriodicTrigger>().ok().unwrap();
         assert_eq!(res_trigger.interval, INTERVAL);
     }
@@ -683,6 +698,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
+        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
         let res_trigger = res.downcast_arc::<ConditionalTrigger>().ok().unwrap();
         // selector_expression should match the node at index 0
         assert!(Arc::ptr_eq(&res_trigger.selector_expression, &node_0));

@@ -19,6 +19,7 @@ pub(crate) struct MockTrigger {
     pub unsubscribe_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
 
     name: String,
+    metrics_config_uuid: String,
     on_fired_callback: AsyncMutex<Option<TriggerCallbackFn>>,
 }
 
@@ -26,6 +27,10 @@ pub(crate) struct MockTrigger {
 impl Trigger for MockTrigger {
     fn get_name(&self) -> &str {
         &self.name
+    }
+
+    fn get_metrics_config_uuid(&self) -> &str {
+        &self.metrics_config_uuid
     }
 
     async fn subscribe(
@@ -51,9 +56,10 @@ impl Trigger for MockTrigger {
 }
 
 impl MockTrigger {
-    pub(crate) fn new(name: String) -> Self {
+    pub(crate) fn new(name: String, metrics_config_uuid: String) -> Self {
         Self {
             name,
+            metrics_config_uuid,
             expected_subscribers: vec![],
             subscribe_callback: None,
             unsubscribe_callback: None,
@@ -61,8 +67,12 @@ impl MockTrigger {
         }
     }
 
-    pub(crate) fn new_for_subscriber(name: String, expected_subscriber: TriggerSubscriber) -> Self {
-        let mut trigger = Self::new(name);
+    pub(crate) fn new_for_subscriber(
+        name: String,
+        metrics_config_uuid: String,
+        expected_subscriber: TriggerSubscriber,
+    ) -> Self {
+        let mut trigger = Self::new(name, metrics_config_uuid);
         trigger.expected_subscribers.push(expected_subscriber);
         trigger
     }

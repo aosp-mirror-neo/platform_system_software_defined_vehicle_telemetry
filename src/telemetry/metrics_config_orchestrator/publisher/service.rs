@@ -87,6 +87,10 @@ impl Publisher for ServicePublisher {
         self.base.get_name()
     }
 
+    fn get_metrics_config_uuid(&self) -> &str {
+        self.base.get_metrics_config_uuid()
+    }
+
     fn is_subscribable(&self) -> bool {
         match self.connection_type {
             ConnectionType::Getter => false,
@@ -238,8 +242,10 @@ impl Publisher for ServicePublisher {
 }
 
 impl ServicePublisher {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         name: String,
+        metrics_config_uuid: String,
         service_name: String,
         configuration: Option<Any>,
         sub_sampling_interval: SubSamplingInterval,
@@ -248,7 +254,7 @@ impl ServicePublisher {
         error_callback: Arc<dyn Fn(ServicePublisherRuntimeError) + Send + Sync>,
     ) -> Self {
         Self {
-            base: BasePublisher::new(name),
+            base: BasePublisher::new(name, metrics_config_uuid),
             configuration,
             sub_sampling_interval,
             connection_type,
@@ -511,6 +517,7 @@ mod tests {
         MockServiceAdapter, MockServiceMessageProvider,
     };
 
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const ERROR_MESSAGE: &str = "Error 42";
     const PUBLISHER_NAME: &str = "publisher";
@@ -521,6 +528,7 @@ mod tests {
     ) -> Arc<ServicePublisher> {
         Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -535,6 +543,7 @@ mod tests {
     ) -> Arc<ServicePublisher> {
         Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -664,6 +673,7 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -706,6 +716,7 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -736,6 +747,7 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             Some(Any::pack(Empty::default_instance()).unwrap()),
             SubSamplingInterval::ZERO,
@@ -794,6 +806,7 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -851,6 +864,7 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -877,6 +891,7 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,
@@ -907,6 +922,7 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
             None,
             SubSamplingInterval::ZERO,

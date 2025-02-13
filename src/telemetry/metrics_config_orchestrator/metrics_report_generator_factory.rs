@@ -218,7 +218,7 @@ mod tests {
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";
-    const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const VERSION: u32 = 42;
 
     impl MetricsReportGeneratorFactoryImpl {
@@ -382,7 +382,8 @@ mod tests {
             }),
         );
         let config = create_valid_config();
-        let trigger = PeriodicTrigger::new(TRIGGER_NAME.to_owned(), Duration::ZERO);
+        let trigger =
+            PeriodicTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), Duration::ZERO);
 
         let err = factory
             .create_using_context(
@@ -405,10 +406,14 @@ mod tests {
     async fn create_success() {
         let factory = create_factory();
         let report_config = create_valid_config();
-        let metrics_config =
-            MetricsConfigProto { uuid: UUID.to_owned(), version: VERSION, ..Default::default() };
+        let metrics_config = MetricsConfigProto {
+            uuid: CONFIG_UUID.to_owned(),
+            version: VERSION,
+            ..Default::default()
+        };
         let mut trigger = MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::MetricsReportGenerator { name: report_config.name.clone() },
         );
         let (tx, rx) = oneshot_callback();

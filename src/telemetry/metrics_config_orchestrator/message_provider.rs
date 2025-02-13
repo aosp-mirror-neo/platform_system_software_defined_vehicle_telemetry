@@ -57,6 +57,7 @@ mod tests {
 
     const ERROR_MESSAGE: &str = "error message";
     const PUBLISHER_NAME: &str = "publisher";
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
     fn create_message_provider(metrics_config: MetricsConfig) -> MessageProviderImpl {
         MessageProviderImpl { metrics_config: Arc::new(metrics_config).into() }
@@ -78,7 +79,7 @@ mod tests {
     #[test]
     fn get_message_publisher_returns_message() {
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
-        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned());
+        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
         publisher.latest_message.replace(Arc::clone(&msg));
         let mut metrics_config = create_metrics_config();
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
@@ -91,7 +92,7 @@ mod tests {
 
     #[test]
     fn get_message_publisher_returns_none() {
-        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned());
+        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
         let mut metrics_config = create_metrics_config();
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
         let message_provider = create_message_provider(metrics_config);
@@ -114,7 +115,7 @@ mod tests {
 
     #[test]
     fn get_message_propagates_publisher_error() {
-        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned());
+        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
         publisher.set_latest_message_error(ServicePublisherAccessorError::MessageParsingFailed(
             anyhow!(ERROR_MESSAGE),
         ));

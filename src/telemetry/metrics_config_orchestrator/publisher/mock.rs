@@ -17,6 +17,7 @@ pub(crate) struct MockPublisher {
     pub latest_message: Option<Arc<dyn MessageDyn>>,
 
     name: String,
+    metrics_config_uuid: String,
     activate_callback:
         Option<Box<dyn Fn(&str) -> Option<ServicePublisherAccessorError> + Send + Sync>>,
     deactivate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
@@ -29,6 +30,10 @@ pub(crate) struct MockPublisher {
 impl Publisher for MockPublisher {
     fn get_name(&self) -> &str {
         &self.name
+    }
+
+    fn get_metrics_config_uuid(&self) -> &str {
+        &self.metrics_config_uuid
     }
 
     fn is_subscribable(&self) -> bool {
@@ -80,21 +85,18 @@ impl Publisher for MockPublisher {
 }
 
 impl MockPublisher {
-    pub(crate) fn new(name: String) -> Self {
+    pub(crate) fn new(name: String, metrics_config_uuid: String) -> Self {
         Self {
             expected_trigger_names: HashSet::new(),
             latest_message: None,
             latest_message_error: None.into(),
             name,
+            metrics_config_uuid,
             activate_callback: None,
             deactivate_callback: None,
             new_message_callback: None.into(),
             unsubscribe_callback: None,
         }
-    }
-
-    pub(crate) fn get_name(&self) -> &str {
-        &self.name
     }
 
     pub(crate) async fn fire_new_message(&self, context: Arc<NodeEvaluationContext>) {

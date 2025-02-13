@@ -26,6 +26,9 @@ type CallbackFn = Box<dyn FnMut(Arc<NodeEvaluationContext>) + Send + Sync>;
 pub(crate) trait Publisher: Send + Sync {
     fn get_name(&self) -> &str;
 
+    #[allow(dead_code)]
+    fn get_metrics_config_uuid(&self) -> &str;
+
     fn is_subscribable(&self) -> bool;
 
     fn get_latest_message(

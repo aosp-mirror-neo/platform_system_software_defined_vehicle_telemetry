@@ -45,6 +45,10 @@ impl Trigger for ConditionalTrigger {
         self.base.get_name()
     }
 
+    fn get_metrics_config_uuid(&self) -> &str {
+        self.base.get_metrics_config_uuid()
+    }
+
     async fn subscribe(
         self: Arc<Self>,
         subscriber: &TriggerSubscriber,
@@ -180,13 +184,18 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
 impl ConditionalTrigger {
     pub(crate) fn new(
         name: String,
+        metrics_config_uuid: String,
         condition_type: ConditionType,
         triggers: Vec<Arc<dyn Trigger>>,
         selector_expression: Arc<Node>,
         error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
-            base: BaseTrigger::new(name.clone(), Weak::clone(me) as Weak<dyn Activatable<_, _>>),
+            base: BaseTrigger::new(
+                name.clone(),
+                metrics_config_uuid,
+                Weak::clone(me) as Weak<dyn Activatable<_, _>>,
+            ),
             triggers,
             selector_expression,
             condition_type,
@@ -246,6 +255,7 @@ mod tests {
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
     };
 
+    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const TRIGGER_NAME: &str = "trigger";
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
@@ -279,12 +289,14 @@ mod tests {
         let parent_trigger = parent_trigger.unwrap_or_else(|| {
             Arc::new(MockTrigger::new_for_subscriber(
                 PARENT_TRIGGER_NAME.to_owned(),
+                CONFIG_UUID.to_owned(),
                 TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
             ))
         });
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             condition_type,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
@@ -342,15 +354,18 @@ mod tests {
     async fn activate_subscribes_to_parents() {
         let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
         let parent_trigger2 = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             ConditionType::AllChanges,
             vec![
                 Arc::<MockTrigger>::clone(&parent_trigger1),
@@ -396,12 +411,14 @@ mod tests {
     async fn shares_context_across_subscribers() {
         let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
         let parent_context = Arc::new(NodeEvaluationContext::new());
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             ConditionType::IsTrue,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
@@ -521,6 +538,7 @@ mod tests {
     async fn deactivate_unsubscribes_from_parents() {
         let mut parent_trigger = MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         );
         let callback_listener = Arc::new(MockCallbackListener::new());

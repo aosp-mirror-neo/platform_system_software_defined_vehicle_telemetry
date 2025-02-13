@@ -224,6 +224,7 @@ mod test {
     fn create_trigger() -> MockTrigger {
         MockTrigger::new_for_subscriber(
             String::default(),
+            CONFIG_UUID.to_owned(),
             TriggerSubscriber::MetricsReportGenerator { name: REPORT_CONFIG_NAME.to_owned() },
         )
     }
