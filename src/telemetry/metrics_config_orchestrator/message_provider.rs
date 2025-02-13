@@ -49,7 +49,7 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageDyn;
-    use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
+    use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
     use std::collections::HashMap;
 
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
@@ -115,17 +115,18 @@ mod tests {
     #[test]
     fn get_message_propagates_publisher_error() {
         let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned());
-        publisher.set_latest_message_error(GetLatestMessageError::MessageParsingError(anyhow!(
-            ERROR_MESSAGE
-        )));
+        publisher.set_latest_message_error(ServicePublisherAccessorError::MessageParsingFailed(
+            anyhow!(ERROR_MESSAGE),
+        ));
         let mut metrics_config = create_metrics_config();
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
         let message_provider = create_message_provider(metrics_config);
 
         let err = message_provider.get_message(PUBLISHER_NAME).unwrap_sync().err().unwrap();
 
-        assert!(
-            matches!(&err, MessageProviderError::MessageRetrievalError { e } if e.to_string() == format!("failed to parse message: {ERROR_MESSAGE}")),
+        assert_eq!(
+            err.to_string(),
+            format!("Error when trying to retrieve latest message: Failed to parse message: {ERROR_MESSAGE}"),
             "Unexpected error: {err:?}"
         );
     }

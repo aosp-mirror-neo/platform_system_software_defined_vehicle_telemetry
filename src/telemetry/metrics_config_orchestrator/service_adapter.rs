@@ -5,10 +5,9 @@ use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetLatestMessageError, GetMessageProviderError,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome,
     GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
-    ServicePublisherMessageProvider, ServicePublisherSubscription,
+    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
@@ -40,7 +39,7 @@ pub(crate) trait ServiceAdapter: Send + Sync {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError>;
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError>;
 
     /// Subscribe to new messages from the service with the specified name
     /// using specified configuration.
@@ -52,7 +51,7 @@ pub(crate) trait ServiceAdapter: Send + Sync {
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError>;
+    ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError>;
 
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
@@ -72,7 +71,7 @@ pub(crate) trait ServiceMessageProvider: Send + Sync {
     async fn get_latest_message(
         &self,
         configuration: Option<&Any>,
-    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError>;
+    ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError>;
 }
 
 /// Stores details about a service subscription.
@@ -150,7 +149,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         struct ServiceMessageProviderImpl {
             service_publisher_message_provider: Box<dyn ServicePublisherMessageProvider>,
         }
@@ -160,7 +159,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
             async fn get_latest_message(
                 &self,
                 configuration: Option<&Any>,
-            ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+            ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
                 self.service_publisher_message_provider.get_latest_message(configuration).await
             }
         }
@@ -188,7 +187,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
+    ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
         let maybe_subscription_type = if configuration.is_some() {
             let error_callback = Arc::clone(&self.error_callback);
             let service_name_clone = service_name.to_owned();

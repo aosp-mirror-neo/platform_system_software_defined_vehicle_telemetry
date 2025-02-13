@@ -13,9 +13,8 @@ use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::ContextRef;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError,
-    GetMessageProviderError, GetMessageProviderOutcome, ServicePublisherMessageProvider,
-    ServicePublisherSubscription, ServiceRuntimeError,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -37,14 +36,14 @@ impl SdvRpcClient {
         &self,
         unit_identifier: UnitIdentifier,
         message_descriptor: MessageDescriptor,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
             unit_identifier.clone(),
             &rpc::ClientOptions::default(),
         )
         .await
-        .map_err(GetMessageProviderError::RpcFailedToConnect)?;
+        .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
 
         struct ServicePublisherMessageProviderImpl {
             client: rpc::Client,
@@ -56,21 +55,23 @@ impl SdvRpcClient {
             async fn get_latest_message(
                 &self,
                 configuration: Option<&Any>,
-            ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+            ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
                 let configuration_bytes = SdvRpcClient::serialize_configuration(configuration);
                 let response_bytes = self
                     .client
                     .unary_call("GetLatestMessage", &configuration_bytes)
                     .await
-                    .map_err(|err| GetLatestMessageError::FailedToRetrieveMessage(err.into()))?;
+                    .map_err(|err| {
+                        ServicePublisherAccessorError::MessageRetrievalFailed(err.into())
+                    })?;
                 if response_bytes.is_empty() {
                     return Ok(None);
                 }
 
-                let response = self
-                    .message_descriptor
-                    .parse_from_bytes(&response_bytes)
-                    .map_err(|err| GetLatestMessageError::MessageParsingError(err.into()))?;
+                let response =
+                    self.message_descriptor.parse_from_bytes(&response_bytes).map_err(|err| {
+                        ServicePublisherAccessorError::MessageParsingFailed(err.into())
+                    })?;
                 Ok(Some(response))
             }
         }
@@ -87,23 +88,23 @@ impl SdvRpcClient {
         configuration: Option<&Any>,
         message_descriptor: MessageDescriptor,
         mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
             unit_identifier.clone(),
             &rpc::ClientOptions::default(),
         )
         .await
-        .map_err(CreateSubscriptionError::RpcFailedToConnect)?;
+        .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
 
         let configuration_bytes = Self::serialize_configuration(configuration);
         let mut response_stream = client
             .server_streaming_call("CreateSubscription", &configuration_bytes)
             .await
-            .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
+            .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
 
         let cancellation_token = CancellationToken::new();
         let subscription_drop_guard = cancellation_token.clone().drop_guard();
@@ -131,7 +132,7 @@ impl SdvRpcClient {
                             Ok(buffer) => buffer,
                             Err(err) => {
                                 (new_message_callback)(Err(
-                                    ServiceRuntimeError::MessageRetrievalError(err),
+                                    ServicePublisherAccessorError::MessageRetrievalFailed(err),
                                 ));
                                 continue;
                             }
@@ -140,7 +141,7 @@ impl SdvRpcClient {
                         let message = message_descriptor
                             .parse_from_bytes(&buffer)
                             .with_context(|| "Failed to parse the protobuf message")
-                            .map_err(ServiceRuntimeError::MessageParsingError);
+                            .map_err(ServicePublisherAccessorError::MessageParsingFailed);
                         (new_message_callback)(message);
                     }
                 }

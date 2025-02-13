@@ -229,7 +229,7 @@ mod tests {
     use protobuf::{Message, MessageDyn, MessageField};
     use sdv_telemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use sdv_telemetry_service_publisher_accessor::{
-        AvailabilityCallbackRegistration, CreateSubscriptionError, GetMessageProviderError,
+        AvailabilityCallbackRegistration, ServicePublisherAccessorError,
     };
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
@@ -254,7 +254,7 @@ mod tests {
         async fn get_message_provider(
             &self,
             _service_name: &str,
-        ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+        ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
             unreachable!()
         }
 
@@ -265,7 +265,7 @@ mod tests {
             _sub_sampling_interval: &SubSamplingInterval,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
             _cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-        ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
+        ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
             unreachable!()
         }
 

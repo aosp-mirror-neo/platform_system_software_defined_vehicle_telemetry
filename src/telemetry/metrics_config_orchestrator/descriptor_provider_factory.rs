@@ -5,7 +5,9 @@ use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
 };
-use sdv_telemetry_service_publisher_accessor::{GetMetadataError, ServicePublisherAccessor};
+use sdv_telemetry_service_publisher_accessor::{
+    ServicePublisherAccessor, ServicePublisherAccessorError,
+};
 use sdv_telemetry_utils::descriptor_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -36,7 +38,7 @@ pub(crate) enum DescriptorProviderFactoryError {
     #[error("Error when calling ServicePublisherManager: {error}")]
     ServicePublisherManagerError {
         #[from]
-        error: GetMetadataError,
+        error: ServicePublisherAccessorError,
     },
 }
 

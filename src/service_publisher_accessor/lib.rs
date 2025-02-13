@@ -14,59 +14,32 @@ use sdv_status_rs::SdvStatus;
 use std::fmt;
 use std::sync::Arc;
 
-/// get_metadata error.
+/// Errors related to Service Publisher Accessor
 #[derive(Debug, thiserror::Error)]
-pub enum GetMetadataError {
-    /// Failed to parse metadata.
-    #[error("failed to parse metadata: {0:#}")]
-    FailedToParseMetadata(anyhow::Error),
-}
+pub enum ServicePublisherAccessorError {
+    /// Failed to parse message
+    #[error("Failed to parse message: {0:#}")]
+    MessageParsingFailed(anyhow::Error),
 
-/// get_message_provider error.
-#[derive(Debug, thiserror::Error)]
-pub enum GetMessageProviderError {
-    /// Failed to parse metadata.
-    #[error("failed to parse metadata: {0:#}")]
-    FailedToParseMetadata(anyhow::Error),
-    /// Failed to connect to RPC client.
-    #[error("failed to connect to RPC client: {0}")]
-    RpcFailedToConnect(SdvStatus),
-}
+    /// Failed to parse metadata
+    #[error("Failed to parse metadata: {0:#}")]
+    MetadataParsingFailed(anyhow::Error),
 
-/// create_subscription error.
-#[derive(Debug, thiserror::Error)]
-pub enum CreateSubscriptionError {
-    /// Failed to parse metadata.
-    #[error("failed to parse metadata: {0:#}")]
-    FailedToParseMetadata(anyhow::Error),
-    /// Failed to connect to RPC client.
-    #[error("failed to connect to RPC client: {0}")]
+    /// Failed to connect to RPC client
+    #[error("Failed to connect to RPC client: {0}")]
     RpcFailedToConnect(SdvStatus),
-    /// Failed to subscribe.
-    #[error("failed to subscribe: {0:#}")]
+
+    /// Subscription failure
+    #[error("Failed to subscribe: {0:#}")]
     FailedToSubscribe(anyhow::Error),
-}
 
-/// get_latest_message error.
-#[derive(Debug, thiserror::Error)]
-pub enum GetLatestMessageError {
-    /// Failed to retrieve the message.
-    #[error("failed to retrieve message: {0:#}")]
-    FailedToRetrieveMessage(anyhow::Error),
-    /// Failed to parse the message.
-    #[error("failed to parse message: {0:#}")]
-    MessageParsingError(anyhow::Error),
-}
+    /// Message retrieval failed
+    #[error("Failed to retrieve message: {0:#}")]
+    MessageRetrievalFailed(anyhow::Error),
 
-/// Runtime errors related to a service.
-#[derive(thiserror::Error, Debug)]
-pub enum ServiceRuntimeError {
-    /// Failure to retrieve a message.
-    #[error("Message retrieval error: {0:#}")]
-    MessageRetrievalError(anyhow::Error),
-    /// Failure to parse a retrieved message.
-    #[error("Message parsing error: {0:#}")]
-    MessageParsingError(anyhow::Error),
+    /// Service is not supported
+    #[error("Service is not supported by underlying data providers")]
+    ServiceNotSupported,
 }
 
 /// Interface of an entity that provides access to Service Publishers.
@@ -78,7 +51,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError>;
+    ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError>;
 
     /// Returns provider of messages from the publisher specified by the service name.
     /// Returns None if the service publisher is not registered
@@ -86,7 +59,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError>;
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError>;
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
@@ -96,10 +69,10 @@ pub trait ServicePublisherAccessor: Send + Sync {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError>;
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError>;
 
     /// Registers a callback that will be called when a service with the specified string
     /// service_name becomes available.
@@ -124,7 +97,7 @@ pub trait ServicePublisherMessageProvider: Send + Sync {
     async fn get_latest_message(
         &self,
         configuration: Option<&Any>,
-    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError>;
+    ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError>;
 }
 
 /// Service publisher metadata.
@@ -142,8 +115,9 @@ pub enum CreateSubscriptionOutcome {
     /// The service with the specified service name is not registered.
     NotRegistered {
         /// New message callback passed to the create subscription call.
-        new_message_callback:
-            Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+        new_message_callback: Box<
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
+        >,
         /// Cancellation callback passed to the create subscription call.
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     },

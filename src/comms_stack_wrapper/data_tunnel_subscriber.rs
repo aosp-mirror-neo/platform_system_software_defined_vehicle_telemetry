@@ -14,9 +14,8 @@ use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionError, CreateSubscriptionOutcome, GetLatestMessageError,
-    GetMessageProviderError, GetMessageProviderOutcome, ServicePublisherMessageProvider,
-    ServicePublisherSubscription, ServiceRuntimeError, SubSamplingInterval,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry_utils::conversions::u32_into_usize;
 use std::iter::Iterator;
@@ -46,10 +45,10 @@ impl DataTunnelSubscriber {
         sub_sampling_interval: &SubSamplingInterval,
         message_descriptor: MessageDescriptor,
         mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let mut subscriber_stream = dt::SubscriberStream::create(
             self.ctx.clone().await,
             &unit_identifier,
@@ -57,7 +56,7 @@ impl DataTunnelSubscriber {
             dt::SubscriberOptions { fetch_last_message: false },
         )
         .await
-        .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
+        .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
 
         let cancellation_token = CancellationToken::new();
         let subscription_drop_guard = cancellation_token.clone().drop_guard();
@@ -92,7 +91,7 @@ impl DataTunnelSubscriber {
                             Ok(result) => result,
                             Err(err) => {
                                 (new_message_callback)(Err(
-                                    ServiceRuntimeError::MessageRetrievalError(err),
+                                    ServicePublisherAccessorError::MessageRetrievalFailed(err),
                                 ));
                                 continue;
                             }
@@ -119,7 +118,7 @@ impl DataTunnelSubscriber {
                                 message_bytes,
                                 &message_descriptor,
                             )
-                            .map_err(ServiceRuntimeError::MessageParsingError);
+                            .map_err(ServicePublisherAccessorError::MessageParsingFailed);
                             (new_message_callback)(message);
                         }
                     }
@@ -137,7 +136,7 @@ impl DataTunnelSubscriber {
         &self,
         unit_identifier: UnitIdentifier,
         message_descriptor: MessageDescriptor,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         struct ServicePublisherMessageProviderImpl {
             ctx: future::Shared<BoxFuture<'static, ContextRef>>,
             unit_identifier: UnitIdentifier,
@@ -149,13 +148,13 @@ impl DataTunnelSubscriber {
             async fn get_latest_message(
                 &self,
                 _configuration: Option<&Any>,
-            ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+            ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
                 let message_bytes = dt::InstantReader::get_last_message(
                     self.ctx.clone().await,
                     &self.unit_identifier,
                 )
                 .await
-                .map_err(|err| GetLatestMessageError::FailedToRetrieveMessage(err.into()))?;
+                .map_err(|err| ServicePublisherAccessorError::MessageRetrievalFailed(err.into()))?;
 
                 if message_bytes.is_empty() {
                     return Ok(None);
@@ -166,7 +165,7 @@ impl DataTunnelSubscriber {
                         &message_bytes,
                         &self.message_descriptor,
                     )
-                    .map_err(GetLatestMessageError::MessageParsingError)?,
+                    .map_err(ServicePublisherAccessorError::MessageParsingFailed)?,
                 ))
             }
         }

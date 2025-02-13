@@ -7,9 +7,9 @@ use async_trait::async_trait;
 use futures::future;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
-    ServicePublisherMetadata, ServiceRuntimeError, SubSamplingInterval,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
+    SubSamplingInterval,
 };
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+    ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError> {
         for accessor in &self.service_publisher_registry {
             let metadata = accessor.get_metadata(service_name).await?;
 
@@ -50,7 +50,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         let mut get_not_supported = false;
 
         for accessor in &self.service_publisher_registry {
@@ -74,10 +74,10 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         mut cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         for accessor in &self.service_publisher_registry {
             (new_message_callback, cancellation_callback) = match accessor
                 .create_subscription(
@@ -159,7 +159,8 @@ mod tests {
     }
 
     fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
+    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
+    {
         Box::new(|_| unreachable!())
     }
 
@@ -190,7 +191,7 @@ mod tests {
 
         let err = service_publisher_manager_impl.get_metadata(SERVICE_NAME2).await.err().unwrap();
 
-        assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
+        assert_eq!(err.to_string(), format!("Failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -237,7 +238,7 @@ mod tests {
         let err =
             service_publisher_manager_impl.get_message_provider(SERVICE_NAME2).await.err().unwrap();
 
-        assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
+        assert_eq!(err.to_string(), format!("Failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -340,7 +341,7 @@ mod tests {
             .err()
             .unwrap();
 
-        assert_eq!(err.to_string(), format!("failed to parse metadata: {ERROR_MESSAGE}"));
+        assert_eq!(err.to_string(), format!("Failed to parse metadata: {ERROR_MESSAGE}"));
     }
 
     #[sdv_telemetry_test_utils::timeout]

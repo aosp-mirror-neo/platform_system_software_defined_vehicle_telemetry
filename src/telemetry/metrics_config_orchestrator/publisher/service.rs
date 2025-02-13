@@ -1,15 +1,13 @@
 // Copyright 2024 Google LLC
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use async_trait::async_trait;
-use either::Either;
 use futures::FutureExt;
 use log::{debug, info, warn};
 use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, GetLatestMessageError,
-    GetMessageProviderError, SubSamplingInterval,
+    AvailabilityCallbackRegistration, ServicePublisherAccessorError, SubSamplingInterval,
 };
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
@@ -98,7 +96,7 @@ impl Publisher for ServicePublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError> {
         if let Some(message) = self.base.get_latest_message() {
             return Ok(Some(message)).into();
         }
@@ -124,7 +122,7 @@ impl Publisher for ServicePublisher {
         .into()
     }
 
-    async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
+    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError> {
         // Lock state mutex and hold it until the state transition is complete.
         let state_lock = self.state.lock().await;
         assert!(
@@ -266,7 +264,7 @@ impl ServicePublisher {
     async fn activate_impl<'a>(
         self: &Arc<Self>,
         mut state_lock: AsyncMutexGuard<'a, ServicePublisherState>,
-    ) -> anyhow::Result<()> {
+    ) -> Result<(), ServicePublisherAccessorError> {
         let new_state = if let Some(state) = self.try_activate().await? {
             state
         } else {
@@ -293,12 +291,11 @@ impl ServicePublisher {
                     }),
                 )
                 .await
-                .with_context(|| "Service adapter failed to subscribe to service availability")?;
+                .with_context(|| "Service adapter failed to subscribe to service availability")
+                .map_err(ServicePublisherAccessorError::FailedToSubscribe)?;
+
             let Some(registration) = maybe_registration else {
-                return Err(anyhow!(
-                    "Service with name {} is not supported by underlying data providers",
-                    self.service_name
-                ));
+                return Err(ServicePublisherAccessorError::ServiceNotSupported);
             };
 
             assert!(registration_container.lock().replace(registration).is_none());
@@ -393,16 +390,11 @@ impl ServicePublisher {
     /// Attempts to activate service publisher and returns the new state if activation was successful.
     async fn try_activate(
         self: &Arc<Self>,
-    ) -> Result<
-        Option<ServicePublisherState>,
-        Either<GetMessageProviderError, CreateSubscriptionError>,
-    > {
+    ) -> Result<Option<ServicePublisherState>, ServicePublisherAccessorError> {
         let outcome = match self.connection_type {
-            ConnectionType::Getter => self
-                .service_adapter
-                .get_message_provider(&self.service_name)
-                .await
-                .map_err(Either::Left)?,
+            ConnectionType::Getter => {
+                self.service_adapter.get_message_provider(&self.service_name).await?
+            }
             ConnectionType::Subscription => GetMessageProviderOutcome::GetNotSupported,
         };
 
@@ -434,8 +426,7 @@ impl ServicePublisher {
                             self_clone.on_subscription_cancelled();
                         }),
                     )
-                    .await
-                    .map_err(Either::Right)?;
+                    .await?;
 
                 struct ServicePublisherHandler {
                     service_publisher: Weak<ServicePublisher>,
@@ -599,9 +590,10 @@ mod tests {
 
         let err = publisher.activate().await.unwrap_err();
 
-        assert_eq!(
-            err.chain().map(|err| err.to_string()).collect::<Vec<_>>(),
-            vec![format!("failed to parse metadata: {ERROR_MESSAGE}")]
+        assert!(
+            err.to_string() == format!("Failed to parse metadata: {ERROR_MESSAGE}"),
+            "Unexpected error: {:?}",
+            err
         );
     }
 

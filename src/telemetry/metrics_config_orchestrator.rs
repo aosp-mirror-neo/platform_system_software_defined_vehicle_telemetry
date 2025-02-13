@@ -28,8 +28,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     Publisher as PublisherProto, Trigger as TriggerProto,
 };
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionError, GetLatestMessageError, GetMessageProviderError,
-    ServicePublisherAccessor, ServiceRuntimeError,
+    ServicePublisherAccessor, ServicePublisherAccessorError,
 };
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
@@ -142,7 +141,7 @@ pub(crate) enum MetricsConfigOrchestratorError {
     #[error("End trigger cannot be set if start trigger is not set")]
     NoStartTriggerDefined,
     #[error("Unable to activate publisher {publisher_name}: {error:#}")]
-    UnableToActivatePublisher { publisher_name: String, error: anyhow::Error },
+    UnableToActivatePublisher { publisher_name: String, error: ServicePublisherAccessorError },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -611,17 +610,37 @@ impl MetricsConfigOrchestratorImpl {
             }
         }
 
+        fn status_code_for_service_publisher_accessor_error(
+            error: &ServicePublisherAccessorError,
+        ) -> StatusCodes {
+            match error {
+                ServicePublisherAccessorError::MetadataParsingFailed(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR
+                }
+                ServicePublisherAccessorError::MessageParsingFailed(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR
+                }
+                ServicePublisherAccessorError::RpcFailedToConnect(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
+                }
+                ServicePublisherAccessorError::FailedToSubscribe(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
+                }
+                ServicePublisherAccessorError::MessageRetrievalFailed(_) => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR
+                }
+                ServicePublisherAccessorError::ServiceNotSupported => {
+                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
+                }
+            }
+        }
+
         fn status_code_for_node_error(error: &NodeEvaluationError) -> StatusCodes {
             if let NodeEvaluationError::MessageProviderError { e: error } = error {
                 match error.as_ref() {
-                    MessageProviderError::MessageRetrievalError { e: error } => match error {
-                        GetLatestMessageError::FailedToRetrieveMessage(_) => {
-                            return StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR;
-                        }
-                        GetLatestMessageError::MessageParsingError(_) => {
-                            return StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR;
-                        }
-                    },
+                    MessageProviderError::MessageRetrievalError { e: error } => {
+                        return status_code_for_service_publisher_accessor_error(error)
+                    }
                     MessageProviderError::InvalidPublisherName => {}
                 }
             }
@@ -629,14 +648,9 @@ impl MetricsConfigOrchestratorImpl {
         }
 
         let status_code = match err {
-            MetricsConfigRuntimeError::Service { ref error, .. } => match error {
-                ServiceRuntimeError::MessageRetrievalError(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR
-                }
-                ServiceRuntimeError::MessageParsingError(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR
-                }
-            },
+            MetricsConfigRuntimeError::Service { ref error, .. } => {
+                status_code_for_service_publisher_accessor_error(error)
+            }
             MetricsConfigRuntimeError::AggregationPublisher {
                 error: AggregationPublisherRuntimeError { message_builder_error: ref error, .. },
                 ..
@@ -645,19 +659,11 @@ impl MetricsConfigOrchestratorImpl {
                 error: ServicePublisherRuntimeError { error: ref error_kind, .. },
                 ..
             } => match error_kind {
-                ServicePublisherRuntimeErrorKind::RetryActivationFailed(ref error) => match error {
-                    either::Left(GetMessageProviderError::FailedToParseMetadata(_))
-                    | either::Right(CreateSubscriptionError::FailedToParseMetadata(_)) => {
-                        StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR
-                    }
-                    either::Left(GetMessageProviderError::RpcFailedToConnect(_))
-                    | either::Right(CreateSubscriptionError::RpcFailedToConnect(_))
-                    | either::Right(CreateSubscriptionError::FailedToSubscribe(_)) => {
-                        StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
-                    }
-                },
-                ServicePublisherRuntimeErrorKind::ActivationAfterCancellationFailed(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
+                ServicePublisherRuntimeErrorKind::RetryActivationFailed(ref error) => {
+                    status_code_for_service_publisher_accessor_error(error)
+                }
+                ServicePublisherRuntimeErrorKind::ActivationAfterCancellationFailed(error) => {
+                    status_code_for_service_publisher_accessor_error(error)
                 }
             },
             MetricsConfigRuntimeError::ConditionalTrigger {
@@ -2066,7 +2072,9 @@ mod tests {
     async fn initialize_config_publisher_doesnt_activate_fails() {
         // Setup mock factory.
         let mut publisher_mock = MockPublisher::new(SOME_PUBLISHER_NAME.to_owned());
-        publisher_mock.set_activate_callback(move |_| Some(anyhow!("Error")));
+        publisher_mock.set_activate_callback(move |_| {
+            Some(ServicePublisherAccessorError::FailedToSubscribe(anyhow!("Error")))
+        });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator.publisher_factory().add_publishers(vec![publisher_mock.into()]);
@@ -2082,7 +2090,11 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher { publisher_name, error } if publisher_name == SOME_PUBLISHER_NAME && error.to_string() == "Error"),
+            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher {
+                publisher_name,
+                error: ServicePublisherAccessorError::FailedToSubscribe(e)
+            }
+            if publisher_name == SOME_PUBLISHER_NAME && e.to_string() == "Error"),
             "Unexpected error: {:?}",
             err
         );

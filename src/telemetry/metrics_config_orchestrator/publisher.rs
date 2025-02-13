@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
-use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
@@ -30,9 +30,9 @@ pub(crate) trait Publisher: Send + Sync {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError>;
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError>;
 
-    async fn activate(self: Arc<Self>) -> anyhow::Result<()>;
+    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError>;
     async fn deactivate(&self) -> anyhow::Result<()>;
 
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn);

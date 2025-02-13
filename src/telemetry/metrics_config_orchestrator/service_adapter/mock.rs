@@ -49,11 +49,11 @@ impl ServiceAdapter for MockServiceAdapter {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         self.num_get_message_provider_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(error) = self.next_error.lock().take() {
-            return Err(GetMessageProviderError::FailedToParseMetadata(error));
+            return Err(ServicePublisherAccessorError::MetadataParsingFailed(error));
         }
 
         let mut get_not_supported = self.next_message_provider_get_not_supported.lock();
@@ -81,7 +81,7 @@ impl ServiceAdapter for MockServiceAdapter {
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<Option<ServiceSubscription>, CreateSubscriptionError> {
+    ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
         self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
         if let Some(configuration) = configuration {
@@ -89,7 +89,7 @@ impl ServiceAdapter for MockServiceAdapter {
         }
 
         if let Some(error) = self.next_error.lock().take() {
-            return Err(CreateSubscriptionError::FailedToParseMetadata(error));
+            return Err(ServicePublisherAccessorError::MetadataParsingFailed(error));
         }
 
         if self.block_subscribe {
@@ -242,9 +242,9 @@ impl ServiceMessageProvider for MockServiceMessageProvider {
     async fn get_latest_message(
         &self,
         _configuration: Option<&Any>,
-    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+    ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
         if let Some(err) = self.next_error.lock().take() {
-            Err(GetLatestMessageError::MessageParsingError(err))
+            Err(ServicePublisherAccessorError::MessageParsingFailed(err))
         } else if let Some(message_provider) = &self.message_provider {
             Ok(Some(message_provider()))
         } else {

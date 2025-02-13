@@ -18,9 +18,9 @@ use sdv_comms::ContextRef;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError, ServicePublisherAccessor,
-    ServicePublisherMetadata, ServiceRuntimeError, SubSamplingInterval,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
+    SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
@@ -54,7 +54,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+    ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(None);
         };
@@ -69,7 +69,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
                     let message_descriptor =
                         Self::parse_telemetry_metadata(v.key(), &service_unit_definition)
-                            .map_err(GetMetadataError::FailedToParseMetadata)?;
+                            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
                     v.insert(message_descriptor.clone());
                     message_descriptor
                 }
@@ -81,7 +81,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(GetMessageProviderOutcome::NotRegistered);
         };
@@ -94,7 +94,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         let message_descriptor =
             Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .map_err(GetMessageProviderError::FailedToParseMetadata)?;
+                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
@@ -114,10 +114,10 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(CreateSubscriptionOutcome::NotRegistered {
                 new_message_callback,
@@ -136,7 +136,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         let message_descriptor =
             Self::parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .map_err(CreateSubscriptionError::FailedToParseMetadata)?;
+                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         let unit_identifier = service_unit_definition.get_unit_identifier();
 
@@ -363,7 +363,8 @@ mod integration_tests {
     }
 
     fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
+    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
+    {
         Box::new(|_| unreachable!())
     }
 
@@ -607,7 +608,7 @@ mod integration_tests {
         let subscriber = create_accessor(ctx);
 
         let (tx1, mut rx1) =
-            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServiceRuntimeError>>();
+            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>>();
         let outcome1 = subscriber
             .create_subscription(
                 &service_name,
@@ -620,7 +621,7 @@ mod integration_tests {
             .unwrap();
 
         let (tx2, mut rx2) =
-            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServiceRuntimeError>>();
+            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>>();
         let outcome2 = subscriber
             .create_subscription(
                 &service_name,
@@ -756,7 +757,7 @@ mod integration_tests {
             }
 
             let message = rx.recv().await.unwrap();
-            let Err(ServiceRuntimeError::MessageRetrievalError(error)) = message else {
+            let Err(ServicePublisherAccessorError::MessageRetrievalFailed(error)) = message else {
                 panic!("Unexpected message: {message:?}");
             };
             let Some(error) = error.root_cause().downcast_ref::<SdvStatus>() else {

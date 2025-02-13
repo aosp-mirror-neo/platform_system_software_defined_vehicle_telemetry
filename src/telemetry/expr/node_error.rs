@@ -4,7 +4,7 @@
 
 use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
-use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -114,7 +114,7 @@ pub(crate) enum MessageProviderError {
     #[error("Error when trying to retrieve latest message: {e}")]
     MessageRetrievalError {
         #[from]
-        e: GetLatestMessageError,
+        e: ServicePublisherAccessorError,
     },
 }
 

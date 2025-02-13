@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
-use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
@@ -59,7 +59,7 @@ impl Publisher for AggregationPublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError> {
         let latest_message = self.base.get_latest_message();
         if self.reset_on_get {
             self.base.reset_latest_message();
@@ -68,7 +68,7 @@ impl Publisher for AggregationPublisher {
         Ok(latest_message).into()
     }
 
-    async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
+    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError> {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         assert!(

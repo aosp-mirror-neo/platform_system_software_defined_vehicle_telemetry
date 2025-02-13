@@ -2,10 +2,7 @@
 
 //! This module represents runtime errors of a metrics config.
 
-use either::Either;
-use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionError, GetMessageProviderError, ServiceRuntimeError,
-};
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 
 use crate::{
     expr::node_error::NodeEvaluationError,
@@ -24,7 +21,7 @@ pub(crate) enum MetricsConfigRuntimeError {
         /// Name of the service.
         service_name: String,
         /// Service error.
-        error: ServiceRuntimeError,
+        error: ServicePublisherAccessorError,
     },
 
     /// Runtime errors related to aggregation publishers.
@@ -96,10 +93,10 @@ pub(crate) struct ServicePublisherRuntimeError {
 pub(crate) enum ServicePublisherRuntimeErrorKind {
     /// Retrying activation of the publisher failed.
     #[error("Retrying activation failed: {0}")]
-    RetryActivationFailed(Either<GetMessageProviderError, CreateSubscriptionError>),
+    RetryActivationFailed(ServicePublisherAccessorError),
     /// Retrying activation after subscription termination failed.
     #[error("Activation after subscription cancellation failed: {0:#}")]
-    ActivationAfterCancellationFailed(anyhow::Error),
+    ActivationAfterCancellationFailed(ServicePublisherAccessorError),
 }
 
 #[derive(thiserror::Error, Debug)]

@@ -19,7 +19,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetLatestMessageError, GetMessageProviderOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, ServiceRuntimeError, GetMetadataError, GetMessageProviderError, CreateSubscriptionError, SubSamplingInterval,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessorError, GetMessageProviderOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::collections::{hash_map::Entry, HashMap};
@@ -101,7 +101,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn get_metadata(
         &self,
         service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+    ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError> {
         let maybe_metadata = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             (entry.message_descriptor.clone(), entry.supports_get)
         });
@@ -115,7 +115,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn get_message_provider(
         &self,
         service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         let provider = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
             if entry.supports_get {
                 GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
@@ -138,10 +138,10 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         // TODO: b/373332101 - Not yet implemented.
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let (message_descriptor, publisher) = {
             let mut publisher_entries_lock = self.publisher_entries.lock();
             let Some(entry) = publisher_entries_lock.get_mut(service_name) else {
@@ -163,7 +163,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         let configuration_bytes = configuration.map(serialize_configuration);
         let subscription = publisher
             .createSubscription(&listener_wrapper, configuration_bytes.as_deref())
-            .map_err(|err| CreateSubscriptionError::FailedToSubscribe(err.into()))?;
+            .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
 
         Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
             ConfigurablePublisherRegistrySubscription {
@@ -357,20 +357,20 @@ impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
     async fn get_latest_message(
         &self,
         configuration: Option<&Any>,
-    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+    ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
         let publisher = self
             .publisher
             .upgrade()
             .with_context(|| "Publisher is no longer registered.")
-            .map_err(GetLatestMessageError::FailedToRetrieveMessage)?;
+            .map_err(ServicePublisherAccessorError::MessageRetrievalFailed)?;
         let configuration_bytes = configuration.map(serialize_configuration);
         let message = publisher
             .getLatestMessage(configuration_bytes.as_deref())
-            .map_err(|err| GetLatestMessageError::FailedToRetrieveMessage(err.into()))?
+            .map_err(|err| ServicePublisherAccessorError::MessageRetrievalFailed(err.into()))?
             .map(|data| {
                 self.message_descriptor
                     .parse_from_bytes(&data)
-                    .map_err(|err| GetLatestMessageError::MessageParsingError(err.into()))
+                    .map_err(|err| ServicePublisherAccessorError::MessageParsingFailed(err.into()))
             })
             .transpose()?;
         Ok(message)
@@ -404,7 +404,8 @@ mod tests {
     }
 
     fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync> {
+    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
+    {
         Box::new(|_| unreachable!())
     }
 

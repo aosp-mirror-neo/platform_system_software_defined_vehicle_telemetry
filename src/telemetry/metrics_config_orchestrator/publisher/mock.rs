@@ -3,7 +3,7 @@
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use protobuf::MessageDyn;
-use sdv_telemetry_service_publisher_accessor::GetLatestMessageError;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::Mutex as AsyncMutex;
@@ -17,9 +17,10 @@ pub(crate) struct MockPublisher {
     pub latest_message: Option<Arc<dyn MessageDyn>>,
 
     name: String,
-    activate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
+    activate_callback:
+        Option<Box<dyn Fn(&str) -> Option<ServicePublisherAccessorError> + Send + Sync>>,
     deactivate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
-    latest_message_error: Mutex<Option<GetLatestMessageError>>,
+    latest_message_error: Mutex<Option<ServicePublisherAccessorError>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
@@ -36,7 +37,7 @@ impl Publisher for MockPublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, GetLatestMessageError> {
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError> {
         if let Some(err) = self.latest_message_error.lock().take() {
             return Err(err).into();
         }
@@ -44,7 +45,7 @@ impl Publisher for MockPublisher {
         Ok(self.latest_message.clone()).into()
     }
 
-    async fn activate(self: Arc<Self>) -> anyhow::Result<()> {
+    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError> {
         if let Some(callback) = &self.activate_callback {
             if let Some(error) = callback(&self.name) {
                 return Err(error);
@@ -102,7 +103,7 @@ impl MockPublisher {
 
     pub(crate) fn set_activate_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<anyhow::Error> + Send + Sync + 'static,
+        callback: impl Fn(&str) -> Option<ServicePublisherAccessorError> + Send + Sync + 'static,
     ) {
         self.activate_callback.replace(Box::new(callback));
     }
@@ -114,7 +115,7 @@ impl MockPublisher {
         self.deactivate_callback.replace(Box::new(callback));
     }
 
-    pub(crate) fn set_latest_message_error(&self, error: GetLatestMessageError) {
+    pub(crate) fn set_latest_message_error(&self, error: ServicePublisherAccessorError) {
         self.latest_message_error.lock().replace(error);
     }
 

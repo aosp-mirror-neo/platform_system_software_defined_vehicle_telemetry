@@ -4,13 +4,14 @@ use async_trait::async_trait;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriberAsyncServer;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_telemetry_service_publisher_accessor::ServiceRuntimeError;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 
 /// Implementation of ISubscriber interface that calls associated callback on a new message.
 pub struct SubscriberService {
     message_descriptor: MessageDescriptor,
-    new_message_callback:
-        Mutex<Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>>,
+    new_message_callback: Mutex<
+        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
+    >,
 }
 
 impl binder::Interface for SubscriberService {}
@@ -21,9 +22,9 @@ impl ISubscriberAsyncServer for SubscriberService {
         self.message_descriptor.parse_from_bytes(data).map_or_else(
             |err| {
                 let binder_msg = format!("Unable to parse message bytes: {:?}", err);
-                (self.new_message_callback.lock())(Err(ServiceRuntimeError::MessageParsingError(
-                    err.into(),
-                )));
+                (self.new_message_callback.lock())(Err(
+                    ServicePublisherAccessorError::MessageParsingFailed(err.into()),
+                ));
                 Err(binder::Status::new_service_specific_error_str(-1, Some(binder_msg)))
             },
             |msg| {
@@ -38,7 +39,7 @@ impl SubscriberService {
     pub fn new(
         message_descriptor: MessageDescriptor,
         new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
     ) -> Self {
         Self { message_descriptor, new_message_callback: new_message_callback.into() }
@@ -64,7 +65,7 @@ mod tests {
 
         assert_eq!(err_binder.service_specific_error(), -1, "Unexpected error: {err_binder:?}");
         assert!(
-            matches!(err_callback, ServiceRuntimeError::MessageParsingError(_)),
+            matches!(err_callback, ServicePublisherAccessorError::MessageParsingFailed(_)),
             "Unexpected error: {err_callback:?}"
         );
     }

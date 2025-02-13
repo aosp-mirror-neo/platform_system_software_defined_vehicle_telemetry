@@ -4,10 +4,9 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionError, CreateSubscriptionOutcome,
-    GetLatestMessageError, GetMessageProviderError, GetMessageProviderOutcome, GetMetadataError,
-    ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata,
-    ServicePublisherSubscription, ServiceRuntimeError, SubSamplingInterval,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider,
+    ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
@@ -24,7 +23,7 @@ struct MockServicePublisherAccessorData {
     /// The map of subscribed callbacks, keyed by service name and sub-sampling interval.
     new_message_callbacks: HashMap<
         (String, SubSamplingInterval),
-        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync>,
+        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
     >,
     /// Last passed cancellation callback.
     cancellation_callback: Option<Box<dyn FnOnce() + Send + Sync>>,
@@ -75,10 +74,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn get_metadata(
         &self,
         _service_name: &str,
-    ) -> Result<Option<ServicePublisherMetadata>, GetMetadataError> {
+    ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError> {
         let mut data = self.data.lock();
         data.num_get_metadata_calls += 1;
-        data.check_next_error().map_err(GetMetadataError::FailedToParseMetadata)?;
+        data.check_next_error().map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         let metadata = data.next_descriptor.take().map(|message_descriptor| {
             ServicePublisherMetadata { supports_get: false, message_descriptor }
@@ -89,10 +88,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn get_message_provider(
         &self,
         _service_name: &str,
-    ) -> Result<GetMessageProviderOutcome, GetMessageProviderError> {
+    ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         let mut data = self.data.lock();
         data.num_get_message_provider_calls += 1;
-        data.check_next_error().map_err(GetMessageProviderError::FailedToParseMetadata)?;
+        data.check_next_error().map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         if data.next_not_available {
             data.next_not_available = false;
@@ -114,14 +113,14 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         configuration: Option<&Any>,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServiceRuntimeError>) + Send + Sync,
+            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
-    ) -> Result<CreateSubscriptionOutcome, CreateSubscriptionError> {
+    ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let mut data = self.data.lock();
         data.last_configuration = configuration.cloned();
         data.num_subscribe_calls += 1;
-        data.check_next_error().map_err(CreateSubscriptionError::FailedToParseMetadata)?;
+        data.check_next_error().map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
         if data.next_not_available {
             data.next_not_available = false;
@@ -291,10 +290,10 @@ impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
     async fn get_latest_message(
         &self,
         _configuration: Option<&Any>,
-    ) -> Result<Option<Box<dyn MessageDyn>>, GetLatestMessageError> {
+    ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
         let data_reference = self.data.upgrade().unwrap();
         let mut data = data_reference.lock();
-        data.check_next_error().map_err(GetLatestMessageError::MessageParsingError)?;
+        data.check_next_error().map_err(ServicePublisherAccessorError::MessageParsingFailed)?;
 
         Ok(data.next_latest_message.take())
     }
