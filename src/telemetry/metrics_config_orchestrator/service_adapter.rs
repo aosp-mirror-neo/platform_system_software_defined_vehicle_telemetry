@@ -18,7 +18,13 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
-use crate::metrics_config_runtime_error::MetricsConfigRuntimeError;
+
+use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::ServiceErrorDetails::ServiceErrorDetails, StatusDetails::StatusDetails,
+    TelemetryServiceStatus::TelemetryServiceStatus,
+};
 
 type CallbackContainer = Arc<
     AsyncMutex<
@@ -125,7 +131,7 @@ pub(crate) struct ServiceAdapterImpl {
             ),
         >,
     >,
-    error_callback: Arc<dyn Fn(MetricsConfigRuntimeError) + Send + Sync>,
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 impl ServiceSubscriptionType {
@@ -201,9 +207,14 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     Box::new(move |msg| match msg {
                         Ok(msg) => new_message_callback(&msg.into()),
                         Err(err) => {
-                            (error_callback)(MetricsConfigRuntimeError::Service {
-                                service_name: service_name_clone.clone(),
-                                error: err,
+                            (error_callback)(TelemetryServiceStatus {
+                                code: err.get_status_code(),
+                                message: format!(
+                                    "Service runtime error for service '{service_name_clone}': {err}'"
+                                ),
+                                details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
+                                    serviceName: service_name_clone.clone(),
+                                }),
                             });
                         }
                     }),
@@ -264,9 +275,12 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                     }
                                 }
                                 Err(err) => {
-                                    (error_callback)(MetricsConfigRuntimeError::Service {
-                                        service_name: service_name_clone.clone(),
-                                        error: err,
+                                    (error_callback)(TelemetryServiceStatus {
+                                        code: err.get_status_code(),
+                                        message: format!("Service runtime error for service '{service_name_clone}': {err}'"),
+                                        details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
+                                            serviceName: service_name_clone.clone(),
+                                        }),
                                     });
                                 }
                             }),
@@ -381,7 +395,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
 impl ServiceAdapterImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
-        error_callback: Arc<dyn Fn(MetricsConfigRuntimeError) + Send + Sync>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
         Self {
             next_subscription_id: SequenceNumber::new(),

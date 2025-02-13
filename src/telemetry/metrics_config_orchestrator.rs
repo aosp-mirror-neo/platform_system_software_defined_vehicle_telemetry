@@ -3,6 +3,8 @@
 mod async_event_processor;
 mod descriptor_provider;
 mod descriptor_provider_factory;
+mod error_status_codes;
+
 pub(crate) mod message_builder;
 mod message_builder_factory;
 mod message_provider;
@@ -17,8 +19,8 @@ mod trigger_factory;
 
 // External dependencies.
 use async_trait::async_trait;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
 use log::{debug, error};
-use message_builder::MessageBuilderError;
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
@@ -41,21 +43,15 @@ use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
 use crate::expr::node::Node;
-use crate::expr::node_error::{MessageProviderError, NodeError, NodeEvaluationError};
+use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
-use crate::metrics_config_runtime_error::{
-    AggregationPublisherRuntimeError, ConditionalTriggerRuntimeError, MetricsConfigRuntimeError,
-    MetricsReportGeneratorError, ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
-};
-use crate::StatusCodes;
 
 // Child module dependencies.
 use descriptor_provider_factory::{
     DescriptorProviderFactory, DescriptorProviderFactoryError, DescriptorProviderFactoryImpl,
 };
-use message_builder::AggregationError;
 use message_builder_factory::MessageBuilderFactoryImpl;
 use message_provider::MessageProviderImpl;
 use metrics_report_generator::{MetricsReportGenerator, MetricsReportGeneratorImpl};
@@ -161,9 +157,6 @@ pub(super) struct MetricsConfigOrchestratorImpl {
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
-
-    /// The function that is used to report misc errors.
-    misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
 }
 
 pub(super) struct MetricsConfig {
@@ -232,26 +225,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             config_proto,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
             |publisher_proto, triggers| {
-                let uuid = config_proto.uuid.clone();
-                let misc_error_callback = Arc::clone(&self.misc_error_callback);
                 let context = PublisherFactoryCreateContext {
                     file_descriptors: &file_descriptors,
                     nodes: &expression_nodes,
                     node_types: &node_types,
                     triggers,
-                    error_callback: Arc::new(move |error| {
-                        let error = error.either(
-                            |error| MetricsConfigRuntimeError::ServicePublisher {
-                                metrics_config_uuid: uuid.clone(),
-                                error,
-                            },
-                            |error| MetricsConfigRuntimeError::AggregationPublisher {
-                                metrics_config_uuid: uuid.clone(),
-                                error,
-                            },
-                        );
-                        Self::log_error(error, &misc_error_callback)
-                    }),
                 };
                 ordered_publisher_names.push(publisher_proto.name.clone());
                 self.publisher_factory
@@ -265,20 +243,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             },
             // Create a rust Trigger object using already created Publisher and Trigger objects to resolve dependencies.
             |trigger_proto, publishers, triggers| {
-                let uuid = config_proto.uuid.clone();
-                let misc_error_callback = Arc::clone(&self.misc_error_callback);
                 let context = TriggerFactoryCreateContext {
                     expression_nodes: &expression_nodes,
                     node_types: &node_types,
                     publishers,
                     triggers,
-                    error_callback: Arc::new(move |error| {
-                        let error = MetricsConfigRuntimeError::ConditionalTrigger {
-                            metrics_config_uuid: uuid.clone(),
-                            error,
-                        };
-                        Self::log_error(error, &misc_error_callback)
-                    }),
                 };
                 self.trigger_factory
                     .create(config_proto.uuid.clone(), trigger_proto, &context)
@@ -559,129 +528,31 @@ impl MetricsConfigOrchestratorImpl {
             + Sync
             + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        misc_error_callback: Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
+        misc_error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
-        let misc_error_callback_clone = Arc::clone(&misc_error_callback);
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
             Arc::clone(&service_publisher_manager),
-            Arc::new(move |err| Self::log_error(err, &misc_error_callback_clone)),
+            Arc::clone(&misc_error_callback),
         ));
-        let misc_error_callback_clone = Arc::clone(&misc_error_callback);
         Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
             metrics_report_generator_factory: Box::new(MetricsReportGeneratorFactoryImpl::new(
                 Arc::<MessageBuilderFactoryImpl>::clone(&message_builder_factory),
-                Arc::new(move |err| {
-                    let err = MetricsConfigRuntimeError::MetricsReportGenerator(err);
-                    Self::log_error(err, &misc_error_callback_clone)
-                }),
+                Arc::clone(&misc_error_callback),
             )),
             node_factory: Box::new(NodeFactoryImpl::new()),
             publisher_factory: Box::new(PublisherFactoryImpl::new(
                 message_builder_factory,
                 service_adapter,
+                Arc::clone(&misc_error_callback),
             )),
-            trigger_factory: Box::new(TriggerFactoryImpl::new()),
+            trigger_factory: Box::new(TriggerFactoryImpl::new(Arc::clone(&misc_error_callback))),
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),
-            misc_error_callback,
             service_publisher_manager,
         }
-    }
-
-    fn log_error(
-        err: MetricsConfigRuntimeError,
-        misc_error_callback: &Arc<dyn Fn(StatusCodes, &str) + Send + Sync>,
-    ) {
-        fn status_code_for_message_builder_error(error: &MessageBuilderError) -> StatusCodes {
-            match error {
-                MessageBuilderError::BadAggregation { e: error, .. } => match error {
-                    AggregationError::ExpressionEvaluationError { e: error } => {
-                        status_code_for_node_error(error)
-                    }
-                    AggregationError::NumericAggregationTypeMismatch { .. }
-                    | AggregationError::VectorAppendTypeMismatch { .. }
-                    | AggregationError::VectorInitializationError { .. } => {
-                        StatusCodes::METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR
-                    }
-                },
-                MessageBuilderError::ExpressionEvaluationError { e: error, .. }
-                | MessageBuilderError::FailedToAssignValueToField { e: error, .. } => {
-                    status_code_for_node_error(error)
-                }
-            }
-        }
-
-        fn status_code_for_service_publisher_accessor_error(
-            error: &ServicePublisherAccessorError,
-        ) -> StatusCodes {
-            match error {
-                ServicePublisherAccessorError::MetadataParsingFailed(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR
-                }
-                ServicePublisherAccessorError::MessageParsingFailed(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR
-                }
-                ServicePublisherAccessorError::RpcFailedToConnect(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
-                }
-                ServicePublisherAccessorError::FailedToSubscribe(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
-                }
-                ServicePublisherAccessorError::MessageRetrievalFailed(_) => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR
-                }
-                ServicePublisherAccessorError::ServiceNotSupported => {
-                    StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_CONNECTION_ERROR
-                }
-            }
-        }
-
-        fn status_code_for_node_error(error: &NodeEvaluationError) -> StatusCodes {
-            if let NodeEvaluationError::MessageProviderError { e: error } = error {
-                match error.as_ref() {
-                    MessageProviderError::MessageRetrievalError { e: error } => {
-                        return status_code_for_service_publisher_accessor_error(error)
-                    }
-                    MessageProviderError::InvalidPublisherName => {}
-                }
-            }
-            StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR
-        }
-
-        let status_code = match err {
-            MetricsConfigRuntimeError::Service { ref error, .. } => {
-                status_code_for_service_publisher_accessor_error(error)
-            }
-            MetricsConfigRuntimeError::AggregationPublisher {
-                error: AggregationPublisherRuntimeError { message_builder_error: ref error, .. },
-                ..
-            } => status_code_for_message_builder_error(error),
-            MetricsConfigRuntimeError::ServicePublisher {
-                error: ServicePublisherRuntimeError { error: ref error_kind, .. },
-                ..
-            } => match error_kind {
-                ServicePublisherRuntimeErrorKind::RetryActivationFailed(ref error) => {
-                    status_code_for_service_publisher_accessor_error(error)
-                }
-                ServicePublisherRuntimeErrorKind::ActivationAfterCancellationFailed(error) => {
-                    status_code_for_service_publisher_accessor_error(error)
-                }
-            },
-            MetricsConfigRuntimeError::ConditionalTrigger {
-                error: ConditionalTriggerRuntimeError { node_error: ref error, .. },
-                ..
-            } => status_code_for_node_error(error),
-            MetricsConfigRuntimeError::MetricsReportGenerator(MetricsReportGeneratorError {
-                message_builder_error: ref error,
-                ..
-            }) => status_code_for_message_builder_error(error),
-        };
-
-        error!("Metrics config runtime error (status: {status_code:?}): {err}");
-        misc_error_callback(status_code, &format!("{err}"));
     }
 }
 
@@ -986,6 +857,7 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
 
+    use crate::expr::node_error::NodeEvaluationError;
     use crate::expr::node_factory::MessageProvider;
     use crate::expr::node_value::NodeValue;
     use crate::expr::node_value_type::NodeValueType;
@@ -1328,7 +1200,6 @@ mod tests {
                 trigger_factory: Box::new(MockTriggerFactory::new()),
                 finish_trigger_fired_callback: Arc::new(|_, _| {}),
                 report_ready_callback: Arc::new(|_| {}),
-                misc_error_callback: Arc::new(|_, _| {}),
                 service_publisher_manager: Arc::new(
                     MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
                 ),

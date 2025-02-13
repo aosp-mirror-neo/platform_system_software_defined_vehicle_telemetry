@@ -14,10 +14,15 @@ use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
-use crate::metrics_config_runtime_error::MetricsReportGeneratorError;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::MetricsReportGeneratorErrorDetails::MetricsReportGeneratorErrorDetails,
+    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+};
 
 #[async_trait]
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
@@ -41,7 +46,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     subscriber: TriggerSubscriber,
     triggers: Vec<Arc<dyn Trigger>>,
 
-    error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
 }
 
@@ -98,7 +103,7 @@ impl MetricsReportGeneratorImpl {
         config_version: u32,
         message_builder: Arc<dyn MessageBuilder>,
         triggers: Vec<Arc<dyn Trigger>>,
-        error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
     ) -> Self {
         let subscriber =
@@ -150,11 +155,19 @@ impl MetricsReportGeneratorImpl {
 
                 (self.report_ready_callback)(report);
             }
-            Err(message_builder_error) => {
-                (self.error_callback)(MetricsReportGeneratorError {
-                    metrics_config_uuid: self.config_uuid.clone(),
-                    metrics_report_name: self.name.clone(),
-                    message_builder_error,
+            Err(err) => {
+                let metrics_config_uuid = self.config_uuid.clone();
+                let metrics_report_name = self.name.clone();
+                (self.error_callback)(TelemetryServiceStatus {
+                    code: err.get_status_code(),
+                    message: format!("Metrics config {metrics_config_uuid} metrics report generation for '{metrics_report_name}' failed due to message builder error: {err}"),
+                    details: StatusDetails::MetricsReportGeneratorErrorDetails(
+                        MetricsReportGeneratorErrorDetails {
+                            metricsConfigUUID: metrics_config_uuid,
+                            metricsReportName: metrics_report_name,
+                            fieldName: err.field_name,
+                        },
+                    ),
                 });
             }
         }
@@ -185,11 +198,11 @@ mod test {
     use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::mpsc;
 
+    use crate::expr::node_error::NodeEvaluationError;
     use crate::metrics_config_orchestrator::message_builder::{
-        mock::MockMessageBuilder, MessageBuilderError,
+        mock::MockMessageBuilder, MessageBuilderError, MessageBuilderErrorType,
     };
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
-    use crate::metrics_config_orchestrator::NodeEvaluationError;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
@@ -277,9 +290,11 @@ mod test {
         trigger.fire().await;
 
         // Setup generator to return an error to make sure no reports can be generated past this point.
-        message_builder.set_next_error(MessageBuilderError::FailedToAssignValueToField {
+        message_builder.set_next_error(MessageBuilderError {
             field_name: String::default(),
-            e: NodeEvaluationError::ConstantValueNotSet,
+            error: MessageBuilderErrorType::FailedToAssignValueToField {
+                e: NodeEvaluationError::ConstantValueNotSet,
+            },
         });
 
         // Wait for reports to be delivered.

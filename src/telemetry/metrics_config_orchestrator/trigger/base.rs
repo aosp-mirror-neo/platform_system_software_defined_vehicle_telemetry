@@ -51,7 +51,6 @@ impl BaseTrigger {
         &self.name
     }
 
-    #[allow(dead_code)]
     pub(super) fn get_metrics_config_uuid(&self) -> &str {
         &self.metrics_config_uuid
     }

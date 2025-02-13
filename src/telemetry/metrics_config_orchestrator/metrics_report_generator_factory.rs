@@ -17,7 +17,8 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
 use crate::metrics_config_orchestrator::{
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
 };
-use crate::metrics_config_runtime_error::MetricsReportGeneratorError;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait MetricsReportGeneratorFactory: Send + Sync {
@@ -76,13 +77,13 @@ pub(crate) enum MetricsReportGeneratorFactoryError {
 
 pub(crate) struct MetricsReportGeneratorFactoryImpl {
     message_builder_factory: Arc<dyn MessageBuilderFactory>,
-    error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 impl MetricsReportGeneratorFactoryImpl {
     pub(crate) fn new(
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
-        error_callback: Arc<dyn Fn(MetricsReportGeneratorError) + Send + Sync>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
         Self { message_builder_factory, error_callback }
     }

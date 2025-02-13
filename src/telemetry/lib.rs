@@ -8,7 +8,6 @@ mod metrics_config_orchestrator;
 mod metrics_report_listener;
 mod status_listener;
 
-pub mod metrics_config_runtime_error;
 pub mod service_publisher_manager;
 
 #[cfg(test)]
@@ -154,9 +153,7 @@ impl SdvTelemetryService {
             config_store_size,
             service_publisher_manager,
             move |report| report_listener.on_report_ready(report),
-            move |status_code, status_message| {
-                status_listener_clone.send_misc_status(status_code, status_message)
-            },
+            move |status| status_listener_clone.send_misc_status(status),
         )
         .await;
 
@@ -442,12 +439,12 @@ mod tests {
     use super::*;
 
     use binder::BinderFeatures;
-    use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReadyReportsInfoListener::BnTelemetryReadyReportsInfoListener;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::{
         status::TelemetryServiceStatus::TelemetryServiceStatus,
         ITelemetryApiStatusListener::BnTelemetryApiStatusListener,
         ITelemetryConfigListListener::BnTelemetryConfigListListener,
         ITelemetryMiscStatusListener::BnTelemetryMiscStatusListener,
+        ITelemetryReadyReportsInfoListener::BnTelemetryReadyReportsInfoListener,
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
         MetricsReportInfo::MetricsReportInfo,
@@ -750,7 +747,7 @@ mod tests {
             self.api_status_message.lock().replace(status_message.to_owned());
         }
 
-        fn send_misc_status(&self, _status_code: StatusCodes, _status_message: &str) {}
+        fn send_misc_status(&self, _status: TelemetryServiceStatus) {}
 
         fn clear_api_status_listener(&self) {
             *self.api_listener.lock() = None;

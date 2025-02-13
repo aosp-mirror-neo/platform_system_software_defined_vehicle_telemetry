@@ -18,7 +18,8 @@ use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::{Publisher, Trigger};
-use crate::metrics_config_runtime_error::ConditionalTriggerRuntimeError;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait TriggerFactory: Send + Sync {
@@ -46,7 +47,6 @@ pub(crate) struct TriggerFactoryCreateContext<'a> {
     pub node_types: &'a [Option<NodeValueType>],
     pub publishers: &'a HashMap<String, Arc<dyn Publisher>>,
     pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
-    pub error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
 }
 
 pub(crate) struct TriggerFactoryValidateContext<'a> {
@@ -82,7 +82,9 @@ pub(crate) enum TriggerFactoryError {
     UnspecifiedTriggerType,
 }
 
-pub(crate) struct TriggerFactoryImpl {}
+pub(crate) struct TriggerFactoryImpl {
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+}
 
 impl TriggerFactory for TriggerFactoryImpl {
     fn create(
@@ -143,7 +145,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     condition_type,
                     triggers,
                     Arc::clone(selector_expression),
-                    Arc::clone(&context.error_callback),
+                    Arc::clone(&self.error_callback),
                 )
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
@@ -204,8 +206,8 @@ impl TriggerFactory for TriggerFactoryImpl {
 }
 
 impl TriggerFactoryImpl {
-    pub(super) fn new() -> Self {
-        Self {}
+    pub(super) fn new(error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>) -> Self {
+        Self { error_callback }
     }
 
     fn get_condition_type(
@@ -310,7 +312,7 @@ mod tests {
     const TRIGGER_NAME: &str = "trigger";
 
     fn create_factory() -> TriggerFactoryImpl {
-        TriggerFactoryImpl {}
+        TriggerFactoryImpl { error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")) }
     }
 
     fn new_trigger(name: &str) -> TriggerProto {
@@ -420,7 +422,6 @@ mod tests {
                 node_types: &node_types,
                 publishers: &publishers,
                 triggers: &triggers,
-                error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")),
             };
             self.create(CONFIG_UUID.to_owned(), trigger_proto, &context)
         }

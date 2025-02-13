@@ -1,7 +1,12 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::FileIOErrorDetails::FileIOErrorDetails, StatusDetails::StatusDetails,
+    TelemetryServiceStatus::TelemetryServiceStatus,
+    TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+};
+
 use log::{error, info};
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
@@ -12,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self};
 use std::marker::{Send, Sync};
 use std::mem;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use thiserror::Error;
@@ -109,13 +114,19 @@ impl MetricsConfigManagerImpl {
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        misc_error_callback: impl Fn(StatusCodes, &str) + Send + Sync + 'static,
+        misc_error_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
         let misc_error_callback =
-            Arc::new(misc_error_callback) as Arc<dyn Fn(StatusCodes, &str) + Send + Sync>;
-        let handle_file_io_error = |err_code: StatusCodes, err_msg: &str| {
+            Arc::new(misc_error_callback) as Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>;
+        let handle_file_io_error = |err_code: StatusCodes, err_msg: &str, path: &Path| {
             error!("{}", err_msg);
-            misc_error_callback(err_code, err_msg);
+            misc_error_callback(TelemetryServiceStatus {
+                code: err_code,
+                message: err_msg.to_owned(),
+                details: StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
+                    path: path.to_string_lossy().to_string(),
+                }),
+            });
         };
 
         let config_manager = Arc::new_cyclic(
@@ -176,7 +187,7 @@ impl MetricsConfigManagerImpl {
 
                         Err(e) => {
                             let err = format!("Error {} in reading file {:?} from disk", e, entry);
-                            handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
+                            handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err, &path);
                             continue;
                         }
                     };
@@ -189,7 +200,11 @@ impl MetricsConfigManagerImpl {
                                 "Error {} in parsing metric config {:?} read from disk",
                                 e, entry
                             );
-                            handle_file_io_error(StatusCodes::METRICS_CONFIG_PARSE_ERROR, &err);
+                            handle_file_io_error(
+                                StatusCodes::METRICS_CONFIG_PARSE_ERROR,
+                                &err,
+                                &path,
+                            );
                             continue;
                         }
                     };
@@ -211,7 +226,11 @@ impl MetricsConfigManagerImpl {
                                 "Error {} in initializing metric config {:?} read from disk",
                                 e, entry
                             );
-                            handle_file_io_error(StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED, &err);
+                            handle_file_io_error(
+                                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED,
+                                &err,
+                                &path,
+                            );
 
                             file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
                                 error!("An error occurred in removing corrupt config: {}", e)
@@ -228,7 +247,7 @@ impl MetricsConfigManagerImpl {
                 }
                 Err(e) => {
                     let err = format!("Error {} in creating active config directory", e);
-                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
+                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err, &active_dir_path);
                 }
             };
         }
@@ -249,7 +268,11 @@ impl MetricsConfigManagerImpl {
                     num_inactive_configs += 1;
                 } else {
                     let err = format!("Metric config corrupted {:?}", entry);
-                    handle_file_io_error(StatusCodes::METRICS_CONFIG_CORRUPTED, &err);
+                    handle_file_io_error(
+                        StatusCodes::METRICS_CONFIG_CORRUPTED,
+                        &err,
+                        &entry.path(),
+                    );
 
                     // remove corrupt inactive config
                     file_io_utils::remove_file(&entry.path()).await.unwrap_or_else(|e| {
@@ -265,7 +288,7 @@ impl MetricsConfigManagerImpl {
                 }
                 Err(e) => {
                     let err = format!("Error {} in creating inactive config directory", e);
-                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err);
+                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err, &inactive_dir_path);
                 }
             };
         }
@@ -608,7 +631,7 @@ mod tests {
 
     struct TestEnvironment {
         manager: Arc<dyn MetricsConfigManager>,
-        error_receiver: future::Shared<BoxFuture<'static, (StatusCodes, String)>>,
+        error_receiver: future::Shared<BoxFuture<'static, TelemetryServiceStatus>>,
         metrics_config_orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
         num_initialize_config_calls: Arc<Mutex<i32>>,
         num_finish_config_calls: Arc<Mutex<i32>>,
@@ -643,8 +666,8 @@ mod tests {
                 max_persistent_config_store_size,
                 Arc::new(MockServicePublisherAccessor::new()),
                 |_| {},
-                move |status_code, status_msg| {
-                    tx((status_code, status_msg.to_owned()));
+                move |status| {
+                    tx(status);
                 },
             )
             .await
@@ -735,8 +758,8 @@ mod tests {
         )
         .await;
 
-        let (status, _) = test_environment.error_receiver.await;
-        assert_eq!(status, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
+        let status = test_environment.error_receiver.await;
+        assert_eq!(status.code, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
     }
 
     #[sdv_telemetry_test_utils::timeout(2_000)]
@@ -754,8 +777,8 @@ mod tests {
         )
         .await;
 
-        let (status, _) = test_environment.error_receiver.await;
-        assert_eq!(status, StatusCodes::FILE_IO_ERROR);
+        let status = test_environment.error_receiver.await;
+        assert_eq!(status.code, StatusCodes::FILE_IO_ERROR);
     }
 
     #[sdv_telemetry_test_utils::timeout(2_000)]
@@ -773,8 +796,8 @@ mod tests {
         )
         .await;
 
-        let (status, _) = test_environment.error_receiver.await;
-        assert_eq!(status, StatusCodes::FILE_IO_ERROR);
+        let status = test_environment.error_receiver.await;
+        assert_eq!(status.code, StatusCodes::FILE_IO_ERROR);
     }
 
     #[sdv_telemetry_test_utils::timeout]

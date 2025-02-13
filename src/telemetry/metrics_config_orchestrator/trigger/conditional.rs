@@ -14,11 +14,16 @@ use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
+use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::condition_checker::{
     ConditionChecker, ConstantConditionChecker, PreviousValueRelationalConditionChecker,
 };
-use crate::metrics_config_runtime_error::ConditionalTriggerRuntimeError;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::ConditionalTriggerErrorDetails::ConditionalTriggerErrorDetails,
+    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+};
 
 pub(crate) enum ConditionType {
     RisingEdge,
@@ -36,7 +41,7 @@ pub(crate) struct ConditionalTrigger {
 
     condition_type: ConditionType,
     subscriber: TriggerSubscriber,
-    error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 #[async_trait]
@@ -188,7 +193,7 @@ impl ConditionalTrigger {
         condition_type: ConditionType,
         triggers: Vec<Arc<dyn Trigger>>,
         selector_expression: Arc<Node>,
-        error_callback: Arc<dyn Fn(ConditionalTriggerRuntimeError) + Send + Sync>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
             base: BaseTrigger::new(
@@ -216,9 +221,15 @@ impl ConditionalTrigger {
         let node_value = match evaluation_result.into_future().await {
             Ok(node_value) => node_value,
             Err(err) => {
-                (self.error_callback)(ConditionalTriggerRuntimeError {
-                    trigger_name: self.get_name().to_owned(),
-                    node_error: err,
+                let trigger_name = self.get_name().to_owned();
+                let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
+                (self.error_callback)(TelemetryServiceStatus {
+                    code: err.get_status_code(),
+                    message: format!("Metrics config {metrics_config_uuid} conditional trigger '{trigger_name}' failed to evaluate condition: {err}"),
+                    details: StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
+                        metricsConfigUUID: metrics_config_uuid,
+                        triggerName: trigger_name,
+                    }),
                 });
                 return;
             }

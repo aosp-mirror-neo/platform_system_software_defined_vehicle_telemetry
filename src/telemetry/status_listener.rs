@@ -16,7 +16,7 @@ const MAX_MISC_ERROR_STORE_SIZE: usize = 128;
 
 pub(super) trait StatusListener: Send + Sync {
     fn send_api_status(&self, api_call_id: i32, status_code: StatusCodes, status_message: &str);
-    fn send_misc_status(&self, status_code: StatusCodes, status_message: &str);
+    fn send_misc_status(&self, status: TelemetryServiceStatus);
 
     fn clear_api_status_listener(&self);
     fn clear_misc_status_listener(&self);
@@ -63,10 +63,7 @@ impl StatusListener for StatusListenerImpl {
     }
 
     /// Uses the global listener object set by the client to send back statuses for API calls
-    /// TODO: Arguments will be changed to TelemetryServiceStatus when status detailed are added
-    fn send_misc_status(&self, status_code: StatusCodes, status_message: &str) {
-        let status =
-            TelemetryServiceStatus { code: status_code, message: status_message.to_owned() };
+    fn send_misc_status(&self, status: TelemetryServiceStatus) {
         if let Some((listener_ref, _)) = self.misc_status_listener.lock().as_ref() {
             if let Err(e) = listener_ref.sendStatus(&status) {
                 warn!("Error when sending status code {:?} to the client: {:?}", status.code, e);
@@ -149,7 +146,7 @@ impl StatusListener for StatusListenerImpl {
         if status_code == StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
             let mut misc_errors = self.misc_error_store.lock();
             while let Some(status) = misc_errors.pop_front() {
-                self.send_misc_status(status.code, &status.message);
+                self.send_misc_status(status);
             }
         }
 
@@ -174,6 +171,10 @@ mod tests {
     use super::*;
 
     use binder::BinderFeatures;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        StatusDetails::AggregationPublisherErrorDetails::AggregationPublisherErrorDetails,
+        StatusDetails::StatusDetails,
+    };
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryApiStatusListener::BnTelemetryApiStatusListener;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryMiscStatusListener::BnTelemetryMiscStatusListener;
     use std::sync::Arc;
@@ -271,6 +272,20 @@ mod tests {
         create_status_listener(None, None)
     }
 
+    fn create_status(code: StatusCodes, message: &str) -> TelemetryServiceStatus {
+        TelemetryServiceStatus {
+            code,
+            message: message.to_owned(),
+            details: StatusDetails::AggregationPublisherErrorDetails(
+                AggregationPublisherErrorDetails {
+                    metricsConfigUUID: "uuid".to_owned(),
+                    publisherName: "publisher".to_owned(),
+                    fieldName: "field".to_owned(),
+                },
+            ),
+        }
+    }
+
     #[test]
     fn send_api_status_with_listener_success() {
         let status_listener = Arc::new(create_default_status_listener());
@@ -313,8 +328,8 @@ mod tests {
         );
         Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
 
-        status_listener
-            .send_misc_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error message");
+        let status = create_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error message");
+        status_listener.send_misc_status(status);
 
         assert_eq!(
             mock_listener.get_last_call().unwrap().code,
@@ -325,8 +340,9 @@ mod tests {
     #[test]
     fn send_misc_status_without_listener_success() {
         let status_listener = StatusListenerImpl::new();
-        status_listener
-            .send_misc_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error message");
+
+        let status = create_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error message");
+        status_listener.send_misc_status(status);
 
         let misc_errors = status_listener.misc_error_store.lock();
         assert_eq!(misc_errors.len(), 1);
@@ -338,10 +354,11 @@ mod tests {
     fn send_misc_status_overflow() {
         let status_listener = StatusListenerImpl::new();
         for i in 0..MAX_MISC_ERROR_STORE_SIZE + 1 {
-            status_listener.send_misc_status(
+            let status = create_status(
                 StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR,
                 &format!("Error {}", i),
             );
+            status_listener.send_misc_status(status);
         }
         let misc_errors = status_listener.misc_error_store.lock();
         assert_eq!(misc_errors.len(), MAX_MISC_ERROR_STORE_SIZE);
@@ -414,7 +431,8 @@ mod tests {
     #[test]
     fn set_misc_status_listener_sends_error_store() {
         let status_listener = Arc::new(create_default_status_listener());
-        status_listener.send_misc_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error");
+        let status = create_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error");
+        status_listener.send_misc_status(status);
 
         let mock_listener = MockTelemetryMiscStatusListener::new();
         let binder_listener = BnTelemetryMiscStatusListener::new_binder(

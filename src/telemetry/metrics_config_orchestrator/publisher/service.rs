@@ -25,8 +25,12 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
-use crate::metrics_config_runtime_error::{
-    ServicePublisherRuntimeError, ServicePublisherRuntimeErrorKind,
+
+use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::ServicePublisherErrorDetails::ServicePublisherErrorDetails,
+    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
 };
 
 pub(crate) enum ConnectionType {
@@ -43,7 +47,7 @@ pub(crate) struct ServicePublisher {
     base: BasePublisher,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     state: AsyncMutex<ServicePublisherState>,
-    error_callback: Arc<dyn Fn(ServicePublisherRuntimeError) + Send + Sync>,
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 #[derive(strum_macros::Display)]
@@ -251,7 +255,7 @@ impl ServicePublisher {
         sub_sampling_interval: SubSamplingInterval,
         connection_type: ConnectionType,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-        error_callback: Arc<dyn Fn(ServicePublisherRuntimeError) + Send + Sync>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name, metrics_config_uuid),
@@ -374,10 +378,17 @@ impl ServicePublisher {
                         );
                     }
                     Err(err) => {
-                        (self.error_callback)(ServicePublisherRuntimeError {
-                            publisher_name: self.get_name().to_owned(),
-                            error: ServicePublisherRuntimeErrorKind::RetryActivationFailed(err)
-                        });
+                        let publisher_name = self.get_name().to_owned();
+                        let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
+                        (self.error_callback)(TelemetryServiceStatus {
+                            code: err.get_status_code(),
+                            message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} error: {err}"),
+                            details: StatusDetails::ServicePublisherErrorDetails(ServicePublisherErrorDetails
+                                {
+                                    metricsConfigUUID: metrics_config_uuid,
+                                    publisherName: publisher_name,
+                                }),
+                            });
                     }
                 }
             },
@@ -493,9 +504,17 @@ impl ServicePublisher {
             }
 
             if let Err(err) = self_clone.activate_impl(state_lock).await {
-                (self_clone.error_callback)(ServicePublisherRuntimeError {
-                    publisher_name: self_clone.base.get_name().to_owned(),
-                    error: ServicePublisherRuntimeErrorKind::ActivationAfterCancellationFailed(err),
+                let publisher_name = self_clone.get_name().to_owned();
+                let metrics_config_uuid = self_clone.get_metrics_config_uuid().to_owned();
+                (self_clone.error_callback)(TelemetryServiceStatus {
+                    code: err.get_status_code(),
+                    message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} error: {err}"),
+                    details: StatusDetails::ServicePublisherErrorDetails(
+                        ServicePublisherErrorDetails {
+                            metricsConfigUUID: metrics_config_uuid,
+                            publisherName: publisher_name,
+                        },
+                    ),
                 });
             }
         });

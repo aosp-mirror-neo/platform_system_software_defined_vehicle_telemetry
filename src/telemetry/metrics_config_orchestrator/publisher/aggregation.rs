@@ -15,9 +15,14 @@ use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
 };
+use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
-use crate::metrics_config_runtime_error::AggregationPublisherRuntimeError;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::AggregationPublisherErrorDetails::AggregationPublisherErrorDetails,
+    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+};
 
 pub(crate) struct AggregationPublisher {
     pub(crate) reset_on_get: bool,
@@ -27,7 +32,7 @@ pub(crate) struct AggregationPublisher {
     message_builder: Arc<dyn MessageBuilder>,
     state: AsyncMutex<AggregationPublisherState>,
     trigger_subscriber: TriggerSubscriber,
-    error_callback: Arc<dyn Fn(AggregationPublisherRuntimeError) + Send + Sync>,
+    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 #[derive(strum_macros::Display)]
@@ -224,7 +229,7 @@ impl AggregationPublisher {
         message_builder: Arc<dyn MessageBuilder>,
         reset_on_get: bool,
         triggers: Vec<Arc<dyn Trigger>>,
-        error_callback: Arc<dyn Fn(AggregationPublisherRuntimeError) + Send + Sync>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name.clone(), metrics_config_uuid),
@@ -253,9 +258,20 @@ impl AggregationPublisher {
         let message = match build_result.into_future().await {
             Ok(msg) => msg.into(),
             Err(err) => {
-                (self.error_callback)(AggregationPublisherRuntimeError {
-                    publisher_name: self.get_name().to_owned(),
-                    message_builder_error: err,
+                let publisher_name = self.get_name().to_owned();
+                let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
+                (self.error_callback)(TelemetryServiceStatus {
+                    code: err.get_status_code(),
+                    message: format!(
+                        "Metrics config {metrics_config_uuid} aggregation publisher {publisher_name} failed to build message: {err}"
+                    ),
+                    details: StatusDetails::AggregationPublisherErrorDetails(
+                        AggregationPublisherErrorDetails {
+                            metricsConfigUUID: metrics_config_uuid,
+                            publisherName: publisher_name,
+                            fieldName: err.field_name,
+                        },
+                    ),
                 });
                 return;
             }

@@ -26,7 +26,6 @@ pub(crate) trait Trigger: Send + Sync {
     /// Returns the name of the trigger.
     fn get_name(&self) -> &str;
 
-    #[allow(dead_code)]
     fn get_metrics_config_uuid(&self) -> &str;
 
     /// Subscribe to trigger fire events.

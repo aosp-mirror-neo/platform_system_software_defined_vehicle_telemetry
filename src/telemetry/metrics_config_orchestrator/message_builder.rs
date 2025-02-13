@@ -46,13 +46,20 @@ pub(crate) struct MessageBuilderImpl {
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum MessageBuilderError {
-    #[error("Unable to assign value to field {field_name} because of: {e}")]
-    BadAggregation { field_name: String, e: AggregationError },
-    #[error("Evaluation of expression node for field {field_name} failed: {e}")]
-    ExpressionEvaluationError { field_name: String, e: NodeEvaluationError },
-    #[error("Failed to assign node value to field {field_name} because of: {e}")]
-    FailedToAssignValueToField { field_name: String, e: NodeEvaluationError },
+#[error("Message build failed for field {field_name}: {error}")]
+pub struct MessageBuilderError {
+    pub field_name: String,
+    pub error: MessageBuilderErrorType,
+}
+
+#[derive(Error, Debug)]
+pub(crate) enum MessageBuilderErrorType {
+    #[error("Unable to assign value to field: {e}")]
+    BadAggregation { e: AggregationError },
+    #[error("Evaluation of expression node failed: {e}")]
+    ExpressionEvaluationError { e: NodeEvaluationError },
+    #[error("Failed to assign node value to field: {e}")]
+    FailedToAssignValueToField { e: NodeEvaluationError },
 }
 
 impl MessageBuilder for MessageBuilderImpl {
@@ -70,14 +77,16 @@ impl MessageBuilder for MessageBuilderImpl {
             let mut msg = self_clone.message_descriptor.new_instance();
             for (field_name, field_aggregator) in &mut *self_clone.field_assignments.lock() {
                 let input_value = results_map.remove(field_name).transpose().map_err(|e| {
-                    MessageBuilderError::ExpressionEvaluationError {
+                    MessageBuilderError {
                         field_name: field_name.to_owned(),
-                        e,
+                        error: MessageBuilderErrorType::ExpressionEvaluationError { e },
                     }
                 })?;
-                let aggregated_value = field_aggregator.compute(input_value).map_err(|e| {
-                    MessageBuilderError::BadAggregation { field_name: field_name.to_owned(), e }
-                })?;
+                let aggregated_value =
+                    field_aggregator.compute(input_value).map_err(|e| MessageBuilderError {
+                        field_name: field_name.to_owned(),
+                        error: MessageBuilderErrorType::BadAggregation { e },
+                    })?;
                 // if aggregated_value is none, skip populating this field
                 if aggregated_value.is_none() {
                     // TODO: b/307547570 - properly handle absent values
@@ -94,18 +103,18 @@ impl MessageBuilder for MessageBuilderImpl {
                         msg.as_mut(),
                         aggregated_value
                             .to_reflect_value_box(&field_descriptor.singular_runtime_type())
-                            .map_err(|e| MessageBuilderError::FailedToAssignValueToField {
+                            .map_err(|e| MessageBuilderError {
                                 field_name: field_name.to_owned(),
-                                e,
+                                error: MessageBuilderErrorType::FailedToAssignValueToField { e },
                             })?,
                     );
                 } else if field_descriptor.is_repeated() {
                     field_descriptor
                         .mut_repeated(msg.as_mut())
                         .push_node_value_content(&aggregated_value)
-                        .map_err(|e| MessageBuilderError::FailedToAssignValueToField {
+                        .map_err(|e| MessageBuilderError {
                             field_name: field_name.to_owned(),
-                            e,
+                            error: MessageBuilderErrorType::FailedToAssignValueToField { e },
                         })?;
                 } else {
                     panic!("Validation should have ensured map fields are not allowed");
@@ -393,7 +402,7 @@ mod tests {
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
-            matches!(&err, MessageBuilderError::FailedToAssignValueToField { .. }),
+            matches!(&err.error, MessageBuilderErrorType::FailedToAssignValueToField { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -412,7 +421,7 @@ mod tests {
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
-            matches!(&err, MessageBuilderError::FailedToAssignValueToField { .. }),
+            matches!(&err.error, MessageBuilderErrorType::FailedToAssignValueToField { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -430,7 +439,7 @@ mod tests {
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
-            matches!(&err, MessageBuilderError::FailedToAssignValueToField { .. }),
+            matches!(&err.error, MessageBuilderErrorType::FailedToAssignValueToField { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -454,7 +463,7 @@ mod tests {
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
-            matches!(&err, MessageBuilderError::BadAggregation { .. }),
+            matches!(&err.error, MessageBuilderErrorType::BadAggregation { .. }),
             "Unexpected error: {:?}",
             err
         );
@@ -492,7 +501,7 @@ mod tests {
             .unwrap_err();
 
         assert!(
-            matches!(&err, MessageBuilderError::ExpressionEvaluationError { .. }),
+            matches!(&err.error, MessageBuilderErrorType::ExpressionEvaluationError { .. }),
             "Unexpected error: {:?}",
             err
         );
