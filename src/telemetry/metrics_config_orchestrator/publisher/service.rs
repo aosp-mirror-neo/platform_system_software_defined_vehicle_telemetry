@@ -382,7 +382,7 @@ impl ServicePublisher {
                         let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
                         (self.error_callback)(TelemetryServiceStatus {
                             code: err.get_status_code(),
-                            message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} error: {err}"),
+                            message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} failed to retry activation: {err}"),
                             details: StatusDetails::ServicePublisherErrorDetails(ServicePublisherErrorDetails
                                 {
                                     metricsConfigUUID: metrics_config_uuid,
@@ -508,7 +508,7 @@ impl ServicePublisher {
                 let metrics_config_uuid = self_clone.get_metrics_config_uuid().to_owned();
                 (self_clone.error_callback)(TelemetryServiceStatus {
                     code: err.get_status_code(),
-                    message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} error: {err}"),
+                    message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} activation after subscription cancellation failed: {err}"),
                     details: StatusDetails::ServicePublisherErrorDetails(
                         ServicePublisherErrorDetails {
                             metricsConfigUUID: metrics_config_uuid,
@@ -524,6 +524,7 @@ impl ServicePublisher {
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
     use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
@@ -731,6 +732,50 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn activate_getter_retry_reports_errors() {
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
+        let (tx, rx) = oneshot_callback();
+        let publisher = Arc::new(ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            SubSamplingInterval::ZERO,
+            ConnectionType::Getter,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(tx),
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+
+        // Fire availability callback when service is still not available.
+        service_adapter.call_availability_callback();
+        tokio::task::yield_now().await;
+
+        // Service adapter returns an error
+        service_adapter.set_next_error(anyhow!(ERROR_MESSAGE));
+
+        // Fire availability callback when service is available.
+        service_adapter.call_availability_callback();
+
+        // Wait for error status to be delivered
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR,
+                message,
+                details: StatusDetails::ServicePublisherErrorDetails(
+                    ServicePublisherErrorDetails { metricsConfigUUID, publisherName }
+                ),
+            }
+            if message.contains("failed to retry activation") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     async fn activate_getter_with_retries_unsubscribes_on_deactivate() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
@@ -932,6 +977,44 @@ mod tests {
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_subscription_on_cancelled_reports_errors() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+
+        let (tx, rx) = oneshot_callback();
+        let publisher = Arc::new(ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            SERVICE_NAME.to_owned(),
+            None,
+            SubSamplingInterval::ZERO,
+            ConnectionType::Subscription,
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(tx),
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+        service_adapter.set_next_error(anyhow!(ERROR_MESSAGE));
+        service_adapter.notify_cancelled();
+
+        // Wait for error status to be delivered.
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR,
+                message,
+                details: StatusDetails::ServicePublisherErrorDetails(
+                    ServicePublisherErrorDetails { metricsConfigUUID, publisherName }
+                ),
+            }
+            if message.contains("activation after subscription cancellation failed") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]

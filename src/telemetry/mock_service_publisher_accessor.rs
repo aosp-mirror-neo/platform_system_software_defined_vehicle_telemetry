@@ -222,13 +222,13 @@ impl MockServicePublisherAccessor {
         &self,
         service_name: &str,
         sub_sampling_interval: &SubSamplingInterval,
-        message: Box<dyn MessageDyn>,
+        message: Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>,
     ) {
         let mut data_lock = self.data.lock();
         data_lock
             .new_message_callbacks
             .get_mut(&(service_name.to_owned(), sub_sampling_interval.to_owned()))
-            .unwrap()(Ok(message))
+            .unwrap()(message)
     }
 
     pub(crate) fn set_next_error(&self, error: anyhow::Error) {

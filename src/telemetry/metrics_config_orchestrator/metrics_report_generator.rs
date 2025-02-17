@@ -192,6 +192,7 @@ mod test {
     use super::*;
 
     use futures::FutureExt;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
     use protobuf::MessageDyn;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::oneshot_callback;
@@ -207,6 +208,7 @@ mod test {
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
     const REPORT_CONFIG_NAME: &str = "name";
+    const FIELD_NAME: &str = "field_name";
 
     fn create_report_config_proto() -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
@@ -319,6 +321,45 @@ mod test {
         // as built by MockMessageBuilder
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(message.int_field, 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_reports_builder_error() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_error(MessageBuilderError {
+            field_name: FIELD_NAME.to_owned(),
+            error: MessageBuilderErrorType::ExpressionEvaluationError {
+                e: NodeEvaluationError::DivideByZero,
+            },
+        });
+
+        let mut generator = create_generator(Arc::clone(&message_builder));
+        let (tx, rx) = oneshot_callback();
+        generator.error_callback = Arc::new(tx);
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+        let generator = Arc::new(generator);
+
+        Arc::clone(&generator).activate().await;
+
+        trigger.fire().await;
+
+        // Wait for error status to be delivered.
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR,
+                message,
+                details: StatusDetails::MetricsReportGeneratorErrorDetails(
+                    MetricsReportGeneratorErrorDetails { metricsConfigUUID, metricsReportName, fieldName }
+                ),
+            }
+            if message.contains("failed due to message builder error") && metricsConfigUUID == CONFIG_UUID && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]

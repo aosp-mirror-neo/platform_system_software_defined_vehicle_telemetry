@@ -463,6 +463,7 @@ pub(super) mod tests {
     use super::*;
 
     use anyhow::anyhow;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
     use lazy_static::lazy_static;
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
@@ -643,7 +644,7 @@ pub(super) mod tests {
             .unwrap();
 
         // Notify about a new message and receive the message.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg.clone()));
         let msg_received = rx.recv().await.unwrap();
 
         // Verify that the received message is the same as the one sent.
@@ -732,10 +733,10 @@ pub(super) mod tests {
             .unwrap();
 
         // Notify about a new message from each service and receive the message.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg1.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg1.clone()));
         let msg1_received = rx.recv().await.unwrap();
 
-        accessor.notify_subscriber(SERVICE_NAME_2, &SubSamplingInterval::ZERO, msg2.clone());
+        accessor.notify_subscriber(SERVICE_NAME_2, &SubSamplingInterval::ZERO, Ok(msg2.clone()));
         let msg2_received = rx.recv().await.unwrap();
 
         // Verify that the received messages are the same as the ones sent.
@@ -780,7 +781,7 @@ pub(super) mod tests {
 
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg.clone()));
         let msg1_received = rx.recv().await.unwrap();
         let msg2_received = rx.recv().await.unwrap();
 
@@ -827,8 +828,8 @@ pub(super) mod tests {
 
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, msg.clone());
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::MAX, msg.clone());
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg.clone()));
+        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::MAX, Ok(msg.clone()));
         let msg1_received = rx.recv().await.unwrap();
         let msg2_received = rx.recv().await.unwrap();
 
@@ -874,7 +875,7 @@ pub(super) mod tests {
                 accessor.notify_subscriber(
                     SERVICE_NAME,
                     &SubSamplingInterval::ZERO,
-                    Box::new(Int32Value { value: i, ..Default::default() }),
+                    Ok(Box::new(Int32Value { value: i, ..Default::default() })),
                 );
             }
             let mut values = vec![];
@@ -1143,5 +1144,95 @@ pub(super) mod tests {
             .unwrap();
 
         assert_eq!(err.to_string(), ERROR_MESSAGE);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_configured_reports_errors() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+
+        let (tx, rx) = oneshot_callback();
+        let service_adapter = Arc::new(ServiceAdapterImpl::new(
+            Arc::clone(&accessor) as Arc<dyn ServicePublisherAccessor>,
+            Arc::new(tx),
+        ));
+
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                Some(&Any::new()),
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
+            .await
+            .unwrap();
+
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::ZERO,
+            Err(ServicePublisherAccessorError::MessageParsingFailed(anyhow!(
+                ERROR_MESSAGE.to_owned()
+            ))),
+        );
+
+        // Wait for error status to be delivered
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR,
+                message,
+                details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails { serviceName } ),
+            }
+            if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_shared_reports_errors() {
+        let accessor = Arc::new(MockServicePublisherAccessor::new());
+
+        let (tx, rx) = oneshot_callback();
+        let service_adapter = Arc::new(ServiceAdapterImpl::new(
+            Arc::clone(&accessor) as Arc<dyn ServicePublisherAccessor>,
+            Arc::new(tx),
+        ));
+
+        service_adapter
+            .subscribe(
+                SERVICE_NAME,
+                None,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                create_empty_fn_box(),
+            )
+            .await
+            .unwrap();
+
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::ZERO,
+            Err(ServicePublisherAccessorError::MessageParsingFailed(anyhow!(
+                ERROR_MESSAGE.to_owned()
+            ))),
+        );
+
+        // Wait for error status to be delivered
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR,
+                message,
+                details: StatusDetails::ServiceErrorDetails(
+                    ServiceErrorDetails { serviceName }
+                ),
+            }
+            if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
     }
 }

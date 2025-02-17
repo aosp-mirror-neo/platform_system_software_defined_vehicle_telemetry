@@ -248,29 +248,36 @@ impl ConditionalTrigger {
 mod tests {
     use super::*;
 
+    use anyhow::anyhow;
     use futures::FutureExt;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
     use googletest::matchers::{eq, none, result_of_ref, some};
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
+    use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
+
     use std::collections::HashMap;
     use std::future;
 
     use crate::expr::mock::MockMessageProvider;
     use crate::expr::node::Node;
+    use crate::expr::node_error::MessageProviderError;
     use crate::metrics_config_orchestrator::trigger::mock::{
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
     };
+    use crate::metrics_config_orchestrator::ServicePublisherAccessorError;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const TRIGGER_NAME: &str = "trigger";
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const ACTIVATION_ID: ActivationId = ActivationId::new(3);
+    const ERROR_MESSAGE: &str = "Error 42";
 
     lazy_static! {
         static ref FALSE_MSG: Arc<dyn MessageDyn> =
@@ -582,5 +589,40 @@ mod tests {
 
         // Deactivate the trigger.
         trigger.deactivate().await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_new_message_reports_error() {
+        let (trigger, message_provider, parent_trigger) =
+            create_valid_conditional_trigger(ConditionType::AllChanges, None);
+
+        let (tx, rx) = oneshot_callback();
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        trigger.error_callback = Arc::new(tx);
+        let trigger = Arc::new(trigger);
+
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
+
+        message_provider.set_next_sync_result(Err(MessageProviderError::MessageRetrievalError {
+            e: ServicePublisherAccessorError::MessageRetrievalFailed(anyhow!(ERROR_MESSAGE)),
+        }));
+
+        parent_trigger.fire().await;
+
+        // Wait for error status to be delivered
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR,
+                message,
+                details: StatusDetails::ConditionalTriggerErrorDetails(
+                    ConditionalTriggerErrorDetails { metricsConfigUUID, triggerName }
+                ),
+            }
+            if message.contains("failed to evaluate condition") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && triggerName == TRIGGER_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
     }
 }

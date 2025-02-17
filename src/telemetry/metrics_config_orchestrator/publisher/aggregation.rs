@@ -285,7 +285,10 @@ impl AggregationPublisher {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use futures::FutureExt;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
     use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::Int32Value;
@@ -293,8 +296,9 @@ mod tests {
     use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::{future, sync::Arc};
 
-    use super::*;
+    use crate::expr::node_error::NodeEvaluationError;
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
+    use crate::metrics_config_orchestrator::message_builder::MessageBuilderErrorType;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
@@ -302,6 +306,7 @@ mod tests {
     const PUBLISHER_NAME: &str = "publisher";
     const PUBLISHER_NAME_2: &str = "publisher2";
     const TRIGGER_NAME: &str = "trigger";
+    const FIELD_NAME: &str = "field_name";
 
     fn create_inactive_aggregation_publisher(
         triggers: Vec<Arc<dyn Trigger>>,
@@ -549,5 +554,52 @@ mod tests {
         let publisher = create_aggregation_publisher_with_subscription(vec![]).await;
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_new_message_reports_builder_error() {
+        let trigger = Arc::new(MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
+        ));
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_error(MessageBuilderError {
+            field_name: FIELD_NAME.to_owned(),
+            error: MessageBuilderErrorType::ExpressionEvaluationError {
+                e: NodeEvaluationError::DivideByZero,
+            },
+        });
+
+        let (tx, rx) = oneshot_callback();
+        let publisher = Arc::new(AggregationPublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
+            false,
+            vec![Arc::<MockTrigger>::clone(&trigger)],
+            Arc::new(tx),
+        ));
+
+        Arc::clone(&publisher).activate().await.unwrap();
+
+        trigger.fire().await;
+
+        // Wait for error status to be delivered.
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR,
+                message,
+                details: StatusDetails::AggregationPublisherErrorDetails(
+                    AggregationPublisherErrorDetails { metricsConfigUUID, publisherName, fieldName }
+                ),
+            }
+            if message.contains("failed to build message") && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME && fieldName == FIELD_NAME),
+            "Unexpected status: {:?}",
+            status
+        );
     }
 }

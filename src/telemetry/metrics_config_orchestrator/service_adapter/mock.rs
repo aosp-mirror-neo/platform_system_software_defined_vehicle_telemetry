@@ -231,6 +231,10 @@ impl MockServiceAdapter {
         self
     }
 
+    pub(crate) fn set_next_error(&self, error: anyhow::Error) {
+        self.next_error.lock().replace(error);
+    }
+
     pub(crate) fn with_next_message_provider_get_not_supported(self) -> Self {
         *self.next_message_provider_get_not_supported.lock() = true;
         self
