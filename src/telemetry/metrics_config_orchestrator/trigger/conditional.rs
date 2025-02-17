@@ -18,7 +18,8 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::condition_checker::{
-    ConditionChecker, ConstantConditionChecker, PreviousValueRelationalConditionChecker,
+    ConditionChecker, ConstantConditionChecker, EdgeConditionChecker,
+    PreviousValueRelationalConditionChecker,
 };
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -29,9 +30,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 #[derive(Default, Clone)]
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) struct EdgeOptions {
-    #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
     pub(crate) min_duration: Duration,
-    #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
     pub(crate) require_exact: bool,
 }
 
@@ -43,9 +42,7 @@ pub(crate) enum ConditionType {
     FallingEdge(EdgeOptions),
     /// Compares values using the LT and GT relational operators.
     BothEdges {
-        #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
         rising_options: EdgeOptions,
-        #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
         falling_options: EdgeOptions,
     },
     /// Compares values using the NOT_EQ relational operator.
@@ -123,19 +120,50 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         }
 
         let condition_checker = match &self.condition_type {
-            // TODO: b/353466210 - Handle edge options.
-            ConditionType::RisingEdge(_edge_options) => {
-                Box::new(PreviousValueRelationalConditionChecker::new_rising_edge())
-                    as Box<dyn ConditionChecker>
+            ConditionType::RisingEdge(rising_options) => {
+                let weak_conditional_trigger = Arc::downgrade(&self);
+                Box::new(EdgeConditionChecker::new_rising_edge(
+                    rising_options.clone(),
+                    move |context| {
+                        let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
+                            return;
+                        };
+                        tokio::spawn(async move {
+                            conditional_trigger.base.fire_trigger(activation_id, context).await;
+                        });
+                    },
+                )) as Box<dyn ConditionChecker>
             }
-            // TODO: b/353466210 - Handle edge options.
-            ConditionType::FallingEdge(_edge_options) => {
-                Box::new(PreviousValueRelationalConditionChecker::new_falling_edge())
-                    as Box<dyn ConditionChecker>
+            ConditionType::FallingEdge(falling_options) => {
+                let weak_conditional_trigger = Arc::downgrade(&self);
+                Box::new(EdgeConditionChecker::new_falling_edge(
+                    falling_options.clone(),
+                    move |context| {
+                        let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
+                            return;
+                        };
+                        tokio::spawn(async move {
+                            conditional_trigger.base.fire_trigger(activation_id, context).await;
+                        });
+                    },
+                )) as Box<dyn ConditionChecker>
             }
-            // TODO: b/353466210 - Handle edge options.
-            ConditionType::BothEdges { rising_options: _, falling_options: _ }
-            | ConditionType::AllChanges => {
+            ConditionType::BothEdges { rising_options, falling_options } => {
+                let weak_conditional_trigger = Arc::downgrade(&self);
+                Box::new(EdgeConditionChecker::new_both_edges(
+                    rising_options.clone(),
+                    falling_options.clone(),
+                    move |context| {
+                        let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
+                            return;
+                        };
+                        tokio::spawn(async move {
+                            conditional_trigger.base.fire_trigger(activation_id, context).await;
+                        });
+                    },
+                )) as Box<dyn ConditionChecker>
+            }
+            ConditionType::AllChanges => {
                 Box::new(PreviousValueRelationalConditionChecker::new_all_changes())
                     as Box<dyn ConditionChecker>
             }

@@ -1,14 +1,13 @@
 // Copyright 2025 Google LLC
 
-use anyhow::{bail, Context};
-use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
+use sdv_telemetry_proto_rust::expression::combination_node::RelationalOperator;
 
-use super::ConditionChecker;
+use super::{apply_relational_operator, ConditionChecker};
 use crate::expr::node_value::NodeValue;
 
 /// Compares current value with the previous value using provided operator.
 pub(crate) struct PreviousValueRelationalConditionChecker {
-    operator: Operator,
+    operator: RelationalOperator,
     previous_value: Option<NodeValue>,
 }
 
@@ -24,36 +23,13 @@ impl ConditionChecker for PreviousValueRelationalConditionChecker {
             return Ok(false);
         };
 
-        let result = current_value
-            .operate_sync(&self.operator, || Ok(previous_value))
-            .with_context(|| format!("Failed to apply operator {:?}", self.operator))?;
-        let NodeValue::Bool(result) = result else {
-            bail!("Operator {:?} evaluation returned non-bool result: {result:?}", self.operator);
-        };
-        Ok(result)
+        apply_relational_operator(self.operator, previous_value, current_value)
     }
 }
 
 impl PreviousValueRelationalConditionChecker {
-    pub(crate) fn new_rising_edge() -> Self {
-        Self {
-            operator: Operator::RelationalOperator(RelationalOperator::GT.into()),
-            previous_value: None,
-        }
-    }
-
-    pub(crate) fn new_falling_edge() -> Self {
-        Self {
-            operator: Operator::RelationalOperator(RelationalOperator::LT.into()),
-            previous_value: None,
-        }
-    }
-
     pub(crate) fn new_all_changes() -> Self {
-        Self {
-            operator: Operator::RelationalOperator(RelationalOperator::NOT_EQ.into()),
-            previous_value: None,
-        }
+        Self { operator: RelationalOperator::NOT_EQ, previous_value: None }
     }
 }
 
@@ -80,15 +56,6 @@ mod tests {
     // Helper constants to make specifying the expected result more succinct.
     const T: Result<bool, ()> = Ok(true);
     const F: Result<bool, ()> = Ok(false);
-    const E: Result<bool, ()> = Err(());
-
-    fn rising_edge() -> PreviousValueRelationalConditionChecker {
-        PreviousValueRelationalConditionChecker::new_rising_edge()
-    }
-
-    fn falling_edge() -> PreviousValueRelationalConditionChecker {
-        PreviousValueRelationalConditionChecker::new_falling_edge()
-    }
 
     fn all_changes() -> PreviousValueRelationalConditionChecker {
         PreviousValueRelationalConditionChecker::new_all_changes()
@@ -111,13 +78,5 @@ mod tests {
         all_changes_string: (all_changes(), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[F, T, F]),
         all_changes_mixed:  (all_changes(), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[F, T, T, T, T]),
         all_changes_none:   (all_changes(), &[&NONE, &NONE], &[F, F]),
-
-        rising_edge:        (rising_edge(), &[&INT_1, /* rising */ &INT_2, /* falling */ &INT_1], &[F, T, F]),
-        rising_edge_string: (rising_edge(), &[&STR_0, &STR_0], &[F, E]),
-        rising_edge_none:   (rising_edge(), &[&NONE, &NONE], &[F, F]),
-
-        falling_edge:        (falling_edge(), &[&INT_2, /* falling */ &INT_1, /* rising */ &INT_2], &[F, T, F]),
-        falling_edge_string: (falling_edge(), &[&STR_0, &STR_0], &[F, E]),
-        falling_edge_none:   (falling_edge(), &[&NONE, &NONE], &[F, F]),
     );
 }

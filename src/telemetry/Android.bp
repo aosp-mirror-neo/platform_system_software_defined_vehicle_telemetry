@@ -64,6 +64,7 @@ rust_test {
         "libsdv_telemetry_test_utils",
         "libsdv_telemetry_utils",
         "libtempfile",
+        "libtokio_stream",
         // keep-sorted end
     ],
     proc_macros: [
