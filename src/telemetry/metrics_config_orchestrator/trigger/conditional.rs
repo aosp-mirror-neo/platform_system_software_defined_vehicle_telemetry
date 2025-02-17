@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 use super::base::{BaseTrigger, TriggerState};
@@ -25,9 +26,29 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
 };
 
+#[derive(Default, Clone)]
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+pub(crate) struct EdgeOptions {
+    #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
+    pub(crate) min_duration: Duration,
+    #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
+    pub(crate) require_exact: bool,
+}
+
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) enum ConditionType {
-    RisingEdge,
-    FallingEdge,
+    /// Compares values using the LT relational operator.
+    RisingEdge(EdgeOptions),
+    /// Compares values using the GT relational operator.
+    FallingEdge(EdgeOptions),
+    /// Compares values using the LT and GT relational operators.
+    BothEdges {
+        #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
+        rising_options: EdgeOptions,
+        #[cfg_attr(not(test), expect(dead_code, reason = "TODO: b/353466210"))]
+        falling_options: EdgeOptions,
+    },
+    /// Compares values using the NOT_EQ relational operator.
     AllChanges,
     IsTrue,
     IsFalse,
@@ -38,8 +59,8 @@ pub(crate) struct ConditionalTrigger {
 
     pub(crate) triggers: Vec<Arc<dyn Trigger>>,
     pub(crate) selector_expression: Arc<Node>,
+    pub(crate) condition_type: ConditionType,
 
-    condition_type: ConditionType,
     subscriber: TriggerSubscriber,
     error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
@@ -101,16 +122,20 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                 .await;
         }
 
-        let condition_checker = match self.condition_type {
-            ConditionType::RisingEdge => {
+        let condition_checker = match &self.condition_type {
+            // TODO: b/353466210 - Handle edge options.
+            ConditionType::RisingEdge(_edge_options) => {
                 Box::new(PreviousValueRelationalConditionChecker::new_rising_edge())
                     as Box<dyn ConditionChecker>
             }
-            ConditionType::FallingEdge => {
+            // TODO: b/353466210 - Handle edge options.
+            ConditionType::FallingEdge(_edge_options) => {
                 Box::new(PreviousValueRelationalConditionChecker::new_falling_edge())
                     as Box<dyn ConditionChecker>
             }
-            ConditionType::AllChanges => {
+            // TODO: b/353466210 - Handle edge options.
+            ConditionType::BothEdges { rising_options: _, falling_options: _ }
+            | ConditionType::AllChanges => {
                 Box::new(PreviousValueRelationalConditionChecker::new_all_changes())
                     as Box<dyn ConditionChecker>
             }
@@ -367,6 +392,14 @@ mod tests {
         (trigger, message_provider, parent_trigger, callback_listener)
     }
 
+    #[test]
+    fn default_edge_options_are_equivalent_to_no_options() {
+        assert_eq!(
+            EdgeOptions::default(),
+            EdgeOptions { min_duration: Duration::ZERO, require_exact: false }
+        );
+    }
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_subscribes_to_parents() {
@@ -509,9 +542,9 @@ mod tests {
         all_changes:      (ConditionType::AllChanges, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
         all_changes_none: (ConditionType::AllChanges, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
 
-        falling_edge: (ConditionType::FallingEdge, &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
-
-        rising_edge: (ConditionType::RisingEdge, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        both_edges: (ConditionType::BothEdges { rising_options: EdgeOptions::default(), falling_options: EdgeOptions::default() }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
+        rising_edge: (ConditionType::RisingEdge(EdgeOptions::default()), &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        falling_edge: (ConditionType::FallingEdge(EdgeOptions::default()), &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
 
         is_true_bool_1:    (ConditionType::IsTrue, &[Some(&*TRUE_MSG)], &[&*TRUE_MSG],),
         is_true_bool_2:    (ConditionType::IsTrue, &[Some(&*FALSE_MSG), Some(&*TRUE_MSG), Some(&*FALSE_MSG), Some(&*TRUE_MSG)], &[&*TRUE_MSG, &*TRUE_MSG],),

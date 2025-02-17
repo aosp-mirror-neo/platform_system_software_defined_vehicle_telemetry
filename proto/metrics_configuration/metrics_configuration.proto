@@ -102,14 +102,40 @@ message ConditionalTrigger {
   // published message.
   optional uint32 selector_node_index = 2;
 
+  // Options for edge detection.
+  message EdgeOptions {
+    // Optional.
+    // Minimum duration the edge needs to hold.
+    google.protobuf.Duration min_duration = 1;
+
+    // Optional.
+    // If true, then all values received during `min_duration` must be equal to
+    // consider the edge as valid.
+    bool require_exact = 2;
+  }
+
   // Fires if the new value is greater than the previous value.
-  message ConditionTypeRisingEdge {}
+  message ConditionTypeRisingEdge {
+    // Optional.
+    EdgeOptions rising_options = 1;
+  }
 
   // Fires if the new value is less than the previous value.
-  message ConditionTypeFallingEdge {}
+  message ConditionTypeFallingEdge {
+    // Optional.
+    EdgeOptions falling_options = 1;
+  }
 
-  // Fires if the new value is different from the previous value.
-  message ConditionTypeAllChanges {}
+  // Fires if the new value is different from the previous value. If any
+  // `EdgeOptions` are set, then only numeric and boolean values are supported,
+  // otherwise all values types are supported.
+  message ConditionTypeAllChanges {
+    // Optional.
+    EdgeOptions rising_options = 1;
+
+    // Optional.
+    EdgeOptions falling_options = 2;
+  }
 
   // Fires if the condition evaluates to true or a non-zero numeric value.
   message ConditionTypeIsTrue {}

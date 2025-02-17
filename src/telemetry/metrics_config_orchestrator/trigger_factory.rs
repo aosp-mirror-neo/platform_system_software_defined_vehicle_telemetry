@@ -1,9 +1,13 @@
 // Copyright 2023 Google LLC
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use protobuf::well_known_types::duration::Duration as DurationProto;
+use protobuf::Message;
 use sdv_telemetry_proto_rust::metrics_configuration::{
+    conditional_trigger::ConditionTypeAllChanges, conditional_trigger::ConditionTypeFallingEdge,
+    conditional_trigger::ConditionTypeRisingEdge,
     conditional_trigger::Condition_type as ConditionTypeProto,
+    conditional_trigger::EdgeOptions as EdgeOptionsProto,
     publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
@@ -13,7 +17,7 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
 use thiserror::Error;
 
-use super::trigger::conditional::{ConditionType, ConditionalTrigger};
+use super::trigger::conditional::{ConditionType, ConditionalTrigger, EdgeOptions};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
@@ -80,6 +84,8 @@ pub(crate) enum TriggerFactoryError {
     UnspecifiedConditionTypeProto,
     #[error("Trigger type is not specified")]
     UnspecifiedTriggerType,
+    #[error("Edge options ({edge_options}) are invalid: {error:#}")]
+    InvalidEdgeOptions { edge_options: EdgeOptionsProto, error: anyhow::Error },
 }
 
 pub(crate) struct TriggerFactoryImpl {
@@ -210,6 +216,22 @@ impl TriggerFactoryImpl {
         Self { error_callback }
     }
 
+    fn get_edge_options(
+        edge_options: &EdgeOptionsProto,
+    ) -> Result<EdgeOptions, TriggerFactoryError> {
+        Ok(EdgeOptions {
+            min_duration: try_into_duration(&edge_options.min_duration)
+                .with_context(|| {
+                    format!("{}.min_duration must be positive", EdgeOptionsProto::NAME)
+                })
+                .map_err(|error| TriggerFactoryError::InvalidEdgeOptions {
+                    edge_options: edge_options.clone(),
+                    error,
+                })?,
+            require_exact: edge_options.require_exact,
+        })
+    }
+
     fn get_condition_type(
         conditional_trigger_proto: &ConditionalTriggerProto,
         value_type: Option<&NodeValueType>,
@@ -229,9 +251,36 @@ impl TriggerFactoryImpl {
         }
 
         let condition_type = match condition_type {
-            ConditionTypeProto::RisingEdge(_) => ConditionType::RisingEdge,
-            ConditionTypeProto::FallingEdge(_) => ConditionType::FallingEdge,
-            ConditionTypeProto::AllChanges(_) => ConditionType::AllChanges,
+            ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options,
+                special_fields: _,
+            }) => ConditionType::RisingEdge(Self::get_edge_options(rising_options)?),
+            ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options,
+                special_fields: _,
+            }) => ConditionType::FallingEdge(Self::get_edge_options(falling_options)?),
+            ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options,
+                falling_options,
+                special_fields: _,
+            }) => {
+                // If either of the edge options are set and not the default, use
+                // `ConditionType::BothEdges`, otherwise use the `ConditionType::AllChanges`.
+                if rising_options
+                    .as_ref()
+                    .is_some_and(|options| options != EdgeOptionsProto::default_instance())
+                    || falling_options
+                        .as_ref()
+                        .is_some_and(|options| options != EdgeOptionsProto::default_instance())
+                {
+                    ConditionType::BothEdges {
+                        rising_options: Self::get_edge_options(rising_options)?,
+                        falling_options: Self::get_edge_options(falling_options)?,
+                    }
+                } else {
+                    ConditionType::AllChanges
+                }
+            }
             ConditionTypeProto::IsTrue(_) => ConditionType::IsTrue,
             ConditionTypeProto::IsFalse(_) => ConditionType::IsFalse,
             unknown_condition_type => {
@@ -289,9 +338,12 @@ impl TriggerFactoryImpl {
 mod tests {
     use super::*;
 
+    use googletest::assert_that;
+    use googletest::matchers::{contains_substring, eq, err, matches_pattern, ok, result_of_ref};
     use protobuf::MessageField;
     use sdv_telemetry_proto_rust::metrics_configuration::ServicePublisher as ServicePublisherProto;
     use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
+    use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::collections::HashMap;
@@ -728,6 +780,190 @@ mod tests {
             .unwrap();
     }
 
+    parameterized_test!(
+        #[test]
+        create_conditional_trigger_with_condition_type,
+
+        |condition_type, matcher| {
+            let factory = create_factory();
+            let node = Arc::new(create_node());
+
+            let (mut trigger, parent_triggers) = create_valid_conditional_trigger();
+            trigger.mut_conditional_trigger().condition_type = condition_type;
+
+            let result = factory.create_using_context_with(
+                &trigger,
+                Some(vec![node]),
+                vec![None],
+                None,
+                parent_triggers,
+            );
+
+            assert_that!(
+                result.unwrap().downcast_arc::<ConditionalTrigger>().ok().unwrap().condition_type,
+                matcher
+            );
+        },
+
+        all_changes_default: (
+            Some(ConditionTypeProto::AllChanges(Default::default())),
+            eq(&ConditionType::AllChanges),
+        ),
+        rising_default: (
+            Some(ConditionTypeProto::RisingEdge(Default::default())),
+            eq(&ConditionType::RisingEdge(EdgeOptions::default())),
+        ),
+        falling_default: (
+            Some(ConditionTypeProto::FallingEdge(Default::default())),
+            eq(&ConditionType::FallingEdge(EdgeOptions::default())),
+        ),
+        is_true_default: (
+            Some(ConditionTypeProto::IsTrue(Default::default())),
+            eq(&ConditionType::IsTrue),
+        ),
+        is_false_default: (
+            Some(ConditionTypeProto::IsFalse(Default::default())),
+            eq(&ConditionType::IsFalse),
+        ),
+
+        all_changes_with_default_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::AllChanges),
+        ),
+        rising_with_default_options: (
+            Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::RisingEdge(EdgeOptions::default())),
+        ),
+        falling_with_default_options: (
+            Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::FallingEdge(EdgeOptions::default())),
+        ),
+
+        all_changes_with_rising_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    require_exact: true,
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::BothEdges {
+                rising_options: EdgeOptions { min_duration: Duration::from_secs(3), require_exact: true },
+                falling_options: EdgeOptions::default(),
+            }),
+        ),
+        all_changes_with_falling_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    require_exact: false,
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::BothEdges {
+                rising_options: EdgeOptions::default(),
+                falling_options: EdgeOptions { min_duration: Duration::from_secs(3), require_exact: false },
+            }),
+        ),
+        all_changes_with_both_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    require_exact: false,
+                    ..Default::default()
+                }).into(),
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    require_exact: true,
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::BothEdges {
+                rising_options: EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false },
+                falling_options: EdgeOptions { min_duration: Duration::from_secs(3), require_exact: true },
+            }),
+        ),
+        rising_with_options: (
+            Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    require_exact: false,
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::RisingEdge(EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false })),
+        ),
+        falling_with_options: (
+            Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 7, ..Default::default() }).into(),
+                    require_exact: true,
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::FallingEdge(EdgeOptions { min_duration: Duration::from_secs(7), require_exact: true })),
+        ),
+    );
+
+    #[test]
+    fn get_edge_options_succeeds() {
+        let edge_options = EdgeOptionsProto {
+            min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+            require_exact: true,
+            ..Default::default()
+        };
+
+        let result = TriggerFactoryImpl::get_edge_options(&edge_options);
+
+        assert_that!(
+            result,
+            ok(eq(&EdgeOptions { min_duration: Duration::from_secs(3), require_exact: true }))
+        );
+    }
+
+    #[test]
+    fn get_edge_options_with_negative_duration_fails() {
+        let edge_options = EdgeOptionsProto {
+            min_duration: Some(DurationProto { seconds: -1, ..Default::default() }).into(),
+            ..Default::default()
+        };
+
+        let result = TriggerFactoryImpl::get_edge_options(&edge_options);
+
+        assert_that!(
+            result,
+            err(matches_pattern!(TriggerFactoryError::InvalidEdgeOptions {
+                edge_options: &edge_options,
+                error: result_of_ref!(
+                    |error| format!("{error:#}"),
+                    contains_substring("EdgeOptions.min_duration must be positive")
+                )
+            }))
+        );
+    }
+
+    #[test]
+    fn default_proto_edge_options_are_equal_to_rust_default_edge_options() {
+        let result = TriggerFactoryImpl::get_edge_options(EdgeOptionsProto::default_instance());
+
+        assert_that!(result, ok(eq(&EdgeOptions::default())));
+    }
+
     #[test]
     fn validate_no_name_fails() {
         let factory = create_factory();
@@ -826,6 +1062,25 @@ mod tests {
             matches!(&result, Err(TriggerFactoryError::PeriodicTriggerInvalidDuration { .. })),
             "Unexpected result: {result:?}"
         );
+    }
+
+    #[test]
+    fn validate_conditional_trigger_negative_min_duration_fails() {
+        let factory = create_factory();
+        let (mut trigger, _) = create_valid_conditional_trigger();
+        trigger.mut_conditional_trigger().condition_type =
+            Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: -3, ..Default::default() }).into(),
+                    ..Default::default()
+                })
+                .into(),
+                ..Default::default()
+            }));
+
+        let result = factory.validate_using_context_with(&trigger, vec![None], None);
+
+        assert_that!(result, err(matches_pattern!(TriggerFactoryError::InvalidEdgeOptions { .. })));
     }
 
     #[test]
