@@ -3,6 +3,7 @@
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::expression::combination_node::RelationalOperator;
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
+use sdv_telemetry_utils::option_extension::OptionExtension;
 use std::sync::{Arc, Weak};
 use tokio::task::AbortHandle;
 use tokio::time::sleep;
@@ -22,7 +23,7 @@ enum Edge {
 
 impl Edge {
     /// Checks whether there is an edge of type `Self` between `prev` and `cur`.
-    fn is_edge(&self, prev: NodeValue, cur: NodeValue) -> anyhow::Result<bool> {
+    fn is_edge(&self, prev: &NodeValue, cur: &NodeValue) -> anyhow::Result<bool> {
         apply_relational_operator(
             match self {
                 Self::Rising => RelationalOperator::LT,
@@ -82,8 +83,8 @@ impl EdgeDetectionOptions {
     /// returns `Ok(Some(_))`, otherwise returns `Ok(None)`.
     fn which_edge(
         &self,
-        prev: NodeValue,
-        cur: NodeValue,
+        prev: &NodeValue,
+        cur: &NodeValue,
     ) -> anyhow::Result<Option<(Edge, &EdgeOptions)>> {
         let to_check = match self {
             Self::Rising(edge_options) => &[(Edge::Rising, edge_options)][..],
@@ -94,7 +95,7 @@ impl EdgeDetectionOptions {
         };
 
         for (edge, edge_options) in to_check.iter() {
-            if edge.is_edge(prev.clone(), cur.clone())? {
+            if edge.is_edge(prev, cur)? {
                 return Ok(Some((*edge, *edge_options)));
             }
         }
@@ -128,14 +129,14 @@ impl EdgeConditionCheckerImpl {
         match &mut self.state {
             EdgeDetectionState::WaitForEdge { ref mut previous_value } => {
                 // Extract previous value and save current value.
-                let Some(previous_value) = previous_value.replace(current_value.clone()) else {
+                let (previous_value, current_value) = previous_value.take_and_insert(current_value);
+                let Some(previous_value) = previous_value else {
                     // No previous value exists, wait for the next value to arrive.
                     return Ok(false);
                 };
 
-                let Some((edge, EdgeOptions { min_duration, require_exact })) = self
-                    .edge_detection_options
-                    .which_edge(previous_value.clone(), current_value.clone())?
+                let Some((edge, EdgeOptions { min_duration, require_exact })) =
+                    self.edge_detection_options.which_edge(&previous_value, current_value)?
                 else {
                     // No edge detected.
                     return Ok(false);
@@ -167,8 +168,9 @@ impl EdgeConditionCheckerImpl {
                 })
                 .abort_handle();
 
+                let current_value = std::mem::replace(current_value, NodeValue::None);
                 self.state = EdgeDetectionState::MonitorGlitches {
-                    threshold: previous_value.clone(),
+                    threshold: previous_value,
                     previous_value: current_value,
                     timeout_abort_handle: abort_handle,
                     timeout_id,
@@ -190,11 +192,11 @@ impl EdgeConditionCheckerImpl {
                 let continue_monitoring = if *require_exact {
                     apply_relational_operator(
                         RelationalOperator::EQ,
-                        previous_value.clone(),
-                        current_value.clone(),
+                        previous_value,
+                        &current_value,
                     )?
                 } else {
-                    edge.is_edge(threshold.clone(), current_value.clone())?
+                    edge.is_edge(threshold, &current_value)?
                 };
 
                 if continue_monitoring {
@@ -352,7 +354,7 @@ mod tests {
         #[test]
         edge_is_edge,
         |edge: Edge, prev: &NodeValue, cur: &NodeValue, matcher| {
-            assert_that!(edge.is_edge(prev.to_owned(), cur.to_owned()), matcher);
+            assert_that!(edge.is_edge(prev, cur), matcher);
         },
 
         rising_true_1: (Edge::Rising, &FALSE, &TRUE, ok(is_true())),
@@ -410,7 +412,7 @@ mod tests {
         #[test]
         edge_detection_options_which_edge,
         |options: EdgeDetectionOptions, prev: &NodeValue, cur: &NodeValue, matcher| {
-            assert_that!(options.which_edge(prev.to_owned(), cur.to_owned()), matcher);
+            assert_that!(options.which_edge(prev, cur), matcher);
         },
 
         rising_rising: (

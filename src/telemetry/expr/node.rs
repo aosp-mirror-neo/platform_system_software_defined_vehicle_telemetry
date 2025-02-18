@@ -13,7 +13,7 @@ use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_evaluation_state::NodeEvaluationState;
 use crate::expr::node_evaluation_state_ext::WithNodeEvaluationState;
 use crate::expr::node_factory::MessageProvider;
-use crate::expr::node_value::NodeValue;
+use crate::expr::node_value::{NodeValue, OperationState};
 use crate::expr::node_value_type::OperatorProtoExtension;
 
 const EMPTY: &str = "Empty";
@@ -89,7 +89,7 @@ impl Node {
         match self.as_ref() {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
-                value.clone().into_operation_result(state)
+                Ok(value.clone()).with_state(state).into()
             }
             Node::FieldLeaf { fields, message_provider, publisher_name, .. } => {
                 // Base case of recursion: node is a leaf node, return value
@@ -165,26 +165,35 @@ impl Node {
 
                         // If unary operator, then operate on self.
                         // If binary operator, then [left] <operator> [right]
-                        // The function short-circuits if possible. The closure provides right operand.
-                        let right_clone = right.clone();
-                        left_value.operate(operator, state, move |state| {
-                            right_clone.as_ref()
-                                .unwrap_or_else(|| {
-                                    if operator.is_unary_operator() {
-                                        panic!(
-                                            "When the operator is unary, NodeValue should not invoke \
-                                            right operand's provider function"
-                                        );
-                                    } else {
-                                        panic!(
-                                            "Incorrect Node! Node construction should have verified that \
-                                            nodes with binary operator specify two children, but evaluate() \
-                                            encountered a node with binary operator but no right child"
-                                        );
-                                    }
-                                })
-                                .evaluate_core(state)
-                        })
+                        // The function short-circuits if possible.
+                        match left_value.operate(operator) {
+                            Ok(OperationState::Finished(result)) => {
+                               Ok(result).with_state(state).into()
+                            },
+                            Ok(OperationState::RightOperandRequired(operate)) => {
+                                right
+                                    .as_ref()
+                                    .unwrap_or_else(|| {
+                                        if operator.is_unary_operator() {
+                                            panic!(
+                                                "When the operator is unary, NodeValue should not invoke \
+                                                right operand's provider function"
+                                            );
+                                        } else {
+                                            panic!(
+                                                "Incorrect Node! Node construction should have verified that \
+                                                nodes with binary operator specify two children, but evaluate() \
+                                                encountered a node with binary operator but no right child"
+                                            );
+                                        }
+                                    })
+                                    .evaluate_core(state)
+                                    .and_then(move |(right_value, state)| {
+                                        operate(&left_value, &right_value).with_state(state).into()
+                                    })
+                            },
+                            Err(err) => Err(err).into()
+                        }
                     })
             }
             Node::FunctionLeaf { function } => match function {
@@ -195,7 +204,7 @@ impl Node {
                             state.get_context().monotonic_time_since_boot
                         }
                     };
-                    NodeValue::Int64(timestamp.0).into_operation_result(state)
+                    Ok(NodeValue::Int64(timestamp.0)).with_state(state).into()
                 }
             },
         }

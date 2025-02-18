@@ -82,10 +82,9 @@ impl NodeValueExtension for NodeValue {
     }
 
     fn less_than(self, other: &NodeValue) -> Result<bool, AggregationError> {
-        let other_clone = other.clone();
         if let NodeValue::Bool(res) = self.operate_sync(
             &Operator::RelationalOperator(RelationalOperator::LT.into()),
-            move || Ok(other_clone),
+            move || other,
         )? {
             Ok(res)
         } else {
