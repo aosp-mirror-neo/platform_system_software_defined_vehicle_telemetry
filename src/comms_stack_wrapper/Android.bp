@@ -83,7 +83,7 @@ rust_defaults {
 
 // TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_unit_tests
 rust_test {
-    name: "libsdv_telemetry_dt_wrapper_unit_tests",
+    name: "sdv_mt_telemetry_unit_comms_stack_wrapper_test",
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["unit_tests"],
     test_options: {
@@ -96,7 +96,7 @@ rust_test {
 
 // TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_integration_tests
 rust_test {
-    name: "libsdv_telemetry_dt_wrapper_integration_tests",
+    name: "sdv_mt_telemetry_integration_comms_stack_wrapper_test",
     defaults: ["telemetry_dt_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
     // Use a custom test config template as per

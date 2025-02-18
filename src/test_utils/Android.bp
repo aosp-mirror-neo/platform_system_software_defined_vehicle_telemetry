@@ -49,7 +49,7 @@ rust_library {
 }
 
 rust_test_host {
-    name: "libsdv_telemetry_test_utils_unit_tests",
+    name: "sdv_mt_telemetry_unit_test_utils_test",
     host_cross_supported: false,
     defaults: ["libsdv_telemetry_test_utils_defaults"],
     rustlibs: [
