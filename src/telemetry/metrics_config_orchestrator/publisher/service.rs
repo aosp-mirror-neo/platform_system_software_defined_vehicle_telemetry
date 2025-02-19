@@ -19,7 +19,7 @@ use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
@@ -47,6 +47,7 @@ pub(crate) struct ServicePublisher {
     base: BasePublisher,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     state: AsyncMutex<ServicePublisherState>,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
@@ -255,6 +256,7 @@ impl ServicePublisher {
         sub_sampling_interval: SubSamplingInterval,
         connection_type: ConnectionType,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
         Self {
@@ -265,6 +267,7 @@ impl ServicePublisher {
             service_adapter,
             service_name,
             state: ServicePublisherState::Inactive.into(),
+            node_evaluation_context_factory,
             error_callback,
         }
     }
@@ -478,10 +481,10 @@ impl ServicePublisher {
     async fn on_new_message(&self, message: Arc<dyn MessageDyn>) {
         // Create context outside of the lock, so that the date/time is set as fast as possible,
         // and not just at the moment when the lock is obtained.
-        let context = Arc::new(NodeEvaluationContext::with_publisher_message(
-            self.get_name().to_owned(),
-            Arc::clone(&message),
-        ));
+        let context = Arc::new(
+            self.node_evaluation_context_factory
+                .create_with_publisher_message(self.get_name().to_owned(), Arc::clone(&message)),
+        );
 
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
         let mut state_lock = self.state.lock().await;
@@ -533,6 +536,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::service_adapter::mock::{
         MockServiceAdapter, MockServiceMessageProvider,
     };
@@ -554,6 +558,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             service_adapter,
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ))
     }
@@ -569,6 +574,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ))
     }
@@ -699,6 +705,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -743,6 +750,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(tx),
         ));
 
@@ -786,6 +794,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -817,6 +826,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -876,6 +886,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -934,6 +945,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -961,6 +973,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -994,6 +1007,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(tx),
         ));
 
@@ -1030,6 +1044,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 

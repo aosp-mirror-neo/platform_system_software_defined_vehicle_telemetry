@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;
 
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
@@ -77,15 +78,17 @@ pub(crate) enum MetricsReportGeneratorFactoryError {
 
 pub(crate) struct MetricsReportGeneratorFactoryImpl {
     message_builder_factory: Arc<dyn MessageBuilderFactory>,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
 impl MetricsReportGeneratorFactoryImpl {
     pub(crate) fn new(
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
-        Self { message_builder_factory, error_callback }
+        Self { message_builder_factory, node_evaluation_context_factory, error_callback }
     }
 }
 
@@ -138,6 +141,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             context.config_proto.version,
             message_builder.into(),
             triggers,
+            Arc::clone(&self.node_evaluation_context_factory),
             Arc::clone(&self.error_callback),
             Arc::clone(context.report_ready_callback),
         )))
@@ -210,6 +214,7 @@ mod tests {
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
 
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::{
         get_test_file_descriptors, get_test_node_types, get_test_nodes, MockMessageBuilderFactory,
     };
@@ -287,6 +292,7 @@ mod tests {
     fn create_factory() -> MetricsReportGeneratorFactoryImpl {
         MetricsReportGeneratorFactoryImpl::new(
             Arc::new(MockMessageBuilderFactory::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
@@ -375,16 +381,23 @@ mod tests {
     #[test]
     fn create_proto_message_builder_factory_returns_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
+        let node_evaluation_context_factory = Arc::new(NodeEvaluationContextFactoryImpl::new())
+            as Arc<dyn NodeEvaluationContextFactory>;
         message_builder_factory.fail_create();
         let factory = MetricsReportGeneratorFactoryImpl::new(
             Arc::new(message_builder_factory),
+            Arc::clone(&node_evaluation_context_factory),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
         );
         let config = create_valid_config();
-        let trigger =
-            PeriodicTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), Duration::ZERO);
+        let trigger = PeriodicTrigger::new(
+            TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            Duration::ZERO,
+            node_evaluation_context_factory,
+        );
 
         let err = factory
             .create_using_context(
@@ -482,6 +495,7 @@ mod tests {
         message_builder_factory.fail_validate();
         let factory = MetricsReportGeneratorFactoryImpl::new(
             Arc::new(message_builder_factory),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),

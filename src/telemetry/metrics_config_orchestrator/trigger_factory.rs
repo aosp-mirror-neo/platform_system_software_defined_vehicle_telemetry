@@ -20,6 +20,7 @@ use thiserror::Error;
 use super::trigger::conditional::{ConditionType, ConditionalTrigger, EdgeOptions};
 use super::trigger::data::DataTrigger;
 use super::trigger::periodic::PeriodicTrigger;
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::{Publisher, Trigger};
 
@@ -89,6 +90,7 @@ pub(crate) enum TriggerFactoryError {
 }
 
 pub(crate) struct TriggerFactoryImpl {
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
@@ -125,6 +127,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                 trigger_name,
                 metrics_config_uuid,
                 Self::get_periodic_interval(periodic_trigger)?,
+                Arc::clone(&self.node_evaluation_context_factory),
             ),
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
@@ -151,6 +154,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     condition_type,
                     triggers,
                     Arc::clone(selector_expression),
+                    Arc::clone(&self.node_evaluation_context_factory),
                     Arc::clone(&self.error_callback),
                 )
             }
@@ -212,8 +216,11 @@ impl TriggerFactory for TriggerFactoryImpl {
 }
 
 impl TriggerFactoryImpl {
-    pub(super) fn new(error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>) -> Self {
-        Self { error_callback }
+    pub(super) fn new(
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    ) -> Self {
+        Self { node_evaluation_context_factory, error_callback }
     }
 
     fn get_edge_options(
@@ -349,6 +356,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::expr::node_value::NodeValue;
     use crate::metrics_config_orchestrator::publisher::service::{
         ConnectionType, ServicePublisher,
@@ -364,7 +372,10 @@ mod tests {
     const TRIGGER_NAME: &str = "trigger";
 
     fn create_factory() -> TriggerFactoryImpl {
-        TriggerFactoryImpl { error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")) }
+        TriggerFactoryImpl {
+            node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")),
+        }
     }
 
     fn new_trigger(name: &str) -> TriggerProto {
@@ -409,8 +420,12 @@ mod tests {
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(PARENT_TRIGGER_NAME.to_owned());
 
-        let parent_trigger =
-            PeriodicTrigger::new(PARENT_TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), INTERVAL);
+        let parent_trigger = PeriodicTrigger::new(
+            PARENT_TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            INTERVAL,
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+        );
 
         (trigger, Some(vec![parent_trigger]))
     }
@@ -536,6 +551,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::new(MockServiceAdapter::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -569,6 +585,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::new(MockServiceAdapter::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 

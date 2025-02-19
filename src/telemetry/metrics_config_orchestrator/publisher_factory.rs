@@ -14,6 +14,7 @@ use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
 use crate::expr::node::Node;
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,
@@ -78,6 +79,7 @@ pub(crate) enum PublisherFactoryError {
 
 pub(crate) struct PublisherFactoryImpl {
     message_builder_factory: Arc<dyn MessageBuilderFactory>,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
@@ -101,6 +103,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                     Self::get_sub_sampling_interval(service_publisher)?,
                     Self::get_connection_type(service_publisher.connection_type)?,
                     Arc::clone(&self.service_adapter),
+                    Arc::clone(&self.node_evaluation_context_factory),
                     Arc::clone(&self.error_callback),
                 )))
             }
@@ -146,9 +149,15 @@ impl PublisherFactoryImpl {
     pub(super) fn new(
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
         service_adapter: Arc<dyn ServiceAdapter>,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Self {
-        Self { message_builder_factory, service_adapter, error_callback }
+        Self {
+            message_builder_factory,
+            service_adapter,
+            node_evaluation_context_factory,
+            error_callback,
+        }
     }
 
     /// Creates Aggregation Publisher struct based on the protobuf message and context.
@@ -239,6 +248,7 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::service_adapter::{
         GetMessageProviderOutcome, ServiceSubscription,
@@ -296,6 +306,7 @@ mod tests {
         PublisherFactoryImpl::new(
             Arc::new(message_builder_factory.unwrap_or_else(MockMessageBuilderFactory::new)),
             Arc::new(MockServiceAdapter {}),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
@@ -348,8 +359,12 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger =
-            PeriodicTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), INTERVAL);
+        let trigger = PeriodicTrigger::new(
+            TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            INTERVAL,
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+        );
 
         (publisher, trigger)
     }

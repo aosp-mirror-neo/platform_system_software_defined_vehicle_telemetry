@@ -14,6 +14,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
@@ -41,6 +42,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     is_active: AsyncMutex<bool>,
     message_builder: Arc<dyn MessageBuilder>,
     name: String,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     report_incomplete: bool,
     report_number: AtomicI32,
     subscriber: TriggerSubscriber,
@@ -85,8 +87,8 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
         }
 
         if self.report_incomplete {
-            let res =
-                Arc::clone(&self.message_builder).build(&Arc::new(NodeEvaluationContext::new()));
+            let res = Arc::clone(&self.message_builder)
+                .build(&Arc::new(self.node_evaluation_context_factory.create()));
             self.generate_report(res, reason, None).await;
         }
 
@@ -103,6 +105,7 @@ impl MetricsReportGeneratorImpl {
         config_version: u32,
         message_builder: Arc<dyn MessageBuilder>,
         triggers: Vec<Arc<dyn Trigger>>,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
     ) -> Self {
@@ -119,6 +122,7 @@ impl MetricsReportGeneratorImpl {
             report_number: 1.into(),
             subscriber,
             triggers,
+            node_evaluation_context_factory,
 
             error_callback,
             report_ready_callback,
@@ -200,6 +204,7 @@ mod test {
     use tokio::sync::mpsc;
 
     use crate::expr::node_error::NodeEvaluationError;
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::message_builder::{
         mock::MockMessageBuilder, MessageBuilderError, MessageBuilderErrorType,
     };
@@ -229,6 +234,7 @@ mod test {
             CONFIG_VERSION,
             message_builder,
             vec![],
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),

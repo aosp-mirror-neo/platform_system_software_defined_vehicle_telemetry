@@ -12,6 +12,7 @@ use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
 use crate::expr::node::Node;
 use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
@@ -60,6 +61,7 @@ pub(crate) struct ConditionalTrigger {
     pub(crate) condition_type: ConditionType,
 
     subscriber: TriggerSubscriber,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
 }
 
@@ -133,6 +135,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                             conditional_trigger.base.fire_trigger(activation_id, context).await;
                         });
                     },
+                    Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
             ConditionType::FallingEdge(falling_options) => {
@@ -147,6 +150,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                             conditional_trigger.base.fire_trigger(activation_id, context).await;
                         });
                     },
+                    Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
             ConditionType::BothEdges { rising_options, falling_options } => {
@@ -162,6 +166,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                             conditional_trigger.base.fire_trigger(activation_id, context).await;
                         });
                     },
+                    Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
             ConditionType::AllChanges => {
@@ -247,6 +252,7 @@ impl ConditionalTrigger {
         condition_type: ConditionType,
         triggers: Vec<Arc<dyn Trigger>>,
         selector_expression: Arc<Node>,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
@@ -259,6 +265,7 @@ impl ConditionalTrigger {
             selector_expression,
             condition_type,
             subscriber: TriggerSubscriber::ConditionalTrigger { name },
+            node_evaluation_context_factory,
             error_callback,
         })
     }
@@ -321,6 +328,7 @@ mod tests {
     use crate::expr::mock::MockMessageProvider;
     use crate::expr::node::Node;
     use crate::expr::node_error::MessageProviderError;
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::trigger::mock::{
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
     };
@@ -372,6 +380,7 @@ mod tests {
             condition_type,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
 
@@ -452,6 +461,7 @@ mod tests {
                 Arc::<MockTrigger>::clone(&parent_trigger2),
             ],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
         let mut trigger = Arc::into_inner(trigger).unwrap();
@@ -502,6 +512,7 @@ mod tests {
             ConditionType::IsTrue,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
 

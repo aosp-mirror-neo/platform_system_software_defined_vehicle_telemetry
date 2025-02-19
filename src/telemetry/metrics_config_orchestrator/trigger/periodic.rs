@@ -9,6 +9,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use super::base::BaseTrigger;
 use super::Trigger;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
@@ -19,18 +20,25 @@ use crate::metrics_config_orchestrator::trigger::{
 
 pub(crate) struct PeriodicTrigger {
     base: BaseTrigger,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
 
     pub(crate) interval: Duration,
 }
 
 impl PeriodicTrigger {
-    pub(crate) fn new(name: String, metrics_config_uuid: String, interval: Duration) -> Arc<Self> {
+    pub(crate) fn new(
+        name: String,
+        metrics_config_uuid: String,
+        interval: Duration,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    ) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
             base: BaseTrigger::new(
                 name,
                 metrics_config_uuid,
                 Weak::clone(me) as Weak<dyn Activatable<_, _>>,
             ),
+            node_evaluation_context_factory,
             interval,
         })
     }
@@ -72,6 +80,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrig
         );
 
         let interval = self.interval;
+        let node_evaluation_context_factory = Arc::clone(&self.node_evaluation_context_factory);
         // There is no point in buffering more than a single trigger message, because
         // `tokio::time::interval` already has built-in missed-tick handling.
         let (sender, receiver) = mpsc::channel(1);
@@ -85,7 +94,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrig
             loop {
                 // Sleep until next interval tick.
                 timer.tick().await;
-                let context = Arc::new(NodeEvaluationContext::new());
+                let context = Arc::new(node_evaluation_context_factory.create());
                 if sender.send(context).await.is_err() {
                     // Receiver dropped, so we can stop here.
                     return;
@@ -139,6 +148,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::{mpsc, Notify};
 
+    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::subscription_manager::{
         Activatable, SubscriptionManager,
     };
@@ -152,7 +162,12 @@ mod tests {
     const ACTIVATION_ID: ActivationId = ActivationId::new(3);
 
     fn create_valid_periodic_trigger() -> Arc<PeriodicTrigger> {
-        PeriodicTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), INTERVAL)
+        PeriodicTrigger::new(
+            TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            INTERVAL,
+            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+        )
     }
 
     fn create_valid_periodic_trigger_with_mock_subscription_manager(

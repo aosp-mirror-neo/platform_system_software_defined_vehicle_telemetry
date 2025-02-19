@@ -45,6 +45,9 @@ use tokio::sync::Mutex as AsyncMutex;
 use crate::expr::node::Node;
 use crate::expr::node_error::NodeError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
+use crate::expr::node_evaluation_context_factory::{
+    NodeEvaluationContextFactory, NodeEvaluationContextFactoryImpl,
+};
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
 
@@ -535,20 +538,27 @@ impl MetricsConfigOrchestratorImpl {
             Arc::clone(&service_publisher_manager),
             Arc::clone(&misc_error_callback),
         ));
+        let node_evaluation_context_factory = Arc::new(NodeEvaluationContextFactoryImpl::new())
+            as Arc<dyn NodeEvaluationContextFactory>;
         Self {
             configs: Mutex::new(HashMap::new()),
             descriptor_provider_factory: Box::new(DescriptorProviderFactoryImpl),
             metrics_report_generator_factory: Box::new(MetricsReportGeneratorFactoryImpl::new(
                 Arc::<MessageBuilderFactoryImpl>::clone(&message_builder_factory),
+                Arc::clone(&node_evaluation_context_factory),
                 Arc::clone(&misc_error_callback),
             )),
             node_factory: Box::new(NodeFactoryImpl::new()),
             publisher_factory: Box::new(PublisherFactoryImpl::new(
                 message_builder_factory,
                 service_adapter,
+                Arc::clone(&node_evaluation_context_factory),
                 Arc::clone(&misc_error_callback),
             )),
-            trigger_factory: Box::new(TriggerFactoryImpl::new(Arc::clone(&misc_error_callback))),
+            trigger_factory: Box::new(TriggerFactoryImpl::new(
+                node_evaluation_context_factory,
+                Arc::clone(&misc_error_callback),
+            )),
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),
             service_publisher_manager,

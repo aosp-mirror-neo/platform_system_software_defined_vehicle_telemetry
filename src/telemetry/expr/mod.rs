@@ -5,6 +5,7 @@
 pub(crate) mod node;
 pub(crate) mod node_error;
 pub(crate) mod node_evaluation_context;
+pub(crate) mod node_evaluation_context_factory;
 pub(crate) mod node_factory;
 pub(crate) mod node_value;
 pub(crate) mod node_value_type;
