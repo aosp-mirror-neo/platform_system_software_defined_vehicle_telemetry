@@ -5,6 +5,7 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::base::{BaseTrigger, TriggerState};
 use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
@@ -13,7 +14,7 @@ use crate::expr::node_error::NodeEvaluationError;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
+    AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
@@ -208,7 +209,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         }
 
         let event_processor = AsyncEventProcessor::new(
-            AsyncReceiver::Unbounded(receiver),
+            UnboundedReceiverStream::new(receiver),
             ConditionalTriggerHandler {
                 activation_id,
                 conditional_trigger: Arc::downgrade(&self),

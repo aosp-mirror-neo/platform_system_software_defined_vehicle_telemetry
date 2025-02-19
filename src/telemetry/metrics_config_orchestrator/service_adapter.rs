@@ -14,11 +14,11 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
+    AsyncEventHandler, AsyncEventProcessor,
 };
-
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -316,7 +316,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             let callback_container = Arc::new(AsyncMutex::new(callbacks));
                             let callback_container_clone = Arc::clone(&callback_container);
                             let event_queue = AsyncEventProcessor::new(
-                                AsyncReceiver::Unbounded(receiver),
+                                UnboundedReceiverStream::new(receiver),
                                 ServiceAdapterHandler {
                                     callback_container: callback_container_clone,
                                 },

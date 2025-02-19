@@ -9,11 +9,12 @@ use sdv_telemetry_utils::{
 use std::collections::HashMap;
 use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
+    AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
@@ -131,7 +132,7 @@ impl Publisher for AggregationPublisher {
         }
 
         let event_processor = AsyncEventProcessor::new(
-            AsyncReceiver::Unbounded(receiver),
+            UnboundedReceiverStream::new(receiver),
             AggregationPublisherHandler { aggregation_publisher: Arc::downgrade(&self) },
         );
 

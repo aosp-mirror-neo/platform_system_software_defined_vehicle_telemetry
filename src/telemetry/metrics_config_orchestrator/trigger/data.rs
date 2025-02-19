@@ -3,12 +3,13 @@
 use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::base::{BaseTrigger, TriggerState};
 use super::Trigger;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
+    AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::{TriggerCallbackFn, TriggerSubscriber};
@@ -81,7 +82,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for DataTrigger 
         }
 
         let event_processor = AsyncEventProcessor::new(
-            AsyncReceiver::Unbounded(receiver),
+            UnboundedReceiverStream::new(receiver),
             DataTriggerHandler { activation_id, trigger: Arc::downgrade(&self) },
         );
 

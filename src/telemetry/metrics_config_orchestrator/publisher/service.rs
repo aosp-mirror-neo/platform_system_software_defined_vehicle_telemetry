@@ -16,17 +16,17 @@ use std::sync::{Arc, Weak};
 use std::{collections::HashMap, mem};
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
+    AsyncEventHandler, AsyncEventProcessor,
 };
+use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
-
-use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::ServicePublisherErrorDetails::ServicePublisherErrorDetails,
@@ -460,7 +460,7 @@ impl ServicePublisher {
                 }
 
                 let event_processor = AsyncEventProcessor::new(
-                    AsyncReceiver::Unbounded(receiver),
+                    UnboundedReceiverStream::new(receiver),
                     ServicePublisherHandler { service_publisher: Arc::downgrade(self) },
                 );
                 maybe_subscription.map(|service_subscription| {

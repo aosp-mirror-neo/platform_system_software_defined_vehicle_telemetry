@@ -4,12 +4,13 @@ use async_trait::async_trait;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, MissedTickBehavior};
+use tokio_stream::wrappers::ReceiverStream;
 
 use super::base::BaseTrigger;
 use super::Trigger;
 use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
-    AsyncEventHandler, AsyncEventProcessor, AsyncReceiver,
+    AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::{
@@ -108,7 +109,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrig
         }
 
         let event_processor = AsyncEventProcessor::new(
-            AsyncReceiver::Bounded(receiver),
+            ReceiverStream::new(receiver),
             PeriodicTriggerHandler { activation_id, trigger: Arc::downgrade(&self) },
         );
 

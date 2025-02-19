@@ -1,23 +1,9 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::mpsc::UnboundedReceiver;
+use core::pin::pin;
+use futures::{Stream, StreamExt};
 use tokio_util::sync::CancellationToken;
-
-pub(super) enum AsyncReceiver<T> {
-    Bounded(Receiver<T>),
-    Unbounded(UnboundedReceiver<T>),
-}
-
-impl<T> AsyncReceiver<T> {
-    async fn recv(&mut self) -> Option<T> {
-        match self {
-            AsyncReceiver::Bounded(ref mut receiver) => receiver.recv().await,
-            AsyncReceiver::Unbounded(ref mut receiver) => receiver.recv().await,
-        }
-    }
-}
 
 /// Receives and processes events asynchronously in a background task.
 pub(super) struct AsyncEventProcessor {
@@ -35,18 +21,19 @@ impl AsyncEventProcessor {
     ///
     /// The background task is cancelled and the receiver is dropped when the processor is dropped.
     pub(super) fn new<TEvent: Send + 'static>(
-        mut receiver: AsyncReceiver<TEvent>,
+        receiver: impl Stream<Item = TEvent> + Send + 'static,
         mut handler: impl AsyncEventHandler<TEvent> + Send + 'static,
     ) -> Self {
         let cancellation_token = CancellationToken::new();
         let cancellation_token_clone = cancellation_token.clone();
         tokio::spawn(async move {
+            let mut receiver = pin!(receiver);
             loop {
                 tokio::select! {
                     // Discard pending messages if the processor was dropped.
                     biased;
                     _ = cancellation_token_clone.cancelled() => break,
-                    maybe_event = receiver.recv() => {
+                    maybe_event = receiver.next() => {
                         if let Some(event) = maybe_event {
                             handler.handle(event).await;
                         } else {
@@ -69,6 +56,7 @@ mod tests {
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
     use tokio::sync::mpsc;
+    use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
 
     #[derive(Clone)]
     struct TestEventHandler {
@@ -97,7 +85,8 @@ mod tests {
     async fn process_events_success() {
         let (tx, rx) = mpsc::unbounded_channel();
         let handler = TestEventHandler::new();
-        let _processor = AsyncEventProcessor::new(AsyncReceiver::Unbounded(rx), handler.clone());
+        let _processor =
+            AsyncEventProcessor::new(UnboundedReceiverStream::new(rx), handler.clone());
 
         tx.send(()).unwrap();
         tx.send(()).unwrap();
@@ -112,7 +101,7 @@ mod tests {
     async fn process_events_with_bounded_receiver_success() {
         let (tx, rx) = mpsc::channel(2);
         let handler = TestEventHandler::new();
-        let _processor = AsyncEventProcessor::new(AsyncReceiver::Bounded(rx), handler.clone());
+        let _processor = AsyncEventProcessor::new(ReceiverStream::new(rx), handler.clone());
 
         tx.send(()).await.unwrap();
         tx.send(()).await.unwrap();
@@ -130,7 +119,7 @@ mod tests {
 
         {
             let _processor =
-                AsyncEventProcessor::new(AsyncReceiver::Unbounded(rx), handler.clone());
+                AsyncEventProcessor::new(UnboundedReceiverStream::new(rx), handler.clone());
             // `processor` is dropped here, so the background task should be cancelled.
         }
         // Before task is cancelled, send should be successful, but the event should not get processed.
