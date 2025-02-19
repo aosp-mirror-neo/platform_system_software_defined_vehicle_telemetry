@@ -24,3 +24,41 @@ rust_protobuf {
         "//apex_available:anyapex",
     ],
 }
+
+filegroup {
+    name: "telemetry_catalog_protos",
+    srcs: [
+        "**/*.proto",
+        "**/*.vsidl",
+    ],
+}
+
+filegroup {
+    name: "telemetry_catalog_protos_with_bp_file",
+    srcs: [
+        ":telemetry_catalog_protos",
+        "Android.bp",
+    ],
+}
+
+prebuilt_etc {
+    name: "telemetry_catalog-vsidl-config.binpb",
+    sub_dir: "vsidl_v1/vsidl_config",
+    src: ":generate_vsidl_files{vsidl-config.binpb}",
+}
+
+genrule {
+    name: "generate_vsidl_files",
+    tools: ["vsidl_rc_generator"],
+    srcs: [
+        ":sdv_vsidl_v1_protos",
+        ":telemetry_catalog_protos_with_bp_file",
+    ],
+    cmd: "$(location vsidl_rc_generator) " +
+        " --vsidl-path  system/software_defined_vehicle/core_services/vsidl/protos" +
+        " --catalog-path system/software_defined_vehicle/telemetry/samples/rust/data_tunnel_middleware_publisher/catalog" +
+        " --output-path $(genDir) ",
+    out: [
+        "vsidl-config.binpb",
+    ],
+}
