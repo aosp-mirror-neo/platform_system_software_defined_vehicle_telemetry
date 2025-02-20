@@ -13,10 +13,20 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
+        "google.sdv.vpm-aidl-V1-rust",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
         "liblog_rust",
+        "libparking_lot",
+        "libpersistent_binder",
         "libsdv_telemetry_platform_abstraction_layer",
         "libsdv_telemetry_time_wrapper",
+        "libtokio",
+        "libtokio_util",
         // keep-sorted end
+    ],
+    proc_macros: [
+        "libasync_trait",
     ],
 }
 
@@ -31,6 +41,12 @@ rust_test {
     name: "libsdv_telemetry_platform_abstraction_layer_core_unit_tests",
     defaults: ["libsdv_telemetry_platform_abstraction_layer_core_defaults"],
     crate_name: "sdv_telemetry_platform_abstraction_layer_core_unit_tests",
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
     test_options: {
         unit_test: true,
     },

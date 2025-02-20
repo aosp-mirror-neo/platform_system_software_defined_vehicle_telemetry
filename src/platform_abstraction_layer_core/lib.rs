@@ -3,21 +3,22 @@
 //! Implements `CorePal`, which is an implementation of the `PlatformAbstractionLayer` trait for SDV
 //! Core.
 
+mod vpm;
+
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_time_wrapper::Microseconds;
 
+use crate::vpm::VpmClient;
+
 /// A `PlatformAbstractionLayer` implementation for SDV Core.
 #[derive(Debug)]
-pub struct CorePal {}
+pub struct CorePal {
+    vpm_client: VpmClient,
+}
 
-// TODO: b/353466210 - Implement for Core.
 impl PlatformAbstractionLayer for CorePal {
     fn get_resumed_at(&self) -> Option<Microseconds> {
-        log::warn!(
-            "CorePal::get_resumed_at called, which is not yet implemented. Returning `None`."
-        );
-
-        None
+        self.vpm_client.get_resumed_at()
     }
 }
 
@@ -30,7 +31,7 @@ impl Default for CorePal {
 impl CorePal {
     /// Create a new instance of a `CorePal`.
     pub fn new() -> Self {
-        CorePal {}
+        Self { vpm_client: VpmClient::default() }
     }
 }
 
@@ -38,8 +39,9 @@ impl CorePal {
 mod tests {
     use super::*;
 
-    #[test]
-    fn get_resumed_at_returns_none() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_resumed_at_returns_none() {
         let pal = CorePal::new();
         assert_eq!(pal.get_resumed_at(), None);
     }
