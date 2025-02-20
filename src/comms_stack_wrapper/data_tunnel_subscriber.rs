@@ -12,7 +12,9 @@ use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
+use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
+use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
@@ -175,6 +177,19 @@ impl DataTunnelSubscriber {
             unit_identifier,
             message_descriptor,
         })))
+    }
+
+    pub(super) async fn get_message_descriptor(
+        vsidl_provider: &dyn VsidlConfigProviderV1,
+        service_unit_definition: &ServiceUnitDefinition,
+    ) -> Option<MessageDescriptor> {
+        vsidl_provider
+            .get_publication_descriptor(
+                service_unit_definition.get_service_bundle_identity().get_fqin(),
+                &service_unit_definition.get_unit_type(),
+            )
+            .await
+            .map(|descriptor| descriptor.message_descriptor)
     }
 
     fn read_length_delimited_proto(

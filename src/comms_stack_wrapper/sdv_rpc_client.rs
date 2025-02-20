@@ -11,13 +11,18 @@ use protobuf::well_known_types::{any::Any, empty::Empty};
 use protobuf::{Message, MessageDyn};
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
+use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
+use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
+
+const CREATE_SUBSCRIPTION_METHOD: &str = "CreateSubscription";
+const GET_LATEST_MESSAGE_METHOD: &str = "GetLatestMessage";
 
 pub(super) struct SdvRpcClient {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
@@ -59,7 +64,7 @@ impl SdvRpcClient {
                 let configuration_bytes = SdvRpcClient::serialize_configuration(configuration);
                 let response_bytes = self
                     .client
-                    .unary_call("GetLatestMessage", &configuration_bytes)
+                    .unary_call(GET_LATEST_MESSAGE_METHOD, &configuration_bytes)
                     .await
                     .map_err(|err| {
                         ServicePublisherAccessorError::MessageRetrievalFailed(err.into())
@@ -102,7 +107,7 @@ impl SdvRpcClient {
 
         let configuration_bytes = Self::serialize_configuration(configuration);
         let mut response_stream = client
-            .server_streaming_call("CreateSubscription", &configuration_bytes)
+            .server_streaming_call(CREATE_SUBSCRIPTION_METHOD, &configuration_bytes)
             .await
             .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
 
@@ -152,6 +157,20 @@ impl SdvRpcClient {
             Box::new(SdvRpcSubscription { _subscription_drop_guard: subscription_drop_guard });
 
         Ok(CreateSubscriptionOutcome::Subscribed(subscription))
+    }
+
+    pub(super) async fn get_message_descriptor(
+        vsidl_provider: &dyn VsidlConfigProviderV1,
+        service_unit_definition: &ServiceUnitDefinition,
+    ) -> Option<MessageDescriptor> {
+        vsidl_provider
+            .get_rpc_method_descriptor(
+                service_unit_definition.get_service_bundle_identity().get_fqin(),
+                &service_unit_definition.get_unit_type(),
+                CREATE_SUBSCRIPTION_METHOD,
+            )
+            .await
+            .and_then(|descriptor| descriptor.response_message)
     }
 
     fn serialize_configuration(configuration: Option<&Any>) -> Vec<u8> {

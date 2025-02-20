@@ -330,21 +330,20 @@ impl CommsStackAccessor {
     ) -> anyhow::Result<MessageDescriptor> {
         if let Some(vsidl_provider) = self.vsidl_provider.clone().await {
             if let Some(message_descriptor) = match service_unit_definition.get_unit_metadata() {
-                UnitMetadata::Publisher(_) => vsidl_provider
-                    .get_publication_descriptor(
-                        service_unit_definition.get_service_bundle_identity().get_fqin(),
-                        &service_unit_definition.get_unit_type(),
+                UnitMetadata::Publisher(_) => {
+                    DataTunnelSubscriber::get_message_descriptor(
+                        vsidl_provider.as_ref(),
+                        service_unit_definition,
                     )
                     .await
-                    .map(|descriptor| descriptor.message_descriptor),
-                UnitMetadata::Server(_) => vsidl_provider
-                    .get_rpc_method_descriptor(
-                        service_unit_definition.get_service_bundle_identity().get_fqin(),
-                        &service_unit_definition.get_unit_type(),
-                        "CreateSubscription",
+                }
+                UnitMetadata::Server(_) => {
+                    SdvRpcClient::get_message_descriptor(
+                        vsidl_provider.as_ref(),
+                        service_unit_definition,
                     )
                     .await
-                    .and_then(|descriptor| descriptor.response_message),
+                }
             } {
                 debug!("Found descriptor for {service_name} in VSIDL provider");
                 return Ok(message_descriptor);
