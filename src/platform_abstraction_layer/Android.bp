@@ -1,0 +1,69 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_platform_abstraction_layer_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_telemetry_time_wrapper",
+        // keep-sorted end
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_platform_abstraction_layer",
+    defaults: ["libsdv_telemetry_platform_abstraction_layer_defaults"],
+    crate_name: "sdv_telemetry_platform_abstraction_layer",
+    features: [],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_platform_abstraction_layer_with_test_utils",
+    defaults: ["libsdv_telemetry_platform_abstraction_layer_defaults"],
+    crate_name: "sdv_telemetry_platform_abstraction_layer",
+    features: [
+        "test_utils",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libmockall",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_test {
+    name: "libsdv_telemetry_platform_abstraction_layer_unit_tests",
+    defaults: ["libsdv_telemetry_platform_abstraction_layer_defaults"],
+    crate_name: "sdv_telemetry_platform_abstraction_layer_unit_tests",
+    features: [
+        "test_utils",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libmockall",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}

@@ -12,6 +12,15 @@
       "name": "libsdv_telemetry_dt_wrapper_unit_tests"
     },
     {
+      "name": "libsdv_telemetry_platform_abstraction_layer_core_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_platform_abstraction_layer_ivi_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_platform_abstraction_layer_unit_tests"
+    },
+    {
       "name": "libsdv_telemetry_rust_wrapper_tests"
     },
     {
