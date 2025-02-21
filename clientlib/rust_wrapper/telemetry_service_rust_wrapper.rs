@@ -7,7 +7,11 @@ mod managers;
 mod status;
 
 use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
-pub use status::TelemetryServiceStatus;
+pub use status::{
+    AggregationPublisherErrorDetails, ConditionalTriggerErrorDetails, FileIOErrorDetails,
+    MetricsReportGeneratorErrorDetails, ServiceErrorDetails, ServicePublisherErrorDetails,
+    StatusDetails, TelemetryServiceStatus,
+};
 
 use crate::rust_to_c::ServiceHolder;
 use callbacks::call_api_with_status_callback;
@@ -89,6 +93,152 @@ impl<T: Send + Sync> SendSyncPtr<T> {
     }
 }
 
+fn get_aggregation_publisher_error_details(
+    details: sdv_telemetry_bindgen::AggregationPublisherErrorDetails,
+) -> status::StatusDetails {
+    StatusDetails::AggregationPublisherErrorDetails(AggregationPublisherErrorDetails {
+        // SAFETY: AggregationPublisherErrorDetails holds a pointer to metrics_config_uuid
+        // that satisfies`CStr::from_ptr` safety requirements.
+        metrics_config_uuid: unsafe { CStr::from_ptr(details.metrics_config_uuid) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+        // SAFETY: AggregationPublisherErrorDetails holds a pointer to publisher_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        publisher_name: unsafe { CStr::from_ptr(details.publisher_name) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+        // SAFETY: AggregationPublisherErrorDetails holds a pointer to field_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        field_name: unsafe { CStr::from_ptr(details.field_name) }.to_str().unwrap().to_string(),
+    })
+}
+
+fn get_service_publisher_error_details(
+    details: sdv_telemetry_bindgen::ServicePublisherErrorDetails,
+) -> status::StatusDetails {
+    StatusDetails::ServicePublisherErrorDetails(ServicePublisherErrorDetails {
+        // SAFETY: ServicePublisherErrorDetails holds a pointer to metrics_config_uuid
+        // that satisfies`CStr::from_ptr` safety requirements.
+        metrics_config_uuid: unsafe { CStr::from_ptr(details.metrics_config_uuid) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+        // SAFETY: ServicePublisherErrorDetails holds a pointer to publisher_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        publisher_name: unsafe { CStr::from_ptr(details.publisher_name) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+    })
+}
+
+fn get_conditional_trigger_error_details(
+    details: sdv_telemetry_bindgen::ConditionalTriggerErrorDetails,
+) -> status::StatusDetails {
+    StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
+        // SAFETY: ConditionalTriggerErrorDetails holds a pointer to metrics_config_uuid
+        // that satisfies`CStr::from_ptr` safety requirements.
+        metrics_config_uuid: unsafe { CStr::from_ptr(details.metrics_config_uuid) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+        // SAFETY: ConditionalTriggerErrorDetails holds a pointer to trigger_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        trigger_name: unsafe { CStr::from_ptr(details.trigger_name) }.to_str().unwrap().to_string(),
+    })
+}
+
+fn get_metrics_report_generator_error_details(
+    details: sdv_telemetry_bindgen::MetricsReportGeneratorErrorDetails,
+) -> status::StatusDetails {
+    StatusDetails::MetricsReportGeneratorErrorDetails(MetricsReportGeneratorErrorDetails {
+        // SAFETY: MetricsReportGeneratorErrorDetails holds a pointer to metrics_config_uuid
+        // that satisfies`CStr::from_ptr` safety requirements.
+        metrics_config_uuid: unsafe { CStr::from_ptr(details.metrics_config_uuid) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+        // SAFETY: MetricsReportGeneratorErrorDetails holds a pointer to metrics_report_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        metrics_report_name: unsafe { CStr::from_ptr(details.metrics_report_name) }
+            .to_str()
+            .unwrap()
+            .to_string(),
+        // SAFETY: MetricsReportGeneratorErrorDetails holds a pointer to field_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        field_name: unsafe { CStr::from_ptr(details.field_name) }.to_str().unwrap().to_string(),
+    })
+}
+
+fn get_service_error_details(
+    details: sdv_telemetry_bindgen::ServiceErrorDetails,
+) -> status::StatusDetails {
+    StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
+        // SAFETY: ServiceErrorDetails holds a pointer to service_name
+        // that satisfies`CStr::from_ptr` safety requirements.
+        service_name: unsafe { CStr::from_ptr(details.service_name) }.to_str().unwrap().to_string(),
+    })
+}
+
+fn get_file_io_error_details(
+    details: sdv_telemetry_bindgen::FileIOErrorDetails,
+) -> status::StatusDetails {
+    StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
+        // SAFETY: FileIOErrorDetails holds a pointer to path
+        // that satisfies`CStr::from_ptr` safety requirements.
+        path: unsafe { CStr::from_ptr(details.path) }.to_str().unwrap().to_string(),
+    })
+}
+
+fn get_status_details(
+    details_with_tag: *const sdv_telemetry_bindgen::StatusDetailsWithTag,
+) -> Option<status::StatusDetails> {
+    // SAFETY: The caller has provided a valid pointer to `StatusDetailsWithTag`
+    let details_with_tag = unsafe { *details_with_tag };
+
+    match details_with_tag.tag {
+        sdv_telemetry_bindgen::StatusDetailsTag_AggregationPublisherErrorDetailsTag => {
+            // SAFETY: The caller has provided a valid tag to access details union field
+            let details = unsafe { details_with_tag.details.aggregation_publisher_error_details };
+            Some(get_aggregation_publisher_error_details(details))
+        }
+
+        sdv_telemetry_bindgen::StatusDetailsTag_ServicePublisherErrorDetailsTag => {
+            // SAFETY: The caller has provided a valid tag to access details union field
+            let details = unsafe { details_with_tag.details.service_publisher_error_details };
+            Some(get_service_publisher_error_details(details))
+        }
+
+        sdv_telemetry_bindgen::StatusDetailsTag_ConditionalTriggerErrorDetailsTag => {
+            // SAFETY: The caller has provided a valid tag to access details union field
+            let details = unsafe { details_with_tag.details.conditional_trigger_error_details };
+            Some(get_conditional_trigger_error_details(details))
+        }
+
+        sdv_telemetry_bindgen::StatusDetailsTag_MetricsReportGeneratorErrorDetailsTag => {
+            // SAFETY: The caller has provided a valid tag to access details union field
+            let details =
+                unsafe { details_with_tag.details.metrics_report_generator_error_details };
+            Some(get_metrics_report_generator_error_details(details))
+        }
+
+        sdv_telemetry_bindgen::StatusDetailsTag_ServiceErrorDetailsTag => {
+            // SAFETY: The caller has provided a valid tag to access details union field
+            let details = unsafe { details_with_tag.details.service_error_details };
+            Some(get_service_error_details(details))
+        }
+
+        sdv_telemetry_bindgen::StatusDetailsTag_FileIOErrorDetailsTag => {
+            // SAFETY: The caller has provided a valid tag to access details union field
+            let details = unsafe { details_with_tag.details.file_io_error_details };
+            Some(get_file_io_error_details(details))
+        }
+        _ => None,
+    }
+}
+
 /// Callback function that receives status from telemetry service
 /// # Safety
 ///
@@ -100,11 +250,6 @@ unsafe extern "C" fn on_misc_status(
     listener: *mut std::ffi::c_void,
     status: *const sdv_telemetry_bindgen::TelemetryServiceStatus,
 ) {
-    // SAFETY: The caller has provided a valid pointer to `TelemetryServiceStatus`
-    let status = unsafe { *status };
-
-    let status_code = TelemetryServiceStatusCodes(status.code);
-
     // SAFETY: The caller sends back the reference to `StatusListener` that was originally sent to
     // the caller as part of the `set_misc_status_listener` API call.
     //
@@ -112,13 +257,19 @@ unsafe extern "C" fn on_misc_status(
     // calls to `on_misc_status` can still access the same `listener`.
     let status_listener = unsafe { &mut *(listener as *mut MiscStatusListener) };
 
+    // SAFETY: The caller has provided a valid pointer to `TelemetryServiceStatus`
+    let status = unsafe { *status };
+
+    let code = TelemetryServiceStatusCodes(status.code);
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
-    let status_msg = unsafe { CStr::from_ptr(status.message).to_str().unwrap().to_string() };
+    let message = unsafe { CStr::from_ptr(status.message) }.to_str().unwrap().to_string();
+    let details = get_status_details(status.details);
 
-    info!("Status code: {status_code:?} status message: {status_msg}");
+    let status = TelemetryServiceStatus { code, message, details };
 
-    (status_listener.callback)(TelemetryServiceStatus { code: status_code, message: status_msg });
+    info!("Status: {status:?}");
+    (status_listener.callback)(status);
 }
 
 /// Struct used to wrap `callback` received from client.
