@@ -6,7 +6,6 @@ use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use protobuf::MessageDyn;
 use sdv_telemetry_test_proto::test_message::TestMessage;
-use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
@@ -16,16 +15,17 @@ use crate::expr::node_evaluation_context::NodeEvaluationContext;
 pub(crate) struct MockMessageBuilder {
     next_error: Mutex<Option<MessageBuilderError>>,
     next_async_result:
-        Mutex<Option<BoxFuture<'static, Result<Box<dyn MessageDyn>, MessageBuilderError>>>>,
+        Mutex<Option<BoxFuture<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>>>,
     num_reset_calls: AtomicU32,
     result_callback: Mutex<
         Option<
             Box<
                 dyn Fn(
                         &NodeEvaluationContext,
-                    )
-                        -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>
-                    + Send
+                    ) -> ValueHolder<
+                        'static,
+                        (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>),
+                    > + Send
                     + Sync,
             >,
         >,
@@ -36,9 +36,9 @@ impl MessageBuilder for MockMessageBuilder {
     fn build(
         self: Arc<Self>,
         context: &Arc<NodeEvaluationContext>,
-    ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError> {
+    ) -> ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)> {
         if let Some(error) = self.next_error.lock().take() {
-            return Err(error).into();
+            return (None, vec![error]).into();
         }
 
         if let Some(async_result) = self.next_async_result.lock().take() {
@@ -46,10 +46,10 @@ impl MessageBuilder for MockMessageBuilder {
         } else if let Some(result_callback) = self.result_callback.lock().as_ref() {
             result_callback(context)
         } else {
-            OperationResult::Synchronous(Ok(Box::new(TestMessage {
-                int_field: 1,
-                ..Default::default()
-            })))
+            ValueHolder::Synchronous((
+                Some(Box::new(TestMessage { int_field: 1, ..Default::default() })),
+                vec![],
+            ))
         }
     }
 
@@ -78,7 +78,7 @@ impl MockMessageBuilder {
 
     pub(crate) fn set_next_async_result(
         &self,
-        future: BoxFuture<'static, Result<Box<dyn MessageDyn>, MessageBuilderError>>,
+        future: BoxFuture<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
     ) {
         self.next_async_result.lock().replace(future);
     }
@@ -87,7 +87,8 @@ impl MockMessageBuilder {
         &self,
         callback: impl Fn(
                 &NodeEvaluationContext,
-            ) -> OperationResult<'static, Box<dyn MessageDyn>, MessageBuilderError>
+            )
+                -> ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>
             + Send
             + Sync
             + 'static,

@@ -2,7 +2,7 @@
 
 //! Defines functions for an operation that can be either synchronous or asynchronous.
 
-use futures::{future::BoxFuture, FutureExt, TryFutureExt};
+use futures::{FutureExt, TryFutureExt};
 use std::future;
 
 use crate::value_holder::ValueHolder;
@@ -72,18 +72,6 @@ impl<'a, T: 'a, E: 'a> OperationResult<'a, T, E> {
             OperationResult::Synchronous(result) => result.map(op).into(),
             OperationResult::Asynchronous(future) => future.map_ok(op).boxed().into(),
         }
-    }
-}
-
-impl<T, E> From<Result<T, E>> for OperationResult<'_, T, E> {
-    fn from(result: Result<T, E>) -> Self {
-        OperationResult::Synchronous(result)
-    }
-}
-
-impl<'a, T, E> From<BoxFuture<'a, Result<T, E>>> for OperationResult<'a, T, E> {
-    fn from(future: BoxFuture<'a, Result<T, E>>) -> Self {
-        OperationResult::Asynchronous(future)
     }
 }
 

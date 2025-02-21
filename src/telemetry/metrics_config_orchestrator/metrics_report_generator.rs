@@ -132,48 +132,50 @@ impl MetricsReportGeneratorImpl {
 
     async fn generate_report(
         &self,
-        build_result: ValueHolder<'static, Result<Box<dyn MessageDyn>, MessageBuilderError>>,
+        build_result: ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
         report_reason: ReportReason,
         trigger_name: Option<&str>,
     ) {
-        match build_result.into_future().await {
-            Ok(report_data) => {
-                let mut report = MetricsReport::new();
-                report.config_activation_timestamp =
-                    Some(self.config_activation_timestamp.clone()).into();
-                report.metrics_config_uuid.clone_from(&self.config_uuid);
-                report.metrics_config_version = self.config_version;
-                report.report_config_name.clone_from(&self.name);
-                report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
-                report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
-                report.report_timestamp = Some(Timestamp::now()).into();
-                report.report_reason = report_reason.into();
+        let (build_result, builder_errors) = build_result.into_future().await;
 
-                debug!(
-                    "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
-                    report.report_config_name,
-                    report.report_number,
-                    report_reason,
-                    trigger_name.unwrap_or("[none]"),
-                    report.metrics_config_uuid,
-                );
+        let error_ids = builder_errors.iter().map(|err| {
+            let metrics_config_uuid = self.config_uuid.clone();
+            let metrics_report_name = self.name.clone();
+            self.status_reporter.report(
+                err.get_status_code(),
+                format!("Metrics config {metrics_config_uuid} metrics report generation for '{metrics_report_name}' failed due to message builder error: {err}"),
+                StatusDetails::MetricsReportGeneratorErrorDetails(
+                    MetricsReportGeneratorErrorDetails {
+                        metricsConfigUUID: metrics_config_uuid,
+                        metricsReportName: metrics_report_name,
+                        fieldName: err.field_name.clone(),
+                    },
+            ))
+        }).collect::<Vec<_>>();
 
-                (self.report_ready_callback)(report);
-            }
-            Err(err) => {
-                let metrics_config_uuid = self.config_uuid.clone();
-                let metrics_report_name = self.name.clone();
-                self.status_reporter.report(
-                    err.get_status_code(),
-                    format!("Metrics config {metrics_config_uuid} metrics report generation for '{metrics_report_name}' failed due to message builder error: {err}"),
-                    StatusDetails::MetricsReportGeneratorErrorDetails(
-                        MetricsReportGeneratorErrorDetails {
-                            metricsConfigUUID: metrics_config_uuid,
-                            metricsReportName: metrics_report_name,
-                            fieldName: err.field_name,
-                        },
-                    ));
-            }
+        if let Some(report_data) = build_result {
+            let mut report = MetricsReport::new();
+            report.config_activation_timestamp =
+                Some(self.config_activation_timestamp.clone()).into();
+            report.metrics_config_uuid.clone_from(&self.config_uuid);
+            report.metrics_config_version = self.config_version;
+            report.report_config_name.clone_from(&self.name);
+            report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+            report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
+            report.report_timestamp = Some(Timestamp::now()).into();
+            report.report_reason = report_reason.into();
+            report.error_ids = error_ids;
+
+            debug!(
+                "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
+                report.report_config_name,
+                report.report_number,
+                report_reason,
+                trigger_name.unwrap_or("[none]"),
+                report.metrics_config_uuid,
+            );
+
+            (self.report_ready_callback)(report);
         }
     }
 
@@ -328,6 +330,7 @@ mod test {
             Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
         );
         assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
+        assert!(report.error_ids.is_empty());
 
         // as built by MockMessageBuilder
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
@@ -381,11 +384,14 @@ mod test {
 
         let message_builder = MockMessageBuilder::new();
         message_builder.set_result_callback(|context| {
-            Ok(Box::new(TestMessage {
-                repeated_i64s: vec![i64::try_from(context.root_id()).unwrap()],
-                ..Default::default()
-            }) as Box<dyn MessageDyn>)
-            .into()
+            (
+                Some(Box::new(TestMessage {
+                    repeated_i64s: vec![i64::try_from(context.root_id()).unwrap()],
+                    ..Default::default()
+                }) as Box<dyn MessageDyn>),
+                vec![],
+            )
+                .into()
         });
         let mut generator = create_generator(Arc::new(message_builder));
         let (tx, rx) = oneshot_callback();
@@ -413,8 +419,10 @@ mod test {
 
         let message_builder = Arc::new(MockMessageBuilder::new());
         message_builder.set_next_async_result(
-            future::ready(Ok(
-                Box::new(TestMessage { int_field: 2, ..Default::default() }) as Box<dyn MessageDyn>
+            future::ready((
+                Some(Box::new(TestMessage { int_field: 2, ..Default::default() })
+                    as Box<dyn MessageDyn>),
+                vec![],
             ))
             .boxed(),
         );
@@ -429,6 +437,41 @@ mod test {
 
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(message.int_field, 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_creates_partial_reports() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_async_result(
+            future::ready((
+                Some(Box::new(TestMessage { int_field: 2, ..Default::default() })
+                    as Box<dyn MessageDyn>),
+                vec![MessageBuilderError {
+                    field_name: FIELD_NAME.to_owned(),
+                    error: MessageBuilderErrorType::ExpressionEvaluationError {
+                        e: NodeEvaluationError::ConstantValueNotSet,
+                    },
+                }],
+            ))
+            .boxed(),
+        );
+        let mut generator = create_generator(Arc::clone(&message_builder));
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
+        generator.status_reporter = Arc::new(StatusReporterImpl::new(|_| {}));
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+
+        Arc::new(generator).activate().await;
+        trigger.fire().await;
+        let report = rx.await;
+
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 2);
+        // message builder error was assigned an id = 0
+        assert_eq!(report.error_ids, vec![0]);
     }
 
     #[sdv_telemetry_test_utils::timeout]

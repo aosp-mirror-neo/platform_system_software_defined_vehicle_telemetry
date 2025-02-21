@@ -96,6 +96,18 @@ impl<'a, T: 'a> ValueHolder<'a, T> {
     }
 }
 
+impl<T> From<T> for ValueHolder<'_, T> {
+    fn from(result: T) -> Self {
+        ValueHolder::Synchronous(result)
+    }
+}
+
+impl<'a, T> From<BoxFuture<'a, T>> for ValueHolder<'a, T> {
+    fn from(future: BoxFuture<'a, T>) -> Self {
+        ValueHolder::Asynchronous(future)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

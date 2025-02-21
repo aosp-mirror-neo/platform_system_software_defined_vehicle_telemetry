@@ -4,9 +4,9 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
-use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
+use sdv_telemetry_utils::atomic::SequenceNumber;
 
-type StatusId = SequenceNumberType;
+type StatusId = i64;
 
 // Status Reporter wraps the callback for reporting errors additionally providing unique
 // identifiers to statuses using SequenceNumber.
@@ -21,8 +21,8 @@ pub(super) struct StatusReporterImpl {
 
 impl StatusReporter for StatusReporterImpl {
     fn report(&self, code: StatusCodes, message: String, details: StatusDetails) -> StatusId {
-        let id = self.status_ids_provider.next();
-        (self.status_callback)(TelemetryServiceStatus { id: id as i64, code, message, details });
+        let id = self.status_ids_provider.next() as StatusId;
+        (self.status_callback)(TelemetryServiceStatus { id, code, message, details });
         id
     }
 }

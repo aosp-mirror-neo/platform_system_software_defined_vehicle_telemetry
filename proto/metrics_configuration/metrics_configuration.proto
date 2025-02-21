@@ -308,6 +308,11 @@ message MetricsReport {
   // Metrics Configuration activation timestamp.
   // Depending on system implementation details, the underlying clock time may go backwards.
   google.protobuf.Timestamp config_activation_timestamp = 8;
+
+  // Required.
+  // Identifiers of errors occurred while generating the report.
+  // Full error information is sent back with Misc Status Listener.
+  repeated int64 error_ids = 9;
 }
 
 // Builds a protobuf message of some given type, where the content of the
