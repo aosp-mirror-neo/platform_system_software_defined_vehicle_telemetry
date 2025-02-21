@@ -318,10 +318,10 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
-
     use std::collections::HashMap;
     use std::future;
 
@@ -380,7 +380,7 @@ mod tests {
             condition_type,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
 
@@ -461,7 +461,7 @@ mod tests {
                 Arc::<MockTrigger>::clone(&parent_trigger2),
             ],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
         let mut trigger = Arc::into_inner(trigger).unwrap();
@@ -504,7 +504,7 @@ mod tests {
             CONFIG_UUID.to_owned(),
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
-        let parent_context = Arc::new(NodeEvaluationContext::new());
+        let parent_context = Arc::new(NodeEvaluationContext::new(None));
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
@@ -512,7 +512,7 @@ mod tests {
             ConditionType::IsTrue,
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         );
 
@@ -555,7 +555,7 @@ mod tests {
             for msg in messages.iter() {
                 message_provider.set_next_sync_result(Ok(msg.cloned()));
 
-                let context = NodeEvaluationContext::new();
+                let context = NodeEvaluationContext::new(None);
                 if let Some(msg) = msg {
                     assert_that!(ctx_to_msg_map.insert(context.root_id(), msg.as_ref()), none());
                 }

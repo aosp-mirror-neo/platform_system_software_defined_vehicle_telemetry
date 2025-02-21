@@ -302,6 +302,9 @@ impl NodeFactoryImpl {
                     TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT => {
                         TimeSource::MonotonicTimeSinceBoot
                     }
+                    TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT_OR_RESUME => {
+                        TimeSource::MonotonicTimeSinceBootOrResume
+                    }
                 };
                 Ok(FunctionType::GetCurrentTimestamp { time_source })
             }
@@ -427,6 +430,8 @@ impl NodeFactory for NodeFactoryImpl {
 mod tests {
     use super::*;
 
+    use googletest::assert_that;
+    use googletest::matchers::{elements_are, eq, ok, some};
     use protobuf::{EnumOrUnknown, MessageFull};
     use sdv_telemetry_proto_rust::expression::combination_node::{
         ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
@@ -1572,41 +1577,26 @@ mod tests {
         );
     }
 
-    #[test]
-    fn validate_function_node_timestamp_time_source_realtime_success() {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
+    parameterized_test!(
+        #[test]
+        validate_function_node_timestamp_time_source,
+        |time_source: TimeSourceProto| {
+            let node_factory = NodeFactoryImpl {};
+            let context = create_factory_context();
 
-        let mut node = NodeProto::new();
-        let timestamp_node = node.mut_function_leaf_node().mut_get_current_timestamp();
-        timestamp_node.time_source = TimeSourceProto::REALTIME_CLOCK.into();
+            let mut node = NodeProto::new();
+            let timestamp_node = node.mut_function_leaf_node().mut_get_current_timestamp();
+            timestamp_node.time_source = time_source.into();
 
-        let result = node_factory.validate(&[node], &context);
+            let result = node_factory.validate(&[node], &context);
 
-        assert_eq!(
-            result.as_ref().unwrap(),
-            &vec![Some(NodeValueType::Int)],
-            "Unexpected result: {result:?}"
-        );
-    }
+            assert_that!(result, ok(elements_are![some(eq(&NodeValueType::Int))]));
+        },
 
-    #[test]
-    fn validate_function_node_timestamp_time_source_monotonic_success() {
-        let node_factory = NodeFactoryImpl {};
-        let context = create_factory_context();
-
-        let mut node = NodeProto::new();
-        let timestamp_node = node.mut_function_leaf_node().mut_get_current_timestamp();
-        timestamp_node.time_source = TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT.into();
-
-        let result = node_factory.validate(&[node], &context);
-
-        assert_eq!(
-            result.as_ref().unwrap(),
-            &vec![Some(NodeValueType::Int)],
-            "Unexpected result: {result:?}"
-        );
-    }
+        realtime: (TimeSourceProto::REALTIME_CLOCK),
+        monotonic_time_since_boot: (TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT),
+        monotonic_time_since_boot_or_resume: (TimeSourceProto::MONOTONIC_TIME_SINCE_BOOT_OR_RESUME),
+    );
 
     #[test]
     fn validate_success() {

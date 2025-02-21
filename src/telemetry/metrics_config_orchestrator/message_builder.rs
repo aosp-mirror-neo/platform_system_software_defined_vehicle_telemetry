@@ -235,7 +235,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
@@ -257,7 +257,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
@@ -288,7 +288,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
@@ -319,7 +319,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         // verify the newly-built message does set the fields to the expected values
@@ -342,7 +342,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
@@ -361,7 +361,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
@@ -383,7 +383,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let res = builder.build(&context).unwrap_sync().unwrap();
 
         assert_that!(res, msg_dyn_eq(&expected_message, &REFLECT_EQ_MODE));
@@ -398,7 +398,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
@@ -417,7 +417,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
@@ -435,7 +435,7 @@ mod tests {
         );
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
@@ -459,7 +459,7 @@ mod tests {
         ));
 
         // action
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         let err = builder.build(&context).unwrap_sync().unwrap_err();
 
         assert!(
@@ -495,7 +495,7 @@ mod tests {
         ));
 
         let err = builder
-            .build(&Arc::new(NodeEvaluationContext::new()))
+            .build(&Arc::new(NodeEvaluationContext::new(None)))
             .unwrap_async()
             .await
             .unwrap_err();
@@ -532,8 +532,11 @@ mod tests {
             vec![(INT_FIELD_NAME.to_owned(), field_node)],
         ));
 
-        let res =
-            builder.build(&Arc::new(NodeEvaluationContext::new())).unwrap_async().await.unwrap();
+        let res = builder
+            .build(&Arc::new(NodeEvaluationContext::new(None)))
+            .unwrap_async()
+            .await
+            .unwrap();
 
         let expected_message = TestMessage { int_field: 80, ..Default::default() };
         assert_eq!(&res, &(Box::new(expected_message) as Box<dyn MessageDyn>));

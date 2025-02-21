@@ -145,6 +145,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrig
 mod tests {
     use super::*;
 
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use std::time::Duration;
     use tokio::sync::{mpsc, Notify};
 
@@ -166,7 +167,7 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             CONFIG_UUID.to_owned(),
             INTERVAL,
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
         )
     }
 

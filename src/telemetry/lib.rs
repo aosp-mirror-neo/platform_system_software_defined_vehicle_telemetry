@@ -27,6 +27,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
 };
 use log::{error, info, warn};
 use protobuf::Message;
+use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use std::borrow::Cow;
 use std::ops::Deref;
@@ -127,6 +128,7 @@ impl SdvTelemetryService {
         root_path: &str,
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
+        pal: Arc<dyn PlatformAbstractionLayer>,
     ) -> Option<Self> {
         let (active_dir_path, inactive_dir_path) = if !root_path.is_empty() {
             (
@@ -152,6 +154,7 @@ impl SdvTelemetryService {
             inactive_dir_path,
             config_store_size,
             service_publisher_manager,
+            pal,
             move |report| report_listener.on_report_ready(report),
             move |status| status_listener_clone.send_misc_status(status),
         )
@@ -451,6 +454,7 @@ mod tests {
     };
     use parking_lot::Mutex;
     use protobuf::Message;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 
@@ -803,6 +807,7 @@ mod tests {
                 dir_path.as_str(),
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
                 Arc::new(MockServicePublisherAccessor::new()),
+                new_stub_pal(),
             )
             .await
             .unwrap();

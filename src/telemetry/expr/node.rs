@@ -68,6 +68,7 @@ pub enum FunctionType {
 pub enum TimeSource {
     RealtimeClock,
     MonotonicTimeSinceBoot,
+    MonotonicTimeSinceBootOrResume,
 }
 
 impl Node {
@@ -194,6 +195,9 @@ impl Node {
                         TimeSource::MonotonicTimeSinceBoot => {
                             state.get_context().monotonic_time_since_boot
                         }
+                        TimeSource::MonotonicTimeSinceBootOrResume => {
+                            state.get_context().monotonic_time_since_boot_or_resume
+                        }
                     };
                     NodeValue::Int64(timestamp.0).into_operation_result(state)
                 }
@@ -257,6 +261,10 @@ mod tests {
     const INT_FIELD_NAME: &str = "int_field";
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
 
+    fn create_node_evaluation_context() -> NodeEvaluationContext {
+        NodeEvaluationContext::new(None)
+    }
+
     #[test]
     fn evaluate_logical_operator_success() -> Result<(), NodeEvaluationError> {
         // setup this tree:
@@ -287,7 +295,7 @@ mod tests {
             NodeValue::Bool(false), // true ^ (true || false) = false
         ];
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             // action + assertion
@@ -356,7 +364,7 @@ mod tests {
             NodeValue::Double(62.5),  // index 6 = |-62.5|= 62.5
         ];
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
@@ -400,7 +408,7 @@ mod tests {
             NodeValue::Bool(true),                  // true == true
         ];
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
@@ -425,7 +433,7 @@ mod tests {
             NodeValue::Int64(3),                    // Pi rounded to the nearest int
         ];
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
@@ -477,7 +485,7 @@ mod tests {
             NodeValue::Bool(true), // True && True = True
         ];
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // assert that evaluated_result[i] == expected_result[i] for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
@@ -527,7 +535,7 @@ mod tests {
             NodeValue::Bool(true),   // 50 < 80 = true
         ];
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // assert that evaluated_result[i] == expected_result[i]  for all index i
         for (rust_node, expected_val_ref) in nodes.iter().zip(expected_results.iter()) {
             assert_eq!(rust_node.evaluate(Arc::clone(&context)).unwrap_sync()?, *expected_val_ref);
@@ -545,7 +553,7 @@ mod tests {
             right: Some(true_node),
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         // expr is "0 < True"
         let err = lt_node.evaluate(context).unwrap_sync().unwrap_err();
 
@@ -565,7 +573,7 @@ mod tests {
             message_provider: Arc::new(MockMessageProvider::new()),
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let err = node.evaluate(context).unwrap_sync().unwrap_err();
 
         assert!(
@@ -585,7 +593,7 @@ mod tests {
             message_provider,
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let res = node.evaluate(context).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::None);
@@ -600,6 +608,7 @@ mod tests {
         });
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
+            None,
             KNOWN_PUBLISHER_NAME.to_owned(),
             Arc::<Int32Value>::clone(&msg),
         ));
@@ -630,7 +639,7 @@ mod tests {
             right: Some(node2),
         });
 
-        let res = node3.evaluate(Arc::new(NodeEvaluationContext::new())).unwrap_sync().unwrap();
+        let res = node3.evaluate(Arc::new(create_node_evaluation_context())).unwrap_sync().unwrap();
         assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
     }
 
@@ -656,8 +665,11 @@ mod tests {
             right: Some(node2),
         });
 
-        let res =
-            node3.evaluate(Arc::new(NodeEvaluationContext::new())).unwrap_async().await.unwrap();
+        let res = node3
+            .evaluate(Arc::new(create_node_evaluation_context()))
+            .unwrap_async()
+            .await
+            .unwrap();
         assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
     }
 
@@ -667,7 +679,7 @@ mod tests {
             function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let res = timestamp_node.evaluate(Arc::clone(&context)).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::Int64(context.unix_timestamp.0));
@@ -679,7 +691,7 @@ mod tests {
             function: FunctionType::GetCurrentTimestamp { time_source: TimeSource::RealtimeClock },
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let expected_timestamp = i64::try_from(
             SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros(),
         )
@@ -693,17 +705,31 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_function_timestamp_time_source_monotonic_success() {
+    fn evaluate_function_timestamp_time_source_monotonic_since_boot_success() {
         let timestamp_node = Arc::new(Node::FunctionLeaf {
             function: FunctionType::GetCurrentTimestamp {
                 time_source: TimeSource::MonotonicTimeSinceBoot,
             },
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let res = timestamp_node.evaluate(Arc::clone(&context)).unwrap_sync().unwrap();
 
         assert_eq!(res, NodeValue::Int64(context.monotonic_time_since_boot.0));
+    }
+
+    #[test]
+    fn evaluate_function_timestamp_time_source_monotonic_since_boot_or_resume_success() {
+        let timestamp_node = Arc::new(Node::FunctionLeaf {
+            function: FunctionType::GetCurrentTimestamp {
+                time_source: TimeSource::MonotonicTimeSinceBootOrResume,
+            },
+        });
+
+        let context = Arc::new(create_node_evaluation_context());
+        let res = timestamp_node.evaluate(Arc::clone(&context)).unwrap_sync().unwrap();
+
+        assert_eq!(res, NodeValue::Int64(context.monotonic_time_since_boot_or_resume.0));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -725,7 +751,7 @@ mod tests {
             right: Some(constant_node),
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
@@ -754,7 +780,7 @@ mod tests {
             right: Some(field_node),
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let err = combination_node.evaluate(context).unwrap_async().await.unwrap_err();
 
         assert!(
@@ -791,7 +817,7 @@ mod tests {
             right: Some(right_field_node),
         });
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(create_node_evaluation_context());
         let res = combination_node.evaluate(context).unwrap_async().await.unwrap();
 
         assert_eq!(&res, &NodeValue::Bool(true));

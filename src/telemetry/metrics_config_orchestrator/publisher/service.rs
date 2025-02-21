@@ -532,6 +532,7 @@ mod tests {
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
     use std::sync::Arc;
 
@@ -558,7 +559,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             service_adapter,
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ))
     }
@@ -574,7 +575,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ))
     }
@@ -705,7 +706,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -750,7 +751,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(tx),
         ));
 
@@ -794,7 +795,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -826,7 +827,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -886,7 +887,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -945,7 +946,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -973,7 +974,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 
@@ -1007,7 +1008,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(tx),
         ));
 
@@ -1044,7 +1045,7 @@ mod tests {
             SubSamplingInterval::ZERO,
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| panic!("Unexpected error: {err:?}")),
         ));
 

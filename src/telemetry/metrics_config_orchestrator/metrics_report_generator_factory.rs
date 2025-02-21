@@ -209,6 +209,7 @@ impl MetricsReportGeneratorFactoryImpl {
 mod tests {
     use super::*;
 
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_utils::collection_extension::VecExtension;
@@ -292,7 +293,7 @@ mod tests {
     fn create_factory() -> MetricsReportGeneratorFactoryImpl {
         MetricsReportGeneratorFactoryImpl::new(
             Arc::new(MockMessageBuilderFactory::new()),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
@@ -381,8 +382,9 @@ mod tests {
     #[test]
     fn create_proto_message_builder_factory_returns_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
-        let node_evaluation_context_factory = Arc::new(NodeEvaluationContextFactoryImpl::new())
-            as Arc<dyn NodeEvaluationContextFactory>;
+        let node_evaluation_context_factory =
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal()))
+                as Arc<dyn NodeEvaluationContextFactory>;
         message_builder_factory.fail_create();
         let factory = MetricsReportGeneratorFactoryImpl::new(
             Arc::new(message_builder_factory),
@@ -495,7 +497,7 @@ mod tests {
         message_builder_factory.fail_validate();
         let factory = MetricsReportGeneratorFactoryImpl::new(
             Arc::new(message_builder_factory),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),

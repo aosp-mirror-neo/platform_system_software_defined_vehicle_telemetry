@@ -478,6 +478,7 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(tx)).await;
 
         let trigger_context = Arc::new(NodeEvaluationContext::with_publisher_message(
+            None,
             PUBLISHER_NAME_2.to_owned(),
             Arc::new(msg.clone()),
         ));

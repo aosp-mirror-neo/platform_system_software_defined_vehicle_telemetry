@@ -7,6 +7,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryService::{
 use rustutils::system_properties::PropertyWatcher;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry::SdvTelemetryService;
+use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 
 use binder_tokio::TokioRuntime;
 use log::info;
@@ -19,6 +20,7 @@ const ROOT_DIR: &str = "/data/vendor/";
 
 pub async fn register_services(
     service_publisher_manager_impl: Arc<ServicePublisherManager>,
+    pal: Arc<dyn PlatformAbstractionLayer>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
     let value = watcher.read(|_, value| Ok(value.trim().to_owned())).ok();
@@ -32,6 +34,7 @@ pub async fn register_services(
         ROOT_DIR,
         configured_size * SIZE_MB,
         service_publisher_manager_impl,
+        pal,
     )
     .await
     else {

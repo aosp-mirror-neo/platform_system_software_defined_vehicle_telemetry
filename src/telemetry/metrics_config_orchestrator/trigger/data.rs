@@ -179,7 +179,7 @@ mod tests {
             .await;
 
         // Fire publisher message. This should notify subscribed trigger.
-        publisher.fire_new_message(Arc::new(NodeEvaluationContext::new())).await;
+        publisher.fire_new_message(Arc::new(NodeEvaluationContext::new(None))).await;
 
         // Wait for notification.
         let (activation_id, _context) = callback_listener.wait_for_callback_fired().await;
@@ -205,7 +205,7 @@ mod tests {
             .subscribe(&TriggerSubscriber::MetricsConfigEnd, callback_listener2.create_callback())
             .await;
 
-        publisher.fire_new_message(Arc::new(NodeEvaluationContext::new())).await;
+        publisher.fire_new_message(Arc::new(NodeEvaluationContext::new(None))).await;
 
         // Wait for trigger to fire and both callbacks to run.
         let context1 = callback_listener1.wait_for_callback_fired().await;

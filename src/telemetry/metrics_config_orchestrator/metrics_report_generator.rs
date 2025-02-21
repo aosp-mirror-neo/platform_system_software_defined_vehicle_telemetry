@@ -198,6 +198,7 @@ mod test {
     use futures::FutureExt;
     use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
     use protobuf::MessageDyn;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
@@ -234,7 +235,7 @@ mod test {
             CONFIG_VERSION,
             message_builder,
             vec![],
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
@@ -389,7 +390,7 @@ mod test {
         // Activate the generator.
         Arc::new(generator).activate().await;
 
-        let context = Arc::new(NodeEvaluationContext::new());
+        let context = Arc::new(NodeEvaluationContext::new(None));
         trigger.fire_with_context(Arc::clone(&context)).await;
 
         // Wait for the report to be delivered.

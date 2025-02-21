@@ -239,6 +239,7 @@ mod tests {
     use protobuf::well_known_types::duration::Duration as DurationProto;
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
     use sdv_telemetry_service_publisher_accessor::{
         AvailabilityCallbackRegistration, ServicePublisherAccessorError,
@@ -306,7 +307,7 @@ mod tests {
         PublisherFactoryImpl::new(
             Arc::new(message_builder_factory.unwrap_or_else(MockMessageBuilderFactory::new)),
             Arc::new(MockServiceAdapter {}),
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(|err| {
                 panic!("Unexpected error: {err:?}");
             }),
@@ -363,7 +364,7 @@ mod tests {
             TRIGGER_NAME.to_owned(),
             CONFIG_UUID.to_owned(),
             INTERVAL,
-            Arc::new(NodeEvaluationContextFactoryImpl::new()),
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
         );
 
         (publisher, trigger)

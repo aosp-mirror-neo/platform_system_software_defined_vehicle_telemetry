@@ -9,6 +9,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 
 use log::{error, info};
 use parking_lot::Mutex;
+use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry_utils::file_io_utils;
@@ -113,6 +114,7 @@ impl MetricsConfigManagerImpl {
         inactive_dir_path: PathBuf,
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
+        pal: Arc<dyn PlatformAbstractionLayer>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
         misc_error_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
@@ -134,6 +136,7 @@ impl MetricsConfigManagerImpl {
                 let manager_reference_clone = Weak::clone(manager_reference);
                 let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
                     service_publisher_manager,
+                    pal,
                     move |config_uuid, _context| {
                         if let Some(manager) = manager_reference_clone.upgrade() {
                             // TODO(b/308000132): Ensure to use `_context` here once we
@@ -534,14 +537,16 @@ pub(crate) mod mock;
 mod tests {
     use super::*;
 
-    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
     use futures::future::{self, BoxFuture, FutureExt};
     use protobuf::Message;
     use rand::prelude::SliceRandom;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig as MetricsConfigProto;
     use sdv_telemetry_test_utils::oneshot_callback;
     use std::path::Path;
     use tempfile::Builder;
+
+    use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
 
     static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -665,6 +670,7 @@ mod tests {
                 inactive_dir_path.to_path_buf(),
                 max_persistent_config_store_size,
                 Arc::new(MockServicePublisherAccessor::new()),
+                new_stub_pal(),
                 |_| {},
                 move |status| {
                     tx(status);

@@ -101,6 +101,7 @@ mod tests {
     fn get_sync_message_from_context_success() {
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
+            None,
             KNOWN_PUBLISHER_NAME.to_owned(),
             Arc::<Int32Value>::clone(&msg),
         ));
@@ -114,7 +115,7 @@ mod tests {
     #[test]
     fn get_sync_message_from_cache_success() {
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
-        let mut state = NodeEvaluationState::new(NodeEvaluationContext::new().into());
+        let mut state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
         state.cache_sync_message(
             KNOWN_PUBLISHER_NAME.to_owned(),
             Some(Arc::<Int32Value>::clone(&msg)),
@@ -127,7 +128,7 @@ mod tests {
 
     #[test]
     fn get_sync_message_not_found_returns_none() {
-        let state = NodeEvaluationState::new(NodeEvaluationContext::new().into());
+        let state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
 
         let res = state.get_sync_message(KNOWN_PUBLISHER_NAME);
 
@@ -138,7 +139,7 @@ mod tests {
     #[tokio::test]
     async fn get_async_message_from_cache_success() {
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
-        let mut state = NodeEvaluationState::new(NodeEvaluationContext::new().into());
+        let mut state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
         let msg_clone = Arc::clone(&msg);
         let future = async move { Ok(Some(msg_clone as Arc<dyn MessageDyn>)) }.boxed().shared();
         state.cache_async_message(KNOWN_PUBLISHER_NAME.to_owned(), future);
@@ -151,7 +152,7 @@ mod tests {
 
     #[test]
     fn get_async_message_not_found_returns_none() {
-        let state = NodeEvaluationState::new(NodeEvaluationContext::new().into());
+        let state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
 
         let res = state.get_async_message(KNOWN_PUBLISHER_NAME);
 
