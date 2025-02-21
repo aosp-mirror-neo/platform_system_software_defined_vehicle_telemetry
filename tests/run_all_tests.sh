@@ -33,11 +33,9 @@ atest --build $TEST_TARGETS
 # we want to make sure that they at least build successfully.
 (cd $ANDROID_BUILD_TOP && mmm "system/software_defined_vehicle/telemetry")
 
-log "Stopping all VM instances..."
-cvd stop
-
 log "Resetting VM instances..."
 cvd reset -y
+cvd clear
 
 # Restart CVD for changes to take effect
 log "Starting VM instance..."
