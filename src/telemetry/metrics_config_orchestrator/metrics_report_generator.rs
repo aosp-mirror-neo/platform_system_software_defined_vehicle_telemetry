@@ -19,10 +19,11 @@ use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
 use crate::metrics_config_orchestrator::Trigger;
+use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::MetricsReportGeneratorErrorDetails::MetricsReportGeneratorErrorDetails,
-    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+    StatusDetails::StatusDetails,
 };
 
 #[async_trait]
@@ -48,7 +49,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     subscriber: TriggerSubscriber,
     triggers: Vec<Arc<dyn Trigger>>,
 
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
 }
 
@@ -106,7 +107,7 @@ impl MetricsReportGeneratorImpl {
         message_builder: Arc<dyn MessageBuilder>,
         triggers: Vec<Arc<dyn Trigger>>,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
         report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
     ) -> Self {
         let subscriber =
@@ -124,7 +125,7 @@ impl MetricsReportGeneratorImpl {
             triggers,
             node_evaluation_context_factory,
 
-            error_callback,
+            status_reporter,
             report_ready_callback,
         }
     }
@@ -162,17 +163,16 @@ impl MetricsReportGeneratorImpl {
             Err(err) => {
                 let metrics_config_uuid = self.config_uuid.clone();
                 let metrics_report_name = self.name.clone();
-                (self.error_callback)(TelemetryServiceStatus {
-                    code: err.get_status_code(),
-                    message: format!("Metrics config {metrics_config_uuid} metrics report generation for '{metrics_report_name}' failed due to message builder error: {err}"),
-                    details: StatusDetails::MetricsReportGeneratorErrorDetails(
+                self.status_reporter.report(
+                    err.get_status_code(),
+                    format!("Metrics config {metrics_config_uuid} metrics report generation for '{metrics_report_name}' failed due to message builder error: {err}"),
+                    StatusDetails::MetricsReportGeneratorErrorDetails(
                         MetricsReportGeneratorErrorDetails {
                             metricsConfigUUID: metrics_config_uuid,
                             metricsReportName: metrics_report_name,
                             fieldName: err.field_name,
                         },
-                    ),
-                });
+                    ));
             }
         }
     }
@@ -196,7 +196,10 @@ mod test {
     use super::*;
 
     use futures::FutureExt;
-    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
     use protobuf::MessageDyn;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -210,6 +213,7 @@ mod test {
         mock::MockMessageBuilder, MessageBuilderError, MessageBuilderErrorType,
     };
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
+    use crate::StatusReporterImpl;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const CONFIG_VERSION: u32 = 42;
@@ -236,9 +240,9 @@ mod test {
             message_builder,
             vec![],
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| {
+            Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
-            }),
+            })),
             Arc::new(|_| {}),
         )
     }
@@ -345,7 +349,7 @@ mod test {
 
         let mut generator = create_generator(Arc::clone(&message_builder));
         let (tx, rx) = oneshot_callback();
-        generator.error_callback = Arc::new(tx);
+        generator.status_reporter = Arc::new(StatusReporterImpl::new(tx));
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
         let generator = Arc::new(generator);
 

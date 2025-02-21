@@ -3,7 +3,6 @@
 use async_trait::async_trait;
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::FileIOErrorDetails::FileIOErrorDetails, StatusDetails::StatusDetails,
-    TelemetryServiceStatus::TelemetryServiceStatus,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
 
@@ -29,6 +28,7 @@ use crate::metrics_config_orchestrator::{
     MetricsConfigOrchestrator, MetricsConfigOrchestratorError as ConfigOrchestratorError,
     MetricsConfigOrchestratorImpl,
 };
+use crate::status_reporter::StatusReporter;
 
 /// Interface of a service that manages Metrics Configurations.
 #[async_trait]
@@ -116,19 +116,17 @@ impl MetricsConfigManagerImpl {
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         pal: Arc<dyn PlatformAbstractionLayer>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        misc_error_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
-        let misc_error_callback =
-            Arc::new(misc_error_callback) as Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>;
         let handle_file_io_error = |err_code: StatusCodes, err_msg: &str, path: &Path| {
             error!("{}", err_msg);
-            misc_error_callback(TelemetryServiceStatus {
-                code: err_code,
-                message: err_msg.to_owned(),
-                details: StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
+            status_reporter.report(
+                err_code,
+                err_msg.to_owned(),
+                StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
                     path: path.to_string_lossy().to_string(),
                 }),
-            });
+            );
         };
 
         let config_manager = Arc::new_cyclic(
@@ -158,7 +156,7 @@ impl MetricsConfigManagerImpl {
                         }
                     },
                     report_ready_callback,
-                    Arc::clone(&misc_error_callback),
+                    Arc::clone(&status_reporter),
                 ));
 
                 MetricsConfigManagerImpl {
@@ -538,6 +536,7 @@ mod tests {
     use super::*;
 
     use futures::future::{self, BoxFuture, FutureExt};
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
     use protobuf::Message;
     use rand::prelude::SliceRandom;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
@@ -547,6 +546,7 @@ mod tests {
     use tempfile::Builder;
 
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
+    use crate::StatusReporterImpl;
 
     static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -672,9 +672,9 @@ mod tests {
                 Arc::new(MockServicePublisherAccessor::new()),
                 new_stub_pal(),
                 |_| {},
-                move |status| {
+                Arc::new(StatusReporterImpl::new(move |status| {
                     tx(status.into());
-                },
+                })),
             )
             .await
             .unwrap();

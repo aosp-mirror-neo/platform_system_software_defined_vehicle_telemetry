@@ -19,7 +19,6 @@ mod trigger_factory;
 
 // External dependencies.
 use async_trait::async_trait;
-use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
 use log::{debug, error};
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
@@ -51,6 +50,7 @@ use crate::expr::node_evaluation_context_factory::{
 };
 use crate::expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use crate::expr::node_value_type::NodeValueType;
+use crate::status_reporter::StatusReporter;
 
 // Child module dependencies.
 use descriptor_provider_factory::{
@@ -533,12 +533,12 @@ impl MetricsConfigOrchestratorImpl {
             + Sync
             + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
-        misc_error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
             Arc::clone(&service_publisher_manager),
-            Arc::clone(&misc_error_callback),
+            Arc::clone(&status_reporter),
         ));
         let node_evaluation_context_factory = Arc::new(NodeEvaluationContextFactoryImpl::new(pal))
             as Arc<dyn NodeEvaluationContextFactory>;
@@ -548,18 +548,18 @@ impl MetricsConfigOrchestratorImpl {
             metrics_report_generator_factory: Box::new(MetricsReportGeneratorFactoryImpl::new(
                 Arc::<MessageBuilderFactoryImpl>::clone(&message_builder_factory),
                 Arc::clone(&node_evaluation_context_factory),
-                Arc::clone(&misc_error_callback),
+                Arc::clone(&status_reporter),
             )),
             node_factory: Box::new(NodeFactoryImpl::new()),
             publisher_factory: Box::new(PublisherFactoryImpl::new(
                 message_builder_factory,
                 service_adapter,
                 Arc::clone(&node_evaluation_context_factory),
-                Arc::clone(&misc_error_callback),
+                Arc::clone(&status_reporter),
             )),
             trigger_factory: Box::new(TriggerFactoryImpl::new(
                 node_evaluation_context_factory,
-                Arc::clone(&misc_error_callback),
+                Arc::clone(&status_reporter),
             )),
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),

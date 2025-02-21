@@ -19,10 +19,11 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
+use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::AggregationPublisherErrorDetails::AggregationPublisherErrorDetails,
-    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+    StatusDetails::StatusDetails,
 };
 
 pub(crate) struct AggregationPublisher {
@@ -33,7 +34,7 @@ pub(crate) struct AggregationPublisher {
     message_builder: Arc<dyn MessageBuilder>,
     state: AsyncMutex<AggregationPublisherState>,
     trigger_subscriber: TriggerSubscriber,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 #[derive(strum_macros::Display)]
@@ -230,7 +231,7 @@ impl AggregationPublisher {
         message_builder: Arc<dyn MessageBuilder>,
         reset_on_get: bool,
         triggers: Vec<Arc<dyn Trigger>>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name.clone(), metrics_config_uuid),
@@ -240,7 +241,7 @@ impl AggregationPublisher {
             reset_on_get,
             trigger_subscriber: TriggerSubscriber::AggregationPublisher { name },
             triggers,
-            error_callback,
+            status_reporter,
         }
     }
 
@@ -261,19 +262,13 @@ impl AggregationPublisher {
             Err(err) => {
                 let publisher_name = self.get_name().to_owned();
                 let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
-                (self.error_callback)(TelemetryServiceStatus {
-                    code: err.get_status_code(),
-                    message: format!(
-                        "Metrics config {metrics_config_uuid} aggregation publisher {publisher_name} failed to build message: {err}"
-                    ),
-                    details: StatusDetails::AggregationPublisherErrorDetails(
-                        AggregationPublisherErrorDetails {
-                            metricsConfigUUID: metrics_config_uuid,
-                            publisherName: publisher_name,
-                            fieldName: err.field_name,
-                        },
-                    ),
-                });
+                self.status_reporter.report(err.get_status_code(), format!("Metrics config {metrics_config_uuid} aggregation publisher {publisher_name} failed to build message: {err}"), StatusDetails::AggregationPublisherErrorDetails(
+                    AggregationPublisherErrorDetails {
+                        metricsConfigUUID: metrics_config_uuid,
+                        publisherName: publisher_name,
+                        fieldName: err.field_name,
+                    },
+                ));
                 return;
             }
         };
@@ -289,7 +284,10 @@ mod tests {
     use super::*;
 
     use futures::FutureExt;
-    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
     use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::Int32Value;
@@ -301,6 +299,7 @@ mod tests {
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
     use crate::metrics_config_orchestrator::message_builder::MessageBuilderErrorType;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
+    use crate::StatusReporterImpl;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const DATA_TRIGGER_NAME: &str = "datatrigger";
@@ -319,7 +318,7 @@ mod tests {
             Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
             false,
             triggers,
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
         (publisher, message_builder)
     }
@@ -364,7 +363,7 @@ mod tests {
             Arc::<MockMessageBuilder>::clone(&message_builder),
             true,
             vec![Arc::<MockTrigger>::clone(&trigger)],
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -582,7 +581,7 @@ mod tests {
             Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
             false,
             vec![Arc::<MockTrigger>::clone(&trigger)],
-            Arc::new(tx),
+            Arc::new(StatusReporterImpl::new(tx)),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();

@@ -23,8 +23,7 @@ use super::trigger::periodic::PeriodicTrigger;
 use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::expr::{node::Node, node_value_type::NodeValueType};
 use crate::metrics_config_orchestrator::{Publisher, Trigger};
-
-use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
+use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait TriggerFactory: Send + Sync {
@@ -91,7 +90,7 @@ pub(crate) enum TriggerFactoryError {
 
 pub(crate) struct TriggerFactoryImpl {
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 impl TriggerFactory for TriggerFactoryImpl {
@@ -155,7 +154,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     triggers,
                     Arc::clone(selector_expression),
                     Arc::clone(&self.node_evaluation_context_factory),
-                    Arc::clone(&self.error_callback),
+                    Arc::clone(&self.status_reporter),
                 )
             }
             _ => return Err(TriggerFactoryError::UnknownTriggerType),
@@ -218,9 +217,9 @@ impl TriggerFactory for TriggerFactoryImpl {
 impl TriggerFactoryImpl {
     pub(super) fn new(
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
-        Self { node_evaluation_context_factory, error_callback }
+        Self { node_evaluation_context_factory, status_reporter }
     }
 
     fn get_edge_options(
@@ -363,6 +362,7 @@ mod tests {
         ConnectionType, ServicePublisher,
     };
     use crate::metrics_config_orchestrator::service_adapter::mock::MockServiceAdapter;
+    use crate::StatusReporterImpl;
 
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
     const NODE_INDEX: u32 = 42;
@@ -377,7 +377,9 @@ mod tests {
             node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new(
                 new_stub_pal(),
             )),
-            error_callback: Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            status_reporter: Arc::new(StatusReporterImpl::new(|err| {
+                panic!("Unexpected error: {err:?}")
+            })),
         }
     }
 
@@ -557,7 +559,7 @@ mod tests {
             ConnectionType::Getter,
             Arc::new(MockServiceAdapter::new()),
             Arc::clone(&factory.node_evaluation_context_factory),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         let err = factory
@@ -591,7 +593,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::new(MockServiceAdapter::new()),
             Arc::clone(&factory.node_evaluation_context_factory),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         let res = factory

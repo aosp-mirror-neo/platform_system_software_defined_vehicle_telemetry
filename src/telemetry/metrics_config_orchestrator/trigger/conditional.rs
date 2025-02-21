@@ -23,10 +23,11 @@ use crate::metrics_config_orchestrator::trigger::condition_checker::{
     ConditionChecker, ConstantConditionChecker, EdgeConditionChecker,
     PreviousValueRelationalConditionChecker,
 };
+use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::ConditionalTriggerErrorDetails::ConditionalTriggerErrorDetails,
-    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+    StatusDetails::StatusDetails,
 };
 
 #[derive(Clone)]
@@ -62,7 +63,7 @@ pub(crate) struct ConditionalTrigger {
 
     subscriber: TriggerSubscriber,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 #[async_trait]
@@ -253,7 +254,7 @@ impl ConditionalTrigger {
         triggers: Vec<Arc<dyn Trigger>>,
         selector_expression: Arc<Node>,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
             base: BaseTrigger::new(
@@ -266,7 +267,7 @@ impl ConditionalTrigger {
             condition_type,
             subscriber: TriggerSubscriber::ConditionalTrigger { name },
             node_evaluation_context_factory,
-            error_callback,
+            status_reporter,
         })
     }
 
@@ -284,14 +285,12 @@ impl ConditionalTrigger {
             Err(err) => {
                 let trigger_name = self.get_name().to_owned();
                 let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
-                (self.error_callback)(TelemetryServiceStatus {
-                    code: err.get_status_code(),
-                    message: format!("Metrics config {metrics_config_uuid} conditional trigger '{trigger_name}' failed to evaluate condition: {err}"),
-                    details: StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
+                self.status_reporter.report(err.get_status_code(),
+                    format!("Metrics config {metrics_config_uuid} conditional trigger '{trigger_name}' failed to evaluate condition: {err}"),
+                    StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
                         metricsConfigUUID: metrics_config_uuid,
                         triggerName: trigger_name,
-                    }),
-                });
+                    }));
                 return;
             }
         };
@@ -311,7 +310,10 @@ mod tests {
 
     use anyhow::anyhow;
     use futures::FutureExt;
-    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
     use googletest::matchers::{eq, none, result_of_ref, some};
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
@@ -333,6 +335,7 @@ mod tests {
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
     };
     use crate::metrics_config_orchestrator::ServicePublisherAccessorError;
+    use crate::StatusReporterImpl;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const TRIGGER_NAME: &str = "trigger";
@@ -381,7 +384,7 @@ mod tests {
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         );
 
         (trigger, message_provider, parent_trigger)
@@ -462,7 +465,7 @@ mod tests {
             ],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         );
         let mut trigger = Arc::into_inner(trigger).unwrap();
         let subscription_manager = MockSubscriptionManager::new();
@@ -513,7 +516,7 @@ mod tests {
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         );
 
         let callback_listener1 = Arc::new(MockCallbackListener::new());
@@ -672,7 +675,7 @@ mod tests {
 
         let (tx, rx) = oneshot_callback();
         let mut trigger = Arc::into_inner(trigger).unwrap();
-        trigger.error_callback = Arc::new(tx);
+        trigger.status_reporter = Arc::new(StatusReporterImpl::new(tx));
         let trigger = Arc::new(trigger);
 
         Arc::clone(&trigger).activate(ACTIVATION_ID).await;

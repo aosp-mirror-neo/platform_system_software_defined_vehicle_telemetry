@@ -23,8 +23,7 @@ use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPubli
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
 use crate::metrics_config_orchestrator::service_adapter::ServiceAdapter;
 use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
-
-use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
+use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait PublisherFactory: Send + Sync {
@@ -81,7 +80,7 @@ pub(crate) struct PublisherFactoryImpl {
     message_builder_factory: Arc<dyn MessageBuilderFactory>,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 impl PublisherFactory for PublisherFactoryImpl {
@@ -104,7 +103,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                     Self::get_connection_type(service_publisher.connection_type)?,
                     Arc::clone(&self.service_adapter),
                     Arc::clone(&self.node_evaluation_context_factory),
-                    Arc::clone(&self.error_callback),
+                    Arc::clone(&self.status_reporter),
                 )))
             }
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
@@ -150,13 +149,13 @@ impl PublisherFactoryImpl {
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
         service_adapter: Arc<dyn ServiceAdapter>,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
             message_builder_factory,
             service_adapter,
             node_evaluation_context_factory,
-            error_callback,
+            status_reporter,
         }
     }
 
@@ -188,7 +187,7 @@ impl PublisherFactoryImpl {
             message_builder.into(),
             aggregation_publisher_proto.reset_on_get,
             triggers,
-            Arc::clone(&self.error_callback),
+            Arc::clone(&self.status_reporter),
         );
         Ok(Box::new(publisher))
     }
@@ -255,6 +254,7 @@ mod tests {
         GetMessageProviderOutcome, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
+    use crate::StatusReporterImpl;
 
     const INTERVAL: Duration = Duration::from_millis(42);
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
@@ -308,9 +308,9 @@ mod tests {
             Arc::new(message_builder_factory.unwrap_or_else(MockMessageBuilderFactory::new)),
             Arc::new(MockServiceAdapter {}),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| {
+            Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
-            }),
+            })),
         )
     }
 

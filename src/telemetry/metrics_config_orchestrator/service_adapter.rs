@@ -20,10 +20,10 @@ use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
+use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::ServiceErrorDetails::ServiceErrorDetails, StatusDetails::StatusDetails,
-    TelemetryServiceStatus::TelemetryServiceStatus,
 };
 
 type CallbackContainer = Arc<
@@ -131,7 +131,7 @@ pub(crate) struct ServiceAdapterImpl {
             ),
         >,
     >,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 impl ServiceSubscriptionType {
@@ -195,7 +195,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
         let maybe_subscription_type = if configuration.is_some() {
-            let error_callback = Arc::clone(&self.error_callback);
+            let status_reporter = Arc::clone(&self.status_reporter);
             let service_name_clone = service_name.to_owned();
             // Subscription has configuration, so it can't be shared.
             let create_subscription_outcome = self
@@ -207,15 +207,14 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     Box::new(move |msg| match msg {
                         Ok(msg) => new_message_callback(&msg.into()),
                         Err(err) => {
-                            (error_callback)(TelemetryServiceStatus {
-                                code: err.get_status_code(),
-                                message: format!(
+                            status_reporter.report(
+                                err.get_status_code(),
+                                format!(
                                     "Service runtime error for service '{service_name_clone}': {err}'"
                                 ),
-                                details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
+                                StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
                                     serviceName: service_name_clone.clone(),
-                                }),
-                            });
+                                }));
                         }
                     }),
                     cancellation_callback,
@@ -254,7 +253,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 }
                 Entry::Vacant(v) => {
                     // If there is no active subscription, create a new one and store it.
-                    let error_callback = Arc::clone(&self.error_callback);
+                    let status_reporter = Arc::clone(&self.status_reporter);
                     let (sender, receiver) = mpsc::unbounded_channel();
                     let service_name_clone = service_name.to_owned();
                     let service_name_clone2 = service_name.to_owned();
@@ -275,13 +274,12 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                     }
                                 }
                                 Err(err) => {
-                                    (error_callback)(TelemetryServiceStatus {
-                                        code: err.get_status_code(),
-                                        message: format!("Service runtime error for service '{service_name_clone}': {err}'"),
-                                        details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
+                                    status_reporter.report(
+                                        err.get_status_code(),
+                                        format!("Service runtime error for service '{service_name_clone}': {err}'"),
+                                        StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
                                             serviceName: service_name_clone.clone(),
-                                        }),
-                                    });
+                                        }));
                                 }
                             }),
                             Box::new(move || self_clone.on_shared_subscription_cancelled(&service_name_clone2, &sub_sampling_interval_clone)),
@@ -395,13 +393,13 @@ impl ServiceAdapter for ServiceAdapterImpl {
 impl ServiceAdapterImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
             next_subscription_id: SequenceNumber::new(),
             service_publisher_accessor: service_publisher_manager,
             service_subscriptions: AsyncMutex::new(HashMap::new()),
-            error_callback,
+            status_reporter,
         }
     }
 
@@ -463,7 +461,10 @@ pub(super) mod tests {
     use super::*;
 
     use anyhow::anyhow;
-    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
     use lazy_static::lazy_static;
     use protobuf::reflect::FieldDescriptor;
     use protobuf::well_known_types::wrappers::Int32Value;
@@ -472,6 +473,7 @@ pub(super) mod tests {
     use tokio::sync::mpsc;
 
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
+    use crate::StatusReporterImpl;
 
     const ERROR_MESSAGE: &str = "Error 42";
     const SERVICE_NAME: &str = "service";
@@ -496,9 +498,9 @@ pub(super) mod tests {
     ) -> Arc<ServiceAdapterImpl> {
         Arc::new(ServiceAdapterImpl::new(
             accessor,
-            Arc::new(|err| {
+            Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
-            }),
+            })),
         ))
     }
 
@@ -854,9 +856,9 @@ pub(super) mod tests {
             let accessor = Arc::new(MockServicePublisherAccessor::new());
             let service_adapter = Arc::new(ServiceAdapterImpl::new(
                 Arc::<MockServicePublisherAccessor>::clone(&accessor),
-                Arc::new(|err| {
+                Arc::new(StatusReporterImpl::new(|err| {
                     panic!("Unexpected error: {err:?}");
-                }),
+                })),
             ));
             let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -1154,7 +1156,7 @@ pub(super) mod tests {
         let (tx, rx) = oneshot_callback();
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
             Arc::clone(&accessor) as Arc<dyn ServicePublisherAccessor>,
-            Arc::new(tx),
+            Arc::new(StatusReporterImpl::new(tx)),
         ));
 
         service_adapter
@@ -1198,7 +1200,7 @@ pub(super) mod tests {
         let (tx, rx) = oneshot_callback();
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
             Arc::clone(&accessor) as Arc<dyn ServicePublisherAccessor>,
-            Arc::new(tx),
+            Arc::new(StatusReporterImpl::new(tx)),
         ));
 
         service_adapter

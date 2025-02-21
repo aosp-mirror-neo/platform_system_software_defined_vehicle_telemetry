@@ -18,8 +18,7 @@ use crate::metrics_config_orchestrator::message_builder_factory::{
 use crate::metrics_config_orchestrator::{
     MetricsReportGenerator, MetricsReportGeneratorImpl, Trigger,
 };
-
-use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
+use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait MetricsReportGeneratorFactory: Send + Sync {
@@ -79,16 +78,16 @@ pub(crate) enum MetricsReportGeneratorFactoryError {
 pub(crate) struct MetricsReportGeneratorFactoryImpl {
     message_builder_factory: Arc<dyn MessageBuilderFactory>,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 impl MetricsReportGeneratorFactoryImpl {
     pub(crate) fn new(
         message_builder_factory: Arc<dyn MessageBuilderFactory>,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
-        Self { message_builder_factory, node_evaluation_context_factory, error_callback }
+        Self { message_builder_factory, node_evaluation_context_factory, status_reporter }
     }
 }
 
@@ -142,7 +141,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             message_builder.into(),
             triggers,
             Arc::clone(&self.node_evaluation_context_factory),
-            Arc::clone(&self.error_callback),
+            Arc::clone(&self.status_reporter),
             Arc::clone(context.report_ready_callback),
         )))
     }
@@ -222,6 +221,7 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::{
         mock::MockTrigger, periodic::PeriodicTrigger, TriggerSubscriber,
     };
+    use crate::StatusReporterImpl;
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";
@@ -294,9 +294,9 @@ mod tests {
         MetricsReportGeneratorFactoryImpl::new(
             Arc::new(MockMessageBuilderFactory::new()),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| {
+            Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
-            }),
+            })),
         )
     }
 
@@ -389,9 +389,9 @@ mod tests {
         let factory = MetricsReportGeneratorFactoryImpl::new(
             Arc::new(message_builder_factory),
             Arc::clone(&node_evaluation_context_factory),
-            Arc::new(|err| {
+            Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
-            }),
+            })),
         );
         let config = create_valid_config();
         let trigger = PeriodicTrigger::new(
@@ -498,9 +498,9 @@ mod tests {
         let factory = MetricsReportGeneratorFactoryImpl::new(
             Arc::new(message_builder_factory),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| {
+            Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
-            }),
+            })),
         );
         let config = create_valid_config();
 

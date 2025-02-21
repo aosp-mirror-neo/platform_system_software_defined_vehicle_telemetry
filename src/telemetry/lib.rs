@@ -7,6 +7,7 @@ mod metrics_config_manager;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;
 mod status_listener;
+mod status_reporter;
 
 pub mod service_publisher_manager;
 
@@ -42,6 +43,7 @@ use metrics_config_manager::{
 use metrics_config_orchestrator::MetricsConfigOrchestratorError as ConfigOrchestratorError;
 use metrics_report_listener::MetricsReportListener;
 use status_listener::{StatusListener, StatusListenerImpl};
+use status_reporter::StatusReporterImpl;
 
 const ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
 const INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -149,6 +151,10 @@ impl SdvTelemetryService {
         let status_listener = Arc::new(StatusListenerImpl::new());
         let status_listener_clone = Arc::clone(&status_listener);
 
+        let status_reporter = Arc::new(StatusReporterImpl::new(move |status| {
+            status_listener_clone.send_misc_status(status);
+        }));
+
         let config_manager_res = MetricsConfigManagerImpl::new(
             active_dir_path,
             inactive_dir_path,
@@ -156,7 +162,7 @@ impl SdvTelemetryService {
             service_publisher_manager,
             pal,
             move |report| report_listener.on_report_ready(report),
-            move |status| status_listener_clone.send_misc_status(status),
+            status_reporter,
         )
         .await;
 

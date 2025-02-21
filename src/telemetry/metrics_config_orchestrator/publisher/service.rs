@@ -27,10 +27,11 @@ use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
+use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::ServicePublisherErrorDetails::ServicePublisherErrorDetails,
-    StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
+    StatusDetails::StatusDetails,
 };
 
 pub(crate) enum ConnectionType {
@@ -48,7 +49,7 @@ pub(crate) struct ServicePublisher {
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
     state: AsyncMutex<ServicePublisherState>,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-    error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+    status_reporter: Arc<dyn StatusReporter>,
 }
 
 #[derive(strum_macros::Display)]
@@ -257,7 +258,7 @@ impl ServicePublisher {
         connection_type: ConnectionType,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-        error_callback: Arc<dyn Fn(TelemetryServiceStatus) + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name, metrics_config_uuid),
@@ -268,7 +269,7 @@ impl ServicePublisher {
             service_name,
             state: ServicePublisherState::Inactive.into(),
             node_evaluation_context_factory,
-            error_callback,
+            status_reporter,
         }
     }
 
@@ -383,15 +384,13 @@ impl ServicePublisher {
                     Err(err) => {
                         let publisher_name = self.get_name().to_owned();
                         let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
-                        (self.error_callback)(TelemetryServiceStatus {
-                            code: err.get_status_code(),
-                            message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} failed to retry activation: {err}"),
-                            details: StatusDetails::ServicePublisherErrorDetails(ServicePublisherErrorDetails
+                        self.status_reporter.report(err.get_status_code(),
+                            format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} failed to retry activation: {err}"),
+                            StatusDetails::ServicePublisherErrorDetails(ServicePublisherErrorDetails
                                 {
                                     metricsConfigUUID: metrics_config_uuid,
                                     publisherName: publisher_name,
-                                }),
-                            });
+                                }));
                     }
                 }
             },
@@ -509,16 +508,15 @@ impl ServicePublisher {
             if let Err(err) = self_clone.activate_impl(state_lock).await {
                 let publisher_name = self_clone.get_name().to_owned();
                 let metrics_config_uuid = self_clone.get_metrics_config_uuid().to_owned();
-                (self_clone.error_callback)(TelemetryServiceStatus {
-                    code: err.get_status_code(),
-                    message: format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} activation after subscription cancellation failed: {err}"),
-                    details: StatusDetails::ServicePublisherErrorDetails(
+                self_clone.status_reporter.report(
+                    err.get_status_code(),
+                    format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} activation after subscription cancellation failed: {err}"),
+                    StatusDetails::ServicePublisherErrorDetails(
                         ServicePublisherErrorDetails {
                             metricsConfigUUID: metrics_config_uuid,
                             publisherName: publisher_name,
                         },
-                    ),
-                });
+                    ));
             }
         });
     }
@@ -527,7 +525,10 @@ impl ServicePublisher {
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
-    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
     use googletest::assert_that;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
@@ -541,6 +542,7 @@ mod tests {
     use crate::metrics_config_orchestrator::service_adapter::mock::{
         MockServiceAdapter, MockServiceMessageProvider,
     };
+    use crate::StatusReporterImpl;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const DATA_TRIGGER_NAME: &str = "datatrigger";
@@ -560,7 +562,7 @@ mod tests {
             ConnectionType::Getter,
             service_adapter,
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ))
     }
 
@@ -576,7 +578,7 @@ mod tests {
             ConnectionType::Subscription,
             service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ))
     }
 
@@ -707,7 +709,7 @@ mod tests {
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -752,7 +754,7 @@ mod tests {
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(tx),
+            Arc::new(StatusReporterImpl::new(tx)),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -796,7 +798,7 @@ mod tests {
             ConnectionType::Getter,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -828,7 +830,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -888,7 +890,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -947,7 +949,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         let err = Arc::clone(&publisher).activate().await.err().unwrap();
@@ -975,7 +977,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -1009,7 +1011,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(tx),
+            Arc::new(StatusReporterImpl::new(tx)),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
@@ -1046,7 +1048,7 @@ mod tests {
             ConnectionType::Subscription,
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::new(|err| panic!("Unexpected error: {err:?}")),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
         Arc::clone(&publisher).activate().await.unwrap();
