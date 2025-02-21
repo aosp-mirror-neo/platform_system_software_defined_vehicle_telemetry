@@ -6,11 +6,9 @@ package google.sdv.telemetry.status;
  * Information on statuses which are being sent back to the client
  */
 
-@RustDerive(Clone=true)
 @VintfStability
 union StatusDetails {
     // Aggregation Publisher error details
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable AggregationPublisherErrorDetails {
         @utf8InCpp String metricsConfigUUID;
@@ -19,7 +17,6 @@ union StatusDetails {
     }
 
     // Service Publisher error details
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable ServicePublisherErrorDetails {
         @utf8InCpp String metricsConfigUUID;
@@ -27,7 +24,6 @@ union StatusDetails {
     }
 
     // Trigger error details
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable ConditionalTriggerErrorDetails {
         @utf8InCpp String metricsConfigUUID;
@@ -35,7 +31,6 @@ union StatusDetails {
     }
 
     // Metrics Report Generator error details
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable MetricsReportGeneratorErrorDetails {
         @utf8InCpp String metricsConfigUUID;
@@ -44,14 +39,12 @@ union StatusDetails {
     }
 
     // Service error details
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable ServiceErrorDetails {
         @utf8InCpp String serviceName;
     }
 
     // File IO error details
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable FileIOErrorDetails {
         @utf8InCpp String path;

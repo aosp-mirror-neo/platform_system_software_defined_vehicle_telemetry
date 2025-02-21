@@ -68,7 +68,7 @@ pub async fn get_report(
     report_info: &ReportInfo,
 ) -> Result<MetricsReport, SimulatorError> {
     telemetry_service
-        .get_metrics_report(report_info.to_owned())
+        .get_metrics_report(report_info)
         .await
         .map_err(|error| SimulatorError::Error {
             error_message: format!(

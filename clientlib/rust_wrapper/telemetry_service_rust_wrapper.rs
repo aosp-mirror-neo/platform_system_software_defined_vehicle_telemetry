@@ -38,7 +38,7 @@ pub struct TelemetryError {
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 
 /// Represents the callback argument of the report ready callback.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ReportInfo {
     /// The metrics config UUID
     pub metrics_config_uuid: String,
@@ -447,7 +447,7 @@ impl TelemetryServiceHolder {
     /// @return MetricsReport in case of success, an error code and error message in case of failure
     pub async fn get_metrics_report(
         &self,
-        report_info: ReportInfo,
+        report_info: &ReportInfo,
     ) -> TelemetryResult<MetricsReport> {
         metrics_report_manager::get_metrics_report(self, report_info).await
     }
@@ -588,7 +588,7 @@ mod test {
         assert_send_sync(service.get_active_metrics_config_uuids());
         assert_send_sync(service.get_inactive_metrics_config_uuids());
 
-        assert_send_sync(service.get_metrics_report(ReportInfo {
+        assert_send_sync(service.get_metrics_report(&ReportInfo {
             metrics_config_uuid: "".to_owned(),
             report_config_name: "".to_owned(),
             report_number: 0,

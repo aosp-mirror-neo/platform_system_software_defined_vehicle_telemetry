@@ -135,7 +135,7 @@ pub fn clear_report_ready_listener(service: &TelemetryServiceHolder) -> Telemetr
 
 pub async fn get_metrics_report(
     service: &TelemetryServiceHolder,
-    report_info: ReportInfo,
+    report_info: &ReportInfo,
 ) -> TelemetryResult<MetricsReport> {
     info!(
         "Retrieving report: {:?} {:?} report number: {}",
@@ -143,9 +143,9 @@ pub async fn get_metrics_report(
     );
 
     let metrics_config_uuid =
-        CString::new(report_info.metrics_config_uuid).expect("CString::new failed");
+        CString::new(report_info.metrics_config_uuid.as_str()).expect("CString::new failed");
     let report_config_name =
-        CString::new(report_info.report_config_name).expect("CString::new failed");
+        CString::new(report_info.report_config_name.as_str()).expect("CString::new failed");
 
     call_api_with_metrics_report_callback(move |callback_data, callback| {
         let report_info = rust_to_c::MetricsReportInfo {

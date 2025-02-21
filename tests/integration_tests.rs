@@ -121,7 +121,7 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     assert_eq!(ready_reports_info[0].report_number, report_info.report_number);
 
     info!("Retrieving metrics report");
-    let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info).await.unwrap();
     info!("Report received: {metrics_report:?}");
     assert_eq!(report_info.metrics_config_uuid, metrics_report.metrics_config_uuid);
 
@@ -326,7 +326,7 @@ async fn run_race_condition_test(config: MetricsConfig) {
     assert_eq!(report_info.metrics_config_uuid, config.uuid);
 
     info!("Retrieving metrics report");
-    let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info).await.unwrap();
     info!("Report received: {metrics_report:?}");
     assert_eq!(report_info.metrics_config_uuid, metrics_report.metrics_config_uuid);
 
@@ -423,7 +423,7 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
     info!("Received metrics report notification");
     assert_eq!(config_uuid, report_info.metrics_config_uuid);
 
-    let metrics_report = service.get_metrics_report(report_info).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info).await.unwrap();
     info!("Received metrics report");
     eprintln!("{metrics_report:?}");
 
@@ -537,7 +537,7 @@ async fn telemetry_service_someip() {
     let _ = server.wait();
     service.finish().unwrap();
 
-    let metrics_report = service.get_metrics_report(report_info.clone()).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info).await.unwrap();
     debug!("Report received: {metrics_report:?}");
 
     assert_eq!(report_info.metrics_config_uuid, config.uuid);
@@ -594,7 +594,7 @@ async fn telemetry_service_middleware() {
     info!("Received metrics report notification");
     assert_eq!(config_uuid, report_info.metrics_config_uuid);
 
-    let metrics_report = service.get_metrics_report(report_info).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info).await.unwrap();
     info!("Received metrics report");
     eprintln!("{metrics_report:?}");
 

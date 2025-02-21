@@ -18,7 +18,6 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.status;
-@RustDerive(Clone=true)
 @VintfStability
 union StatusDetails {
     google.sdv.telemetry.status.StatusDetails
@@ -31,38 +30,32 @@ union StatusDetails {
             .MetricsReportGeneratorErrorDetails metricsReportGeneratorErrorDetails;
     google.sdv.telemetry.status.StatusDetails.ServiceErrorDetails serviceErrorDetails;
     google.sdv.telemetry.status.StatusDetails.FileIOErrorDetails fileIOErrorDetails;
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable AggregationPublisherErrorDetails {
         @utf8InCpp String metricsConfigUUID;
         @utf8InCpp String publisherName;
         @utf8InCpp String fieldName;
     }
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable ServicePublisherErrorDetails {
         @utf8InCpp String metricsConfigUUID;
         @utf8InCpp String publisherName;
     }
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable ConditionalTriggerErrorDetails {
         @utf8InCpp String metricsConfigUUID;
         @utf8InCpp String triggerName;
     }
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable MetricsReportGeneratorErrorDetails {
         @utf8InCpp String metricsConfigUUID;
         @utf8InCpp String metricsReportName;
         @utf8InCpp String fieldName;
     }
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable ServiceErrorDetails {
         @utf8InCpp String serviceName;
     }
-    @RustDerive(Clone=true)
     @VintfStability
     parcelable FileIOErrorDetails {
         @utf8InCpp String path;
