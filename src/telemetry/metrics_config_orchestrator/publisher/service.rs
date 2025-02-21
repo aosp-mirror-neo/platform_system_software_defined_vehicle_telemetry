@@ -773,6 +773,7 @@ mod tests {
         let status = rx.await;
         assert!(
             matches!(&status, TelemetryServiceStatus {
+                id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR,
                 message,
                 details: StatusDetails::ServicePublisherErrorDetails(
@@ -1022,6 +1023,7 @@ mod tests {
         let status = rx.await;
         assert!(
             matches!(&status, TelemetryServiceStatus {
+                id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_METADATA_PARSING_ERROR,
                 message,
                 details: StatusDetails::ServicePublisherErrorDetails(

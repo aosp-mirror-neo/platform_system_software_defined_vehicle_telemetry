@@ -274,6 +274,7 @@ mod tests {
 
     fn create_status(code: StatusCodes, message: &str) -> TelemetryServiceStatus {
         TelemetryServiceStatus {
+            id: 42,
             code,
             message: message.to_owned(),
             details: StatusDetails::AggregationPublisherErrorDetails(

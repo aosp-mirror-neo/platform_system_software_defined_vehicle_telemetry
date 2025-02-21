@@ -1182,6 +1182,7 @@ pub(super) mod tests {
         let status = rx.await;
         assert!(
             matches!(&status, TelemetryServiceStatus {
+                id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR,
                 message,
                 details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails { serviceName } ),
@@ -1226,6 +1227,7 @@ pub(super) mod tests {
         let status = rx.await;
         assert!(
             matches!(&status, TelemetryServiceStatus {
+                id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_PARSING_ERROR,
                 message,
                 details: StatusDetails::ServiceErrorDetails(

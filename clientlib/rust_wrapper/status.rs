@@ -76,6 +76,8 @@ pub enum StatusDetails {
 /// Structure containing details of Telemetry Service statuses which are sent back to the client
 #[derive(Debug)]
 pub struct TelemetryServiceStatus {
+    /// Unique status ID
+    pub id: usize,
     /// Associated status code providing additional context
     pub code: TelemetryServiceStatusCodes,
     /// Human-readable status message

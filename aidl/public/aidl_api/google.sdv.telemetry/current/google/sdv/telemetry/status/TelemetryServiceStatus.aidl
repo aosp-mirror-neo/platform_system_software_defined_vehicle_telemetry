@@ -20,6 +20,7 @@
 package google.sdv.telemetry.status;
 @VintfStability
 parcelable TelemetryServiceStatus {
+    long id;
     google.sdv.telemetry.status.TelemetryServiceStatusCodes code;
     @utf8InCpp String message;
     google.sdv.telemetry.status.StatusDetails details;

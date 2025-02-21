@@ -22,7 +22,7 @@ pub(super) struct StatusReporterImpl {
 impl StatusReporter for StatusReporterImpl {
     fn report(&self, code: StatusCodes, message: String, details: StatusDetails) -> StatusId {
         let id = self.status_ids_provider.next();
-        (self.status_callback)(TelemetryServiceStatus { code, message, details });
+        (self.status_callback)(TelemetryServiceStatus { id: id as i64, code, message, details });
         id
     }
 }

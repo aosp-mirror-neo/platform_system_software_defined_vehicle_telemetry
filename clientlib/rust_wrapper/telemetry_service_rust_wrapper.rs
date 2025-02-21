@@ -260,13 +260,14 @@ unsafe extern "C" fn on_misc_status(
     // SAFETY: The caller has provided a valid pointer to `TelemetryServiceStatus`
     let status = unsafe { *status };
 
+    let id = status.id as usize;
     let code = TelemetryServiceStatusCodes(status.code);
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
     let message = unsafe { CStr::from_ptr(status.message) }.to_str().unwrap().to_string();
     let details = get_status_details(status.details);
 
-    let status = TelemetryServiceStatus { code, message, details };
+    let status = TelemetryServiceStatus { id, code, message, details };
 
     info!("Status: {status:?}");
     (status_listener.callback)(status);

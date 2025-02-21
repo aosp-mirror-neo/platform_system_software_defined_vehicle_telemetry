@@ -592,6 +592,7 @@ mod tests {
         let status = rx.await;
         assert!(
             matches!(&status, TelemetryServiceStatus {
+                id: 0,
                 code: StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR,
                 message,
                 details: StatusDetails::AggregationPublisherErrorDetails(

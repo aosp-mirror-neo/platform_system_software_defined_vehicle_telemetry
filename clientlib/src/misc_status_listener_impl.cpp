@@ -128,6 +128,7 @@ ndk::ScopedAStatus MiscStatusListenerImpl::sendStatus(
 
     const auto telemetry_status_details = convert(status.details);
     const auto telemetry_status = TelemetryServiceStatus{
+            .id = status.id,
             .code = std::to_underlying(status.code),
             .message = status.message.c_str(),
             .details = &telemetry_status_details,

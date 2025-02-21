@@ -91,6 +91,8 @@ struct StatusDetailsWithTag {
 // TelemetryServiceStatus contains details of Telemetry Service statuses
 // which are sent back to the client
 struct TelemetryServiceStatus {
+    // Unique status ID
+    int64_t id;
     // Associated status code providing additional context
     int32_t code;
     // Human-readable status message

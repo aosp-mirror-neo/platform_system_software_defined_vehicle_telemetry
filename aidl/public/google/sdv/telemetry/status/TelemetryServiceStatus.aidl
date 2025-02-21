@@ -12,6 +12,9 @@ import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
 
 @VintfStability
 parcelable TelemetryServiceStatus {
+    // Unique status ID
+    long id;
+
     // Associated status code providing additional context
     TelemetryServiceStatusCodes code;
 
