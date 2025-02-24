@@ -139,7 +139,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
             error!("Report ready callback dropped while still expecting additional reports.");
             break;
         };
-        let metrics_report = service.get_metrics_report(report_info).await?;
+        let metrics_report = service.get_metrics_report(&report_info).await?;
 
         if let Some(report_directory) = args.out_folder.as_ref() {
             if !report_directory.is_dir() {

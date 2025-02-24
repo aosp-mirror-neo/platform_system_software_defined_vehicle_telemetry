@@ -29,8 +29,8 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::StatusDetails, TelemetryServiceStatus::TelemetryServiceStatus,
 };
 
-#[derive(Default, Clone)]
-#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug, Default, Eq, PartialEq))]
 pub(crate) struct EdgeOptions {
     pub(crate) min_duration: Duration,
     pub(crate) require_exact: bool,

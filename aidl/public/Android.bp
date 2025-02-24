@@ -28,6 +28,7 @@ aidl_interface {
             enabled: true,
         },
     },
+    frozen: false,
 }
 
 vintf_fragment {

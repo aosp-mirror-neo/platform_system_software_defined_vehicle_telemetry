@@ -636,7 +636,7 @@ mod tests {
 
     struct TestEnvironment {
         manager: Arc<dyn MetricsConfigManager>,
-        error_receiver: future::Shared<BoxFuture<'static, TelemetryServiceStatus>>,
+        error_receiver: future::Shared<BoxFuture<'static, Arc<TelemetryServiceStatus>>>,
         metrics_config_orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
         num_initialize_config_calls: Arc<Mutex<i32>>,
         num_finish_config_calls: Arc<Mutex<i32>>,
@@ -673,7 +673,7 @@ mod tests {
                 new_stub_pal(),
                 |_| {},
                 move |status| {
-                    tx(status);
+                    tx(status.into());
                 },
             )
             .await

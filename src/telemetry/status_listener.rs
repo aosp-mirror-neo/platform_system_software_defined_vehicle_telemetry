@@ -212,7 +212,7 @@ mod tests {
     /// testing purposes
     #[derive(Clone)]
     struct MockTelemetryMiscStatusListener {
-        last_call: Arc<Mutex<Option<TelemetryServiceStatus>>>,
+        last_call: Arc<Mutex<Option<StatusCodes>>>,
     }
 
     impl binder::Interface for MockTelemetryMiscStatusListener {}
@@ -222,14 +222,14 @@ mod tests {
             Self { last_call: Arc::new(Mutex::new(None)) }
         }
 
-        pub fn get_last_call(&self) -> Option<TelemetryServiceStatus> {
-            self.last_call.lock().clone()
+        pub fn get_last_call(&self) -> Option<StatusCodes> {
+            *self.last_call.lock()
         }
     }
 
     impl ITelemetryMiscStatusListener for MockTelemetryMiscStatusListener {
         fn sendStatus(&self, status: &TelemetryServiceStatus) -> binder::Result<()> {
-            self.last_call.lock().replace(status.clone());
+            self.last_call.lock().replace(status.code);
             Ok(())
         }
     }
@@ -332,7 +332,7 @@ mod tests {
         status_listener.send_misc_status(status);
 
         assert_eq!(
-            mock_listener.get_last_call().unwrap().code,
+            mock_listener.get_last_call().unwrap(),
             StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR
         );
     }
@@ -443,7 +443,7 @@ mod tests {
         Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
 
         assert_eq!(
-            mock_listener.get_last_call().unwrap().code,
+            mock_listener.get_last_call().unwrap(),
             StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR
         );
     }

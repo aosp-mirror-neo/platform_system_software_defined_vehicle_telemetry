@@ -10,7 +10,6 @@ import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
  * which are sent back to the client
  */
 
-@RustDerive(Clone=true)
 @VintfStability
 parcelable TelemetryServiceStatus {
     // Associated status code providing additional context

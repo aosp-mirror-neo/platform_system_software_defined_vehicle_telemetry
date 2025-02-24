@@ -18,7 +18,6 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.status;
-@RustDerive(Clone=true)
 @VintfStability
 parcelable TelemetryServiceStatus {
     google.sdv.telemetry.status.TelemetryServiceStatusCodes code;
