@@ -113,13 +113,13 @@ impl PartialEq for NodeValue {
     }
 }
 
-pub(crate) enum OperationState {
+pub(crate) enum OperationState<'a> {
     /// Operation finished without the need for a right operator (either due to being a unary
     /// operation, or due to short-circuiting).
     Finished(NodeValue),
-    /// Operation cannot be finished without providing both a left and right operand.
+    /// Operation cannot be finished without providing a right operand.
     RightOperandRequired(
-        Box<dyn FnOnce(&NodeValue, &NodeValue) -> Result<NodeValue, NodeEvaluationError> + Send>,
+        Box<dyn FnOnce(&NodeValue) -> Result<NodeValue, NodeEvaluationError> + 'a + Send>,
     ),
 }
 
@@ -140,9 +140,9 @@ impl NodeValue {
         op: &OperatorProto,
         get_right_operand: impl FnOnce() -> &'a NodeValue + Send,
     ) -> Result<NodeValue, NodeEvaluationError> {
-        self.operate(op).and_then(|result| match result {
+        Self::operate(Cow::Borrowed(self), op).and_then(|result| match result {
             OperationState::Finished(result) => Ok(result),
-            OperationState::RightOperandRequired(operate) => operate(self, get_right_operand()),
+            OperationState::RightOperandRequired(operate) => operate(get_right_operand()),
         })
     }
 
@@ -283,12 +283,12 @@ impl NodeValue {
     /// * `op` - The operator.
     ///          If unary operator, then operates on self.
     ///          If binary operator, then [self] <operator> [right].
-    pub(super) fn operate(
-        &self,
+    pub(super) fn operate<'a>(
+        self_cow: Cow<'a, Self>,
         op: &OperatorProto,
-    ) -> Result<OperationState, NodeEvaluationError> {
+    ) -> Result<OperationState<'a>, NodeEvaluationError> {
         // None occurs when message is missing or incomplete, and None propagates up.
-        if self.is_none() {
+        if self_cow.is_none() {
             return Ok(OperationState::Finished(NodeValue::None));
         }
 
@@ -303,7 +303,7 @@ impl NodeValue {
                     }
                 };
 
-                self.handle_arithmetic(op)
+                Self::handle_arithmetic(self_cow, op)
             }
             OperatorProto::LogicalOperator(op) => {
                 let op = match op.enum_value() {
@@ -315,7 +315,7 @@ impl NodeValue {
                     }
                 };
 
-                self.handle_logical(op)
+                Self::handle_logical(self_cow, op)
             }
             OperatorProto::RelationalOperator(op) => {
                 let op = match op.enum_value() {
@@ -327,9 +327,9 @@ impl NodeValue {
                     }
                 };
 
-                self.handle_binary(move |left, right| left.handle_relational(&op, right))
+                Self::handle_binary(self_cow, move |left, right| left.handle_relational(&op, right))
             }
-            OperatorProto::RoundingOperator(op) => self.handle_unary(|value| {
+            OperatorProto::RoundingOperator(op) => self_cow.handle_unary(|value| {
                 let op = match op.enum_value() {
                     Ok(value) => value,
                     Err(i) => {
@@ -394,13 +394,13 @@ impl NodeValue {
 
     /// Handle arithmetic operations.
     fn handle_arithmetic(
-        &self,
+        self_cow: Cow<'_, Self>,
         op: ArithmeticOperator,
-    ) -> Result<OperationState, NodeEvaluationError> {
+    ) -> Result<OperationState<'_>, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::ArithmeticOperatorIncompatibleOperands;
 
         match op {
-            ArithmeticOperator::ABSOLUTE => self.handle_unary(|value| {
+            ArithmeticOperator::ABSOLUTE => self_cow.handle_unary(|value| {
                 value
                     .apply_numeric_unary(
                         |a| NodeValue::Int64(a.abs()),
@@ -408,7 +408,7 @@ impl NodeValue {
                     )
                     .ok_or_else(err_provider)
             }),
-            ArithmeticOperator::ADD => self.handle_binary(move |left, right| {
+            ArithmeticOperator::ADD => Self::handle_binary(self_cow, move |left, right| {
                 left.apply_numeric_binary(
                     right,
                     |a, b| NodeValue::Int64(a + b),
@@ -416,7 +416,7 @@ impl NodeValue {
                 )
                 .ok_or_else(err_provider)
             }),
-            ArithmeticOperator::DIVIDE => self.handle_binary(move |left, right| {
+            ArithmeticOperator::DIVIDE => Self::handle_binary(self_cow, move |left, right| {
                 let left_double = left.get_double().ok_or_else(err_provider)?;
                 let right_double = right.get_double().ok_or_else(err_provider)?;
 
@@ -427,7 +427,7 @@ impl NodeValue {
                 Ok(NodeValue::Double(left_double / right_double))
             }),
             ArithmeticOperator::MODULO_TRUNC => {
-                self.handle_binary(|left, right| {
+                Self::handle_binary(self_cow, |left, right| {
                     // First, verify that both operands have the corrected data
                     // types, and only then perform further checks.
                     let err_provider = || NodeEvaluationError::ModuloOperatorIncompatibleOperands;
@@ -441,7 +441,7 @@ impl NodeValue {
                     Ok(NodeValue::Int64(dividend % divisor))
                 })
             }
-            ArithmeticOperator::MULTIPLY => self.handle_binary(move |left, right| {
+            ArithmeticOperator::MULTIPLY => Self::handle_binary(self_cow, move |left, right| {
                 left.apply_numeric_binary(
                     right,
                     |a, b| NodeValue::Int64(a * b),
@@ -450,7 +450,7 @@ impl NodeValue {
                 .ok_or_else(err_provider)
             }),
             ArithmeticOperator::POWER => {
-                self.handle_binary(move |left, right| {
+                Self::handle_binary(self_cow, move |left, right| {
                     left.apply_numeric_binary(
                         right,
                         |a, b| {
@@ -468,7 +468,7 @@ impl NodeValue {
                     .ok_or_else(err_provider)
                 })
             }
-            ArithmeticOperator::SUBTRACT => self.handle_binary(move |left, right| {
+            ArithmeticOperator::SUBTRACT => Self::handle_binary(self_cow, move |left, right| {
                 left.apply_numeric_binary(
                     right,
                     |a, b| NodeValue::Int64(a - b),
@@ -476,7 +476,7 @@ impl NodeValue {
                 )
                 .ok_or_else(err_provider)
             }),
-            ArithmeticOperator::UNARY_MINUS => self.handle_unary(|value| {
+            ArithmeticOperator::UNARY_MINUS => self_cow.handle_unary(|value| {
                 value
                     .apply_numeric_unary(|a| NodeValue::Int64(-a), |a| NodeValue::Double(-a))
                     .ok_or_else(err_provider)
@@ -485,10 +485,13 @@ impl NodeValue {
     }
 
     /// Handle logical operations.
-    fn handle_logical(&self, op: LogicalOperator) -> Result<OperationState, NodeEvaluationError> {
+    fn handle_logical(
+        self_cow: Cow<'_, Self>,
+        op: LogicalOperator,
+    ) -> Result<OperationState<'_>, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::LogicalOperatorIncompatibleOperands;
 
-        let Some(left_value) = self.get_bool() else { return Err(err_provider()) };
+        let Some(left_value) = self_cow.get_bool() else { return Err(err_provider()) };
 
         match op {
             LogicalOperator::AND => {
@@ -497,7 +500,7 @@ impl NodeValue {
                     Ok(OperationState::Finished(NodeValue::Bool(false)))
                 } else {
                     // If left is true, the result depends on the right operand.
-                    self.handle_binary(move |_left, right| {
+                    Self::handle_binary(self_cow, move |_left, right| {
                         Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
                     })
                 }
@@ -508,12 +511,12 @@ impl NodeValue {
                     Ok(OperationState::Finished(NodeValue::Bool(true)))
                 } else {
                     // If left is false, the result depends on the right operand.
-                    self.handle_binary(move |_left, right| {
+                    Self::handle_binary(self_cow, move |_left, right| {
                         Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
                     })
                 }
             }
-            LogicalOperator::XOR => self.handle_binary(move |_left, right| {
+            LogicalOperator::XOR => Self::handle_binary(self_cow, move |_left, right| {
                 Ok(NodeValue::Bool(left_value != right.get_bool().ok_or_else(err_provider)?))
             }),
             LogicalOperator::NOT => Ok(OperationState::Finished(NodeValue::Bool(!left_value))),
@@ -613,24 +616,24 @@ impl NodeValue {
     fn handle_unary(
         &self,
         handler: impl FnOnce(&NodeValue) -> Result<NodeValue, NodeEvaluationError>,
-    ) -> Result<OperationState, NodeEvaluationError> {
+    ) -> Result<OperationState<'static>, NodeEvaluationError> {
         Ok(OperationState::Finished(handler(self)?))
     }
 
     /// Handles binary operation on self using provided node value handler.
-    fn handle_binary(
-        &self,
+    fn handle_binary<'a>(
+        self_cow: Cow<'a, Self>,
         handler: impl FnOnce(&NodeValue, &NodeValue) -> Result<NodeValue, NodeEvaluationError>
             + Send
-            + 'static,
-    ) -> Result<OperationState, NodeEvaluationError> {
-        Ok(OperationState::RightOperandRequired(Box::new(move |left, right| {
+            + 'a,
+    ) -> Result<OperationState<'a>, NodeEvaluationError> {
+        Ok(OperationState::RightOperandRequired(Box::new(move |right| {
             if right.is_none() {
                 // None occurs when message is missing or incomplete, and None propagates up.
                 return Ok(NodeValue::None);
             }
 
-            handler(left, right)
+            handler(&self_cow, right)
         })))
     }
 

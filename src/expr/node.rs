@@ -167,7 +167,7 @@ impl Node {
                         // If unary operator, then operate on self.
                         // If binary operator, then [left] <operator> [right]
                         // The function short-circuits if possible.
-                        match left_value.operate(operator) {
+                        match NodeValue::operate(Cow::Owned(left_value), operator) {
                             Ok(OperationState::Finished(result)) => {
                                Ok(result).with_state(state).into()
                             },
@@ -190,7 +190,7 @@ impl Node {
                                     })
                                     .evaluate_core(state)
                                     .and_then(move |(right_value, state)| {
-                                        operate(&left_value, &right_value).with_state(state).into()
+                                        operate(&right_value).with_state(state).into()
                                     })
                             },
                             Err(err) => Err(err).into()
