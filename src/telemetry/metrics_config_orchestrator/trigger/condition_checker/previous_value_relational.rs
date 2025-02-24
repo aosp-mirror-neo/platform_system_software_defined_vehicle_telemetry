@@ -1,6 +1,7 @@
 // Copyright 2025 Google LLC
 
 use sdv_telemetry_proto_rust::expression::combination_node::RelationalOperator;
+use sdv_telemetry_utils::option_extension::OptionExtension;
 
 use super::{apply_relational_operator, ConditionChecker};
 use crate::expr::node_value::NodeValue;
@@ -19,11 +20,12 @@ impl ConditionChecker for PreviousValueRelationalConditionChecker {
         }
 
         // Extract previous value and save current value. Return false if there's no previous value.
-        let Some(previous_value) = self.previous_value.replace(current_value.clone()) else {
+        let (previous_value, current_value) = self.previous_value.take_and_insert(current_value);
+        let Some(previous_value) = previous_value else {
             return Ok(false);
         };
 
-        apply_relational_operator(self.operator, previous_value, current_value)
+        apply_relational_operator(self.operator, &previous_value, current_value)
     }
 }
 

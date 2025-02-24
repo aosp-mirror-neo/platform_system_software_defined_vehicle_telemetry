@@ -27,10 +27,11 @@ impl ValueAggregator for SumAggregator {
             return Ok(NodeValue::None);
         }
 
-        self.current_sum = self.current_sum.clone().operate_sync(
-            &Operator::ArithmeticOperator(ArithmeticOperator::ADD.into()),
-            move || Ok(node_value),
-        )?;
+        self.current_sum =
+            self.current_sum.clone().operate_sync(
+                &Operator::ArithmeticOperator(ArithmeticOperator::ADD.into()),
+                || &node_value,
+            )?;
         Ok(self.current_sum.clone())
     }
 

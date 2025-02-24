@@ -36,6 +36,7 @@ rust_test {
     defaults: ["libsdv_telemetry_utils_defaults"],
     rustlibs: [
         // keep-sorted start
+        "libgoogletest_rust",
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],

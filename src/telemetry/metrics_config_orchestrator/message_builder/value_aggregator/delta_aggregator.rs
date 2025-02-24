@@ -33,7 +33,7 @@ impl ValueAggregator for DeltaAggregator {
             );
         }
 
-        // Previous valus is none for the first received node.
+        // Previous value is `None` for the first received node.
         if self.previous_value.is_none() {
             self.previous_value = node_value;
             Ok(NodeValue::None)
@@ -41,7 +41,7 @@ impl ValueAggregator for DeltaAggregator {
             let previous_value = mem::replace(&mut self.previous_value, node_value.clone());
             let current_delta = node_value.operate_sync(
                 &Operator::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into()),
-                || Ok(previous_value),
+                || &previous_value,
             )?;
             Ok(current_delta)
         }

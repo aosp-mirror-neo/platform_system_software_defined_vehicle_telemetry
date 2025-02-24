@@ -19,13 +19,13 @@ pub(crate) trait ConditionChecker: Send + Sync {
 
 fn apply_relational_operator(
     operator: RelationalOperator,
-    left: NodeValue,
-    right: NodeValue,
+    left: &NodeValue,
+    right: &NodeValue,
 ) -> anyhow::Result<bool> {
     let operator = Operator::RelationalOperator(operator.into());
 
     let result = left
-        .operate_sync(&operator, || Ok(right))
+        .operate_sync(&operator, || right)
         .with_context(|| format!("Failed to apply operator {operator:?}"))?;
     let NodeValue::Bool(result) = result else {
         bail!("Operator {operator:?} evaluation returned non-bool result: {result:?}");
