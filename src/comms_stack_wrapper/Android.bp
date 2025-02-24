@@ -13,6 +13,7 @@ rust_defaults {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
+        "libdashmap",
         "libfutures",
         "liblog_rust",
         "liblogger",

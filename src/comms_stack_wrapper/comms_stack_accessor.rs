@@ -4,6 +4,7 @@
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
+use dashmap::{mapref::entry::Entry as DashEntry, DashMap};
 use futures::future::{self, BoxFuture};
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -25,9 +26,8 @@ use sdv_telemetry_service_publisher_accessor::{
 };
 use sdv_telemetry_utils::descriptor_utils;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
-use std::collections::{hash_map::Entry, HashMap};
 use std::sync::Arc;
-use tokio::{select, sync::Mutex as AsyncMutex};
+use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber::DataTunnelSubscriber;
@@ -41,7 +41,7 @@ pub struct CommsStackAccessor {
     data_tunnel_subscriber: DataTunnelSubscriber,
 
     /// Hashmap to store service names and their `MessageDescriptor`s.
-    service_message_descriptors: AsyncMutex<HashMap<ServiceName, MessageDescriptor>>,
+    service_message_descriptors: DashMap<ServiceName, MessageDescriptor>,
 
     sdv_rpc_client: SdvRpcClient,
 
@@ -63,22 +63,31 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let message_descriptor =
-            match self.service_message_descriptors.lock().await.entry(service_name) {
-                Entry::Occupied(o) => o.get().clone(),
-                Entry::Vacant(v) => {
-                    let Some(service_unit_definition) = self.discover_service(v.key()).await else {
-                        return Ok(None);
-                    };
+        let message_descriptor = if let Some(entry) =
+            self.service_message_descriptors.get(&service_name)
+        {
+            entry.clone()
+        } else {
+            let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+                return Ok(None);
+            };
 
-                    let message_descriptor = self
-                        .parse_telemetry_metadata(v.key(), &service_unit_definition)
-                        .await
-                        .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+            let message_descriptor = self
+                .parse_telemetry_metadata(&service_name, &service_unit_definition)
+                .await
+                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+
+            match self.service_message_descriptors.entry(service_name) {
+                DashEntry::Occupied(o) => {
+                    // Concurrent task has already added metadata for this service, use it instead.
+                    o.get().clone()
+                }
+                DashEntry::Vacant(v) => {
                     v.insert(message_descriptor.clone());
                     message_descriptor
                 }
-            };
+            }
+        };
 
         Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
     }
@@ -276,7 +285,7 @@ impl CommsStackAccessor {
         Self {
             ctx,
             data_tunnel_subscriber,
-            service_message_descriptors: HashMap::new().into(),
+            service_message_descriptors: DashMap::new(),
             sdv_rpc_client,
             vsidl_provider,
         }
