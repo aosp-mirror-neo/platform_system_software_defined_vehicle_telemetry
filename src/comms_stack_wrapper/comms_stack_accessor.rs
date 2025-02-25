@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, Context};
 use async_trait::async_trait;
-use dashmap::{mapref::entry::Entry as DashEntry, DashMap};
+use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, info, warn};
@@ -63,10 +63,10 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let message_descriptor = if let Some(entry) =
-            self.service_message_descriptors.get(&service_name)
+        let message_descriptor = if let Some(message_descriptor) =
+            self.service_message_descriptors.view(&service_name, |_k, v| (v.clone()))
         {
-            entry.clone()
+            message_descriptor
         } else {
             let Some(service_unit_definition) = self.discover_service(&service_name).await else {
                 return Ok(None);
@@ -78,11 +78,11 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
             match self.service_message_descriptors.entry(service_name) {
-                DashEntry::Occupied(o) => {
+                DashMapEntry::Occupied(o) => {
                     // Concurrent task has already added metadata for this service, use it instead.
                     o.get().clone()
                 }
-                DashEntry::Vacant(v) => {
+                DashMapEntry::Vacant(v) => {
                     v.insert(message_descriptor.clone());
                     message_descriptor
                 }
