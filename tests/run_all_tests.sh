@@ -3,6 +3,13 @@
 
 set -e -o pipefail
 
+if ! command -v jq &> /dev/null; then
+  echo "[ERROR] The jq command is not installed. Please install is as follows:"
+  echo ""
+  echo "sudo apt install -y jq"
+  exit 1
+fi
+
 log() {
   echo "----------------------"
   echo "$1"
@@ -48,6 +55,8 @@ until adb shell echo 'VM running' &>/dev/null; do
 done
 
 log "Running telemetry tests..."
-atest $TEST_TARGETS
+ADB_SERIAL=$(cvd fleet | jq --raw-output ".groups[0].instances[0].adb_serial")
+NOTIFY_AS_NATIVE="${ADB_SERIAL}" atest $TEST_TARGETS
+
 
 exit 0
