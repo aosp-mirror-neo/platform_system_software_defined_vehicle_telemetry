@@ -1,9 +1,10 @@
 // Copyright 2024 Google LLC
 
+use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
+use futures::FutureExt;
 use protobuf::MessageDyn;
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use std::collections::HashMap;
+use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
 use std::sync::Arc;
 
 use crate::node_error::MessageProviderError;
@@ -11,10 +12,10 @@ use crate::node_evaluation_context::NodeEvaluationContext;
 
 /// Stores expression evaluation state to ensure expression evaluation uses the same message
 /// in different branches.
-pub(super) struct NodeEvaluationState {
+pub struct NodeEvaluationState {
     context: Arc<NodeEvaluationContext>,
-    sync_message_cache: HashMap<String, Option<Arc<dyn MessageDyn>>>,
-    async_message_cache: HashMap<
+    sync_message_cache: DashMap<String, Option<Arc<dyn MessageDyn>>>,
+    async_message_cache: DashMap<
         String,
         future::Shared<
             BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
@@ -24,8 +25,8 @@ pub(super) struct NodeEvaluationState {
 
 impl NodeEvaluationState {
     /// Creates a new instance of `NodeEvaluationState`.
-    pub(super) fn new(context: Arc<NodeEvaluationContext>) -> Self {
-        Self { context, sync_message_cache: HashMap::new(), async_message_cache: HashMap::new() }
+    pub fn new(context: Arc<NodeEvaluationContext>) -> Self {
+        Self { context, sync_message_cache: DashMap::new(), async_message_cache: DashMap::new() }
     }
 
     /// Returns a reference to the underlying node evaluation context.
@@ -33,57 +34,48 @@ impl NodeEvaluationState {
         &self.context
     }
 
-    /// Returns a synchronously available message if found in the state.
-    pub(super) fn get_sync_message(
+    /// Retrieves publisher message from cache, or obtains it from the message factory
+    /// and adds it to the cache if it's not present.
+    pub(super) fn get_or_add(
         &self,
         publisher_name: &str,
-    ) -> Option<Option<&Arc<dyn MessageDyn>>> {
-        let context_message = self.context.get_message(publisher_name);
-        if context_message.is_some() {
-            return Some(context_message);
+        message_factory: impl FnOnce(
+            &str,
+        ) -> OperationResult<
+            'static,
+            Option<Arc<dyn MessageDyn>>,
+            MessageProviderError,
+        >,
+    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>> {
+        if let Some(msg) = self.context.get_message(publisher_name) {
+            return Ok(Some(Arc::clone(msg))).into();
         }
 
-        self.sync_message_cache.get(publisher_name).map(Option::as_ref)
-    }
-
-    /// Returns a future to an asynchronously available message if found in the state.
-    pub(super) fn get_async_message(
-        &self,
-        publisher_name: &str,
-    ) -> Option<
-        &future::Shared<
-            BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
-        >,
-    > {
-        self.async_message_cache.get(publisher_name)
-    }
-
-    /// Caches a synchronously available message in the state.
-    ///
-    /// The cache is expected to contain only one message per publisher.
-    pub(super) fn cache_sync_message(
-        &mut self,
-        publisher_name: String,
-        message: Option<Arc<dyn MessageDyn>>,
-    ) {
-        self.sync_message_cache
-            .try_insert_value(publisher_name, message)
-            .expect("Only one message per publisher should be added into sync cache");
-    }
-
-    /// Caches an asynchronously available message in the state.
-    ///
-    /// The cache is expected to contain only one message per publisher.
-    pub(super) fn cache_async_message(
-        &mut self,
-        publisher_name: String,
-        message: future::Shared<
-            BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
-        >,
-    ) {
-        self.async_message_cache
-            .try_insert_value(publisher_name, message)
-            .expect("Only one message per publisher should be added into async cache");
+        match self.sync_message_cache.entry(publisher_name.to_owned()) {
+            DashMapEntry::Occupied(o) => Ok(o.get().as_ref().map(Arc::clone)).into(),
+            DashMapEntry::Vacant(v_sync) => {
+                match self.async_message_cache.entry(publisher_name.to_owned()) {
+                    DashMapEntry::Occupied(o) => ValueHolder::Asynchronous(o.get().clone().boxed()),
+                    DashMapEntry::Vacant(v_async) => {
+                        match message_factory(publisher_name).map_err(Arc::new) {
+                            ValueHolder::Synchronous(res) => {
+                                if let Ok(maybe_msg) = &res {
+                                    // Put message into synchronous message cache.
+                                    v_sync.insert(maybe_msg.to_owned());
+                                }
+                                ValueHolder::Synchronous(res)
+                            }
+                            ValueHolder::Asynchronous(future) => {
+                                let shared_future = future.shared();
+                                // Put message into async message cache.
+                                v_async.insert(shared_future.clone());
+                                ValueHolder::Asynchronous(shared_future.boxed())
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -91,70 +83,149 @@ impl NodeEvaluationState {
 mod tests {
     use super::*;
 
-    use futures::FutureExt;
     use protobuf::well_known_types::wrappers::Int32Value;
-    use protobuf::MessageDyn;
+    use std::future;
 
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
 
     #[test]
-    fn get_sync_message_from_context_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+    fn get_or_add_sync_message_from_context_success() {
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
             KNOWN_PUBLISHER_NAME.to_owned(),
-            Arc::<Int32Value>::clone(&msg),
+            Arc::clone(&msg),
         ));
         let state = NodeEvaluationState::new(context);
 
-        let res_msg = state.get_sync_message(KNOWN_PUBLISHER_NAME).unwrap().unwrap();
+        let result =
+            state.get_or_add(KNOWN_PUBLISHER_NAME, |_| panic!("Should not call message factory"));
+        let res_msg = result.unwrap_sync().unwrap().unwrap();
 
-        assert!(Arc::ptr_eq(res_msg, &(msg as Arc<dyn MessageDyn>)));
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
     }
 
     #[test]
-    fn get_sync_message_from_cache_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
-        let mut state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
-        state.cache_sync_message(
-            KNOWN_PUBLISHER_NAME.to_owned(),
-            Some(Arc::<Int32Value>::clone(&msg)),
+    fn get_or_add_sync_message_from_cache_success() {
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(Arc::clone(&context));
+        state.sync_message_cache.insert(KNOWN_PUBLISHER_NAME.to_owned(), Some(Arc::clone(&msg)));
+
+        let result =
+            state.get_or_add(KNOWN_PUBLISHER_NAME, |_| panic!("Should not call message factory"));
+        let res_msg = result.unwrap_sync().unwrap().unwrap();
+
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+    }
+
+    #[test]
+    fn get_or_add_sync_message_from_message_factory_success() {
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(Arc::clone(&context));
+
+        let result = state.get_or_add(KNOWN_PUBLISHER_NAME, |_| Ok(Some(Arc::clone(&msg))).into());
+        let res_msg = result.unwrap_sync().unwrap().unwrap();
+        let cached_value = state.sync_message_cache.get(KNOWN_PUBLISHER_NAME).unwrap();
+
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+        assert!(
+            Arc::ptr_eq(cached_value.as_ref().unwrap(), &msg),
+            "Unexpected message: {}",
+            cached_value.as_ref().unwrap()
+        )
+    }
+
+    #[test]
+    fn get_or_add_sync_message_from_message_factory_fail() {
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(Arc::clone(&context));
+
+        let result = state.get_or_add(KNOWN_PUBLISHER_NAME, |_| {
+            Err(MessageProviderError::InvalidPublisherName).into()
+        });
+        let err = result.unwrap_sync().unwrap_err();
+
+        assert!(
+            matches!(err.as_ref(), MessageProviderError::InvalidPublisherName),
+            "Unexpected error: {:?}",
+            err.as_ref()
         );
-
-        let res_msg = state.get_sync_message(KNOWN_PUBLISHER_NAME).unwrap().unwrap();
-
-        assert!(Arc::ptr_eq(res_msg, &(msg as Arc<dyn MessageDyn>)));
-    }
-
-    #[test]
-    fn get_sync_message_not_found_returns_none() {
-        let state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
-
-        let res = state.get_sync_message(KNOWN_PUBLISHER_NAME);
-
-        assert!(res.is_none());
+        assert!(state.sync_message_cache.get(KNOWN_PUBLISHER_NAME).is_none());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_async_message_from_cache_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
-        let mut state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
+    async fn get_or_add_async_message_from_cache_success() {
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(Arc::clone(&context));
         let msg_clone = Arc::clone(&msg);
-        let future = async move { Ok(Some(msg_clone as Arc<dyn MessageDyn>)) }.boxed().shared();
-        state.cache_async_message(KNOWN_PUBLISHER_NAME.to_owned(), future);
+        let future = future::ready(Ok(Some(msg_clone))).boxed().shared();
+        state.async_message_cache.insert(KNOWN_PUBLISHER_NAME.to_owned(), future);
 
-        let res_msg =
-            state.get_async_message(KNOWN_PUBLISHER_NAME).unwrap().clone().await.unwrap().unwrap();
+        let result =
+            state.get_or_add(KNOWN_PUBLISHER_NAME, |_| panic!("Should not call message factory"));
+        let res_msg = result.unwrap_async().await.unwrap().unwrap();
 
-        assert!(Arc::ptr_eq(&res_msg, &(msg as Arc<dyn MessageDyn>)));
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_or_add_async_message_from_message_factory_success() {
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(Arc::clone(&context));
+
+        let msg_clone = Arc::clone(&msg);
+        let result = state.get_or_add(KNOWN_PUBLISHER_NAME, |_| {
+            future::ready(Ok(Some(msg_clone))).boxed().into()
+        });
+        let res_msg = result.unwrap_async().await.unwrap().unwrap();
+        let cached_future = state.async_message_cache.get(KNOWN_PUBLISHER_NAME).unwrap();
+        let cached_msg = cached_future.value().clone().await.unwrap().unwrap();
+
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+        assert!(Arc::ptr_eq(&cached_msg, &msg), "Unexpected message: {cached_msg}");
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_or_add_async_message_from_message_factory_fail() {
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(Arc::clone(&context));
+
+        let err = state
+            .get_or_add(KNOWN_PUBLISHER_NAME, |_| {
+                future::ready(Err(MessageProviderError::InvalidPublisherName)).boxed().into()
+            })
+            .unwrap_async()
+            .await
+            .unwrap_err();
+        let cached_err =
+            state.async_message_cache.get(KNOWN_PUBLISHER_NAME).unwrap().clone().await.unwrap_err();
+
+        assert!(
+            matches!(err.as_ref(), MessageProviderError::InvalidPublisherName),
+            "Unexpected error: {:?}",
+            err.as_ref()
+        );
+        assert!(
+            matches!(cached_err.as_ref(), MessageProviderError::InvalidPublisherName),
+            "Unexpected error: {:?}",
+            cached_err.as_ref()
+        );
     }
 
     #[test]
-    fn get_async_message_not_found_returns_none() {
-        let state = NodeEvaluationState::new(NodeEvaluationContext::new(None).into());
+    fn get_or_add_sync_message_not_found_returns_none() {
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        let state = NodeEvaluationState::new(context);
 
-        let res = state.get_async_message(KNOWN_PUBLISHER_NAME);
+        let result = state.get_or_add(KNOWN_PUBLISHER_NAME, |_| Ok(None).into());
+        let res = result.unwrap_sync().unwrap();
 
         assert!(res.is_none());
     }

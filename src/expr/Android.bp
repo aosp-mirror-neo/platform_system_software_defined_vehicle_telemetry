@@ -13,6 +13,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
+        "libdashmap",
         "libdowncast_rs",
         "libfutures",
         "libparking_lot",

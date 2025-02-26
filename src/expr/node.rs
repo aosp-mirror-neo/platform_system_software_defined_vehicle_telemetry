@@ -1,9 +1,7 @@
 // Copyright 2024 Google LLC
 
-use futures::FutureExt;
-use protobuf::MessageDyn;
 use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
-use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
+use sdv_telemetry_utils::operation_result::OperationResult;
 use std::borrow::Cow;
 use std::fmt;
 use std::sync::Arc;
@@ -77,76 +75,41 @@ impl Node {
         self: &Arc<Self>,
         context: Arc<NodeEvaluationContext>,
     ) -> OperationResult<'static, NodeValue, NodeEvaluationError> {
-        let state = NodeEvaluationState::new(context);
-        self.evaluate_core(state).map_ok(|(value, _state)| value)
+        let state = Arc::new(NodeEvaluationState::new(context));
+        self.evaluate_with_state(state).map_ok(|(value, _state)| value)
     }
 
     /// Evaluate AST recursively and use cached messages from the state
     /// to ensure expression evaluation uses the same message in different branches.
-    fn evaluate_core(
+    pub fn evaluate_with_state(
         self: &Arc<Self>,
-        mut state: NodeEvaluationState,
-    ) -> OperationResult<'static, (NodeValue, NodeEvaluationState), NodeEvaluationError> {
+        state: Arc<NodeEvaluationState>,
+    ) -> OperationResult<'static, (NodeValue, Arc<NodeEvaluationState>), NodeEvaluationError> {
         match self.as_ref() {
             Node::ConstantLeaf { value } => {
                 // Base case of recursion: node is a leaf node, return value
                 Ok(value.clone()).with_state(state).into()
             }
-            Node::FieldLeaf { fields, message_provider, publisher_name, .. } => {
+            Node::FieldLeaf { message_provider, publisher_name, .. } => {
                 // Base case of recursion: node is a leaf node, return value
-                fn handle_msg<'a, T>(
-                    maybe_msg: Option<T>,
-                    fields: &[String],
-                    msg_selector: impl FnOnce(T) -> Cow<'a, Arc<dyn MessageDyn>>,
-                ) -> Result<NodeValue, NodeEvaluationError> {
-                    maybe_msg.map_or_else(
-                        || Ok(NodeValue::None),
-                        |msg| NodeValue::extract_value(msg_selector(msg), fields),
-                    )
-                }
-
-                let sync_message_result = state.get_sync_message(publisher_name);
-                if let Some(maybe_msg) = sync_message_result {
-                    // Synchronously available message found in the state.
-                    return handle_msg(maybe_msg, fields, Cow::Borrowed).with_state(state).into();
-                }
-
-                let async_message_result = state.get_async_message(publisher_name);
-                let provider_result = if let Some(future) = async_message_result {
-                    // Provider result future found in the asynchronous message cache.
-                    ValueHolder::Asynchronous(future.clone().boxed())
-                } else {
-                    // Call message provider and cache the result.
-                    match message_provider.get_message(publisher_name).map_err(Arc::new) {
-                        ValueHolder::Synchronous(res) => {
-                            if let Ok(maybe_msg) = &res {
-                                // Put message into synchronous message cache.
-                                state.cache_sync_message(
-                                    publisher_name.to_owned(),
-                                    maybe_msg.to_owned(),
-                                );
-                            }
-                            ValueHolder::Synchronous(res)
-                        }
-                        ValueHolder::Asynchronous(future) => {
-                            let shared_future = future.shared();
-                            state.cache_async_message(
-                                publisher_name.to_owned(),
-                                shared_future.clone(),
-                            );
-                            ValueHolder::Asynchronous(shared_future.boxed())
-                        }
-                    }
-                };
-
                 let self_clone = Arc::clone(self);
-                provider_result.err_into().and_then_sync(move |maybe_msg| {
-                    let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
-                        panic!("Captured node is not a field leaf node: {:?}", self_clone);
-                    };
+                state
+                    .get_or_add(publisher_name, |publisher_name| {
+                        message_provider.get_message(publisher_name)
+                    })
+                    .err_into()
+                    .and_then_sync(move |maybe_msg| {
+                        let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
+                            panic!("Captured node is not a field leaf node: {:?}", self_clone);
+                        };
 
-                    handle_msg(maybe_msg, fields, Cow::Owned).with_state(state)
-                })
+                        maybe_msg
+                            .map_or_else(
+                                || Ok(NodeValue::None),
+                                |msg| NodeValue::extract_value(msg, fields),
+                            )
+                            .with_state(state)
+                    })
             }
             Node::Combination { left, .. } => {
                 // evaluate left branch recursively
@@ -158,7 +121,7 @@ impl Node {
                         every non-leaf Node has a left child, but evaluate() encountered \
                         a node without left child",
                     )
-                    .evaluate_core(state)
+                    .evaluate_with_state(state)
                     .and_then(move |(left_value, state)| {
                         let Node::Combination { operator, right, .. } = self_clone.as_ref() else {
                             panic!("Captured node is not a combination node: {:?}", self_clone);
@@ -188,7 +151,7 @@ impl Node {
                                             );
                                         }
                                     })
-                                    .evaluate_core(state)
+                                    .evaluate_with_state(state)
                                     .and_then(move |(right_value, state)| {
                                         operate(&right_value).with_state(state).into()
                                     })
