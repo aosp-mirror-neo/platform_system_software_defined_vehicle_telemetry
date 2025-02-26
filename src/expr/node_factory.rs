@@ -24,7 +24,7 @@ use crate::node_value_type::{
 /// Creates rust nodes from protobuf expression nodes.
 #[cfg_attr(
     any(test, feature = "test_utils"),
-    sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast)
+    sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast)
 )]
 pub trait NodeFactory: Send + Sync {
     /// Creates rust Nodes from protobuf Nodes,.

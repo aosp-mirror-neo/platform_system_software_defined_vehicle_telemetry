@@ -21,7 +21,7 @@ pub(crate) mod mock;
 type TriggerCallbackFn = CallbackFn<Arc<NodeEvaluationContext>>;
 
 #[async_trait]
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait Trigger: Send + Sync {
     /// Returns the name of the trigger.
     fn get_name(&self) -> &str;

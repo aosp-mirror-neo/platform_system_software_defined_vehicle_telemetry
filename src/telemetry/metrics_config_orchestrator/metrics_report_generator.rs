@@ -28,7 +28,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 };
 
 #[async_trait]
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait MetricsReportGenerator: Send + Sync {
     async fn activate(self: Arc<Self>);
     async fn deactivate(&self, reason: ReportReason);

@@ -26,7 +26,7 @@ use crate::metrics_config_orchestrator::{
 };
 use crate::status_reporter::StatusReporter;
 
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait PublisherFactory: Send + Sync {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(

@@ -12,3 +12,5 @@ pub mod logging;
 pub mod operation_result;
 pub mod option_extension;
 pub mod value_holder;
+
+pub use sdv_telemetry_utils_macros::with_super_trait;

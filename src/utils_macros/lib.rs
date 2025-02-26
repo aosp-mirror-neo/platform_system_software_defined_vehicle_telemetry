@@ -15,7 +15,7 @@ use syn::{
 ///
 /// Example use:
 /// ```rust
-/// #[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+/// #[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast))]
 /// trait Foo {
 ///   // ...
 /// }
