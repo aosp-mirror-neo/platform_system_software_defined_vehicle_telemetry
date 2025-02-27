@@ -4,12 +4,12 @@ use super::*;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::subscription_manager::{ActivationId, SubscriptionManager};
 
 /// Mock implementation of Trigger trait for unit tests.

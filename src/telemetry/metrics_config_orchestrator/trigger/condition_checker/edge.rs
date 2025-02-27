@@ -1,6 +1,7 @@
 // Copyright 2025 Google LLC
 
 use parking_lot::Mutex;
+use sdv_telemetry_expr::{node_evaluation_context::NodeEvaluationContext, node_value::NodeValue};
 use sdv_telemetry_proto_rust::expression::combination_node::RelationalOperator;
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use sdv_telemetry_utils::option_extension::OptionExtension;
@@ -10,9 +11,7 @@ use tokio::time::sleep;
 
 use super::super::conditional::EdgeOptions;
 use super::{apply_relational_operator, ConditionChecker};
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
-use crate::expr::node_value::NodeValue;
+use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactory;
 
 #[derive(Copy, Clone)]
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
@@ -335,7 +334,7 @@ mod tests {
     use tokio::task::JoinError;
     use tokio_stream::wrappers::UnboundedReceiverStream;
 
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
+    use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
 
     const NONE: NodeValue = NodeValue::None;
     const TRUE: NodeValue = NodeValue::Bool(true);

@@ -2,7 +2,6 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
-mod expr;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
 mod metrics_report_listener;

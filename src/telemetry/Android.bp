@@ -38,7 +38,6 @@ rust_defaults {
     proc_macros: [
         // keep-sorted start
         "libasync_trait",
-        "libsdv_telemetry_utils_macros",
         "libstrum_macros",
         // keep-sorted end
     ],
@@ -51,6 +50,7 @@ rust_library {
     vendor_available: true,
     rustlibs: [
         // keep-sorted start
+        "libsdv_telemetry_expr",
         "libsdv_telemetry_platform_abstraction_layer",
         // keep-sorted end
     ],
@@ -65,6 +65,7 @@ rust_test {
         "liblazy_static",
         "libmockall",
         "librand",
+        "libsdv_telemetry_expr_with_test_utils",
         "libsdv_telemetry_platform_abstraction_layer_with_test_utils",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_proto",

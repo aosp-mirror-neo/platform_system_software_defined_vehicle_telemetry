@@ -5,11 +5,10 @@ use super::*;
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
-
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 /// The builder will build a TestMessage defined in `src/test_utils/test_message.proto`
 pub(crate) struct MockMessageBuilder {

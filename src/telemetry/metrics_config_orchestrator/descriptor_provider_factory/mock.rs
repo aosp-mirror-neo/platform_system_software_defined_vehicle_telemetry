@@ -2,7 +2,7 @@
 
 use super::*;
 
-use crate::expr::mock::MockDescriptorProvider;
+use sdv_telemetry_expr::mock::MockDescriptorProvider;
 
 pub(crate) struct MockDescriptorProviderFactory {}
 

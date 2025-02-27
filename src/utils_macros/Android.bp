@@ -24,6 +24,12 @@ rust_proc_macro {
     name: "libsdv_telemetry_utils_macros",
     defaults: ["libsdv_telemetry_utils_macros_defaults"],
     crate_name: "sdv_telemetry_utils_macros",
+    visibility: [
+        // Do not add additional modules here. Use `libsdv_telemetry_utils`
+        // instead, which re-exports the macros from
+        // `libsdv_telemetry_utils_macros`.
+        "//system/software_defined_vehicle/telemetry/src/utils:__subpackages__",
+    ],
 }
 
 rust_test_host {

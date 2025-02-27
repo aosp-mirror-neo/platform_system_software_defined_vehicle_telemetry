@@ -1,9 +1,8 @@
 // Copyright 2023 Google LLC
 
 use protobuf::reflect::MessageDescriptor;
+use sdv_telemetry_expr::{node_error::DescriptorProviderError, node_factory::DescriptorProvider};
 use std::collections::HashMap;
-
-use crate::expr::{node_error::DescriptorProviderError, node_factory::DescriptorProvider};
 
 pub(crate) struct DescriptorProviderImpl {
     // key = publisher name, value = MessageDescriptor for the data it publishes

@@ -1,11 +1,12 @@
 // Copyright 2024 Google LLC
 
-use crate::expr::node_value::NodeValue;
+use sdv_telemetry_expr::node_value::NodeValue;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
+
 use crate::metrics_config_orchestrator::message_builder::{
     value_aggregator::AggregationError, ValueAggregator,
 };
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::Arc;
 
 /// Implementation of ValueAggregator that has preset output for `compute()`.
 #[derive(Clone)]

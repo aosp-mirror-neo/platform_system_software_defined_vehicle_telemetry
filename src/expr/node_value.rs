@@ -14,8 +14,8 @@ use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as Node
 use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodeProto;
 use std::{borrow::Cow, convert::From, sync::Arc};
 
-use crate::expr::node_error::NodeEvaluationError;
-use crate::expr::proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt;
+use crate::node_error::NodeEvaluationError;
+use crate::proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt;
 
 /// Holds a generic value.
 #[derive(Clone, Debug)]
@@ -780,7 +780,7 @@ mod tests {
     use std::f32::consts::PI as PIf32;
     use std::f64::consts::PI as PIf64;
 
-    use crate::expr::mock::*;
+    use crate::mock::*;
 
     const ONE: NodeValue = NodeValue::Double(1.0);
     const ONE_EPSILON: NodeValue = NodeValue::Double(1.0 + f64::EPSILON);

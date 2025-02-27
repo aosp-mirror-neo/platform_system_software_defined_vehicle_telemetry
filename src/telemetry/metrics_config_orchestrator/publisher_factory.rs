@@ -2,6 +2,7 @@
 
 use anyhow::anyhow;
 use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
+use sdv_telemetry_expr::node::Node;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
     service_publisher::ConnectionType as ConnectionTypeProto,
@@ -13,19 +14,19 @@ use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 use thiserror::Error;
 
-use crate::expr::node::Node;
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
     MessageBuilderFactoryValidateContext,
 };
 use crate::metrics_config_orchestrator::publisher::aggregation::AggregationPublisher;
 use crate::metrics_config_orchestrator::publisher::service::{ConnectionType, ServicePublisher};
-use crate::metrics_config_orchestrator::service_adapter::ServiceAdapter;
-use crate::metrics_config_orchestrator::{NodeValueType, Publisher, Trigger};
+use crate::metrics_config_orchestrator::{
+    node_evaluation_context_factory::NodeEvaluationContextFactory, service_adapter::ServiceAdapter,
+    NodeValueType, Publisher, Trigger,
+};
 use crate::status_reporter::StatusReporter;
 
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast))]
 pub(crate) trait PublisherFactory: Send + Sync {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
@@ -248,12 +249,14 @@ mod tests {
     use std::collections::HashMap;
     use std::time::Duration;
 
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
-    use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::service_adapter::{
         GetMessageProviderOutcome, ServiceSubscription,
     };
-    use crate::metrics_config_orchestrator::trigger::periodic::PeriodicTrigger;
+    use crate::metrics_config_orchestrator::{
+        message_builder_factory::mock::MockMessageBuilderFactory,
+        node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
+        trigger::periodic::PeriodicTrigger,
+    };
     use crate::StatusReporterImpl;
 
     const INTERVAL: Duration = Duration::from_millis(42);

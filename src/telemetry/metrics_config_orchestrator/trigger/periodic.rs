@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
 use tokio::time::{Duration, MissedTickBehavior};
@@ -8,11 +9,10 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use super::base::BaseTrigger;
 use super::Trigger;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };
+use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactory;
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::{
     base::TriggerState, TriggerCallbackFn, TriggerSubscriber,
@@ -149,7 +149,7 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::{mpsc, Notify};
 
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
+    use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::subscription_manager::{
         Activatable, SubscriptionManager,
     };

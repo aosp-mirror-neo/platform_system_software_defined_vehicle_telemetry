@@ -1,13 +1,13 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use super::base::{BaseTrigger, TriggerState};
 use super::Trigger;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 use crate::metrics_config_orchestrator::async_event_processor::{
     AsyncEventHandler, AsyncEventProcessor,
 };

@@ -2,12 +2,11 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
-
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 mod base;
 
@@ -22,7 +21,7 @@ pub(crate) mod mock;
 type CallbackFn = Box<dyn FnMut(Arc<NodeEvaluationContext>) + Send + Sync>;
 
 #[async_trait]
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait Publisher: Send + Sync {
     fn get_name(&self) -> &str;
 

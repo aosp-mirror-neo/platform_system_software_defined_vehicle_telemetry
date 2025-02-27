@@ -1,9 +1,9 @@
 // Copyright 2024 Google LLC
 
+use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
 use std::mem;
 
-use crate::expr::node_value::NodeValue;
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where numeric delta is calculated.

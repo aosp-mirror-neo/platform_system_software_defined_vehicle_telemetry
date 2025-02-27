@@ -11,9 +11,8 @@ pub(super) mod std_dev_aggregator;
 pub(super) mod sum_aggregator;
 pub(super) mod vector_aggregator;
 
+use sdv_telemetry_expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 use thiserror::Error;
-
-use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 #[derive(Error, Debug)]
 pub(crate) enum AggregationError {
@@ -32,7 +31,7 @@ pub(crate) enum AggregationError {
 
 /// Aggregation types should implement this trait and perform the corresponding
 /// aggregation at `compute()`.
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(std::fmt::Debug))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(std::fmt::Debug))]
 pub(crate) trait ValueAggregator: Send + Sync {
     fn compute(&mut self, node_value: Option<NodeValue>) -> Result<NodeValue, AggregationError>;
     fn reset(&mut self);

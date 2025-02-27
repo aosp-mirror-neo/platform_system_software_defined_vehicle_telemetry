@@ -10,19 +10,22 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
-use crate::expr::node::{FunctionType, Node, TimeSource};
-use crate::expr::node_error::{
+use crate::node::{FunctionType, Node, TimeSource};
+use crate::node_error::{
     DescriptorProviderError, FunctionLeafNodeArgumentError,
     FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeError,
     NodeEvaluationError,
 };
-use crate::expr::node_value::NodeValue;
-use crate::expr::node_value_type::{
+use crate::node_value::NodeValue;
+use crate::node_value_type::{
     FieldLeafNodeExtension, NodeValueType, NodeValueTypeExtension, OperatorProtoExtension,
 };
 
 /// Creates rust nodes from protobuf expression nodes.
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::Downcast))]
+#[cfg_attr(
+    any(test, feature = "test_utils"),
+    sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast)
+)]
 pub trait NodeFactory: Send + Sync {
     /// Creates rust Nodes from protobuf Nodes,.
     /// Protobuf nodes use indices to represent left and right children.
@@ -44,7 +47,7 @@ pub trait NodeFactory: Send + Sync {
     ) -> Result<Vec<Option<NodeValueType>>, NodeError>;
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test_utils"))]
 downcast_rs::impl_downcast!(NodeFactory);
 
 /// Provides necessary information for node validation and creation.
@@ -362,6 +365,12 @@ impl NodeFactoryImpl {
     }
 }
 
+impl Default for NodeFactoryImpl {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NodeFactory for NodeFactoryImpl {
     fn validate(
         &self,
@@ -443,7 +452,7 @@ mod tests {
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::parameterized_test;
 
-    use crate::expr::mock::*;
+    use crate::mock::*;
 
     const BOOL_FIELD_NAME: &str = "bool_field";
     const FLOAT_FIELD_NAME: &str = "float_field";

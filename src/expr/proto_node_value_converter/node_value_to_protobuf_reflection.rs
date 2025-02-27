@@ -7,7 +7,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{MessageDyn, MessageFull};
 use std::sync::Arc;
 
-use crate::expr::{node_error::NodeEvaluationError, node_value::NodeValue};
+use crate::{node_error::NodeEvaluationError, node_value::NodeValue};
 
 /// Implementing type will be able to convert self into a ReflectValueBox.
 pub trait ToReflectValueBox {

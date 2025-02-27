@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
-use crate::expr::node_value::NodeValue;
+use sdv_telemetry_expr::node_value::NodeValue;
+
 use crate::metrics_config_orchestrator::message_builder::{AggregationError, ValueAggregator};
 
 /// Field value type where count aggregation is performed.

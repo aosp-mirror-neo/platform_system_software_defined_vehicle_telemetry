@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use log::debug;
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
 };
@@ -13,12 +14,12 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
-use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactory;
-use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
-use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
-use crate::metrics_config_orchestrator::Trigger;
+use crate::metrics_config_orchestrator::{
+    error_status_codes::ErrorStatusCodes,
+    node_evaluation_context_factory::NodeEvaluationContextFactory, trigger::TriggerSubscriber,
+    Trigger,
+};
 use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -27,7 +28,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 };
 
 #[async_trait]
-#[cfg_attr(test, sdv_telemetry_utils_macros::with_super_trait(downcast_rs::DowncastSync))]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait MetricsReportGenerator: Send + Sync {
     async fn activate(self: Arc<Self>);
     async fn deactivate(&self, reason: ReportReason);
@@ -203,18 +204,20 @@ mod test {
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
     use protobuf::MessageDyn;
+    use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
     use tokio::sync::mpsc;
 
-    use crate::expr::node_error::NodeEvaluationError;
-    use crate::expr::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::message_builder::{
         mock::MockMessageBuilder, MessageBuilderError, MessageBuilderErrorType,
     };
-    use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
+    use crate::metrics_config_orchestrator::{
+        node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
+        trigger::mock::MockTrigger,
+    };
     use crate::StatusReporterImpl;
 
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";

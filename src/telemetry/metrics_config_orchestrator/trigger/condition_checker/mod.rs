@@ -9,9 +9,8 @@ pub(crate) use edge::EdgeConditionChecker;
 pub(crate) use previous_value_relational::PreviousValueRelationalConditionChecker;
 
 use anyhow::{bail, Context};
+use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
-
-use crate::expr::node_value::NodeValue;
 
 pub(crate) trait ConditionChecker: Send + Sync {
     fn check(&mut self, value: NodeValue) -> anyhow::Result<bool>;

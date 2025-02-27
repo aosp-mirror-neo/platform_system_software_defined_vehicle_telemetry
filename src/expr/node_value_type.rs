@@ -11,12 +11,12 @@ use sdv_telemetry_proto_rust::expression::{
     ConstantLeafNode, FieldLeafNode, FunctionLeafNode,
 };
 
-use crate::expr::{node_error::NodeEvaluationError, node_factory::DescriptorProvider};
+use crate::{node_error::NodeEvaluationError, node_factory::DescriptorProvider};
 
 /// Used for compatibility type checking in expression nodes, such as
 /// operator-operand compatibility and protobuf field assignment compatibility.
 #[derive(Clone, PartialEq, Eq, Debug)]
-pub(crate) enum NodeValueType {
+pub enum NodeValueType {
     Bool,
     Int,
     Float,

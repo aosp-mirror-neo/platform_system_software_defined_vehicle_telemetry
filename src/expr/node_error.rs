@@ -11,13 +11,13 @@ use thiserror::Error;
 /// A wrapper for NodeEvaluationError containing index of the node causing it
 #[derive(Error, Debug)]
 #[error("Processing node at index {index} failed: {err}")]
-pub(crate) struct NodeError {
+pub struct NodeError {
     pub index: usize,
     pub err: NodeEvaluationError,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum NodeEvaluationError {
+pub enum NodeEvaluationError {
     // general errors
     #[error("Node is out of bounds, expression nodes have size {n}")]
     IndexOutOfBound { n: usize },
@@ -107,7 +107,7 @@ pub(crate) enum NodeEvaluationError {
 
 /// Error returned by MessageProvider
 #[derive(Error, Debug)]
-pub(crate) enum MessageProviderError {
+pub enum MessageProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
@@ -120,20 +120,20 @@ pub(crate) enum MessageProviderError {
 
 /// Error returned by DescriptorProvider
 #[derive(Error, Debug)]
-pub(crate) enum DescriptorProviderError {
+pub enum DescriptorProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum FunctionLeafNodeArgumentError {
+pub enum FunctionLeafNodeArgumentError {
     #[error("GetCurrentTimestampError: {0}")]
     GetCurrentTimestampError(FunctionLeafNodeGetCurrentTimestampArgumentError),
 }
 
 #[derive(Error, Debug)]
-pub(crate) enum FunctionLeafNodeGetCurrentTimestampArgumentError {
+pub enum FunctionLeafNodeGetCurrentTimestampArgumentError {
     #[error("Time source is not set")]
     TimeSourceNotSet,
     #[error("Time source is unsupported")]

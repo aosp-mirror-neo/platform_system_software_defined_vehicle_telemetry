@@ -1,0 +1,77 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_expr_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libdowncast_rs",
+        "libfutures",
+        "libparking_lot",
+        "libprotobuf",
+        "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_service_publisher_accessor",
+        "libsdv_telemetry_time_wrapper",
+        "libsdv_telemetry_utils",
+        "libthiserror",
+        "libtokio",
+        // keep-sorted end
+    ],
+    ld_flags: ["-Wl,--no-as-needed"],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_expr",
+    defaults: ["libsdv_telemetry_expr_defaults"],
+    crate_name: "sdv_telemetry_expr",
+}
+
+rust_library {
+    name: "libsdv_telemetry_expr_with_test_utils",
+    defaults: ["libsdv_telemetry_expr_defaults"],
+    crate_name: "sdv_telemetry_expr",
+    features: [
+        "test_utils",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "liblazy_static",
+        "libsdv_telemetry_test_proto",
+        // keep-sorted end
+    ],
+}
+
+rust_test {
+    name: "libsdv_telemetry_expr_unit_tests",
+    defaults: ["libsdv_telemetry_expr_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "liblazy_static",
+        "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}

@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-use crate::expr::node_value::NodeValue;
+use crate::node_value::NodeValue;
 
 pub(super) trait WithNodeEvaluationState<S> {
     type Output;

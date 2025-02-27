@@ -1,7 +1,8 @@
 // Copyright 2025 Google LLC
 
+use sdv_telemetry_expr::node_value::NodeValue;
+
 use super::ConditionChecker;
-use crate::expr::node_value::NodeValue;
 
 /// Checks that the value is equal to `expected` (numbers are treated as `true` iff they are not 0).
 pub(crate) struct ConstantConditionChecker {

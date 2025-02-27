@@ -2,10 +2,10 @@
 
 use parking_lot::Mutex;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::{collections::HashMap, sync::Arc};
 
 use super::CallbackFn;
-use crate::expr::node_evaluation_context::NodeEvaluationContext;
 
 pub(super) struct BasePublisher {
     name: String,
