@@ -13,7 +13,7 @@ use sdv_telemetry_expr::proto_node_value_converter::node_value_to_protobuf_refle
 };
 use sdv_telemetry_expr::{
     node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
-    node_value::NodeValue,
+    node_evaluation_state::NodeEvaluationState, node_value::NodeValue,
 };
 use sdv_telemetry_utils::value_holder::ValueHolder;
 use std::collections::HashMap;
@@ -67,9 +67,11 @@ impl MessageBuilder for MessageBuilderImpl {
         self: Arc<Self>,
         context: &Arc<NodeEvaluationContext>,
     ) -> ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)> {
+        let node_evaluation_state = Arc::new(NodeEvaluationState::new(Arc::clone(context)));
         let operation_results = self.value_providers.iter().map(|(field_name, node)| {
             let name_clone = field_name.to_owned();
-            node.evaluate(Arc::clone(context)).map(move |res| (name_clone, res))
+            node.evaluate_with_state(Arc::clone(&node_evaluation_state))
+                .map(move |res| (name_clone, res.map(|(value, _state)| value)))
         });
         let self_clone = Arc::clone(&self);
         ValueHolder::collect_unordered(operation_results).map(move |results| {
@@ -190,7 +192,6 @@ mod tests {
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdv_telemetry_test_utils::msg_dyn_eq;
     use std::sync::Arc;
-
     use value_aggregator::mock::MockValueAggregator;
 
     lazy_static! {
@@ -216,6 +217,7 @@ mod tests {
     const REPEATED_MESSAGE_FIELD_NAME: &str = "repeated_messages";
     const OPTIONAL_BOOL_FIELD_NAME: &str = "optional_bool_field";
     const OPTIONAL_INT64_FIELD_NAME: &str = "optional_int64_field";
+    const PUBLISHER_NAME: &str = "test_publisher";
 
     /// Creates a MessageBuilderImpl struct object using the descriptor and
     /// field_name + node pairs as field assignments.
@@ -657,6 +659,52 @@ mod tests {
 
         let message = message.unwrap();
         let expected_message = TestMessage { int_field: 80, ..Default::default() };
+        assert_eq!(&message, &(Box::new(expected_message) as Box<dyn MessageDyn>));
+    }
+
+    #[test]
+    fn build_shares_node_evaluation_context() {
+        let message_provider = Arc::new(MockMessageProvider::new());
+        message_provider
+            .set_next_sync_result(Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>)));
+        let field_node1 = Arc::new(Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_owned(),
+            fields: vec![INT_FIELD_NAME.to_owned()],
+            message_provider,
+        });
+        let field_node2 = Arc::new(Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_owned(),
+            fields: vec![FLOAT_FIELD_NAME.to_owned()],
+            message_provider: Arc::new(MockMessageProvider::new()),
+        });
+
+        let builder = Arc::new(MessageBuilderImpl::new(
+            String::default(),
+            TestMessage::descriptor(),
+            vec![
+                (
+                    INT_FIELD_NAME.to_owned(),
+                    Box::new(MockValueAggregator::new()) as Box<dyn ValueAggregator>,
+                ),
+                (
+                    FLOAT_FIELD_NAME.to_owned(),
+                    Box::new(MockValueAggregator::new()) as Box<dyn ValueAggregator>,
+                ),
+            ],
+            vec![
+                (INT_FIELD_NAME.to_owned(), field_node1),
+                (FLOAT_FIELD_NAME.to_owned(), field_node2),
+            ],
+        ));
+
+        let (message, errors) =
+            builder.build(&Arc::new(NodeEvaluationContext::new(None))).unwrap_sync();
+
+        assert!(errors.is_empty());
+
+        let message = message.unwrap();
+        let expected_message =
+            TestMessage { int_field: 80, float_field: 100.0, ..Default::default() };
         assert_eq!(&message, &(Box::new(expected_message) as Box<dyn MessageDyn>));
     }
 
