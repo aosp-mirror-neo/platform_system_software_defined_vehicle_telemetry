@@ -67,7 +67,7 @@ StatusDetailsWithTag convert(const StatusDetailsAIDL& status_details) {
 
     switch (status_details.getTag()) {
         case StatusDetailsAIDLTag::aggregationPublisherErrorDetails: {
-            const auto details =
+            const auto& details =
                     status_details.get<StatusDetailsAIDLTag::aggregationPublisherErrorDetails>();
             result.tag = StatusDetailsTag::AggregationPublisherErrorDetailsTag;
             result.details.aggregation_publisher_error_details = convert(details);
@@ -75,7 +75,7 @@ StatusDetailsWithTag convert(const StatusDetailsAIDL& status_details) {
         }
 
         case StatusDetailsAIDLTag::servicePublisherErrorDetails: {
-            const auto details =
+            const auto& details =
                     status_details.get<StatusDetailsAIDLTag::servicePublisherErrorDetails>();
             result.tag = StatusDetailsTag::ServicePublisherErrorDetailsTag;
             result.details.service_publisher_error_details = convert(details);
@@ -83,7 +83,7 @@ StatusDetailsWithTag convert(const StatusDetailsAIDL& status_details) {
         }
 
         case StatusDetailsAIDLTag::conditionalTriggerErrorDetails: {
-            const auto details =
+            const auto& details =
                     status_details.get<StatusDetailsAIDLTag::conditionalTriggerErrorDetails>();
             result.tag = StatusDetailsTag::ConditionalTriggerErrorDetailsTag;
             result.details.conditional_trigger_error_details = convert(details);
@@ -91,7 +91,7 @@ StatusDetailsWithTag convert(const StatusDetailsAIDL& status_details) {
         }
 
         case StatusDetailsAIDLTag::metricsReportGeneratorErrorDetails: {
-            const auto details =
+            const auto& details =
                     status_details.get<StatusDetailsAIDLTag::metricsReportGeneratorErrorDetails>();
             result.tag = StatusDetailsTag::MetricsReportGeneratorErrorDetailsTag;
             result.details.metrics_report_generator_error_details = convert(details);
@@ -99,14 +99,14 @@ StatusDetailsWithTag convert(const StatusDetailsAIDL& status_details) {
         }
 
         case StatusDetailsAIDLTag::serviceErrorDetails: {
-            const auto details = status_details.get<StatusDetailsAIDLTag::serviceErrorDetails>();
+            const auto& details = status_details.get<StatusDetailsAIDLTag::serviceErrorDetails>();
             result.tag = StatusDetailsTag::ServiceErrorDetailsTag;
             result.details.service_error_details = convert(details);
             return result;
         }
 
         case StatusDetailsAIDLTag::fileIOErrorDetails: {
-            const auto details = status_details.get<StatusDetailsAIDLTag::fileIOErrorDetails>();
+            const auto& details = status_details.get<StatusDetailsAIDLTag::fileIOErrorDetails>();
             result.tag = StatusDetailsTag::FileIOErrorDetailsTag;
             result.details.file_io_error_details = convert(details);
             return result;
