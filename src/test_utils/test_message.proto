@@ -25,16 +25,18 @@ message TestMessage {
 
   // Repeated fields
   repeated bool repeated_bools = 9;
-  repeated int64 repeated_i64s = 10;
-  repeated double repeated_doubles = 11;
-  repeated TestEnum repeated_enums = 12;
-  repeated TestNestedMessage repeated_messages = 13;
-  repeated google.protobuf.Empty repeated_empty = 14;
-  repeated google.protobuf.Any repeated_any = 15;
+  repeated int32 repeated_i32s = 10;
+  repeated int64 repeated_i64s = 11;
+  repeated float repeated_floats = 12;
+  repeated double repeated_doubles = 13;
+  repeated TestEnum repeated_enums = 14;
+  repeated TestNestedMessage repeated_messages = 15;
+  repeated google.protobuf.Empty repeated_empty = 16;
+  repeated google.protobuf.Any repeated_any = 17;
 
   // Optional fields
-  optional bool optional_bool_field = 16;
-  optional int64 optional_int64_field = 17;
+  optional bool optional_bool_field = 18;
+  optional int64 optional_int64_field = 19;
 }
 
 message TestNestedMessage {

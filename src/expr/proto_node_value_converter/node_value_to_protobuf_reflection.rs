@@ -63,41 +63,33 @@ impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
     }
 }
 
-/// A NodeValue can be converted into an optional/singular protobuf reflection value.
-/// For NodeValues holding a list, use `push_node_value_content()` in
-///  `ReflectRepeatedMutExt` trait.
+/// A NodeValue can be converted into an optional/singular protobuf reflection value. For NodeValues
+/// holding a list, use `push_node_value_content()` in `ReflectRepeatedMutExt` trait.
 impl ToReflectValueBox for NodeValue {
     fn to_reflect_value_box(
         &self,
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeEvaluationError> {
-        let err_provider = || NodeEvaluationError::ValueToProtoConversionError {
-            value: format!("{:?}", self),
-            refl_type: format!("{:?}", protobuf_type),
-        };
-        match protobuf_type {
-            ProtobufRuntimeType::I32
-            | ProtobufRuntimeType::I64
-            | ProtobufRuntimeType::U32
-            | ProtobufRuntimeType::U64
-            | ProtobufRuntimeType::Enum(_) => {
-                self.get_int().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
-            }
-            ProtobufRuntimeType::F32 | ProtobufRuntimeType::F64 => {
-                self.get_double().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
-            }
-            ProtobufRuntimeType::Bool => {
-                self.get_bool().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
-            }
-            ProtobufRuntimeType::Message(_) => {
-                self.get_message().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
-            }
-            ProtobufRuntimeType::String => {
-                self.get_string().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
-            }
-            ProtobufRuntimeType::VecU8 => {
-                self.get_bytes().ok_or_else(err_provider)?.to_reflect_value_box(protobuf_type)
-            }
+        match self {
+            Self::None
+            | Self::BoolList(_)
+            | Self::Int32List(_)
+            | Self::Int64List(_)
+            | Self::FloatList(_)
+            | Self::DoubleList(_)
+            | Self::MessageList(_) => Err(NodeEvaluationError::ValueToProtoConversionError {
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
+            }),
+
+            Self::Bool(value) => value.to_reflect_value_box(protobuf_type),
+            Self::Int32(value) => value.to_reflect_value_box(protobuf_type),
+            Self::Int64(value) => value.to_reflect_value_box(protobuf_type),
+            Self::Float(value) => value.to_reflect_value_box(protobuf_type),
+            Self::Double(value) => value.to_reflect_value_box(protobuf_type),
+            Self::Message(value) => value.to_reflect_value_box(protobuf_type),
+            Self::String(value) => value.as_str().to_reflect_value_box(protobuf_type),
+            Self::ByteList(value) => value.as_slice().to_reflect_value_box(protobuf_type),
         }
     }
 }
@@ -125,7 +117,11 @@ impl ToReflectValueBox for i32 {
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
+            // Technically, the match arms for I32, F64, and Enum aren't necessary, because
+            // `i64::to_reflect_value_box` handles them as well. However, we list them here as they
+            // are loss-less only for `i32`, whereas they are lossy for `i64`.
             ProtobufRuntimeType::I32 => Ok(ReflectValueBox::I32(*self)),
+            ProtobufRuntimeType::F64 => Ok(ReflectValueBox::F64(f64::from(*self))),
             ProtobufRuntimeType::Enum(enum_descriptor) => {
                 Ok(ReflectValueBox::Enum(enum_descriptor.clone(), *self))
             }
@@ -157,11 +153,16 @@ impl ToReflectValueBox for i64 {
             ProtobufRuntimeType::U64 => {
                 u64::try_from(*self).map_or_else(err_provider, |v| Ok(ReflectValueBox::U64(v)))
             }
+            ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self as f32)),
+            ProtobufRuntimeType::F64 => Ok(ReflectValueBox::F64(*self as f64)),
             ProtobufRuntimeType::Enum(enum_descriptor) => i32::try_from(*self)
                 .map_or_else(err_provider, |v| {
                     Ok(ReflectValueBox::Enum(enum_descriptor.clone(), v))
                 }),
-            _ => Err(NodeEvaluationError::ValueToProtoConversionError {
+            ProtobufRuntimeType::Bool
+            | ProtobufRuntimeType::Message(_)
+            | ProtobufRuntimeType::String
+            | ProtobufRuntimeType::VecU8 => Err(NodeEvaluationError::ValueToProtoConversionError {
                 value: format!("{:?}", self),
                 refl_type: format!("{:?}", protobuf_type),
             }),
@@ -176,6 +177,9 @@ impl ToReflectValueBox for f32 {
         protobuf_type: &ProtobufRuntimeType,
     ) -> Result<ReflectValueBox, NodeEvaluationError> {
         match protobuf_type {
+            // Technically, the match arm for F32 isn't necessary, because
+            // `f64::to_reflect_value_box` handles it as well. However, we list it here as it is
+            // loss-less only for `f32`, whereas it is lossy for `f64`.
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self)),
             _ => f64::from(*self).to_reflect_value_box(protobuf_type),
         }
@@ -258,7 +262,9 @@ mod tests {
 
     use googletest::assert_that;
     use googletest::matchers::{eq, err, matches_pattern, ok};
-    use protobuf::well_known_types::wrappers::Int32Value;
+    use protobuf::well_known_types::{any::Any, empty::Empty, wrappers::Int32Value};
+    use protobuf::{Enum, EnumFull, Message};
+    use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
     use sdv_telemetry_test_utils::parameterized_test;
 
     fn create_int32_value() -> Int32Value {
@@ -318,5 +324,50 @@ mod tests {
 
         vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3])))),
         vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+    );
+
+    parameterized_test!(
+        #[test]
+        push_node_value_content,
+
+        |field_name: &str, node_value: &NodeValue, expected| {
+            let message_descriptor = TestMessage::descriptor();
+            let mut message = message_descriptor.new_instance();
+
+            let field_descriptor = message_descriptor.field_by_name(field_name).unwrap();
+            assert!(field_descriptor.is_repeated());
+            field_descriptor
+                .mut_repeated(message.as_mut())
+                .push_node_value_content(node_value)
+                .unwrap();
+
+            assert_eq!(
+                field_descriptor.get_repeated(message.as_ref()),
+                expected
+            );
+        },
+
+        bool_list_to_bool_list: ("repeated_bools", &NodeValue::BoolList(vec![true, false]), vec![ReflectValueBox::Bool(true), ReflectValueBox::Bool(false)]),
+
+        int32_list_to_int32_list: ("repeated_i32s", &NodeValue::Int32List(vec![1, 2]), vec![ReflectValueBox::I32(1), ReflectValueBox::I32(2)]),
+        int32_list_to_int64_list: ("repeated_i64s", &NodeValue::Int32List(vec![1, 2]), vec![ReflectValueBox::I64(1), ReflectValueBox::I64(2)]),
+        int32_list_to_float_list: ("repeated_floats", &NodeValue::Int32List(vec![1, 2]), vec![ReflectValueBox::F32(1.0), ReflectValueBox::F32(2.0)]),
+        int32_list_to_double_list: ("repeated_doubles", &NodeValue::Int32List(vec![1, 2]), vec![ReflectValueBox::F64(1.0), ReflectValueBox::F64(2.0)]),
+        int32_list_to_enum_list: ("repeated_enums", &NodeValue::Int32List(vec![TestEnum::NONE.value(), TestEnum::SOME.value()]), vec![ReflectValueBox::Enum(TestEnum::enum_descriptor(), TestEnum::NONE.value()), ReflectValueBox::Enum(TestEnum::enum_descriptor(), TestEnum::SOME.value())]),
+
+        int64_list_to_int32_list: ("repeated_i32s", &NodeValue::Int64List(vec![1, 2]), vec![ReflectValueBox::I32(1), ReflectValueBox::I32(2)]),
+        int64_list_to_int64_list: ("repeated_i64s", &NodeValue::Int64List(vec![1, 2]), vec![ReflectValueBox::I64(1), ReflectValueBox::I64(2)]),
+        int64_list_to_float_list: ("repeated_floats", &NodeValue::Int64List(vec![1, 2]), vec![ReflectValueBox::F32(1.0), ReflectValueBox::F32(2.0)]),
+        int64_list_to_double_list: ("repeated_doubles", &NodeValue::Int64List(vec![1, 2]), vec![ReflectValueBox::F64(1.0), ReflectValueBox::F64(2.0)]),
+        int64_list_to_enum_list: ("repeated_enums", &NodeValue::Int64List(vec![TestEnum::NONE.value().into(), TestEnum::SOME.value().into()]), vec![ReflectValueBox::Enum(TestEnum::enum_descriptor(), TestEnum::NONE.value()), ReflectValueBox::Enum(TestEnum::enum_descriptor(), TestEnum::SOME.value())]),
+
+        float_list_to_float_list: ("repeated_floats", &NodeValue::FloatList(vec![1.0, 2.0]), vec![ReflectValueBox::F32(1.0), ReflectValueBox::F32(2.0)]),
+        float_list_to_double_list: ("repeated_doubles", &NodeValue::FloatList(vec![1.0, 2.0]), vec![ReflectValueBox::F64(1.0), ReflectValueBox::F64(2.0)]),
+
+        double_list_to_float_list: ("repeated_floats", &NodeValue::DoubleList(vec![1.0, 2.0]), vec![ReflectValueBox::F32(1.0), ReflectValueBox::F32(2.0)]),
+        double_list_to_double_list: ("repeated_doubles", &NodeValue::DoubleList(vec![1.0, 2.0]), vec![ReflectValueBox::F64(1.0), ReflectValueBox::F64(2.0)]),
+
+        message_list_to_message_list: ("repeated_empty", &NodeValue::MessageList(vec![Arc::new(Empty::default())]), vec![ReflectValueBox::Message(Empty::descriptor().new_instance())]),
+        message_list_to_any_list: ("repeated_any", &NodeValue::MessageList(vec![Arc::new(Empty::default())]), vec![ReflectValueBox::Message(Box::new(Any::pack(Empty::default_instance()).unwrap()))]),
     );
 }
