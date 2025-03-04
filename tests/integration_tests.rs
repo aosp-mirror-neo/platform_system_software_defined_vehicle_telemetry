@@ -16,14 +16,17 @@ use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_proto_rust::expression::{
-    constant_leaf_node::Node_value, node::Node_type, ConstantLeafNode, Node,
+    combination_node::ArithmeticOperator, combination_node::Operator,
+    constant_leaf_node::Node_value, node::Node_type, CombinationNode, ConstantLeafNode, Node,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::Condition_type, metrics_report::ReportReason, publisher::Publisher_type,
     trigger::Trigger_type, AggregationPublisher, ConditionalTrigger, MetricsConfig,
     MetricsReportConfig, PeriodicTrigger, ProtoMessageBuilder, Publisher, Trigger,
 };
-use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
+use sdv_telemetry_rust_wrapper::{
+    ConditionalTriggerErrorDetails, StatusDetails, TelemetryServiceHolder,
+};
 use sdv_telemetry_sample_middleware_proto::tire::TirePressure;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_test_proto::test_message;
@@ -127,6 +130,131 @@ async fn telemetry_service_simple_config_end_to_end_test() {
 
     let ready_reports_info = service.get_ready_reports_info().await.unwrap();
     assert!(ready_reports_info.is_empty());
+
+    info!("Removing metrics config");
+    service.remove_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Finishing service");
+    service.finish().unwrap();
+
+    info!("Successfully finished service");
+}
+
+#[sdv_telemetry_test_utils::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_status_reporting_test() {
+    setup_once();
+
+    let config = MetricsConfig {
+        uuid: "9b1750a9-2de9-40ea-b8f8-b4caaa005d54".to_owned(),
+
+        triggers: vec![
+            Trigger {
+                name: "periodic_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_millis(1).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "finish_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_secs(1).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "conditional_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::ConditionalTrigger(ConditionalTrigger {
+                    trigger_names: vec!["periodic_trigger".to_owned()],
+                    selector_node_index: Some(0),
+                    condition_type: Some(Condition_type::IsTrue(Default::default())),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ],
+
+        expression_nodes: vec![
+            Node {
+                node_type: Some(Node_type::CombinationNode(CombinationNode {
+                    left_index: Some(1),
+                    right_index: Some(2),
+                    operator: Some(Operator::ArithmeticOperator(ArithmeticOperator::DIVIDE.into())),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Node {
+                node_type: Some(Node_type::ConstantLeafNode(ConstantLeafNode {
+                    node_value: Some(Node_value::FloatValue(42.0)),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Node {
+                node_type: Some(Node_type::ConstantLeafNode(ConstantLeafNode {
+                    node_value: Some(Node_value::FloatValue(0.0)),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ],
+
+        finish_trigger_name: "finish_trigger".to_owned(),
+        metrics_report_configs: vec![MetricsReportConfig {
+            name: "some_metrics_report_config".to_owned(),
+            trigger_names: vec!["conditional_trigger".to_owned()],
+            report_incomplete: true,
+            message_builder: Some(ProtoMessageBuilder {
+                message_type: Empty::descriptor().full_name().to_owned(),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let serialized_config = config.write_to_bytes().unwrap();
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    info!("Initializing service");
+    let (status_sender, mut status_receiver) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status| {
+                status_sender.send(status).unwrap();
+            },
+            move |report_info| {
+                info!("Received report info {report_info:?}");
+            },
+        )
+        .await
+        .unwrap();
+
+    info!("Adding config");
+    service.add_metrics_config(&serialized_config).await.unwrap();
+
+    info!("Activating config");
+    service.activate_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Awaiting error status");
+    let status = status_receiver.recv().await.unwrap();
+
+    assert!(
+        matches!(
+            &status.details,
+            Some(StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
+                metrics_config_uuid, trigger_name,
+            }))
+            if metrics_config_uuid == &config.uuid && trigger_name == &config.triggers[2].name),
+        "Unexpected status: {status:?}",
+    );
 
     info!("Removing metrics config");
     service.remove_metrics_config(&config.uuid).await.unwrap();
