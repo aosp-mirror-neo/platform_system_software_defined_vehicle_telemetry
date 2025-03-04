@@ -5,6 +5,13 @@ package {
     default_applicable_licenses: ["sdv_license"],
 }
 
+sysprop_library {
+    name: "sdv_telemetry_platform_abstraction_layer_core_sysprops",
+    srcs: ["PALCore.sysprop"],
+    property_owner: "Vendor",
+    device_specific: true,
+}
+
 rust_defaults {
     name: "libsdv_telemetry_platform_abstraction_layer_core_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
@@ -16,12 +23,15 @@ rust_defaults {
         "google.sdv.vpm-aidl-V1-rust",
         "libbinder_rs",
         "libbinder_tokio_rs",
+        "libfutures",
         "liblog_rust",
         "libparking_lot",
         "libpersistent_binder",
         "libsdv_telemetry_platform_abstraction_layer",
+        "libsdv_telemetry_platform_abstraction_layer_core_sysprops_rust",
         "libsdv_telemetry_time_wrapper",
         "libtokio",
+        "libtokio_stream",
         "libtokio_util",
         // keep-sorted end
     ],
@@ -44,6 +54,7 @@ rust_test {
     rustlibs: [
         // keep-sorted start
         "libgoogletest_rust",
+        "libmockall",
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],

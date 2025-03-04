@@ -1,0 +1,10 @@
+owner: Vendor
+module: "com.sdv.google.foo"
+
+prop {
+    api_name: "resumed_at_timestamp"
+    type: Long
+    access: ReadWrite
+    scope: Internal
+    prop_name: "vendor.sdv.telemetry.resumed_at_timestamp"
+}

@@ -9,18 +9,19 @@ use google_sdv_vpm_aidl::aidl::google::sdv::vpm::PowerStateReport::PowerStateRep
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
 use log::debug;
-use parking_lot::RwLock;
 use persistent_binder::PersistentBinderConnection;
 use sdv_telemetry_time_wrapper::get_monotonic_time_since_boot;
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+use tokio::sync::watch;
 
-use super::{log_error, ResumedAt};
+use crate::resumed_at::log_error;
+use crate::ResumedAt;
 
-/// Wrapper around a weak pointer to `ResumedAt` that subscribes to the VPM as a power state client.
-/// Whenever it receives a power state report, it updates `resumed_at`, if applicable.
+/// Subscribes to the VPM as a power state client. Whenever it receives a power state report about
+/// the VM having resumed, it sends the timestamp via the provided `resumed_at_tx` sender.
 #[derive(Clone)]
 pub(super) struct PowerStateListener {
-    pub(super) resumed_at: Weak<RwLock<ResumedAt>>,
+    pub(super) resumed_at_tx: watch::Sender<ResumedAt>,
 }
 
 impl binder::Interface for PowerStateListener {}
@@ -41,9 +42,9 @@ impl IPowerStateReportListenerAsyncServer for PowerStateListener {
                 // super quick, but let's get the timestamp here just in case).
                 let now = get_monotonic_time_since_boot();
 
-                if let Some(resumed_at) = self.resumed_at.upgrade() {
-                    *resumed_at.write() = Some(now);
-                }
+                // If sending the value fails, then the receiving side was closed, which we can
+                // safely ignore.
+                let _ = self.resumed_at_tx.send(Some(now));
             }
             _ => {}
         }
@@ -53,16 +54,16 @@ impl IPowerStateReportListenerAsyncServer for PowerStateListener {
 }
 
 impl PowerStateListener {
-    /// Creates a new `PowerStateListener` that subscribes to power state reports and updates
-    /// `resumed_at` whenever a power state report notifies it of the VM resuming from sleep. The
-    /// binder connection is managed by the `PersistentBinderConnection`, which this function
-    /// returns, and which automatically resubscribes on binder death, as long as `resumed_at` still
-    /// points somewhere.
+    /// Creates a new `PowerStateListener` that subscribes to power state reports and sends resumed
+    /// at timestamps via `resumed_at_tx` whenever a power state report notifies it of the VM
+    /// resuming from sleep. The binder connection is managed by the `PersistentBinderConnection`,
+    /// which this function returns, and which automatically resubscribes on binder death, as long
+    /// as the `resumed_at_tx` channel isn't closed.
     ///
     /// TODO: b/353466210 - Unfortunately, `PersistentBinderConnection` uses and expects blocking
     /// binder calls. We should refactor it to use async binder calls.
     pub(super) fn blocking_subscribe(
-        resumed_at: Weak<RwLock<ResumedAt>>,
+        resumed_at_tx: watch::Sender<ResumedAt>,
         power_state_client_api_factory: impl Fn() -> binder::Strong<dyn IPowerStateClientApi>
             + Send
             + Sync
@@ -72,7 +73,7 @@ impl PowerStateListener {
 
         let binder_connection = PersistentBinderConnection::new(power_state_client_api_factory);
 
-        let power_state_listener = Self { resumed_at };
+        let power_state_listener = Self { resumed_at_tx };
 
         {
             let binder_mutex = binder_connection.get_binder();
@@ -90,8 +91,8 @@ impl PowerStateListener {
             // runtime, hence we cannot access the current Tokio runtime handle here,
             // and instead need to re-use the handle saved in `tokio_runtime_handle`.
 
-            // Only resubscribe to Binder if `resumed_at` is still pointing somewhere.
-            if power_state_listener.resumed_at.upgrade().is_some() {
+            // Only resubscribe to Binder if the channel isn't closed.
+            if !power_state_listener.resumed_at_tx.is_closed() {
                 if let Err(err) = power_state_client_api.subscribeToPowerStateReport(
                     &power_state_listener.clone().into_binder(tokio_runtime_handle.clone()),
                 ) {
