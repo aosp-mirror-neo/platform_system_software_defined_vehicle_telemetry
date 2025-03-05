@@ -17,6 +17,7 @@ rust_defaults {
         "libanyhow",
         "libbinder_rs",
         "libbinder_tokio_rs",
+        "libdashmap",
         "liblog_rust",
         "libparking_lot",
         "libprotobuf",

@@ -5,6 +5,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
 use binder::BinderFeatures;
+use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::IConfigurablePublisher,
     IConfigurablePublisherSubscription::IConfigurablePublisherSubscription,
@@ -12,7 +13,6 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     PublisherInfo::PublisherInfo,
 };
 use log::info;
-use parking_lot::Mutex;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
@@ -22,7 +22,6 @@ use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessorError, GetMessageProviderOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
-use std::collections::{hash_map::Entry, HashMap};
 use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
@@ -34,13 +33,13 @@ use crate::subscriber_service::SubscriberService;
 
 /// ConfigurablePublisherRegistry that maintains the list of configurable publishers in memory.
 pub struct ConfigurablePublisherRegistry {
-    availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
+    availability_callbacks: Arc<DashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>,
     /// Adapter to make calls into Binder library.
     binder_adapter: Box<dyn BinderAdapter<dyn IConfigurablePublisher>>,
     /// Sender of cancellation callbacks.
     cancellation_sender: mpsc::UnboundedSender<Vec<Box<dyn FnOnce() + Send + Sync>>>,
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
-    publisher_entries: Mutex<HashMap<String, PublisherEntry>>,
+    publisher_entries: DashMap<String, PublisherEntry>,
 }
 
 pub struct ConfigurablePublisherRegistrySubscription {
@@ -67,7 +66,7 @@ pub(crate) enum ConfigurablePublisherRegistryRegisterError {
 }
 
 struct AvailabilityCallbackRegistrationImpl {
-    availability_callbacks: Arc<Mutex<HashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>>,
+    availability_callbacks: Arc<DashMap<String, Vec<Weak<dyn Fn() + Send + Sync>>>>,
     service_name: String,
     callback: Arc<dyn Fn() + Send + Sync>,
 }
@@ -102,13 +101,13 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
     ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError> {
-        let maybe_metadata = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
-            (entry.message_descriptor.clone(), entry.supports_get)
-        });
-
-        let metadata = maybe_metadata.map(|(message_descriptor, supports_get)| {
-            ServicePublisherMetadata { message_descriptor, supports_get }
-        });
+        let metadata = self
+            .publisher_entries
+            .view(service_name, |_k, v| (v.message_descriptor.clone(), v.supports_get))
+            .map(|(message_descriptor, supports_get)| ServicePublisherMetadata {
+                message_descriptor,
+                supports_get,
+            });
         Ok(metadata)
     }
 
@@ -116,18 +115,22 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
     ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
-        let provider = Self::visit_entry(&self.publisher_entries, service_name, |entry| {
-            if entry.supports_get {
-                GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
-                    message_descriptor: entry.message_descriptor.clone(),
-                    publisher: binder::Strong::downgrade(&entry.publisher),
-                })
-                    as Box<dyn ServicePublisherMessageProvider>)
-            } else {
-                GetMessageProviderOutcome::GetNotSupported
-            }
-        })
-        .unwrap_or(GetMessageProviderOutcome::NotRegistered);
+        let provider = self
+            .publisher_entries
+            .view(service_name, |_k, v| {
+                if v.supports_get {
+                    GetMessageProviderOutcome::Success(Box::new(
+                        ServicePublisherMessageProviderImpl {
+                            message_descriptor: v.message_descriptor.clone(),
+                            publisher: binder::Strong::downgrade(&v.publisher),
+                        },
+                    )
+                        as Box<dyn ServicePublisherMessageProvider>)
+                } else {
+                    GetMessageProviderOutcome::GetNotSupported
+                }
+            })
+            .unwrap_or(GetMessageProviderOutcome::NotRegistered);
         Ok(provider)
     }
 
@@ -143,8 +146,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let (message_descriptor, publisher) = {
-            let mut publisher_entries_lock = self.publisher_entries.lock();
-            let Some(entry) = publisher_entries_lock.get_mut(service_name) else {
+            let Some(mut entry) = self.publisher_entries.get_mut(service_name) else {
                 return Ok(CreateSubscriptionOutcome::NotRegistered {
                     new_message_callback,
                     cancellation_callback,
@@ -179,9 +181,9 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let callback_weak = Arc::downgrade(callback);
 
-        match self.availability_callbacks.lock().entry(service_name.to_owned()) {
-            Entry::Occupied(mut o) => o.get_mut().push(callback_weak),
-            Entry::Vacant(v) => {
+        match self.availability_callbacks.entry(service_name.to_owned()) {
+            DashMapEntry::Occupied(mut o) => o.get_mut().push(callback_weak),
+            DashMapEntry::Vacant(v) => {
                 v.insert(vec![callback_weak]);
             }
         };
@@ -208,10 +210,10 @@ impl ConfigurablePublisherRegistry {
         });
 
         Self {
-            availability_callbacks: Arc::new(Mutex::new(HashMap::new())),
+            availability_callbacks: Arc::new(DashMap::new()),
             binder_adapter: Box::new(BinderAdapterImpl {}),
             cancellation_sender,
-            publisher_entries: HashMap::new().into(),
+            publisher_entries: DashMap::new(),
         }
     }
 
@@ -230,13 +232,13 @@ impl ConfigurablePublisherRegistry {
                 message_type_name: publisher_info.messageTypeName.clone(),
             })?;
 
-        match self.publisher_entries.lock().entry(publisher_info.serviceName.clone()) {
-            Entry::Occupied(_) => {
+        match self.publisher_entries.entry(publisher_info.serviceName.clone()) {
+            DashMapEntry::Occupied(_) => {
                 return Err(ConfigurablePublisherRegistryRegisterError::ServiceAlreadyRegistered {
                     service_name: publisher_info.serviceName.clone(),
                 });
             }
-            Entry::Vacant(v) => {
+            DashMapEntry::Vacant(v) => {
                 let self_reference = Arc::downgrade(self);
                 let service_name_clone = v.key().clone();
                 let death_recipient = self.binder_adapter.link_to_death(
@@ -259,12 +261,13 @@ impl ConfigurablePublisherRegistry {
         }
 
         // Notify availability callbacks for the service.
-        if let Some(callbacks) = self.availability_callbacks.lock().get(&publisher_info.serviceName)
+        if let Some(callbacks) =
+            self.availability_callbacks.view(&publisher_info.serviceName, |_k, v| {
+                v.iter().filter_map(|callback| callback.upgrade()).collect::<Vec<_>>()
+            })
         {
-            for callback in callbacks.iter() {
-                if let Some(cb) = callback.upgrade() {
-                    cb();
-                }
+            for callback in callbacks {
+                callback();
             }
         }
 
@@ -283,25 +286,15 @@ impl ConfigurablePublisherRegistry {
     }
 
     fn try_unregister_publisher(&self, service_name: &str) -> bool {
-        let Some(entry) = self.publisher_entries.lock().remove(service_name) else {
+        let Some((_k, v)) = self.publisher_entries.remove(service_name) else {
             return false;
         };
 
         self.cancellation_sender
-            .send(entry.cancellation_callbacks)
+            .send(v.cancellation_callbacks)
             .expect("Receiver should have the same lifetime as self");
 
         true
-    }
-
-    fn visit_entry<T>(
-        publisher_entries: &Mutex<HashMap<String, PublisherEntry>>,
-        service_name: &str,
-        visitor: impl FnOnce(&PublisherEntry) -> T,
-    ) -> Option<T> {
-        let publisher_entries_lock = publisher_entries.lock();
-        let entry = publisher_entries_lock.get(service_name)?;
-        Some(visitor(entry))
     }
 
     fn on_publisher_death(&self, service_name: &str) {
@@ -335,10 +328,12 @@ impl Drop for AvailabilityCallbackRegistrationImpl {
 impl AvailabilityCallbackRegistrationImpl {
     fn unregister_impl(&mut self) {
         let availability_callbacks = mem::take(&mut self.availability_callbacks);
-        let mut availability_callbacks_lock = availability_callbacks.lock();
-        let Some(callbacks) = availability_callbacks_lock.get_mut(&self.service_name) else {
+        let DashMapEntry::Occupied(mut o) =
+            availability_callbacks.entry(mem::take(&mut self.service_name))
+        else {
             return;
         };
+        let callbacks = o.get_mut();
         let Some(callback_index) = callbacks
             .iter()
             .position(|each| each.upgrade().is_some_and(|cb| Arc::ptr_eq(&cb, &self.callback)))
@@ -347,7 +342,7 @@ impl AvailabilityCallbackRegistrationImpl {
         };
         callbacks.swap_remove(callback_index);
         if callbacks.is_empty() {
-            availability_callbacks_lock.remove(&self.service_name);
+            o.remove();
         }
     }
 }
@@ -388,6 +383,7 @@ mod tests {
         IConfigurablePublisherSubscription,
         BnConfigurablePublisherSubscription,
     };
+    use parking_lot::Mutex;
     use protobuf::reflect::ReflectValueRef;
     use protobuf::well_known_types::{any::Any, wrappers::Int32Value};
     use protobuf::{Message, MessageFull};
@@ -641,7 +637,7 @@ mod tests {
 
         binder_adapter.callback.lock().as_ref().unwrap()();
 
-        assert!(configurable_publisher_registry.publisher_entries.lock().is_empty());
+        assert!(configurable_publisher_registry.publisher_entries.is_empty());
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -663,10 +659,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
-        assert!(configurable_publisher_registry
-            .publisher_entries
-            .lock()
-            .contains_key(SERVICE_NAME));
+        assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -731,10 +724,7 @@ mod tests {
             .unwrap();
         configurable_publisher_registry.unregister_publisher(SERVICE_NAME).await.unwrap();
 
-        assert!(!configurable_publisher_registry
-            .publisher_entries
-            .lock()
-            .contains_key(SERVICE_NAME));
+        assert!(!configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
 
         // Unregistering doesn't unsubscribe from the publisher.
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 0);
@@ -760,10 +750,7 @@ mod tests {
             .unwrap();
         configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await.unwrap();
 
-        assert!(configurable_publisher_registry
-            .publisher_entries
-            .lock()
-            .contains_key(SERVICE_NAME));
+        assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
     }
 
     #[tokio::test]
@@ -784,9 +771,10 @@ mod tests {
             .unwrap();
 
         // Verify the callbacks are stored
-        let callbacks = registry.availability_callbacks.lock();
-        let registered_callbacks =
-            callbacks.get(SERVICE_NAME).expect("Service should be registered");
+        let registered_callbacks = registry
+            .availability_callbacks
+            .get(SERVICE_NAME)
+            .expect("Service should be registered");
 
         assert_eq!(registered_callbacks.len(), 2, "Expected 2 callbacks registered");
 
@@ -817,9 +805,10 @@ mod tests {
 
         // Verify only the second callback remains
         {
-            let callbacks = registry.availability_callbacks.lock();
-            let remaining_callbacks =
-                callbacks.get(SERVICE_NAME).expect("Service should still be registered");
+            let remaining_callbacks = registry
+                .availability_callbacks
+                .get(SERVICE_NAME)
+                .expect("Service should still be registered");
 
             assert_eq!(remaining_callbacks.len(), 1, "Expected only 1 callback remaining");
             assert!(Arc::ptr_eq(&callback2, &remaining_callbacks[0].upgrade().unwrap()));
@@ -829,9 +818,8 @@ mod tests {
         reg2.unregister().await;
 
         // Verify the service entry is removed after all callbacks are unregistered
-        let callbacks = registry.availability_callbacks.lock();
         assert!(
-            !callbacks.contains_key(SERVICE_NAME),
+            !registry.availability_callbacks.contains_key(SERVICE_NAME),
             "Service entry should be removed when no callbacks are left"
         );
     }
