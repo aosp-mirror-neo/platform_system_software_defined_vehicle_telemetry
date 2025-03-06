@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for DT.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -182,14 +182,22 @@ impl DataTunnelSubscriber {
     pub(super) async fn get_message_descriptor(
         vsidl_provider: &dyn VsidlConfigProviderV1,
         service_unit_definition: &ServiceUnitDefinition,
-    ) -> Option<MessageDescriptor> {
-        vsidl_provider
+    ) -> anyhow::Result<MessageDescriptor> {
+        let descriptor = vsidl_provider
             .get_publication_descriptor(
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
                 &service_unit_definition.get_unit_type(),
             )
             .await
-            .map(|descriptor| descriptor.message_descriptor)
+            .ok_or_else(|| {
+                anyhow!(
+                    "VSIDL provider was unable to provide publication descriptor for {}|{}",
+                    service_unit_definition.get_service_bundle_identity().get_fqin(),
+                    service_unit_definition.get_unit_type()
+                )
+            })?;
+
+        Ok(descriptor.message_descriptor)
     }
 
     fn read_length_delimited_proto(

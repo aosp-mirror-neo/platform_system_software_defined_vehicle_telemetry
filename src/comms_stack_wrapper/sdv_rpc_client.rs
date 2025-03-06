@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for SDV RPC.
 
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -162,15 +162,29 @@ impl SdvRpcClient {
     pub(super) async fn get_message_descriptor(
         vsidl_provider: &dyn VsidlConfigProviderV1,
         service_unit_definition: &ServiceUnitDefinition,
-    ) -> Option<MessageDescriptor> {
-        vsidl_provider
+    ) -> anyhow::Result<MessageDescriptor> {
+        let descriptor = vsidl_provider
             .get_rpc_method_descriptor(
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
                 &service_unit_definition.get_unit_type(),
                 CREATE_SUBSCRIPTION_METHOD,
             )
             .await
-            .and_then(|descriptor| descriptor.response_message)
+            .ok_or_else(|| {
+                anyhow!(
+                    "VSIDL provider was unable to provide RPC method descriptor for {}|{}",
+                    service_unit_definition.get_service_bundle_identity().get_fqin(),
+                    service_unit_definition.get_unit_type()
+                )
+            })?;
+
+        descriptor.response_message.ok_or_else(|| {
+            anyhow!(
+                "VSIDL provider descriptor for {}|{} has no response message",
+                service_unit_definition.get_service_bundle_identity().get_fqin(),
+                service_unit_definition.get_unit_type()
+            )
+        })
     }
 
     fn serialize_configuration(configuration: Option<&Any>) -> Vec<u8> {

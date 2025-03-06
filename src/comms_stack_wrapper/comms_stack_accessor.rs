@@ -337,51 +337,54 @@ impl CommsStackAccessor {
         service_name: &ServiceName,
         service_unit_definition: &ServiceUnitDefinition,
     ) -> anyhow::Result<MessageDescriptor> {
-        if let Some(vsidl_provider) = self.vsidl_provider.clone().await {
-            if let Some(message_descriptor) = match service_unit_definition.get_unit_metadata() {
-                UnitMetadata::Publisher(_) => {
-                    DataTunnelSubscriber::get_message_descriptor(
-                        vsidl_provider.as_ref(),
-                        service_unit_definition,
-                    )
-                    .await
-                }
-                UnitMetadata::Server(_) => {
-                    SdvRpcClient::get_message_descriptor(
-                        vsidl_provider.as_ref(),
-                        service_unit_definition,
-                    )
-                    .await
-                }
-            } {
-                debug!("Found descriptor for {service_name} in VSIDL provider");
-                return Ok(message_descriptor);
-            }
+        let app_metadata = service_unit_definition.get_application_metadata();
+        if !app_metadata.is_empty() {
+            debug!("Service unit definition for {service_name} contains application metadata, using it to retrieve descriptor");
+
+            let publisher_metadata = MessageMetadata::parse_from_bytes(app_metadata.as_slice())
+                .with_context(|| "Failed to parse publisher app metadata")?;
+
+            // Build the provided proto file descriptors.
+            let file_descriptors = FileDescriptor::new_dynamic_fds(
+                publisher_metadata.file_descriptors,
+                &WELL_KNOWN_FILE_DESCRIPTORS,
+            )
+            .with_context(|| "Invalid Descriptor Protos")?;
+
+            return descriptor_utils::find_message_by_full_name(
+                &file_descriptors,
+                &publisher_metadata.message_full_name
+            ).ok_or_else(|| {
+                anyhow!(
+                    "Message named \"{}\" not found in file descriptors ({} file descriptors provided)",
+                    publisher_metadata.message_full_name,
+                    file_descriptors.len()
+                )
+            });
         }
 
-        debug!("Metadata for {service_name} not found in VSIDL provider, trying to use Service Discovery application metadata");
-        let app_metadata = service_unit_definition.get_application_metadata();
-        let publisher_metadata = MessageMetadata::parse_from_bytes(app_metadata.as_slice())
-            .with_context(|| {
-                format!("Failed to parse publisher app metadata for service '{service_name}'.")
-            })?;
-
-        // Build the provided proto file descriptors.
-        let file_descriptors = FileDescriptor::new_dynamic_fds(
-            publisher_metadata.file_descriptors,
-            &WELL_KNOWN_FILE_DESCRIPTORS,
-        )
-        .with_context(|| "Invalid Descriptor Protos")?;
-
-        descriptor_utils::find_message_by_full_name(
-            &file_descriptors,
-            &publisher_metadata.message_full_name,
-        )
-        .ok_or(anyhow!(
-            "Message named \"{}\" not found in file descriptors ({} file descriptors provided)",
-            publisher_metadata.message_full_name,
-            file_descriptors.len(),
-        ))
+        debug!("Querying VSIDL provider to retrieve descriptor for {service_name}");
+        let vsidl_provider = self
+            .vsidl_provider
+            .clone()
+            .await
+            .ok_or_else(|| anyhow!("VSIDL provider is not available"))?;
+        match service_unit_definition.get_unit_metadata() {
+            UnitMetadata::Publisher(_) => {
+                DataTunnelSubscriber::get_message_descriptor(
+                    vsidl_provider.as_ref(),
+                    service_unit_definition,
+                )
+                .await
+            }
+            UnitMetadata::Server(_) => {
+                SdvRpcClient::get_message_descriptor(
+                    vsidl_provider.as_ref(),
+                    service_unit_definition,
+                )
+                .await
+            }
+        }
     }
 }
 
