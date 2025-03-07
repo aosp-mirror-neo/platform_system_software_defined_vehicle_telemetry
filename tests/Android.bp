@@ -11,7 +11,7 @@ filegroup {
 }
 
 rust_test {
-    name: "sdv_telemetry_integration_tests",
+    name: "sdv_mt_telemetry_integration_general_test",
     defaults: ["sdv_telemetry@rust_defaults"],
     test_options: {
         unit_test: false,
