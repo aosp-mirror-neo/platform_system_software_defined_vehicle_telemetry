@@ -28,7 +28,7 @@ fi
 source "$ANDROID_BUILD_TOP/build/envsetup.sh"
 
 declare -a TEST_TARGETS
-TEST_TARGETS=('sdv_telemetry_*' 'sdv_mt_telemetry_*')
+TEST_TARGETS=('libsdv_telemetry_*' 'sdv_telemetry_*')
 
 log "Building code..."
 # Running `m` is needed to build essential tools like `cvd`.

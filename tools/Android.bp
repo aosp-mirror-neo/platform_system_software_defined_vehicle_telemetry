@@ -6,7 +6,7 @@ sh_binary_host {
 }
 
 rust_test_host {
-    name: "sdv_mt_telemetry_unit_get_proto_file_descriptors_test",
+    name: "sdv_telemetry_get_proto_file_descriptors_test",
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["get_proto_file_descriptors_test/test.rs"],
     data: [

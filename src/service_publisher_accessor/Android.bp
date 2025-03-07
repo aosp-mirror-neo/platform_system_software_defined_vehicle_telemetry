@@ -38,7 +38,7 @@ rust_library {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_service_publisher_accessor_test",
+    name: "libsdv_telemetry_service_publisher_accessor_unit_tests",
     defaults: ["libsdv_telemetry_service_publisher_accessor_defaults"],
     crate_name: "sdv_telemetry_service_publisher_accessor_unit_tests",
     test_options: {
