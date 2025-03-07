@@ -242,59 +242,78 @@ impl TriggerFactoryImpl {
         conditional_trigger_proto: &ConditionalTriggerProto,
         value_type: Option<&NodeValueType>,
     ) -> Result<ConditionType, TriggerFactoryError> {
-        let condition_type = conditional_trigger_proto
+        let proto_condition_type = conditional_trigger_proto
             .condition_type
             .as_ref()
             .ok_or_else(|| TriggerFactoryError::UnspecifiedConditionTypeProto)?;
 
+        let is_bool_or_numeric = Box::new(|value_type: &NodeValueType| -> bool {
+            value_type.is_bool() || value_type.is_numeric()
+        });
+
+        let (condition_type, is_value_type_allowed): (_, Box<dyn FnOnce(&NodeValueType) -> bool>) =
+            match proto_condition_type {
+                ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                    rising_options,
+                    special_fields: _,
+                }) => (
+                    ConditionType::RisingEdge(Self::get_edge_options(rising_options)?),
+                    is_bool_or_numeric,
+                ),
+                ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                    falling_options,
+                    special_fields: _,
+                }) => (
+                    ConditionType::FallingEdge(Self::get_edge_options(falling_options)?),
+                    is_bool_or_numeric,
+                ),
+                ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                    rising_options,
+                    falling_options,
+                    special_fields: _,
+                }) => {
+                    // If either of the edge options are set and not the default, use
+                    // `ConditionType::BothEdges`, otherwise use the `ConditionType::AllChanges`.
+                    if rising_options
+                        .as_ref()
+                        .is_some_and(|options| options != EdgeOptionsProto::default_instance())
+                        || falling_options
+                            .as_ref()
+                            .is_some_and(|options| options != EdgeOptionsProto::default_instance())
+                    {
+                        (
+                            ConditionType::BothEdges {
+                                rising_options: Self::get_edge_options(rising_options)?,
+                                falling_options: Self::get_edge_options(falling_options)?,
+                            },
+                            is_bool_or_numeric,
+                        )
+                    } else {
+                        (
+                            ConditionType::AllChanges,
+                            // `AllChanges` uses the NOT_EQ operator, which supports all node value
+                            // types.
+                            Box::new(|_| true),
+                        )
+                    }
+                }
+                ConditionTypeProto::IsTrue(_) => (ConditionType::IsTrue, is_bool_or_numeric),
+                ConditionTypeProto::IsFalse(_) => (ConditionType::IsFalse, is_bool_or_numeric),
+                unknown_condition_type => {
+                    return Err(TriggerFactoryError::UnknownConditionTypeProto {
+                        condition_type: unknown_condition_type.clone(),
+                    })
+                }
+            };
+
         if let Some(value_type) = value_type {
-            if !value_type.is_bool() && !value_type.is_numeric() {
+            if !is_value_type_allowed(value_type) {
                 return Err(TriggerFactoryError::InvalidNodeValueType {
-                    condition_type: condition_type.clone(),
-                    value_type: value_type.clone(),
+                    condition_type: proto_condition_type.to_owned(),
+                    value_type: value_type.to_owned(),
                 });
             }
         }
-
-        let condition_type = match condition_type {
-            ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
-                rising_options,
-                special_fields: _,
-            }) => ConditionType::RisingEdge(Self::get_edge_options(rising_options)?),
-            ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
-                falling_options,
-                special_fields: _,
-            }) => ConditionType::FallingEdge(Self::get_edge_options(falling_options)?),
-            ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
-                rising_options,
-                falling_options,
-                special_fields: _,
-            }) => {
-                // If either of the edge options are set and not the default, use
-                // `ConditionType::BothEdges`, otherwise use the `ConditionType::AllChanges`.
-                if rising_options
-                    .as_ref()
-                    .is_some_and(|options| options != EdgeOptionsProto::default_instance())
-                    || falling_options
-                        .as_ref()
-                        .is_some_and(|options| options != EdgeOptionsProto::default_instance())
-                {
-                    ConditionType::BothEdges {
-                        rising_options: Self::get_edge_options(rising_options)?,
-                        falling_options: Self::get_edge_options(falling_options)?,
-                    }
-                } else {
-                    ConditionType::AllChanges
-                }
-            }
-            ConditionTypeProto::IsTrue(_) => ConditionType::IsTrue,
-            ConditionTypeProto::IsFalse(_) => ConditionType::IsFalse,
-            unknown_condition_type => {
-                return Err(TriggerFactoryError::UnknownConditionTypeProto {
-                    condition_type: unknown_condition_type.clone(),
-                })
-            }
-        };
 
         Ok(condition_type)
     }
@@ -344,8 +363,10 @@ impl TriggerFactoryImpl {
 mod tests {
     use super::*;
 
-    use googletest::assert_that;
-    use googletest::matchers::{contains_substring, eq, err, matches_pattern, ok, result_of_ref};
+    use googletest::matchers::{
+        contains_substring, eq, err, matches_pattern, ok, result_of_ref, some,
+    };
+    use googletest::{assert_that, expect_that};
     use protobuf::MessageField;
     use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
@@ -454,16 +475,6 @@ mod tests {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let conditional_trigger = trigger.mut_conditional_trigger();
         conditional_trigger.condition_type = None;
-        conditional_trigger.selector_node_index = Some(0);
-        conditional_trigger.trigger_names.push(String::default());
-        trigger
-    }
-
-    fn create_conditional_trigger_with_all_changes_condition_type() -> TriggerProto {
-        let mut trigger = new_trigger(TRIGGER_NAME);
-        let conditional_trigger = trigger.mut_conditional_trigger();
-        conditional_trigger.condition_type =
-            Some(ConditionTypeProto::AllChanges(Default::default()));
         conditional_trigger.selector_node_index = Some(0);
         conditional_trigger.trigger_names.push(String::default());
         trigger
@@ -739,28 +750,83 @@ mod tests {
         );
     }
 
-    #[test]
-    fn create_conditional_trigger_incompatible_condition_type_fails() {
-        let factory = create_factory();
-        let trigger = create_conditional_trigger_with_all_changes_condition_type();
+    parameterized_test!(
+        #[googletest::test]
+        conditional_trigger_incompatible_condition_type_fails,
 
-        let err = factory
-            .create_using_context_with(
-                &trigger,
-                Some(vec![Arc::new(create_node())]),
-                vec![Some(NodeValueType::BoolList)],
-                None,
-                None,
-            )
-            .err()
-            .unwrap();
+        |condition_type: ConditionTypeProto, node_value_type: NodeValueType| {
+            let factory = create_factory();
+            let mut trigger = create_conditional_trigger_with_unspecified_condition_type();
+            trigger.mut_conditional_trigger().condition_type = Some(condition_type);
 
-        assert!(
-            matches!(err, TriggerFactoryError::InvalidNodeValueType { .. }),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
+            let node_types = vec![Some(node_value_type)];
+
+            let validate_result = factory
+                .validate_using_context_with(&trigger, node_types.clone(), None);
+            let create_err = factory
+                .create_using_context_with(
+                    &trigger,
+                    Some(vec![Arc::new(create_node())]),
+                    node_types,
+                    None,
+                    None,
+                )
+                .err();
+
+            expect_that!(validate_result, err(matches_pattern!(TriggerFactoryError::InvalidNodeValueType { .. })));
+            expect_that!(create_err, some(matches_pattern!(TriggerFactoryError::InvalidNodeValueType { .. })));
+        },
+
+        rising_edge_bool_list: (
+            ConditionTypeProto::RisingEdge(Default::default()),
+            NodeValueType::BoolList,
+        ),
+        rising_edge_options_bool_list: (
+            ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            }),
+            NodeValueType::BoolList,
+        ),
+
+        falling_edge_bool_list: (
+            ConditionTypeProto::FallingEdge(Default::default()),
+            NodeValueType::BoolList,
+        ),
+        falling_edge_options_bool_list: (
+            ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            }),
+            NodeValueType::BoolList,
+        ),
+
+        all_changes_edge_options_bool_list: (
+            ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            }),
+            NodeValueType::BoolList,
+        ),
+
+        is_true_bool_list: (
+            ConditionTypeProto::IsTrue(Default::default()),
+            NodeValueType::BoolList,
+        ),
+        is_false_bool_list: (
+            ConditionTypeProto::IsTrue(Default::default()),
+            NodeValueType::BoolList,
+        ),
+    );
 
     #[test]
     fn create_conditional_trigger_success() {
@@ -1166,23 +1232,6 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
-            "Unexpected error: {:?}",
-            err
-        );
-    }
-
-    #[test]
-    fn validate_conditional_trigger_incompatible_condition_type_fails() {
-        let factory = create_factory();
-        let trigger = create_conditional_trigger_with_all_changes_condition_type();
-
-        let err = factory
-            .validate_using_context_with(&trigger, vec![Some(NodeValueType::BoolList)], None)
-            .err()
-            .unwrap();
-
-        assert!(
-            matches!(err, TriggerFactoryError::InvalidNodeValueType { .. }),
             "Unexpected error: {:?}",
             err
         );
