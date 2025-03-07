@@ -73,7 +73,7 @@ rust_bindgen {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_clientlib_bindgen_test",
+    name: "libsdv_telemetry_bindgen_tests",
     defaults: ["sdv_telemetry@rust_defaults"],
     crate_name: "sdv_telemetry_bindgen_tests",
     srcs: [
@@ -113,7 +113,7 @@ rust_bindgen {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_clientlib_status_codes_bindgen_test",
+    name: "libsdv_telemetry_status_codes_bindgen_tests",
     defaults: ["sdv_telemetry@rust_defaults"],
     crate_name: "sdv_telemetry_status_codes_bindgen_tests",
     srcs: [
@@ -175,7 +175,7 @@ rust_library {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_clientlib_rust_wrapper_test",
+    name: "libsdv_telemetry_rust_wrapper_tests",
     defaults: ["libsdv_telemetry_rust_wrapper_defaults"],
     crate_name: "sdv_telemetry_rust_wrapper_tests",
     test_options: {

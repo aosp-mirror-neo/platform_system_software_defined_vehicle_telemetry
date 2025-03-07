@@ -3,52 +3,61 @@
   "sdv_telemetry_tests_presubmit": [
     // keep-sorted start block=yes
     {
-      "name": "sdv_mt_telemetry_lib_unit_test"
+      "name": "libsdv_telemetry_bindgen_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_clientlib_bindgen_test"
+      "name": "libsdv_telemetry_configurable_publisher_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_clientlib_rust_wrapper_test"
+      "name": "libsdv_telemetry_dt_wrapper_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_clientlib_status_codes_bindgen_test"
+      "name": "libsdv_telemetry_expr_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_comms_stack_wrapper_test"
+      "name": "libsdv_telemetry_platform_abstraction_layer_core_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_get_proto_file_descriptors_test"
+      "name": "libsdv_telemetry_platform_abstraction_layer_ivi_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_sample_utils_test"
+      "name": "libsdv_telemetry_platform_abstraction_layer_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_service_publisher_accessor_test"
+      "name": "libsdv_telemetry_rust_wrapper_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_simulator_test"
+      "name": "libsdv_telemetry_service_publisher_accessor_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_telemetry_configurable_publisher_test"
+      "name": "libsdv_telemetry_simulator_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_test_utils_macros_test"
+      "name": "libsdv_telemetry_status_codes_bindgen_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_test_utils_test"
+      "name": "libsdv_telemetry_test_utils_macros_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_time_bindgen_test"
+      "name": "libsdv_telemetry_test_utils_unit_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_time_wrapper_test"
+      "name": "libsdv_telemetry_time_bindgen_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_utils_macros_test"
+      "name": "libsdv_telemetry_time_wrapper_tests"
     },
     {
-      "name": "sdv_mt_telemetry_unit_utils_test"
+      "name": "libsdv_telemetry_unit_tests"
+    },
+    {
+      "name": "libsdv_telemetry_utils_macros_tests"
+    },
+    {
+      "name": "libsdv_telemetry_utils_unit_tests"
+    },
+    {
+      "name": "sdv_telemetry_get_proto_file_descriptors_test"
     },
     {
       "name": "sdv_telemetry_sample_getter_publisher_unit_tests"
@@ -57,26 +66,30 @@
       "name": "sdv_telemetry_sample_publisher_unit_tests"
     },
     {
+      "name": "sdv_telemetry_sample_utils_unit_tests"
+    },
+    {
       "name": "sdv_telemetry_scenario_generator_unit_tests"
     }
     // keep-sorted end
   ],
   "sdv_telemetry_tests_postsubmit": [
     // keep-sorted start block=yes
+
     // This test suite also runs in presubmit, but if we leave this empty, our
     // postsubmit tests are constantly getting suspended.
     {
-      "name": "sdv_mt_telemetry_unit_utils_test"
+      "name": "libsdv_telemetry_utils_unit_tests"
     }
     // keep-sorted end
   ],
   "sdv_telemetry_integration_tests_presubmit": [
     // keep-sorted start block=yes
     {
-      "name": "sdv_mt_telemetry_integration_comms_stack_wrapper_test"
+      "name": "libsdv_telemetry_dt_wrapper_integration_tests"
     },
     {
-      "name": "sdv_mt_telemetry_integration_general_test"
+      "name": "sdv_telemetry_integration_tests"
     }
     // keep-sorted end
   ]

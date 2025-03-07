@@ -37,7 +37,7 @@ rust_library {
 }
 
 rust_test {
-    name: "sdv_mt_telemetry_unit_utils_test",
+    name: "libsdv_telemetry_utils_unit_tests",
     defaults: ["libsdv_telemetry_utils_defaults"],
     rustlibs: [
         // keep-sorted start
