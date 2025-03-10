@@ -4,7 +4,8 @@ use sdv_telemetry_expr::node_value::NodeValue;
 
 use super::ConditionChecker;
 
-/// Checks that the value is equal to `expected` (numbers are treated as `true` iff they are not 0).
+/// Checks that the value is equal to `expected`. This condition checker only supports numbers and
+/// booleans (numbers are treated as `true` if they are not 0).
 pub(crate) struct ConstantConditionChecker {
     expected: bool,
 }
@@ -16,10 +17,8 @@ impl ConditionChecker for ConstantConditionChecker {
             NodeValue::None => false,
 
             NodeValue::Bool(boolean) => boolean == self.expected,
-            // If the value is not a bool or None, it's numeric. Otherwise validation would fail.
-            numeric_value => {
-                let is_not_zero = !numeric_value.is_zero()?;
-
+            value => {
+                let is_not_zero = !value.is_zero()?;
                 is_not_zero == self.expected
             }
         })
