@@ -80,7 +80,7 @@ impl fmt::Display for CliArgs {
         fn write_finish_condition(
             f: &mut fmt::Formatter<'_>,
             max_simulation_time: &Duration,
-            max_report_count: &Option<u64>,
+            max_report_count: Option<u64>,
         ) -> fmt::Result {
             if let Some(max_report_count) = max_report_count {
                 writeln!(
@@ -108,7 +108,7 @@ impl fmt::Display for CliArgs {
                 write_finish_condition(
                     f,
                     &self.max_simulation_time,
-                    &telemetry_client_args.max_report_count,
+                    telemetry_client_args.max_report_count,
                 )
             }
             Commands::SimulationPublishers { simulation_publisher_args } => {
@@ -118,7 +118,7 @@ impl fmt::Display for CliArgs {
                     "Publisher configs: {:?}",
                     simulation_publisher_args.publisher_config_paths
                 )?;
-                write_finish_condition(f, &self.max_simulation_time, &None)
+                write_finish_condition(f, &self.max_simulation_time, None)
             }
             Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
                 writeln!(f, "Running telemetry client and simulation publishers")?;
@@ -134,7 +134,7 @@ impl fmt::Display for CliArgs {
                 write_finish_condition(
                     f,
                     &self.max_simulation_time,
-                    &telemetry_client_args.max_report_count,
+                    telemetry_client_args.max_report_count,
                 )
             }
         }

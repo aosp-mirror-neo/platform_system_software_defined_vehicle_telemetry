@@ -23,6 +23,11 @@ rust_defaults {
         "sdv_tracing@rust_defaults",
     ],
     flags: [
+        // Disallows function signatures using `&Option<T>`. Instead use
+        // `Option<&T>` or `Option<T>` (if `T: Copy`). `&Option<T>` requires the
+        // caller to own `T`, whereas `Option<&T>` does not require the caller
+        // to own it, which provides greater flexibility (see also ag/28707195).
+        "-D clippy::ref_option",
         // By enforcing this lint, we make it a lot more obvious when a conversion
         // is potentially lossy, because lossless conversions are no longer
         // allowed to be written as `a as XX`.

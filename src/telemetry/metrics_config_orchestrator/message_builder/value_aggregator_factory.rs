@@ -215,7 +215,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
     ) -> Result<Option<NodeValueType>, ValueAggregatorFactoryError> {
         let res = match self {
             AggregatedFieldValueProto::NoAggregation(aggr_proto) => {
-                get_node_type(node_types, &aggr_proto.expression_node_index)?.clone()
+                get_node_type(node_types, aggr_proto.expression_node_index)?.clone()
             }
             AggregatedFieldValueProto::VectorAggregation(aggr_proto) => {
                 if let Some(max_len) = &aggr_proto.max_length {
@@ -226,7 +226,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                     }
                 }
 
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if let Some(node_type) = node_type {
                     // after vector aggregation, it will be a list type
                     let aggregated_type = match node_type {
@@ -252,7 +252,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 }
             }
             AggregatedFieldValueProto::MaxAggregation(aggr_proto) => {
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
@@ -265,7 +265,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 }
             }
             AggregatedFieldValueProto::MinAggregation(aggr_proto) => {
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
@@ -278,7 +278,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 }
             }
             AggregatedFieldValueProto::AvgAggregation(aggr_proto) => {
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     Some(NodeValueType::Float)
                 } else {
@@ -291,7 +291,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 }
             }
             AggregatedFieldValueProto::SumAggregation(aggr_proto) => {
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
@@ -304,7 +304,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 }
             }
             AggregatedFieldValueProto::StdDevAggregation(aggr_proto) => {
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     Some(NodeValueType::Float)
                 } else {
@@ -317,7 +317,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 }
             }
             AggregatedFieldValueProto::DeltaAggregation(aggr_proto) => {
-                let node_type = get_node_type(node_types, &aggr_proto.expression_node_index)?;
+                let node_type = get_node_type(node_types, aggr_proto.expression_node_index)?;
                 if node_type.as_ref().is_none_or(|t| t.is_numeric()) {
                     node_type.clone()
                 } else {
@@ -341,10 +341,10 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
     }
 }
 
-fn get_node_type<'a>(
-    node_types: &'a [Option<NodeValueType>],
-    index: &'a Option<u32>,
-) -> Result<&'a Option<NodeValueType>, ValueAggregatorFactoryError> {
+fn get_node_type(
+    node_types: &[Option<NodeValueType>],
+    index: Option<u32>,
+) -> Result<&Option<NodeValueType>, ValueAggregatorFactoryError> {
     let index = index.ok_or(ValueAggregatorFactoryError::MissingExpressionNodeIndex)?;
     node_types
         .get(index as usize)
