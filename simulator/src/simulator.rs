@@ -28,11 +28,8 @@ use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::valid
 use std::{
     collections::HashMap, ops::Deref, path::Path, path::PathBuf, sync::Arc, time::Duration
 };
-use tokio::{
-    sync::{mpsc::UnboundedReceiver, oneshot, oneshot::error::TryRecvError},
-    task,
-    time::sleep,
-};
+use tokio::{sync::mpsc::UnboundedReceiver, task};
+use tokio::time::{sleep, timeout_at, Instant};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::BnConfigurablePublisher, PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::{IConfigurablePublisherRegistry, BpConfigurablePublisherRegistry}};
 
@@ -133,19 +130,23 @@ async fn run_telemetry_client(
     }
 
     let mut num_reports = 0;
-    let mut simulator_is_done = get_finish_condition(max_simulation_time, max_report_count)?;
-    while !simulator_is_done(num_reports) {
-        tokio::select! {
-            report_info = await_next_report(&mut report_ready_rx) => {
-                let report_info = report_info?;
-                let report = get_report(&telemetry_service, &report_info).await?;
-                metrics_configs_tracker.process_new_report(&report_info, report)?;
-                num_reports += 1;
-            }
-            _ = sleep(max_simulation_time) => {
-                info!{"Simulator time limit reached before any reports were returned by the telemetry service."}
-            }
+    let deadline = Instant::now() + max_simulation_time;
+    loop {
+        if max_report_count.is_some_and(|max_report_count| num_reports >= max_report_count) {
+            info!("Simulation max report count reached.");
+            break;
         }
+
+        let Ok(report_info) = timeout_at(deadline, await_next_report(&mut report_ready_rx)).await
+        else {
+            info!("Simulation time limit reached.");
+            break;
+        };
+
+        let report_info = report_info?;
+        let report = get_report(&telemetry_service, &report_info).await?;
+        metrics_configs_tracker.process_new_report(&report_info, report)?;
+        num_reports += 1;
     }
 
     telemetry_service.remove_all_metrics_configs().await?;
@@ -271,26 +272,5 @@ async fn await_next_report(
 ) -> Result<ReportInfo, SimulatorError> {
     report_ready_tx.recv().await.ok_or_else(|| SimulatorError::Error {
         error_message: "Report listener dropped.".to_owned(),
-    })
-}
-
-/// Creates a function that returns true once the specified max number of
-/// reports or the specified max duration is reached. If neither is specified,
-/// it uses the default values.
-fn get_finish_condition(
-    max_duration: Duration,
-    max_reports: Option<u64>,
-) -> Result<impl FnMut(u64) -> bool, SimulatorError> {
-    let (simulator_done_tx, mut simulator_done_rx) = oneshot::channel();
-    task::spawn(async move {
-        tokio::time::sleep(max_duration).await;
-        let _ = simulator_done_tx.send(());
-    });
-
-    Ok(move |num_reports: u64| {
-        let time_limit_reached = !matches!(simulator_done_rx.try_recv(), Err(TryRecvError::Empty));
-        let reports_limit_reached =
-            max_reports.map(|max_reports| num_reports >= max_reports).unwrap_or(false);
-        time_limit_reached || reports_limit_reached
     })
 }
