@@ -16,6 +16,17 @@ rust_protobuf {
     vendor_available: true,
 }
 
+rust_protobuf {
+    name: "libsdv_telemetry_test_proto_bool_value",
+    crate_name: "sdv_telemetry_test_proto_bool_value",
+    protos: [
+        "test_bool_value_1.proto",
+        "test_bool_value_2.proto",
+    ],
+    source_stem: "sdv_telemetry_test_proto_bool_value",
+    vendor_available: true,
+}
+
 rust_defaults {
     name: "libsdv_telemetry_test_utils_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
