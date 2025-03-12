@@ -20,22 +20,25 @@ mod util;
 use anyhow::Error;
 use binder::BinderFeatures;
 use clap::Parser;
-use io::REPORTS_DIR_NAME;
+use futures::{StreamExt, TryStreamExt};
 use protobuf::Message;
 use log::{error, info};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatus};
 use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
 use std::{
-    collections::HashMap, ops::Deref, path::Path, path::PathBuf, sync::Arc, time::Duration
+    collections::HashMap, collections::HashSet, ops::Deref, path::Path, path::PathBuf, pin::pin,
+    sync::Arc, time::Duration,
 };
 use tokio::{sync::mpsc::UnboundedReceiver, task};
-use tokio::time::{sleep, timeout_at, Instant};
+use tokio::time::{interval, sleep, sleep_until, Instant, MissedTickBehavior};
+use tokio_stream::wrappers::IntervalStream;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::BnConfigurablePublisher, PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::{IConfigurablePublisherRegistry, BpConfigurablePublisherRegistry}};
 
 use crate::{
     cli::Commands,
     io::create_output_directory,
+    io::REPORTS_DIR_NAME,
     metrics_configs_tracker::MetricsConfigsTracker,
     publisher_config_parser::parse_publisher_config,
     simulation_publisher::{SimulationPublisher, SimulationPublisherWrapper},
@@ -125,25 +128,60 @@ async fn run_telemetry_client(
     handle_telemetry_service_status_updates(misc_status_rx);
     let metrics_config_uuids = metrics_configs_tracker.get_metrics_config_uuids();
 
-    for uuid in metrics_config_uuids {
-        metrics_configs_tracker.activate_metrics_config(&telemetry_service, &uuid).await?;
+    for uuid in &metrics_config_uuids {
+        metrics_configs_tracker.activate_metrics_config(&telemetry_service, uuid).await?;
     }
+
+    // There are three conditions that stop the simulation, if any one of them is true:
+    //
+    // 1. The configured maximum number of reports is reached.
+    // 2. The configured deadline is reached.
+    // 3. All activated metrics configs have finished execution.
 
     let mut num_reports = 0;
     let deadline = Instant::now() + max_simulation_time;
+
+    // Since there is no API to be notified of when a metrics config finishes execution, we fall
+    // back to regularly polling the Telemetry Service for which metrics configs are still active.
+    // We poll every 3 seconds, which feels like a good balance between bombarding the Telemetry
+    // Service with too many API calls and not waiting unnecessarily long after all configs have
+    // finished in the worst case.
+    //
+    // We use `MissedTickBehavior::Delay`, so that even when a tick is missed, the interval ticks
+    // _at most_ every 3 seconds.
+    let mut active_config_uuids_changed = pin!({
+        let mut i = interval(Duration::from_secs(3));
+        i.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        IntervalStream::new(i)
+            .skip(1) // Discard the first tick that occurs immediately.
+            .then(|_| telemetry_service.get_active_metrics_config_uuids())
+            .map_ok(HashSet::from_iter)
+    });
+
     loop {
+        // This check is at the start of the loop, as opposed to after receiving a report, to catch
+        // the edge case where `max_report_count` is `Some(0)`.
         if max_report_count.is_some_and(|max_report_count| num_reports >= max_report_count) {
             info!("Simulation max report count reached.");
             break;
         }
 
-        let Ok(report_info) = timeout_at(deadline, await_next_report(&mut report_ready_rx)).await
-        else {
-            info!("Simulation time limit reached.");
-            break;
+        let report_info = tokio::select! {
+            biased;
+            _ = sleep_until(deadline) => {
+                info!("Simulation time limit reached.");
+                break;
+            },
+            Some(active_config_uuids) = active_config_uuids_changed.next() => {
+                if active_config_uuids?.is_disjoint(&metrics_config_uuids) {
+                    info!("Simulation stopped because all started metrics configs finished.");
+                    break;
+                }
+                continue;
+            },
+            report_info = await_next_report(&mut report_ready_rx) => report_info?,
         };
 
-        let report_info = report_info?;
         let report = get_report(&telemetry_service, &report_info).await?;
         metrics_configs_tracker.process_new_report(&report_info, report)?;
         num_reports += 1;
