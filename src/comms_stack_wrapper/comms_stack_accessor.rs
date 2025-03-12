@@ -196,7 +196,9 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             ServiceName::UnitTypeBased { unit_type, unit_name } => sd
                 .subscribe_service_unit_change_by_type(&unit_type)
                 .await
-                .with_context(|| "Failed to subscribe to changes for unit type {unit_type}")?
+                .with_context(|| {
+                    format!("Failed to subscribe to changes for unit type {unit_type}")
+                })?
                 .filter(move |event| {
                     let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
                         unit_name.as_ref().is_none_or(|unit_name| {
@@ -213,16 +215,16 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 let name_args = UnitNameDiscoveryArgs::new_builder()
                     .set_sdv_package_name(fqin.get_sdv_package_name())
                     .set_service_bundle_name(fqin.get_service_bundle_name())
-                    .set_service_unit_name(unit_name)
+                    .set_service_unit_name(unit_name.clone())
                     .set_sdv_vm_name(fqin.get_sdv_vm_name())
                     .build()
                     .with_context(|| {
-                        "Failed to build UnitNameDiscoveryArgs for {fqin}|{unit_name}"
+                        format!("Failed to build UnitNameDiscoveryArgs for {fqin}|{unit_name}")
                     })?;
                 sd.subscribe_service_unit_change_by_name(&name_args)
                     .await
                     .with_context(|| {
-                        "Failed to subscribe to changes for service {fqin}|{unit_name}"
+                        format!("Failed to subscribe to changes for service {fqin}|{unit_name}")
                     })?
                     .filter(move |event| {
                         let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
