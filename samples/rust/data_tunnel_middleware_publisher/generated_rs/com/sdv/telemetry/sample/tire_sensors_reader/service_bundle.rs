@@ -57,7 +57,9 @@ pub mod publisher {
         const MESSAGE_SIZE: u32;
         const MESSAGE_COUNT: u32;
         const IS_MULTIPUB: bool;
-        fn get_message_metadata() -> sdv_proto_reflection_rs::message_metadata::MessageMetadata;
+        fn get_message_metadata() -> sdv_proto_reflection_rs::message_metadata::MessageMetadata {
+            sdv_proto_reflection_rs::message_metadata::MessageMetadata::default()
+        }
     }
 
     impl Metadata for sdv_telemetry_sample_middleware_proto::tire::TirePressure {
@@ -239,6 +241,7 @@ impl TireSensorsReader {
                                 .message_count(M::MESSAGE_COUNT)
                                 .is_multipub(M::IS_MULTIPUB)
                                 .message_metadata(M::get_message_metadata())
+                                .message_metadata_required(true)
                                 .build()?,
                         )
                         .build()?,

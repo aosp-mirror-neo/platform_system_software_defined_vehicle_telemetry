@@ -34,4 +34,6 @@ sdv_service_bundle {
     unit_type {
       type: "VehicleSpeed"
     }
+
+    register_reflection_metadata: true
 }
