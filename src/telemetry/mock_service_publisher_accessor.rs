@@ -79,9 +79,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         data.num_get_metadata_calls += 1;
         data.check_next_error().map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
 
-        let metadata = data.next_descriptor.take().map(|message_descriptor| {
-            ServicePublisherMetadata { supports_get: false, message_descriptor }
-        });
+        let metadata = data
+            .next_descriptor
+            .take()
+            .map(|message_descriptor| ServicePublisherMetadata { message_descriptor });
         Ok(metadata)
     }
 

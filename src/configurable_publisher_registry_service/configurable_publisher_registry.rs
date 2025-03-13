@@ -103,11 +103,8 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     ) -> Result<Option<ServicePublisherMetadata>, ServicePublisherAccessorError> {
         let metadata = self
             .publisher_entries
-            .view(service_name, |_k, v| (v.message_descriptor.clone(), v.supports_get))
-            .map(|(message_descriptor, supports_get)| ServicePublisherMetadata {
-                message_descriptor,
-                supports_get,
-            });
+            .view(service_name, |_k, v| v.message_descriptor.clone())
+            .map(|message_descriptor| ServicePublisherMetadata { message_descriptor });
         Ok(metadata)
     }
 
@@ -561,7 +558,6 @@ mod tests {
         let res =
             configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
 
-        assert!(res.supports_get);
         assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
     }
 

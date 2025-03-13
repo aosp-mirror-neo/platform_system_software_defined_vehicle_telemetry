@@ -91,7 +91,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             }
         };
 
-        Ok(Some(ServicePublisherMetadata { supports_get: false, message_descriptor }))
+        Ok(Some(ServicePublisherMetadata { message_descriptor }))
     }
 
     async fn get_message_provider(
@@ -634,7 +634,6 @@ mod integration_tests {
 
         let accessor = create_accessor(ctx);
         let publisher_metadata = accessor.get_metadata(&service_name).await.unwrap().unwrap();
-        assert!(!publisher_metadata.supports_get);
         assert_eq!(publisher_metadata.message_descriptor.name(), "TestMessage");
         assert_eq!(
             publisher_metadata.message_descriptor.proto(),
@@ -1044,7 +1043,6 @@ mod integration_tests {
             /* create_subscription_metadata: */ None,
             /* get_latest_message_metadata:  */ None,
             ok(some(pat!(ServicePublisherMetadata {
-                supports_get: &false, // TODO: b/403180292 - This seems wrong.
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
         ),
@@ -1053,7 +1051,6 @@ mod integration_tests {
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
             ok(some(pat!(ServicePublisherMetadata {
-                supports_get: &false, // TODO: b/403180292 - This seems wrong.
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
         ),
@@ -1063,7 +1060,6 @@ mod integration_tests {
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ None,
             ok(some(pat!(ServicePublisherMetadata {
-                supports_get: &false, // TODO: b/403180292 - This seems wrong.
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
         ),
@@ -1079,7 +1075,6 @@ mod integration_tests {
             /* create_subscription_metadata: */ None,
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
             ok(some(pat!(ServicePublisherMetadata {
-                supports_get: &false, // TODO: b/403180292 - This seems wrong.
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
         ),
@@ -1095,7 +1090,6 @@ mod integration_tests {
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
             ok(some(pat!(ServicePublisherMetadata {
-                supports_get: &false, // TODO: b/403180292 - This seems wrong.
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
         ),
@@ -1104,7 +1098,6 @@ mod integration_tests {
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1.clone()),
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.clone()),
             ok(some(pat!(ServicePublisherMetadata {
-                supports_get: &false, // TODO: b/403180292 - This seems wrong.
                 message_descriptor: all!(
                     message_descriptor_and_full_name_eq(TestBoolValue1::descriptor()),
                     message_descriptor_and_full_name_eq(TestBoolValue2::descriptor())
