@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use thiserror::Error;
 use tokio::io;
+use uuid::Uuid;
 
 // Crate module dependencies.
 use crate::metrics_config_orchestrator::{
@@ -29,6 +30,10 @@ use crate::metrics_config_orchestrator::{
     MetricsConfigOrchestratorImpl,
 };
 use crate::status_reporter::StatusReporter;
+
+fn is_valid_uuid_format(uuid_str: &str) -> bool {
+    Uuid::try_parse(uuid_str).is_ok()
+}
 
 /// Interface of a service that manages Metrics Configurations.
 #[async_trait]
@@ -79,7 +84,7 @@ pub(crate) enum MetricsConfigManagerError {
         #[from]
         error: io::Error,
     },
-    #[error("Metric Config with UUID {uuid} doesn't exist")]
+    #[error("UUID '{uuid}' is either incorrectly formatted or no matching metrics configuration exists.")]
     InvalidConfigUuid { uuid: String },
     #[error("Error in reading metrics config from memory: {error}")]
     ConfigReadError { error: io::Error },
@@ -322,6 +327,10 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             return Err(MetricsConfigManagerError::PersistentStorageLimitExceeded);
         }
 
+        if !is_valid_uuid_format(&config.uuid) {
+            return Err(MetricsConfigManagerError::InvalidConfigUuid { uuid: config.uuid.clone() });
+        }
+
         // Validate the metrics config and report any errors to client
         self.metrics_config_orchestrator.validate_config(&config).await?;
 
@@ -552,6 +561,7 @@ mod tests {
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    const INVALID_UUID: &str = "../01bf0754-df95-46bb-bb35-522b6af66600";
 
     struct MockMetricsConfigOrchestratorImpl {
         num_initialize_config_calls: Arc<Mutex<i32>>,
@@ -860,6 +870,36 @@ mod tests {
             err
         );
         assert_eq!(2, test_environment.get_num_validate_config_calls());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn add_metrics_config_invalid_config_uuid_fail() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let file_path = inactive_dir_path.join(INVALID_UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        info!("Serializing metric config");
+        let serialized_config = create_serialized_config(INVALID_UUID);
+
+        let err =
+            test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
+
+        assert!(!file_path.is_file());
+        assert!(
+            matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. }),
+            "Unexpected error: {:?}",
+            err
+        );
+        assert_eq!(0, test_environment.get_num_validate_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]

@@ -2,7 +2,7 @@
 # proto-file: ../../proto/metrics_configuration/metrics_configuration.proto
 # proto-message: MetricsConfig
 
-uuid: "c6005cea-8fde-436a-9f29-c12f06a10c102504"
+uuid: "c6005cea-8fde-436a-9f29-c12f06a10c10"
 version: 1
 descriptor_protos {
   name: "metrics.proto"

@@ -49,7 +49,7 @@ mod tests {
         let config: MetricsConfig =
             protobuf::Message::parse_from_bytes(&serialized_legacy_textproto_config).unwrap();
 
-        assert_eq!(&config.uuid, "d3456chu-8fde-436a-9f29-c12f06a10c102504");
+        assert_eq!(&config.uuid, "d3456cf0-8fde-436a-9f29-c12f16d10c10");
 
         assert_eq!(config.descriptor_protos.len(), 1);
         assert_eq!(config.descriptor_protos[0].name.as_ref().unwrap(), "multi_config_test.proto");
