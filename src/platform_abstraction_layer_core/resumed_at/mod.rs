@@ -17,8 +17,8 @@ use self::vpm::VpmClient;
 pub(crate) type ResumedAt = Option<Microseconds>;
 
 fn log_error(message: String) {
-    // TODO: b/353466210 - These errors should probably also be reported via the misc status
-    // callback(?)
+    // TODO: b/403481321 - These errors should probably also be reported via the misc status
+    // callback.
     error!("{message}");
 }
 

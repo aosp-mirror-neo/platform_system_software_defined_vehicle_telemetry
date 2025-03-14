@@ -60,7 +60,7 @@ impl PowerStateListener {
     /// which this function returns, and which automatically resubscribes on binder death, as long
     /// as the `resumed_at_tx` channel isn't closed.
     ///
-    /// TODO: b/353466210 - Unfortunately, `PersistentBinderConnection` uses and expects blocking
+    /// TODO: b/398758129 - Unfortunately, `PersistentBinderConnection` uses and expects blocking
     /// binder calls. We should refactor it to use async binder calls.
     pub(super) fn blocking_subscribe(
         resumed_at_tx: watch::Sender<ResumedAt>,

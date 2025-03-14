@@ -156,10 +156,6 @@ impl EdgeConditionCheckerImpl {
                     sleep(min_duration).await;
                     if let Some(condition_checker) = weak_self.upgrade() {
                         // Create the context as early as possible, before waiting for the lock.
-                        //
-                        // TODO: b/353466210 - this should probably re-use the `messages` of the
-                        // `NodeEvaluationContext` from the last time `check` was called. It should
-                        // probably not re-use that context's timestamps, though.
                         let context = Arc::new(node_evaluation_context_factory.create());
 
                         condition_checker.lock().on_timeout(timeout_id, context);
