@@ -70,7 +70,7 @@ pub mod publisher {
             sdv_proto_reflection_rs::message_metadata::MessageMetadata {
                 file_descriptors: vec![
                     sdv_telemetry_sample_middleware_proto::tire::file_descriptor().proto().clone(),
-                    vsidl_v1::annotations::file_descriptor().proto().clone(),
+                    vsidl_v1_stdlib::annotations::file_descriptor().proto().clone(),
                 ],
                 message_full_name: String::from(".com.sdv.telemetry.sample.TirePressure"),
                 ..Default::default()
@@ -116,7 +116,7 @@ pub mod publisher {
             sdv_proto_reflection_rs::message_metadata::MessageMetadata {
                 file_descriptors: vec![
                     sdv_telemetry_sample_middleware_proto::tire::file_descriptor().proto().clone(),
-                    vsidl_v1::annotations::file_descriptor().proto().clone(),
+                    vsidl_v1_stdlib::annotations::file_descriptor().proto().clone(),
                 ],
                 message_full_name: String::from(".com.sdv.telemetry.sample.TireTemperature"),
                 ..Default::default()
@@ -162,7 +162,7 @@ pub mod publisher {
             sdv_proto_reflection_rs::message_metadata::MessageMetadata {
                 file_descriptors: vec![
                     sdv_telemetry_sample_middleware_proto::tire::file_descriptor().proto().clone(),
-                    vsidl_v1::annotations::file_descriptor().proto().clone(),
+                    vsidl_v1_stdlib::annotations::file_descriptor().proto().clone(),
                 ],
                 message_full_name: String::from(".com.sdv.telemetry.sample.VehicleSpeed"),
                 ..Default::default()
@@ -174,7 +174,7 @@ pub mod publisher {
         /// Publication variant 'UNIQUE' of 'com.sdv.telemetry.sample.VehicleSpeed'
         pub const UNIQUE: &Self = &Self {
             _proto: std::marker::PhantomData,
-            id: vsidl_v1::annotations::UniqueInstance::UNIQUE as i32,
+            id: vsidl_v1_stdlib::annotations::UniqueInstance::UNIQUE as i32,
             service_unit: "com-sdv-telemetry-sample-vehicle-speed-unique",
         };
         /// List of all publication variants of 'com.sdv.telemetry.sample.VehicleSpeed' available to the service bundle

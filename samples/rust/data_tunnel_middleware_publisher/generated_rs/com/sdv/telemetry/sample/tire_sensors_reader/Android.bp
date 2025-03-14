@@ -19,7 +19,7 @@ rust_library {
         "libsdv_rs",
         "libfutures",
         "libsdv_telemetry_sample_middleware_proto",
-        "libvsidl_v1_proto_rs",
+        "libvsidl_v1_stdlib_proto_rs",
         "libsdv_proto_reflection_rs",
     ],
     apex_available: [
