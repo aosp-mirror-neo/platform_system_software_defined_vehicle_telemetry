@@ -2,6 +2,8 @@
 
 //! Test Utils for Comms Stack
 
+#![cfg(test)]
+
 use protobuf::Message;
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
@@ -69,7 +71,8 @@ pub(super) async fn register_topic_with_message_queue_size(
     publisher_metadata: MessageMetadata,
     message_queue_size: u32,
 ) -> SdvResult<dt::Publisher> {
-    let mut unit_registration_args = create_registration_args(service_name, publisher_metadata);
+    let mut unit_registration_args =
+        create_registration_args(service_name, Some(publisher_metadata));
 
     let mut publisher_unit_metadata = PublisherUnitMetadata::new();
     publisher_unit_metadata.set_message_size(3);
@@ -82,9 +85,8 @@ pub(super) async fn register_topic_with_message_queue_size(
 pub(super) async fn register_server(
     ctx: ContextRef,
     service_name: &str,
-    publisher_metadata: MessageMetadata,
-    method_name: String,
-    method_fn: rpc::RpcMethod,
+    publisher_metadata: Option<MessageMetadata>,
+    methods_map: HashMap<String, rpc::RpcMethod>,
 ) -> SdvResult<rpc::Server> {
     let mut unit_registration_args = create_registration_args(service_name, publisher_metadata);
 
@@ -92,7 +94,6 @@ pub(super) async fn register_server(
     server_unit_metadata.set_version(1);
     unit_registration_args.set_unit_metadata(&UnitMetadata::Server(server_unit_metadata));
 
-    let methods_map = HashMap::from([(method_name, method_fn)]);
     rpc::Server::create_with_generic_handlers(
         ctx,
         unit_registration_args,
@@ -104,7 +105,7 @@ pub(super) async fn register_server(
 
 fn create_registration_args(
     service_name: &str,
-    publisher_metadata: MessageMetadata,
+    publisher_metadata: Option<MessageMetadata>,
 ) -> UnitRegistrationArgs {
     let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
         ServiceName::parse(service_name).unwrap()
@@ -116,9 +117,11 @@ fn create_registration_args(
     unit_registration_args.set_unit_type(&unit_type);
     unit_registration_args.set_unit_name(&unit_name);
 
-    let app_metadata =
-        publisher_metadata.write_to_bytes().expect("Metadata serialization should succeed");
-    unit_registration_args.set_application_metadata(&app_metadata);
+    if let Some(publisher_metadata) = publisher_metadata {
+        let app_metadata =
+            publisher_metadata.write_to_bytes().expect("Metadata serialization should succeed");
+        unit_registration_args.set_application_metadata(&app_metadata);
+    }
 
     unit_registration_args
 }

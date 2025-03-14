@@ -24,8 +24,10 @@ use sdv_telemetry_service_publisher_accessor::{
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
-use sdv_telemetry_utils::descriptor_utils;
-use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
+use sdv_telemetry_utils::{
+    descriptor_utils, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
+    option_extension::OptionExtension,
+};
 use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -265,31 +267,40 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 impl CommsStackAccessor {
     /// Creates a new instance of the Comms Stack Accessor.
     pub fn new(ctx: future::Shared<BoxFuture<'static, ContextRef>>) -> Self {
+        let ctx_clone = ctx.clone();
+        Self::new_with_vsidl_provider_factory(ctx, move || {
+            async move {
+                vsidl_provider::new_for_vendor(ctx_clone.await)
+                    .inspect_none(|| {
+                        warn!(
+                            "Unable to initialize VSIDL provider library.\
+                            Telemetry Service won't be able to retrieve VSIDL metadata"
+                        )
+                    })
+                    .map(|provider| {
+                        Arc::new(provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>
+                    })
+            }
+            .boxed()
+        })
+    }
+
+    fn new_with_vsidl_provider_factory(
+        ctx: future::Shared<BoxFuture<'static, ContextRef>>,
+        vsidl_provider_factory: impl FnOnce() -> BoxFuture<
+            'static,
+            Option<Arc<dyn VsidlConfigProviderV1 + Send + Sync>>,
+        >,
+    ) -> Self {
         let data_tunnel_subscriber = DataTunnelSubscriber::new(ctx.clone());
         let sdv_rpc_client = SdvRpcClient::new(ctx.clone());
-
-        let ctx_clone = ctx.clone();
-        let vsidl_provider = async move {
-            vsidl_provider::new_for_vendor(ctx_clone.await).map_or_else(
-                || {
-                    warn!(
-                        "Unable to initialize VSIDL provider library.\
-                        Telemetry Service won't be able to retrieve VSIDL metadata"
-                    );
-                    None
-                },
-                |provider| Some(Arc::new(provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>),
-            )
-        }
-        .boxed()
-        .shared();
 
         Self {
             ctx,
             data_tunnel_subscriber,
             service_message_descriptors: DashMap::new(),
             sdv_rpc_client,
-            vsidl_provider,
+            vsidl_provider: vsidl_provider_factory().shared(),
         }
     }
 
@@ -400,16 +411,28 @@ mod integration_tests {
     use super::*;
 
     use futures::{stream, FutureExt};
-    use protobuf::reflect::ReflectValueRef;
-    use protobuf::well_known_types::wrappers::{self, Int32Value};
-    use protobuf::MessageFull;
+    use googletest::assert_that;
+    use googletest::description::Description;
+    use googletest::matcher::{Matcher, MatcherBase, MatcherResult};
+    use googletest::matchers::{
+        all, contains_substring, displays_as, each, eq, err, ok, pat, some,
+    };
+    use lazy_static::lazy_static;
+    use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
+    use protobuf::{reflect::ReflectValueRef, MessageFull};
     use sdv_comms::dt;
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;
+    use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProviderV1, RpcMethodDescriptor};
     use sdv_status_rs::SdvStatus;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
+    use sdv_telemetry_test_proto_bool_value::{
+        test_bool_value_1::BoolValue as TestBoolValue1,
+        test_bool_value_2::BoolValue as TestBoolValue2,
+    };
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
+    use std::collections::HashMap;
     use std::str::FromStr;
     use std::time::Duration;
     use tokio::sync::mpsc;
@@ -420,6 +443,104 @@ mod integration_tests {
     const INVALID_SERVICE_NAME: &str = "lalala";
     const VALID_SERVICE_NAME: &str =
         "com.google.sdv.telemetry.tests.DataTunnelSubscriberTest#Topic|default";
+
+    lazy_static! {
+        static ref MESSAGE_METADATA_INT32: MessageMetadata = MessageMetadata {
+            file_descriptors: vec![Int32Value::descriptor().file_descriptor().proto().clone()],
+            message_full_name: Int32Value::descriptor().full_name().to_owned(),
+            ..Default::default()
+        };
+        static ref RPC_DESCRIPTOR_INT32_RESPONSE: RpcMethodDescriptor = RpcMethodDescriptor {
+            request_message: None,
+            response_message: Some(Int32Value::descriptor()),
+        };
+        static ref RPC_DESCRIPTOR_BOOL_RESPONSE: RpcMethodDescriptor = RpcMethodDescriptor {
+            request_message: None,
+            response_message: Some(BoolValue::descriptor()),
+        };
+        static ref RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1: RpcMethodDescriptor = RpcMethodDescriptor {
+            request_message: None,
+            response_message: Some(TestBoolValue1::descriptor()),
+        };
+        static ref RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2: RpcMethodDescriptor = RpcMethodDescriptor {
+            request_message: None,
+            response_message: Some(TestBoolValue2::descriptor()),
+        };
+    }
+
+    #[test]
+    fn test_constants_are_as_expected() {
+        let original = RPC_DESCRIPTOR_BOOL_RESPONSE.response_message.as_ref().unwrap().clone();
+        let test1 = RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1.response_message.as_ref().unwrap().clone();
+        let test2 = RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.response_message.as_ref().unwrap().clone();
+
+        // None of the message descriptors should be equal, since they all come from different
+        // files.
+        assert_ne!(original, test1);
+        assert_ne!(original, test2);
+        assert_ne!(test1, test2);
+
+        // However, all of the `DescriptorProto`s of the message descriptors should be equal, since
+        // they all have the same message name and fields.
+        assert_eq!(original.proto(), test1.proto());
+        assert_eq!(original.proto(), test2.proto());
+        assert_eq!(test1.proto(), test2.proto());
+
+        // All messages should be called "BoolValue".
+        assert_that!([original.name(), test1.name(), test2.name()], each(eq("BoolValue")));
+
+        // The package, and therefore the full name, should differ between `original` and `test1` /
+        // `test2`.
+        assert_ne!(original.file_descriptor().package(), test1.file_descriptor().package());
+        assert_ne!(original.file_descriptor().package(), test2.file_descriptor().package());
+        assert_ne!(original.full_name(), test1.full_name());
+        assert_ne!(original.full_name(), test2.full_name());
+
+        // `test1` and `test2` should have the same package, and therefore, full name.
+        assert_eq!(test1.file_descriptor().package(), test2.file_descriptor().package());
+        assert_eq!(test1.full_name(), test2.full_name());
+    }
+
+    const RPC_DESCRIPTOR_NO_RESPONSE: RpcMethodDescriptor =
+        RpcMethodDescriptor { request_message: None, response_message: None };
+
+    #[derive(MatcherBase)]
+    struct MessageDescriptorAndFullNameEq {
+        expected: MessageDescriptor,
+    }
+
+    impl<'a> Matcher<&'a MessageDescriptor> for MessageDescriptorAndFullNameEq {
+        fn matches(&self, actual: &'a MessageDescriptor) -> MatcherResult {
+            (self.expected.proto() == actual.proto()
+                && self.expected.full_name() == actual.full_name())
+            .into()
+        }
+
+        fn describe(&self, matcher_result: MatcherResult) -> Description {
+            match matcher_result {
+                MatcherResult::Match => {
+                    format!(
+                        "has a full name equal to {:?} and a `DescriptorProto` equal to {:?}",
+                        self.expected.full_name(),
+                        self.expected.proto()
+                    ).into()
+                }
+                MatcherResult::NoMatch => {
+                    format!(
+                        "does not have a full name equal to {:?} or does not have a `DescriptorProto` equal to {:?}",
+                        self.expected.full_name(),
+                        self.expected.proto()
+                    ).into()
+                }
+            }
+        }
+    }
+
+    fn message_descriptor_and_full_name_eq(
+        expected: MessageDescriptor,
+    ) -> MessageDescriptorAndFullNameEq {
+        MessageDescriptorAndFullNameEq { expected }
+    }
 
     fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
         Box::new(|| unreachable!())
@@ -432,12 +553,27 @@ mod integration_tests {
     }
 
     fn create_accessor(ctx: ContextRef) -> CommsStackAccessor {
-        CommsStackAccessor::new(std::future::ready(ctx).boxed().shared())
+        CommsStackAccessor::new(future::ready(ctx).boxed().shared())
     }
 
     fn create_accessor_with_context(fqin_extra: u8) -> CommsStackAccessor {
         let ctx = crate::test_utils::make_context(fqin_extra).boxed().shared();
         CommsStackAccessor::new(ctx)
+    }
+
+    fn create_accessor_with_mock_vsidl_provider(
+        ctx: ContextRef,
+        vsidl_provider: MockVsidlConfigProviderV1,
+    ) -> CommsStackAccessor {
+        CommsStackAccessor::new_with_vsidl_provider_factory(
+            future::ready(ctx).boxed().shared(),
+            || {
+                future::ready(Some(
+                    Arc::new(vsidl_provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>
+                ))
+                .boxed()
+            },
+        )
     }
 
     fn get_int_field_value(message: Box<dyn MessageDyn>) -> i32 {
@@ -848,6 +984,159 @@ mod integration_tests {
         with_sub_sampling: (SubSamplingInterval::try_from(Duration::from_secs(1)).unwrap(),),
     );
 
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        get_metadata_for_rpc,
+
+        |
+            message_metadata: Option<MessageMetadata>,
+            create_subscription_metadata: Option<RpcMethodDescriptor>,
+            get_latest_message_metadata: Option<RpcMethodDescriptor>,
+            metadata_matcher
+        | async move {
+            let ctx = test_utils::make_context(0).await;
+            let service_name = test_utils::make_unique_service_name();
+
+            let _server = test_utils::register_server(
+                ctx,
+                &service_name,
+                message_metadata,
+                HashMap::from([(
+                    "CreateSubscription".to_owned(),
+                    rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
+                        future::ready(Ok(stream::pending().boxed())).boxed()
+                    })),
+                ), (
+                    "GetLatestMessage".to_owned(),
+                    rpc::RpcMethod::Unary(Arc::new(move |_, _| {
+                        future::pending().boxed()
+                    })),
+                )]),
+            )
+            .await
+            .unwrap();
+
+            let mut vsidl_provider_mock = MockVsidlConfigProviderV1::new();
+            vsidl_provider_mock
+                .expect_get_rpc_method_descriptor()
+                .withf(|_, _, method_name| method_name == "CreateSubscription")
+                .returning(move |_, _, _| create_subscription_metadata.clone());
+            vsidl_provider_mock
+                .expect_get_rpc_method_descriptor()
+                .withf(|_, _, method_name| method_name == "GetLatestMessage")
+                .returning(move |_, _, _| get_latest_message_metadata.clone());
+            let subscriber = create_accessor_with_mock_vsidl_provider(ctx, vsidl_provider_mock);
+
+            let metadata = subscriber.get_metadata(&service_name).await;
+
+            assert_that!(metadata, metadata_matcher);
+        },
+
+        no_metadata: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ None,
+            /* get_latest_message_metadata:  */ None,
+            err(displays_as(contains_substring("VSIDL provider was unable to provide RPC method descriptor"))),
+        ),
+        message_metadata: (
+            /* message_metadata:             */ Some(MESSAGE_METADATA_INT32.clone()),
+            /* create_subscription_metadata: */ None,
+            /* get_latest_message_metadata:  */ None,
+            ok(some(pat!(ServicePublisherMetadata {
+                supports_get: &false, // TODO: b/403180292 - This seems wrong.
+                message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
+            }))),
+        ),
+        vsidl_provider_is_ignored_if_message_metadata_set: (
+            /* message_metadata:             */ Some(MESSAGE_METADATA_INT32.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
+            ok(some(pat!(ServicePublisherMetadata {
+                supports_get: &false, // TODO: b/403180292 - This seems wrong.
+                message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
+            }))),
+        ),
+
+        create_subscription_metadata: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ None,
+            ok(some(pat!(ServicePublisherMetadata {
+                supports_get: &false, // TODO: b/403180292 - This seems wrong.
+                message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
+            }))),
+        ),
+        create_subscription_metadata_missing_response: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_NO_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ None,
+            err(displays_as(contains_substring("has no response message"))),
+        ),
+
+        get_latest_message_metadata: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ None,
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            ok(some(pat!(ServicePublisherMetadata {
+                supports_get: &false, // TODO: b/403180292 - This seems wrong.
+                message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
+            }))),
+        ),
+        get_latest_message_metadata_missing_response: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ None,
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_NO_RESPONSE.clone()),
+            err(displays_as(contains_substring("has no response message"))),
+        ),
+
+        create_subscription_and_get_latest_message_metadata_equal: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            ok(some(pat!(ServicePublisherMetadata {
+                supports_get: &false, // TODO: b/403180292 - This seems wrong.
+                message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
+            }))),
+        ),
+        create_subscription_and_get_latest_message_metadata_equal_but_from_different_files_but_same_package: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.clone()),
+            ok(some(pat!(ServicePublisherMetadata {
+                supports_get: &false, // TODO: b/403180292 - This seems wrong.
+                message_descriptor: all!(
+                    message_descriptor_and_full_name_eq(TestBoolValue1::descriptor()),
+                    message_descriptor_and_full_name_eq(TestBoolValue2::descriptor())
+                ),
+            }))),
+        ),
+        create_subscription_and_get_latest_message_metadata_equal_but_from_different_files_and_different_packages: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.clone()),
+            err(displays_as(contains_substring("VSIDL provider returned conflicting RPC method descriptors"))),
+        ),
+        create_subscription_and_get_latest_message_metadata_differ_1: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
+            err(displays_as(contains_substring("VSIDL provider returned conflicting RPC method descriptors"))),
+        ),
+        create_subscription_and_get_latest_message_metadata_differ_2: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_NO_RESPONSE.clone()),
+            err(displays_as(contains_substring("has no response message"))),
+        ),
+        create_subscription_and_get_latest_message_metadata_differ_3: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_NO_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            err(displays_as(contains_substring("has no response message"))),
+        ),
+    );
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_rpc_subscription_success() {
@@ -858,20 +1147,18 @@ mod integration_tests {
         let _server = test_utils::register_server(
             ctx,
             &service_name,
-            MessageMetadata {
-                file_descriptors: vec![wrappers::file_descriptor().proto().clone()],
-                message_full_name: Int32Value::descriptor().full_name().to_owned(),
-                ..Default::default()
-            },
-            "CreateSubscription".to_owned(),
-            rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
-                future::ready(Ok(stream::select(
-                    stream::once(future::ready(Ok(msg_bytes.clone()))),
-                    stream::pending(),
-                )
-                .boxed()))
-                .boxed()
-            })),
+            Some(MESSAGE_METADATA_INT32.clone()),
+            HashMap::from([(
+                "CreateSubscription".to_owned(),
+                rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
+                    future::ready(Ok(stream::select(
+                        stream::once(future::ready(Ok(msg_bytes.clone()))),
+                        stream::pending(),
+                    )
+                    .boxed()))
+                    .boxed()
+                })),
+            )]),
         )
         .await
         .unwrap();
@@ -966,15 +1253,13 @@ mod integration_tests {
         let _server = test_utils::register_server(
             ctx,
             &service_name,
-            MessageMetadata {
-                file_descriptors: vec![wrappers::file_descriptor().proto().clone()],
-                message_full_name: Int32Value::descriptor().full_name().to_owned(),
-                ..Default::default()
-            },
-            "GetLatestMessage".to_owned(),
-            rpc::RpcMethod::Unary(Arc::new(move |_, _| {
-                future::ready(Ok(msg_bytes.clone())).boxed()
-            })),
+            Some(MESSAGE_METADATA_INT32.clone()),
+            HashMap::from([(
+                "GetLatestMessage".to_owned(),
+                rpc::RpcMethod::Unary(Arc::new(move |_, _| {
+                    future::ready(Ok(msg_bytes.clone())).boxed()
+                })),
+            )]),
         )
         .await
         .unwrap();

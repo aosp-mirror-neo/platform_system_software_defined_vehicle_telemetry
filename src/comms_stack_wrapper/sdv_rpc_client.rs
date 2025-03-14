@@ -2,7 +2,7 @@
 
 //! Telemetry subscription logic for SDV RPC.
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
@@ -163,28 +163,76 @@ impl SdvRpcClient {
         vsidl_provider: &dyn VsidlConfigProviderV1,
         service_unit_definition: &ServiceUnitDefinition,
     ) -> anyhow::Result<MessageDescriptor> {
-        let descriptor = vsidl_provider
+        let create_subscription_descriptor = Self::get_response_descriptor_for_method(
+            vsidl_provider,
+            service_unit_definition,
+            CREATE_SUBSCRIPTION_METHOD,
+        )
+        .await?;
+        let get_latest_message_descriptor = Self::get_response_descriptor_for_method(
+            vsidl_provider,
+            service_unit_definition,
+            GET_LATEST_MESSAGE_METHOD,
+        )
+        .await?;
+
+        match (create_subscription_descriptor, get_latest_message_descriptor) {
+            (None, None) => Err(anyhow!(
+                "VSIDL provider was unable to provide RPC method descriptor for {}|{}",
+                service_unit_definition.get_service_bundle_identity().get_fqin(),
+                service_unit_definition.get_unit_type()
+            )),
+            (None, Some(descriptor)) | (Some(descriptor), None) => Ok(descriptor),
+
+            (
+                Some(a @ /* type for clarity: */ MessageDescriptor { .. }),
+                Some(b @ /* type for clarity: */ MessageDescriptor { .. }),
+            ) => {
+                // We want to ensure that both `MessageDescriptor`s describe the same message. We
+                // MUST NOT compare the `MessageDescriptor`s directly, because they are only equal
+                // if the message is defined in the exact same file and position within that file.
+                //
+                // Instead, we need to compare the `DescriptorProto`s (returned by
+                // `MessageDescriptor::proto`), which describe the actual message formats,
+                // irrespective of the file they are in, as well as the "full name" (= package name
+                // + message name).
+                if a.proto() == b.proto() && a.full_name() == b.full_name() {
+                    Ok(a)
+                } else {
+                    Err(anyhow!(
+                        "VSIDL provider returned conflicting RPC method descriptors for {}|{}",
+                        service_unit_definition.get_service_bundle_identity().get_fqin(),
+                        service_unit_definition.get_unit_type()
+                    ))
+                }
+            }
+        }
+    }
+
+    async fn get_response_descriptor_for_method(
+        vsidl_provider: &dyn VsidlConfigProviderV1,
+        service_unit_definition: &ServiceUnitDefinition,
+        method_name: &str,
+    ) -> anyhow::Result<Option<MessageDescriptor>> {
+        let Some(rpc_descriptor) = vsidl_provider
             .get_rpc_method_descriptor(
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
                 &service_unit_definition.get_unit_type(),
-                CREATE_SUBSCRIPTION_METHOD,
+                method_name,
             )
             .await
-            .ok_or_else(|| {
-                anyhow!(
-                    "VSIDL provider was unable to provide RPC method descriptor for {}|{}",
-                    service_unit_definition.get_service_bundle_identity().get_fqin(),
-                    service_unit_definition.get_unit_type()
-                )
-            })?;
+        else {
+            return Ok(None);
+        };
 
-        descriptor.response_message.ok_or_else(|| {
-            anyhow!(
+        let Some(response_descriptor) = rpc_descriptor.response_message else {
+            bail!(
                 "VSIDL provider descriptor for {}|{} has no response message",
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
                 service_unit_definition.get_unit_type()
-            )
-        })
+            );
+        };
+        Ok(Some(response_descriptor))
     }
 
     fn serialize_configuration(configuration: Option<&Any>) -> Vec<u8> {

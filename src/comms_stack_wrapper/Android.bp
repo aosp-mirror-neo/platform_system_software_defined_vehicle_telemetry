@@ -54,6 +54,7 @@ rust_defaults {
     rustlibs: [
         // keep-sorted start
         "libgoogletest_rust",
+        "liblazy_static",
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],
@@ -114,6 +115,7 @@ rust_test {
         "librand",
         "libscopeguard",
         "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_proto_bool_value",
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],

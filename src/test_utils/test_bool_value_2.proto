@@ -1,0 +1,11 @@
+// Copyright 2025 Google LLC
+
+syntax = "proto3";
+
+package google.sdv.telemetry.test;
+
+// This must match the definition of the `BoolValue` wrapper type defined by
+// Protobuf, and the definition of `BoolValue` in `test_bool_value_2.proto`.
+message BoolValue {
+  bool value = 1;
+}

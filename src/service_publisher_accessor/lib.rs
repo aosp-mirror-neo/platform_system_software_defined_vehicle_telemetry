@@ -101,6 +101,7 @@ pub trait ServicePublisherMessageProvider: Send + Sync {
 }
 
 /// Service publisher metadata.
+#[derive(Debug)]
 pub struct ServicePublisherMetadata {
     /// True if the service provides the latest message without subscription.
     pub supports_get: bool,
