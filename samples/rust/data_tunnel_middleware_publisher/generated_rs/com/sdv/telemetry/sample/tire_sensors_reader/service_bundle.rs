@@ -66,16 +66,6 @@ pub mod publisher {
         const MESSAGE_SIZE: u32 = 6;
         const MESSAGE_COUNT: u32 = 100;
         const IS_MULTIPUB: bool = false;
-        fn get_message_metadata() -> sdv_proto_reflection_rs::message_metadata::MessageMetadata {
-            sdv_proto_reflection_rs::message_metadata::MessageMetadata {
-                file_descriptors: vec![
-                    sdv_telemetry_sample_middleware_proto::tire::file_descriptor().proto().clone(),
-                    vsidl_v1_stdlib::annotations::file_descriptor().proto().clone(),
-                ],
-                message_full_name: String::from(".com.sdv.telemetry.sample.TirePressure"),
-                ..Default::default()
-            }
-        }
     }
 
     impl Variant<sdv_telemetry_sample_middleware_proto::tire::TirePressure> {
@@ -112,16 +102,6 @@ pub mod publisher {
         const MESSAGE_SIZE: u32 = 6;
         const MESSAGE_COUNT: u32 = 100;
         const IS_MULTIPUB: bool = false;
-        fn get_message_metadata() -> sdv_proto_reflection_rs::message_metadata::MessageMetadata {
-            sdv_proto_reflection_rs::message_metadata::MessageMetadata {
-                file_descriptors: vec![
-                    sdv_telemetry_sample_middleware_proto::tire::file_descriptor().proto().clone(),
-                    vsidl_v1_stdlib::annotations::file_descriptor().proto().clone(),
-                ],
-                message_full_name: String::from(".com.sdv.telemetry.sample.TireTemperature"),
-                ..Default::default()
-            }
-        }
     }
 
     impl Variant<sdv_telemetry_sample_middleware_proto::tire::TireTemperature> {
@@ -158,16 +138,6 @@ pub mod publisher {
         const MESSAGE_SIZE: u32 = 5;
         const MESSAGE_COUNT: u32 = 100;
         const IS_MULTIPUB: bool = false;
-        fn get_message_metadata() -> sdv_proto_reflection_rs::message_metadata::MessageMetadata {
-            sdv_proto_reflection_rs::message_metadata::MessageMetadata {
-                file_descriptors: vec![
-                    sdv_telemetry_sample_middleware_proto::tire::file_descriptor().proto().clone(),
-                    vsidl_v1_stdlib::annotations::file_descriptor().proto().clone(),
-                ],
-                message_full_name: String::from(".com.sdv.telemetry.sample.VehicleSpeed"),
-                ..Default::default()
-            }
-        }
     }
 
     impl Variant<sdv_telemetry_sample_middleware_proto::tire::VehicleSpeed> {
@@ -241,7 +211,7 @@ impl TireSensorsReader {
                                 .message_count(M::MESSAGE_COUNT)
                                 .is_multipub(M::IS_MULTIPUB)
                                 .message_metadata(M::get_message_metadata())
-                                .message_metadata_required(true)
+                                .message_metadata_required(false)
                                 .build()?,
                         )
                         .build()?,
