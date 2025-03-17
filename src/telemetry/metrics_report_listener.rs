@@ -12,7 +12,6 @@ use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
-use thiserror::Error;
 
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 
@@ -26,7 +25,7 @@ pub(super) struct MetricsReportListener {
     listener_binder_adapter: Box<dyn BinderAdapter<dyn ITelemetryReportReadyListener>>,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(super) enum MetricsReportListenerError {
     #[error("Binder Error: {code}")]
     BinderError {
@@ -89,20 +88,20 @@ impl MetricsReportListener {
 
     pub(super) fn set_report_ready_listener(
         self: &Arc<Self>,
-        listener: &Strong<dyn ITelemetryReportReadyListener>,
+        listener: Strong<dyn ITelemetryReportReadyListener>,
     ) -> Result<(), MetricsReportListenerError> {
         let mut guard = self.report_ready_listener.lock();
         if guard.is_none() {
             let self_reference = Arc::downgrade(self);
             let death_recipient = self.listener_binder_adapter.link_to_death(
-                listener,
+                &listener,
                 Box::new(move || {
                     if let Some(self_reference) = self_reference.upgrade() {
                         self_reference.clear_report_ready_listener();
                     }
                 }),
             )?;
-            *guard = Some((listener.clone(), death_recipient));
+            *guard = Some((listener, death_recipient));
             Ok(())
         } else {
             Err(MetricsReportListenerError::ReportReadyListenerExists)
@@ -202,7 +201,7 @@ pub(crate) mod tests {
             mock_listener.clone(),
             binder::BinderFeatures::default(),
         );
-        report_listener.set_report_ready_listener(&binder_listener).unwrap();
+        report_listener.set_report_ready_listener(binder_listener).unwrap();
 
         report_listener.on_report_ready(create_metrics_report());
 
@@ -273,9 +272,9 @@ pub(crate) mod tests {
             MockTelemetryReportReadyListener::new(),
             binder::BinderFeatures::default(),
         );
-        report_listener.set_report_ready_listener(&binder_listener).unwrap();
+        report_listener.set_report_ready_listener(binder_listener.clone()).unwrap();
 
-        let err = report_listener.set_report_ready_listener(&binder_listener).unwrap_err();
+        let err = report_listener.set_report_ready_listener(binder_listener).unwrap_err();
 
         assert!(
             matches!(err, MetricsReportListenerError::ReportReadyListenerExists),
@@ -294,7 +293,7 @@ pub(crate) mod tests {
             binder::BinderFeatures::default(),
         );
 
-        report_listener.set_report_ready_listener(&binder_listener).unwrap();
+        report_listener.set_report_ready_listener(binder_listener).unwrap();
 
         mock_adapter.callback.lock().as_ref().unwrap()();
 
@@ -308,7 +307,7 @@ pub(crate) mod tests {
             MockTelemetryReportReadyListener::new(),
             binder::BinderFeatures::default(),
         );
-        report_listener.set_report_ready_listener(&binder_listener).unwrap();
+        report_listener.set_report_ready_listener(binder_listener).unwrap();
 
         report_listener.clear_report_ready_listener();
 

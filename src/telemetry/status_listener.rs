@@ -28,9 +28,19 @@ pub(super) trait StatusListener: Send + Sync {
 
     fn set_misc_status_listener(
         self: Arc<Self>,
-        api_call_id: i32,
-        new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
-    ) -> binder::Result<()>;
+        new_listener: binder::Strong<dyn ITelemetryMiscStatusListener>,
+    ) -> Result<(), SetMiscStatusListenerError>;
+}
+
+#[derive(thiserror::Error, Debug)]
+pub(super) enum SetMiscStatusListenerError {
+    #[error("Binder Error: {code}")]
+    BinderError {
+        #[from]
+        code: binder::StatusCode,
+    },
+    #[error("Misc Status Listener is already set")]
+    ListenerAlreadySet,
 }
 
 pub(super) struct StatusListenerImpl {
@@ -113,41 +123,30 @@ impl StatusListener for StatusListenerImpl {
 
     fn set_misc_status_listener(
         self: Arc<Self>,
-        api_call_id: i32,
-        new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
-    ) -> binder::Result<()> {
-        let (status_code, status_message) = {
+        new_listener: binder::Strong<dyn ITelemetryMiscStatusListener>,
+    ) -> Result<(), SetMiscStatusListenerError> {
+        {
             let mut guard = self.misc_status_listener.lock();
             if guard.is_some() {
-                (
-                    StatusCodes::SET_MISC_STATUS_LISTENER_FAILED,
-                    "Misc Status listener is already set",
-                )
-            } else {
-                let self_reference = Arc::downgrade(&self);
-                let death_recipient = self.misc_status_binder_adapter.link_to_death(
-                    new_listener,
-                    Box::new(move || {
-                        // Clear the misc status listener when the client process dies.
-                        if let Some(self_reference) = self_reference.upgrade() {
-                            self_reference.clear_misc_status_listener();
-                        }
-                    }),
-                )?;
-                guard.replace((new_listener.clone(), death_recipient));
-                (
-                    StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-                    "Misc Status listener successfully set",
-                )
+                return Err(SetMiscStatusListenerError::ListenerAlreadySet);
             }
-        };
-        self.send_api_status(api_call_id, status_code, status_message);
 
-        if status_code == StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
-            let mut misc_errors = self.misc_error_store.lock();
-            while let Some(status) = misc_errors.pop_front() {
-                self.send_misc_status(status);
-            }
+            let self_reference = Arc::downgrade(&self);
+            let death_recipient = self.misc_status_binder_adapter.link_to_death(
+                &new_listener,
+                Box::new(move || {
+                    // Clear the misc status listener when the client process dies.
+                    if let Some(self_reference) = self_reference.upgrade() {
+                        self_reference.clear_misc_status_listener();
+                    }
+                }),
+            )?;
+            guard.replace((new_listener.clone(), death_recipient));
+        }
+
+        let mut misc_errors = self.misc_error_store.lock();
+        while let Some(status) = misc_errors.pop_front() {
+            self.send_misc_status(status);
         }
 
         Ok(())
@@ -327,7 +326,7 @@ mod tests {
             mock_listener.clone(),
             BinderFeatures::default(),
         );
-        Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
+        Arc::clone(&status_listener).set_misc_status_listener(binder_listener).unwrap();
 
         let status = create_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, "Error message");
         status_listener.send_misc_status(status);
@@ -413,19 +412,18 @@ mod tests {
         );
 
         Arc::clone(&status_listener)
-            .set_misc_status_listener(1, &binder_misc_status_listener)
+            .set_misc_status_listener(binder_misc_status_listener.clone())
             .unwrap();
 
         Arc::clone(&status_listener).set_api_status_listener(&binder_api_status_listener).unwrap();
 
-        Arc::clone(&status_listener)
-            .set_misc_status_listener(2, &binder_misc_status_listener)
-            .unwrap();
+        let err = Arc::clone(&status_listener)
+            .set_misc_status_listener(binder_misc_status_listener)
+            .unwrap_err();
 
-        // Check if the correct API status was sent for failure
-        assert_eq!(
-            mock_api_status_listener.get_last_call(),
-            Some((2, StatusCodes::SET_MISC_STATUS_LISTENER_FAILED))
+        assert!(
+            matches!(&err, SetMiscStatusListenerError::ListenerAlreadySet),
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -441,7 +439,7 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
+        Arc::clone(&status_listener).set_misc_status_listener(binder_listener).unwrap();
 
         assert_eq!(
             mock_listener.get_last_call().unwrap(),
@@ -456,7 +454,7 @@ mod tests {
         let mock_listener = MockTelemetryMiscStatusListener::new();
         let binder_listener =
             BnTelemetryMiscStatusListener::new_binder(mock_listener, BinderFeatures::default());
-        Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
+        Arc::clone(&status_listener).set_misc_status_listener(binder_listener).unwrap();
 
         // Trigger client death
         mock_adapter.callback.lock().as_ref().unwrap()();
@@ -485,7 +483,7 @@ mod tests {
             MockTelemetryMiscStatusListener::new(),
             BinderFeatures::default(),
         );
-        Arc::clone(&status_listener).set_misc_status_listener(1, &binder_listener).unwrap();
+        Arc::clone(&status_listener).set_misc_status_listener(binder_listener).unwrap();
 
         status_listener.clear_misc_status_listener();
 

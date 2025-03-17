@@ -112,6 +112,10 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
 
 /// This struct is defined to implement ITelemetryService AIDL interface.
 pub struct SdvTelemetryService {
+    data: Arc<SdvTelemetryServiceData>,
+}
+
+struct SdvTelemetryServiceData {
     /// Instance of Metrics Configuration Manager
     metrics_config_manager: Arc<dyn MetricsConfigManager + Send + Sync>,
     /// Report Ready listener to inform the client when a report is ready
@@ -174,9 +178,11 @@ impl SdvTelemetryService {
         };
 
         Some(SdvTelemetryService {
-            metrics_config_manager: config_manager,
-            metrics_report_listener: report_listener_clone,
-            status_listener,
+            data: Arc::new(SdvTelemetryServiceData {
+                metrics_config_manager: config_manager,
+                metrics_report_listener: report_listener_clone,
+                status_listener,
+            }),
         })
     }
 }
@@ -189,23 +195,23 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         api_call_id: i32,
         metrics_config: &[u8],
     ) -> binder::Result<()> {
-        // Add metrics config and report any errors to client
-        let metrics_config_uuid =
-            match self.metrics_config_manager.add_metrics_config(metrics_config).await {
-                Ok(config_uuid) => config_uuid,
-                Err(e) => {
-                    error!("Invalid Metric Config");
-                    let (err_code, err_msg) = get_error_code_and_message(e);
-                    self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
-                    return Ok(());
-                }
-            };
+        let metrics_config = metrics_config.to_owned();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            // Add metrics config and report any errors to client
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) =
+                data.metrics_config_manager.add_metrics_config(&metrics_config).await.map_or_else(
+                    |e| {
+                        error!("Unable to add Metrics Config: {e:?}");
+                        get_error_code_and_message(e)
+                    },
+                    |config_uuid| (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, config_uuid),
+                );
 
-        self.status_listener.send_api_status(
-            api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            &metrics_config_uuid,
-        );
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
         Ok(())
     }
 
@@ -215,21 +221,26 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         api_call_id: i32,
         metrics_config_uuid: &str,
     ) -> binder::Result<()> {
-        // Activate metrics config and report any errors to client
-        if let Err(e) =
-            self.metrics_config_manager.activate_metrics_config(metrics_config_uuid).await
-        {
-            error!("Unable to activate Metric Config Err: {:?}", e);
-            let (err_code, err_msg) = get_error_code_and_message(e);
-            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
-            return Ok(());
-        }
+        let metrics_config_uuid = metrics_config_uuid.to_owned();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            // Activate metrics config and report any errors to client
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) = data
+                .metrics_config_manager
+                .activate_metrics_config(&metrics_config_uuid)
+                .await
+                .map_or_else(
+                    |e| {
+                        error!("Unable to activate Metrics Config: {e:?}");
+                        get_error_code_and_message(e)
+                    },
+                    |()| (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, metrics_config_uuid),
+                );
 
-        self.status_listener.send_api_status(
-            api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            metrics_config_uuid,
-        );
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
         Ok(())
     }
 
@@ -239,21 +250,26 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         api_call_id: i32,
         metrics_config_uuid: &str,
     ) -> binder::Result<()> {
-        // Deactivate metrics config and report any errors to client
-        if let Err(e) =
-            self.metrics_config_manager.deactivate_metrics_config(metrics_config_uuid).await
-        {
-            error!("Unable to deactivate Metric Config Err: {:?}", e);
-            let (err_code, err_msg) = get_error_code_and_message(e);
-            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
-            return Ok(());
-        }
+        let metrics_config_uuid = metrics_config_uuid.to_owned();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            // Deactivate metrics config and report any errors to client
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) = data
+                .metrics_config_manager
+                .deactivate_metrics_config(&metrics_config_uuid)
+                .await
+                .map_or_else(
+                    |e| {
+                        error!("Unable to deactivate Metrics Config: {e:?}");
+                        get_error_code_and_message(e)
+                    },
+                    |()| (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, metrics_config_uuid),
+                );
 
-        self.status_listener.send_api_status(
-            api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            metrics_config_uuid,
-        );
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
         Ok(())
     }
 
@@ -263,38 +279,53 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         api_call_id: i32,
         metrics_config_uuid: &str,
     ) -> binder::Result<()> {
-        // Remove metrics config and report any errors to client
-        if let Err(e) = self.metrics_config_manager.remove_metrics_config(metrics_config_uuid).await
-        {
-            error!("Unable to remove Metric Config Err: {:?}", e);
-            let (err_code, err_msg) = get_error_code_and_message(e);
-            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
-            return Ok(());
-        }
+        let metrics_config_uuid = metrics_config_uuid.to_owned();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            // Remove metrics config and report any errors to client
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) = data
+                .metrics_config_manager
+                .remove_metrics_config(&metrics_config_uuid)
+                .await
+                .map_or_else(
+                    |e| {
+                        error!("Unable to remove Metrics Config: {e:?}");
+                        get_error_code_and_message(e)
+                    },
+                    |()| (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, metrics_config_uuid),
+                );
 
-        self.status_listener.send_api_status(
-            api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            metrics_config_uuid,
-        );
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
         Ok(())
     }
 
     #[instrument(skip(self))]
     async fn removeAllMetricsConfigs(&self, api_call_id: i32) -> binder::Result<()> {
-        // Remove all metrics config and report any errors to client
-        if let Err(e) = self.metrics_config_manager.remove_all_metrics_configs().await {
-            error!("Unable to remove all metric configs Err: {:?}", e);
-            let (err_code, err_msg) = get_error_code_and_message(e);
-            self.status_listener.send_api_status(api_call_id, err_code, &err_msg);
-            return Ok(());
-        }
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            // Remove all metrics config and report any errors to client
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) =
+                data.metrics_config_manager.remove_all_metrics_configs().await.map_or_else(
+                    |e| {
+                        error!("Unable to remove all Metrics Configs: {e:?}");
+                        let (code, message) = get_error_code_and_message(e);
+                        (code, Cow::from(message))
+                    },
+                    |()| {
+                        (
+                            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                            Cow::from("Successfully removed all Metrics Configs"),
+                        )
+                    },
+                );
 
-        self.status_listener.send_api_status(
-            api_call_id,
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            "successfully Removed All Configs",
-        );
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
         Ok(())
     }
 
@@ -305,14 +336,19 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     ) -> binder::Result<()> {
         info!("getActiveMetricsConfigUuids");
 
-        let config_list = self.metrics_config_manager.get_active_metrics_config_uuids().await;
-        if let Err(e) = config_list_listener.deref().sendConfigList(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            "",
-            &config_list,
-        ) {
-            warn!("Unable to send config list to the client: {:?}", e);
-        }
+        let config_list_listener = config_list_listener.clone();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            let Some(data) = data_reference.upgrade() else { return };
+            let config_list = data.metrics_config_manager.get_active_metrics_config_uuids().await;
+            if let Err(e) = config_list_listener.deref().sendConfigList(
+                StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                "",
+                &config_list,
+            ) {
+                warn!("Unable to send config list to the client: {:?}", e);
+            }
+        });
 
         Ok(())
     }
@@ -323,14 +359,20 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         config_list_listener: &binder::Strong<dyn ITelemetryConfigListListener>,
     ) -> binder::Result<()> {
         info!("getInactiveMetricsConfigUuids");
-        let config_list = self.metrics_config_manager.get_inactive_metrics_config_uuids().await;
-        if let Err(e) = config_list_listener.deref().sendConfigList(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            "",
-            &config_list,
-        ) {
-            warn!("Unable to send config list to the client: {:?}", e);
-        }
+
+        let config_list_listener = config_list_listener.clone();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            let Some(data) = data_reference.upgrade() else { return };
+            let config_list = data.metrics_config_manager.get_inactive_metrics_config_uuids().await;
+            if let Err(e) = config_list_listener.deref().sendConfigList(
+                StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                "",
+                &config_list,
+            ) {
+                warn!("Unable to send config list to the client: {:?}", e);
+            }
+        });
 
         Ok(())
     }
@@ -342,17 +384,27 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         listener: &binder::Strong<dyn ITelemetryReportReadyListener>,
     ) -> binder::Result<()> {
         info!("registerReportReadyListener");
-        let (status_code, status_message) =
-            self.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
-                |err| (StatusCodes::SET_REPORT_READY_LISTENER_FAILED, Cow::Owned(err.to_string())),
-                |()| {
-                    (
-                        StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-                        Cow::Borrowed("Report Ready Listener successfully added"),
-                    )
-                },
-            );
-        self.status_listener.send_api_status(api_call_id, status_code, &status_message);
+
+        let listener = listener.clone();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) =
+                data.metrics_report_listener.set_report_ready_listener(listener).map_or_else(
+                    |err| {
+                        (StatusCodes::SET_REPORT_READY_LISTENER_FAILED, Cow::from(err.to_string()))
+                    },
+                    |()| {
+                        (
+                            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                            Cow::from("Report Ready Listener successfully added"),
+                        )
+                    },
+                );
+
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
         Ok(())
     }
 
@@ -361,7 +413,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         &self,
         new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
     ) -> binder::Result<()> {
-        Arc::clone(&self.status_listener).set_api_status_listener(new_listener)
+        Arc::clone(&self.data.status_listener).set_api_status_listener(new_listener)
     }
 
     #[instrument(skip(self))]
@@ -370,7 +422,31 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         api_call_id: i32,
         new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
     ) -> binder::Result<()> {
-        Arc::clone(&self.status_listener).set_misc_status_listener(api_call_id, new_listener)
+        let new_listener = new_listener.clone();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            let Some(data) = data_reference.upgrade() else { return };
+            let (status_code, status_message) = Arc::clone(&data.status_listener)
+                .set_misc_status_listener(new_listener)
+                .map_or_else(
+                    |e| {
+                        (
+                            StatusCodes::SET_MISC_STATUS_LISTENER_FAILED,
+                            Cow::from(format!("Unable to set misc status listener: {e:?}")),
+                        )
+                    },
+                    |()| {
+                        (
+                            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                            Cow::from("Misc Status listener successfully set"),
+                        )
+                    },
+                );
+
+            data.status_listener.send_api_status(api_call_id, status_code, &status_message);
+        });
+
+        Ok(())
     }
 
     #[instrument(skip(self, report_listener))]
@@ -380,24 +456,36 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         report_listener: &binder::Strong<dyn ITelemetryReportListener>,
     ) -> binder::Result<()> {
         info!("getMetricsReport: {}", metrics_report_info.metricsConfigUuid);
-        if let Ok(metrics_report) =
-            self.metrics_report_listener.get_metrics_report(metrics_report_info)
-        {
-            let serialized_report: &[u8] = &metrics_report.write_to_bytes().unwrap();
-            if let Err(e) = report_listener.deref().onReport(
-                StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-                &metrics_report_info.metricsConfigUuid,
-                serialized_report,
-            ) {
-                warn!("Unable to send report to the client: {:?}", e);
+
+        let metrics_report_info = metrics_report_info.clone();
+        let report_listener = report_listener.clone();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            let Some(data) = data_reference.upgrade() else { return };
+            match data.metrics_report_listener.get_metrics_report(&metrics_report_info) {
+                Ok(metrics_report) => {
+                    let serialized_report: &[u8] = &metrics_report
+                        .write_to_bytes()
+                        .expect("Report serialization should be successful");
+                    if let Err(e) = report_listener.deref().onReport(
+                        StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                        &metrics_report_info.metricsConfigUuid,
+                        serialized_report,
+                    ) {
+                        warn!("Unable to send report to the client: {:?}", e);
+                    }
+                }
+                Err(e) => {
+                    if let Err(e) = report_listener.deref().onReport(
+                        StatusCodes::GET_FINISHED_REPORT_FAILED,
+                        &format!("Unable to retrieve report: {:?}", e),
+                        &[],
+                    ) {
+                        warn!("Unable to send report retrieval error to the client: {:?}", e);
+                    }
+                }
             }
-        } else if let Err(e) = report_listener.deref().onReport(
-            StatusCodes::GET_FINISHED_REPORT_FAILED,
-            &metrics_report_info.metricsConfigUuid,
-            &[],
-        ) {
-            warn!("Unable to send report retrieval error to the client: {:?}", e);
-        }
+        });
 
         Ok(())
     }
@@ -408,36 +496,43 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         report_listener: &binder::Strong<dyn ITelemetryReadyReportsInfoListener>,
     ) -> binder::Result<()> {
         info!("getReadyReportsInfo");
-        let ready_reports_info = self.metrics_report_listener.get_ready_reports_info();
 
-        if let Err(e) = report_listener.deref().sendReadyReportsInfo(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            format!("Number of ready reports: {}", ready_reports_info.len()).as_str(),
-            &ready_reports_info,
-        ) {
-            warn!("Unable to send info of ready reports to the client: {:?}", e);
-        }
+        let report_listener = report_listener.clone();
+        let data_reference = Arc::downgrade(&self.data);
+        tokio::spawn(async move {
+            let Some(data) = data_reference.upgrade() else { return };
+            let ready_reports_info = data.metrics_report_listener.get_ready_reports_info();
+
+            if let Err(e) = report_listener.deref().sendReadyReportsInfo(
+                StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
+                format!("Number of ready reports: {}", ready_reports_info.len()).as_str(),
+                &ready_reports_info,
+            ) {
+                warn!("Unable to send info of ready reports to the client: {:?}", e);
+            }
+        });
+
         Ok(())
     }
 
     #[instrument(skip(self))]
     async fn unregisterReportReadyListener(&self) -> binder::Result<()> {
         info!("unregisterReportReadyListener");
-        self.metrics_report_listener.clear_report_ready_listener();
+        self.data.metrics_report_listener.clear_report_ready_listener();
         Ok(())
     }
 
     #[instrument(skip(self))]
     async fn unregisterApiStatusListener(&self) -> binder::Result<()> {
         info!("unregisterApiStatusListener");
-        self.status_listener.clear_api_status_listener();
+        self.data.status_listener.clear_api_status_listener();
         Ok(())
     }
 
     #[instrument(skip(self))]
     async fn unregisterMiscStatusListener(&self) -> binder::Result<()> {
         info!("unregisterMiscStatusListener");
-        self.status_listener.clear_misc_status_listener();
+        self.data.status_listener.clear_misc_status_listener();
         Ok(())
     }
 }
@@ -462,12 +557,17 @@ mod tests {
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
+    use sdv_telemetry_utils::collection_extension::HashMapExtension;
+    use std::collections::HashMap;
+    use std::future::Future;
+    use std::sync::atomic::{AtomicI32, Ordering};
+    use tokio::sync::oneshot;
 
     use crate::metrics_config_manager::mock::MockMetricsConfigManager;
     use crate::metrics_report_listener::tests::create_default_metrics_report_listener;
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
+    use crate::status_listener::SetMiscStatusListenerError;
 
-    const DUMMY_API_CALL_ID: i32 = -1;
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
     const REPORT_NUMBER: i32 = 42;
     const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
@@ -476,9 +576,8 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryConfigListListener {
-        status_code: Arc<Mutex<StatusCodes>>,
-        num_send_config_calls: Arc<Mutex<i32>>,
         metrics_config_list: Arc<Mutex<Option<Vec<String>>>>,
+        status_sender: Arc<Mutex<Option<oneshot::Sender<(StatusCodes, String)>>>>,
     }
 
     impl binder::Interface for MockTelemetryConfigListListener {}
@@ -486,18 +585,15 @@ mod tests {
     impl MockTelemetryConfigListListener {
         fn new() -> Self {
             Self {
-                status_code: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
-                num_send_config_calls: Arc::new(Mutex::new(0)),
                 metrics_config_list: Arc::new(Mutex::new(None)),
+                status_sender: Arc::new(Mutex::new(None)),
             }
         }
 
-        fn get_status_code(&self) -> StatusCodes {
-            *self.status_code.lock()
-        }
-
-        fn get_num_send_config_calls(&self) -> i32 {
-            *self.num_send_config_calls.lock()
+        fn expect_call(&self) -> oneshot::Receiver<(StatusCodes, String)> {
+            let (sender, receiver) = oneshot::channel();
+            assert!(self.status_sender.lock().replace(sender).is_none());
+            receiver
         }
 
         fn get_metrics_config_list(&self) -> Vec<String> {
@@ -509,12 +605,17 @@ mod tests {
         fn sendConfigList(
             &self,
             status_code: StatusCodes,
-            _status_message: &str,
+            status_message: &str,
             config_list: &[String],
         ) -> binder::Result<()> {
-            *self.status_code.lock() = status_code;
-            *self.num_send_config_calls.lock() += 1;
-            self.metrics_config_list.lock().replace(config_list.to_vec());
+            self.metrics_config_list.lock().replace(config_list.to_owned());
+            self.status_sender
+                .lock()
+                .take()
+                .expect("Status sender should be set")
+                .send((status_code, status_message.to_owned()))
+                .unwrap();
+
             Ok(())
         }
     }
@@ -522,12 +623,8 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryReportListener {
-        status_code: Arc<Mutex<StatusCodes>>,
-        status_message: Arc<Mutex<String>>,
-        num_on_result_calls: Arc<Mutex<i32>>,
-        uuid: Arc<Mutex<String>>,
-        report_number: Arc<Mutex<i32>>,
         metrics_report: Arc<Mutex<Option<MetricsReport>>>,
+        status_sender: Arc<Mutex<Option<oneshot::Sender<(StatusCodes, String)>>>>,
     }
 
     impl binder::Interface for MockTelemetryReportListener {}
@@ -535,33 +632,19 @@ mod tests {
     impl MockTelemetryReportListener {
         fn new() -> Self {
             Self {
-                status_code: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
-                status_message: Arc::new(Mutex::new(String::new())),
-                num_on_result_calls: Arc::new(Mutex::new(0)),
-                uuid: Arc::new(Mutex::new(String::new())),
-                report_number: Arc::new(Mutex::new(0)),
                 metrics_report: Arc::new(Mutex::new(None)),
+                status_sender: Arc::new(Mutex::new(None)),
             }
         }
 
-        fn get_status_code(&self) -> StatusCodes {
-            *self.status_code.lock()
+        fn expect_call(&self) -> oneshot::Receiver<(StatusCodes, String)> {
+            let (sender, receiver) = oneshot::channel();
+            assert!(self.status_sender.lock().replace(sender).is_none());
+            receiver
         }
 
-        fn get_status_message(&self) -> String {
-            self.status_message.lock().to_string()
-        }
-
-        fn get_num_on_result_calls(&self) -> i32 {
-            *self.num_on_result_calls.lock()
-        }
-
-        fn get_report_number(&self) -> i32 {
-            *self.report_number.lock()
-        }
-
-        fn get_uuid(&self) -> String {
-            self.uuid.lock().to_string()
+        fn get_metrics_report(&self) -> Option<MetricsReport> {
+            self.metrics_report.lock().take()
         }
     }
 
@@ -573,24 +656,18 @@ mod tests {
             serialized_report: &[u8],
         ) -> binder::Result<()> {
             // bytes now contains the contents of the file
-            let metrics_report: MetricsReport =
-                match protobuf::Message::parse_from_bytes(serialized_report) {
-                    Ok(report) => report,
-                    Err(_) => return Err(binder::StatusCode::BAD_VALUE.into()),
-                };
+            let metrics_report = match MetricsReport::parse_from_bytes(serialized_report) {
+                Ok(report) => report,
+                Err(_) => return Err(binder::StatusCode::BAD_VALUE.into()),
+            };
 
-            let mut mut_status_code = self.status_code.lock();
-            *mut_status_code = status_code;
-            let mut mut_status_message = self.status_message.lock();
-            *mut_status_message = status_message.to_string();
-            let mut num_on_result_calls = self.num_on_result_calls.lock();
-            *num_on_result_calls += 1;
-            let mut report_number = self.report_number.lock();
-            *report_number = metrics_report.report_number;
-            let mut uuid = self.uuid.lock();
-            *uuid = metrics_report.clone().metrics_config_uuid;
-            let mut report = self.metrics_report.lock();
-            *report = Some(metrics_report);
+            assert!(self.metrics_report.lock().replace(metrics_report).is_none());
+            self.status_sender
+                .lock()
+                .take()
+                .expect("Status sender should be set")
+                .send((status_code, status_message.to_owned()))
+                .unwrap();
 
             Ok(())
         }
@@ -599,10 +676,8 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryReadyReportsInfoListener {
-        status_code: Arc<Mutex<StatusCodes>>,
-        status_message: Arc<Mutex<String>>,
-        num_on_ready_reports_info_calls: Arc<Mutex<i32>>,
-        ready_reports_info: Arc<Mutex<Vec<MetricsReportInfo>>>,
+        ready_reports_info: Arc<Mutex<Option<Vec<MetricsReportInfo>>>>,
+        status_sender: Arc<Mutex<Option<oneshot::Sender<(StatusCodes, String)>>>>,
     }
 
     impl binder::Interface for MockTelemetryReadyReportsInfoListener {}
@@ -610,27 +685,19 @@ mod tests {
     impl MockTelemetryReadyReportsInfoListener {
         fn new() -> Self {
             Self {
-                status_code: Arc::new(Mutex::new(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR)),
-                status_message: Arc::new(Mutex::new(String::new())),
-                num_on_ready_reports_info_calls: Arc::new(Mutex::new(0)),
-                ready_reports_info: Arc::new(Mutex::new(Vec::new())),
+                ready_reports_info: Arc::new(Mutex::new(None)),
+                status_sender: Arc::new(Mutex::new(None)),
             }
         }
 
-        fn get_status_code(&self) -> StatusCodes {
-            *self.status_code.lock()
+        fn expect_call(&self) -> oneshot::Receiver<(StatusCodes, String)> {
+            let (sender, receiver) = oneshot::channel();
+            assert!(self.status_sender.lock().replace(sender).is_none());
+            receiver
         }
 
-        fn get_status_message(&self) -> String {
-            self.status_message.lock().to_string()
-        }
-
-        fn get_num_on_ready_reports_info_calls(&self) -> i32 {
-            *self.num_on_ready_reports_info_calls.lock()
-        }
-
-        fn get_ready_reports_info(&self) -> Vec<MetricsReportInfo> {
-            self.ready_reports_info.lock().clone()
+        fn get_ready_reports_info(&self) -> Option<Vec<MetricsReportInfo>> {
+            self.ready_reports_info.lock().take()
         }
     }
 
@@ -641,17 +708,17 @@ mod tests {
             status_message: &str,
             ready_reports_info: &[MetricsReportInfo],
         ) -> binder::Result<()> {
-            let mut mut_status_code = self.status_code.lock();
-            *mut_status_code = status_code;
-
-            let mut mut_status_message = self.status_message.lock();
-            *mut_status_message = status_message.to_string();
-
-            let mut num_on_ready_reports_info_calls = self.num_on_ready_reports_info_calls.lock();
-            *num_on_ready_reports_info_calls += 1;
-
-            let mut mut_ready_reports_info = self.ready_reports_info.lock();
-            *mut_ready_reports_info = ready_reports_info.to_vec();
+            assert!(self
+                .ready_reports_info
+                .lock()
+                .replace(ready_reports_info.to_owned())
+                .is_none());
+            self.status_sender
+                .lock()
+                .take()
+                .expect("Status sender should be set")
+                .send((status_code, status_message.to_owned()))
+                .unwrap();
 
             Ok(())
         }
@@ -728,58 +795,72 @@ mod tests {
     }
 
     struct MockStatusListener {
-        api_status_code: Arc<Mutex<Option<StatusCodes>>>,
-        api_status_message: Arc<Mutex<Option<String>>>,
-        api_listener: Arc<Mutex<Option<binder::Strong<dyn ITelemetryApiStatusListener>>>>,
-        misc_listener: Arc<Mutex<Option<(i32, binder::Strong<dyn ITelemetryMiscStatusListener>)>>>,
+        num_clear_api_status_listener_calls: Mutex<u32>,
+        num_clear_misc_status_listener_calls: Mutex<u32>,
+        num_set_api_status_listener_calls: Mutex<u32>,
+        num_set_misc_status_listener_calls: Mutex<i32>,
+        status_senders: Mutex<HashMap<i32, oneshot::Sender<(StatusCodes, String)>>>,
     }
 
     impl MockStatusListener {
         fn new() -> Self {
             Self {
-                api_status_code: Arc::new(Mutex::new(None)),
-                api_status_message: Arc::new(Mutex::new(None)),
-                api_listener: Arc::new(Mutex::new(None)),
-                misc_listener: Arc::new(Mutex::new(None)),
+                num_clear_api_status_listener_calls: 0.into(),
+                num_clear_misc_status_listener_calls: 0.into(),
+                num_set_api_status_listener_calls: 0.into(),
+                num_set_misc_status_listener_calls: 0.into(),
+                status_senders: HashMap::new().into(),
             }
+        }
+
+        fn expect_call(&self, api_call_id: i32) -> oneshot::Receiver<(StatusCodes, String)> {
+            let (sender, receiver) = oneshot::channel();
+            self.status_senders
+                .lock()
+                .try_insert_value(api_call_id, sender)
+                .expect("API call ids should be unique");
+            receiver
         }
     }
 
     impl StatusListener for MockStatusListener {
         fn send_api_status(
             &self,
-            _api_call_id: i32,
+            api_call_id: i32,
             status_code: StatusCodes,
             status_message: &str,
         ) {
-            self.api_status_code.lock().replace(status_code);
-            self.api_status_message.lock().replace(status_message.to_owned());
+            let Some(status_sender) = self.status_senders.lock().remove(&api_call_id) else {
+                panic!("Received unexpected API call id: {api_call_id}");
+            };
+            status_sender.send((status_code, status_message.to_owned())).unwrap();
         }
 
         fn send_misc_status(&self, _status: TelemetryServiceStatus) {}
 
         fn clear_api_status_listener(&self) {
-            *self.api_listener.lock() = None;
+            *self.num_clear_api_status_listener_calls.lock() += 1;
         }
 
         fn clear_misc_status_listener(&self) {
-            *self.misc_listener.lock() = None;
+            *self.num_clear_misc_status_listener_calls.lock() += 1;
         }
 
         fn set_api_status_listener(
             self: Arc<Self>,
-            new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
+            _new_listener: &binder::Strong<dyn ITelemetryApiStatusListener>,
         ) -> binder::Result<()> {
-            self.api_listener.lock().replace(new_listener.clone());
+            *self.num_set_api_status_listener_calls.lock() += 1;
+
             Ok(())
         }
 
         fn set_misc_status_listener(
             self: Arc<Self>,
-            api_call_id: i32,
-            new_listener: &binder::Strong<dyn ITelemetryMiscStatusListener>,
-        ) -> binder::Result<()> {
-            self.misc_listener.lock().replace((api_call_id, new_listener.clone()));
+            _new_listener: binder::Strong<dyn ITelemetryMiscStatusListener>,
+        ) -> Result<(), SetMiscStatusListenerError> {
+            *self.num_set_misc_status_listener_calls.lock() += 1;
+
             Ok(())
         }
     }
@@ -788,6 +869,7 @@ mod tests {
         service: SdvTelemetryService,
         status_listener: Arc<MockStatusListener>,
         metrics_config_manager: Arc<MockMetricsConfigManager>,
+        next_api_call_id: AtomicI32,
         num_add_metrics_config_calls: Arc<Mutex<i32>>,
         num_activate_metrics_config_calls: Arc<Mutex<i32>>,
         num_deactivate_metrics_config_calls: Arc<Mutex<i32>>,
@@ -816,6 +898,7 @@ mod tests {
             )
             .await
             .unwrap();
+
             let metrics_config_manager = Arc::new(MockMetricsConfigManager::new(
                 Arc::clone(&num_add_metrics_config_calls),
                 Arc::clone(&num_activate_metrics_config_calls),
@@ -825,19 +908,20 @@ mod tests {
                 Arc::clone(&num_get_active_config_calls),
                 Arc::clone(&num_get_inactive_config_calls),
             ));
-
-            service.metrics_config_manager = Arc::<
-                metrics_config_manager::mock::MockMetricsConfigManager,
-            >::clone(&metrics_config_manager);
-            service.metrics_report_listener = create_default_metrics_report_listener().into();
-
             let status_listener = Arc::new(MockStatusListener::new());
-            service.status_listener = Arc::<MockStatusListener>::clone(&status_listener);
+            service.data = Arc::new(SdvTelemetryServiceData {
+                metrics_config_manager: Arc::<MockMetricsConfigManager>::clone(
+                    &metrics_config_manager,
+                ),
+                metrics_report_listener: create_default_metrics_report_listener().into(),
+                status_listener: Arc::<MockStatusListener>::clone(&status_listener),
+            });
 
             TestEnvironment {
                 service,
                 status_listener,
                 metrics_config_manager,
+                next_api_call_id: 1.into(),
                 num_add_metrics_config_calls: Arc::clone(&num_add_metrics_config_calls),
                 num_activate_metrics_config_calls: Arc::clone(&num_activate_metrics_config_calls),
                 num_deactivate_metrics_config_calls: Arc::clone(
@@ -850,44 +934,54 @@ mod tests {
             }
         }
 
-        pub fn get_status_code(&self) -> StatusCodes {
-            self.status_listener.api_status_code.lock().expect("Status code should be set")
-        }
-
-        pub fn get_status_message(&self) -> String {
-            self.status_listener
-                .api_status_message
-                .lock()
-                .take()
-                .expect("Status message should be set")
-        }
-
-        pub fn get_num_add_metrics_config_calls(&self) -> i32 {
+        fn get_num_add_metrics_config_calls(&self) -> i32 {
             *self.num_add_metrics_config_calls.lock()
         }
 
-        pub fn get_num_activate_metrics_config_calls(&self) -> i32 {
+        fn get_num_activate_metrics_config_calls(&self) -> i32 {
             *self.num_activate_metrics_config_calls.lock()
         }
 
-        pub fn get_num_deactivate_metrics_config_calls(&self) -> i32 {
+        fn get_num_deactivate_metrics_config_calls(&self) -> i32 {
             *self.num_deactivate_metrics_config_calls.lock()
         }
 
-        pub fn get_num_remove_config_calls(&self) -> i32 {
+        fn get_num_remove_config_calls(&self) -> i32 {
             *self.num_remove_config_calls.lock()
         }
 
-        pub fn get_num_remove_all_config_calls(&self) -> i32 {
+        fn get_num_remove_all_config_calls(&self) -> i32 {
             *self.num_remove_all_config_calls.lock()
         }
 
-        pub fn get_num_get_active_config_calls(&self) -> i32 {
+        fn get_num_get_active_config_calls(&self) -> i32 {
             *self.num_get_active_config_calls.lock()
         }
 
-        pub fn get_num_get_inactive_config_calls(&self) -> i32 {
+        fn get_num_get_inactive_config_calls(&self) -> i32 {
             *self.num_get_inactive_config_calls.lock()
+        }
+
+        async fn make_async_call<'a, Fut>(
+            &'a self,
+            f: impl FnOnce(&'a SdvTelemetryService, i32) -> Fut,
+        ) -> Result<(), StatusCodes>
+        where
+            Fut: Future<Output = binder::Result<()>> + 'a,
+        {
+            let api_call_id = self.next_api_call_id.fetch_add(1, Ordering::AcqRel);
+            let status_receiver = self.status_listener.expect_call(api_call_id);
+
+            f(&self.service, api_call_id)
+                .await
+                .expect("API should return successful Binder result");
+
+            let (status_code, _status_message) = status_receiver.await.unwrap();
+            if status_code == StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
+                Ok(())
+            } else {
+                Err(status_code)
+            }
         }
     }
 
@@ -902,27 +996,24 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn add_metrics_config_call_received() {
+    async fn add_metrics_config_success() {
         const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
-
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID1);
 
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config)
+            })
             .await
             .unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
+
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
     }
 
@@ -932,112 +1023,128 @@ mod tests {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "add_metrics_config";
-
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID1);
 
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config)
+            })
             .await
             .unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
-        assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
 
-        test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
+        let status_code = test_environment
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config)
+            })
             .await
-            .unwrap();
-        assert_eq!(StatusCodes::ADD_METRICS_CONFIG_FAILED, test_environment.get_status_code());
+            .unwrap_err();
+
+        assert_eq!(StatusCodes::ADD_METRICS_CONFIG_FAILED, status_code);
         assert_eq!(2, test_environment.get_num_add_metrics_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn activate_metrics_config_call_received() {
+    async fn activate_metrics_config_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config = create_serialized_config(UUID1);
+
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config)
+            })
             .await
             .unwrap();
+
+        test_environment
+            .make_async_call(|service, api_call_id| {
+                service.activateMetricsConfig(api_call_id, UUID1)
+            })
+            .await
+            .unwrap();
+
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn activate_metrics_config_fail_config_doesnt_exist() {
+    async fn activate_metrics_config_config_doesnt_exist_fails() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "activate_metrics_config";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
-        assert_eq!(
-            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
-            test_environment.get_status_code()
-        );
+        let status_code = test_environment
+            .make_async_call(|service, api_call_id| {
+                service.activateMetricsConfig(api_call_id, UUID1)
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID, status_code);
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn deactivate_metrics_config_call_received() {
+    async fn deactivate_metrics_config_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config = create_serialized_config(UUID1);
+
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config)
+            })
             .await
             .unwrap();
+
+        test_environment
+            .make_async_call(|service, api_call_id| {
+                service.activateMetricsConfig(api_call_id, UUID1)
+            })
+            .await
+            .unwrap();
+
+        test_environment
+            .make_async_call(|service, api_call_id| {
+                service.deactivateMetricsConfig(api_call_id, UUID1)
+            })
+            .await
+            .unwrap();
+
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
-
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
-
-        test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
         assert_eq!(1, test_environment.get_num_deactivate_metrics_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn deactivate_metrics_config_fail_config_doesnt_exist() {
+    async fn deactivate_metrics_config_config_doesnt_exist_fails() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "deactivate_metrics_config";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        test_environment.service.deactivateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
+        let status_code = test_environment
+            .make_async_call(|service, api_call_id| {
+                service.deactivateMetricsConfig(api_call_id, UUID1)
+            })
+            .await
+            .unwrap_err();
 
-        assert_eq!(
-            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
-            test_environment.get_status_code()
-        );
+        assert_eq!(StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID, status_code);
         assert_eq!(1, test_environment.get_num_deactivate_metrics_config_calls());
     }
 
@@ -1050,44 +1157,51 @@ mod tests {
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
         let serialized_config = create_serialized_config(UUID1);
+
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config)
+            })
             .await
             .unwrap();
+
+        test_environment
+            .make_async_call(|service, api_call_id| {
+                service.activateMetricsConfig(api_call_id, UUID1)
+            })
+            .await
+            .unwrap();
+
+        test_environment
+            .make_async_call(|service, api_call_id| service.removeMetricsConfig(api_call_id, UUID1))
+            .await
+            .unwrap();
+
         assert_eq!(1, test_environment.get_num_add_metrics_config_calls());
-
-        test_environment.service.activateMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_activate_metrics_config_calls());
-
-        test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
         assert_eq!(1, test_environment.get_num_remove_config_calls());
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn remove_metrics_config_fail_config_doesnt_exist() {
+    async fn remove_metrics_config_config_doesnt_exist_fails() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_metrics_config";
         let test_environment = TestEnvironment::new(ROOT_PATH.to_owned()).await;
 
-        test_environment.service.removeMetricsConfig(DUMMY_API_CALL_ID, UUID1).await.unwrap();
+        let status_code = test_environment
+            .make_async_call(|service, api_call_id| service.removeMetricsConfig(api_call_id, UUID1))
+            .await
+            .unwrap_err();
 
-        assert_eq!(
-            StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID,
-            test_environment.get_status_code()
-        );
+        assert_eq!(StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID, status_code);
         assert_eq!(1, test_environment.get_num_remove_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn remove_all_metrics_configs() {
+    async fn remove_all_metrics_configs_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "remove_all_metrics_configs";
@@ -1098,29 +1212,31 @@ mod tests {
 
         // Add configs
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config1)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config1)
+            })
             .await
             .unwrap();
         test_environment
-            .service
-            .addMetricsConfig(DUMMY_API_CALL_ID, &serialized_config2)
+            .make_async_call(|service, api_call_id| {
+                service.addMetricsConfig(api_call_id, &serialized_config2)
+            })
             .await
             .unwrap();
-        assert_eq!(2, test_environment.get_num_add_metrics_config_calls());
 
         // Remove all configs
-        test_environment.service.removeAllMetricsConfigs(-1).await.unwrap();
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
+        test_environment
+            .make_async_call(|service, api_call_id| service.removeAllMetricsConfigs(api_call_id))
+            .await
+            .unwrap();
+
+        assert_eq!(2, test_environment.get_num_add_metrics_config_calls());
         assert_eq!(1, test_environment.get_num_remove_all_config_calls());
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_active_metrics_config_uuids() {
+    async fn get_active_metrics_config_uuids_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_active_metrics_config_uuids";
@@ -1133,6 +1249,7 @@ mod tests {
 
         let config_uuids = [UUID1.to_string(), UUID2.to_string()];
         test_environment.metrics_config_manager.populate_active_configs(config_uuids.to_vec());
+        let status_receiver = config_list_listener.expect_call();
 
         test_environment
             .service
@@ -1140,12 +1257,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            config_list_listener.get_status_code()
-        );
+        let (status_code, _status_message) = status_receiver.await.unwrap();
+        assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, status_code);
         assert_eq!(1, test_environment.get_num_get_active_config_calls());
-        assert_eq!(1, config_list_listener.get_num_send_config_calls());
         assert!(config_uuids
             .iter()
             .all(|item| config_list_listener.get_metrics_config_list().contains(item)));
@@ -1153,7 +1267,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_inactive_metrics_config_uuids() {
+    async fn get_inactive_metrics_config_uuids_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_inactive_metrics_config_uuids";
@@ -1167,6 +1281,7 @@ mod tests {
 
         let config_uuids = [UUID1.to_string(), UUID2.to_string()];
         test_environment.metrics_config_manager.populate_inactive_configs(config_uuids.to_vec());
+        let status_receiver = config_list_listener.expect_call();
 
         test_environment
             .service
@@ -1174,12 +1289,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            config_list_listener.get_status_code()
-        );
+        let (status_code, _status_message) = status_receiver.await.unwrap();
+        assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, status_code);
         assert_eq!(1, test_environment.get_num_get_inactive_config_calls());
-        assert_eq!(1, config_list_listener.get_num_send_config_calls());
         assert!(config_uuids
             .iter()
             .all(|item| config_list_listener.get_metrics_config_list().contains(item)));
@@ -1187,7 +1299,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn clear_report_ready_listener() {
+    async fn clear_report_ready_listener_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "clear_report_ready_listener";
@@ -1199,27 +1311,18 @@ mod tests {
         );
 
         test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &binder_report_ready_listener)
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &binder_report_ready_listener)
+            })
             .await
             .unwrap();
 
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
-
         test_environment.service.unregisterReportReadyListener().await.unwrap();
-
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn set_report_ready_listener() {
+    async fn set_report_ready_listener_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "set_report_ready_listener";
@@ -1232,20 +1335,16 @@ mod tests {
         );
 
         test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &binder_report_ready_listener)
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &binder_report_ready_listener)
+            })
             .await
             .unwrap();
-
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn set_report_ready_listener_and_check_on_ready_calls() {
+    async fn set_report_ready_listener_receives_ready_calls() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "check_on_ready_calls";
@@ -1257,15 +1356,11 @@ mod tests {
         );
 
         test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &binder_report_ready_listener)
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &binder_report_ready_listener)
+            })
             .await
             .unwrap();
-
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
 
         let report_info = MetricsReportInfo {
             metricsConfigUuid: UUID1.to_string(),
@@ -1274,6 +1369,7 @@ mod tests {
         };
         // Call onReady on report ready listener
         report_ready_listener.onReady(&report_info).unwrap();
+
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID1, &report_ready_listener.get_uuid());
@@ -1290,25 +1386,20 @@ mod tests {
         );
 
         test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &report_listener)
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &report_listener)
+            })
             .await
             .unwrap();
 
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
-
-        test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &report_listener)
+        let status_code = test_environment
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &report_listener)
+            })
             .await
-            .unwrap();
-        assert_eq!(
-            StatusCodes::SET_REPORT_READY_LISTENER_FAILED,
-            test_environment.get_status_code()
-        );
+            .unwrap_err();
+
+        assert_eq!(StatusCodes::SET_REPORT_READY_LISTENER_FAILED, status_code);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1323,7 +1414,7 @@ mod tests {
 
         test_environment.service.registerApiStatusListener(&mock_api_listener).await.unwrap();
 
-        assert!(test_environment.status_listener.api_listener.lock().is_some());
+        assert_eq!(*test_environment.status_listener.num_set_api_status_listener_calls.lock(), 1);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1338,10 +1429,14 @@ mod tests {
             BinderFeatures::default(),
         );
 
-        test_environment.service.registerMiscStatusListener(123, &binder_listener).await.unwrap();
+        test_environment
+            .make_async_call(|service, api_call_id| {
+                service.registerMiscStatusListener(api_call_id, &binder_listener)
+            })
+            .await
+            .unwrap();
 
-        let listener = test_environment.status_listener.misc_listener.lock();
-        assert!(listener.is_some());
+        assert_eq!(*test_environment.status_listener.num_set_misc_status_listener_calls.lock(), 1);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1362,7 +1457,8 @@ mod tests {
         // Then unregister
         test_environment.service.unregisterApiStatusListener().await.unwrap();
 
-        assert!(test_environment.status_listener.api_listener.lock().is_none());
+        assert_eq!(*test_environment.status_listener.num_set_api_status_listener_calls.lock(), 1);
+        assert_eq!(*test_environment.status_listener.num_clear_api_status_listener_calls.lock(), 1);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1378,17 +1474,26 @@ mod tests {
         );
 
         // Register the listener first
-        test_environment.service.registerMiscStatusListener(123, &binder_listener).await.unwrap();
+        test_environment
+            .make_async_call(|service, api_call_id| {
+                service.registerMiscStatusListener(api_call_id, &binder_listener)
+            })
+            .await
+            .unwrap();
 
         // Then unregister
         test_environment.service.unregisterMiscStatusListener().await.unwrap();
 
-        assert!(test_environment.status_listener.misc_listener.lock().is_none());
+        assert_eq!(*test_environment.status_listener.num_set_misc_status_listener_calls.lock(), 1);
+        assert_eq!(
+            *test_environment.status_listener.num_clear_misc_status_listener_calls.lock(),
+            1
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_metrics_report() {
+    async fn get_metrics_report_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_metrics_report";
@@ -1404,27 +1509,20 @@ mod tests {
         );
 
         test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &binder_report_ready_listener)
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &binder_report_ready_listener)
+            })
             .await
             .unwrap();
-
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code(),
-            "Unexpected status: ({:?}, {})",
-            test_environment.get_status_code(),
-            test_environment.get_status_message()
-        );
 
         // Setting Report Listener
 
         let report_listener = MockTelemetryReportListener::new();
-
         let binder_report_listener = BnTelemetryReportListener::new_binder(
             report_listener.clone(),
             BinderFeatures::default(),
         );
+        let status_receiver = report_listener.expect_call();
 
         // Send report to metric report listener
         let mut report = MetricsReport::new();
@@ -1437,27 +1535,25 @@ mod tests {
         };
 
         // Call on_report_ready callback on metrics report listener
-        test_environment.service.metrics_report_listener.on_report_ready(report);
+        test_environment.service.data.metrics_report_listener.on_report_ready(report);
         test_environment
             .service
             .getMetricsReport(&report_info, &binder_report_listener)
             .await
             .unwrap();
 
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            report_listener.get_status_code()
-        );
-        assert_eq!(UUID1, report_listener.get_status_message());
-        assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
-        assert_eq!(1, report_listener.get_num_on_result_calls());
-        assert_eq!(UUID1, report_listener.get_uuid());
-        assert_eq!(REPORT_NUMBER, report_listener.get_report_number());
+        let (status_code, status_message) = status_receiver.await.unwrap();
+        assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, status_code);
+        assert_eq!(UUID1, status_message);
+        let metrics_report =
+            report_listener.get_metrics_report().expect("Metrics report should be set");
+        assert_eq!(UUID1, metrics_report.metrics_config_uuid);
+        assert_eq!(REPORT_NUMBER, metrics_report.report_number);
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_ready_reports_info() {
+    async fn get_ready_reports_info_success() {
         // Creating a separate directory for each unit test to avoid overlapping file
         // IO operations in the same directories which can cause test flakiness.
         const ROOT_PATH: &str = "get_ready_reports_info";
@@ -1469,16 +1565,13 @@ mod tests {
             report_ready_listener.clone(),
             BinderFeatures::default(),
         );
+
         test_environment
-            .service
-            .registerReportReadyListener(DUMMY_API_CALL_ID, &binder_report_ready_listener)
+            .make_async_call(|service, api_call_id| {
+                service.registerReportReadyListener(api_call_id, &binder_report_ready_listener)
+            })
             .await
             .unwrap();
-
-        assert_eq!(
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-            test_environment.get_status_code()
-        );
 
         // Setting Ready Report Ids Listener
         let ready_reports_info_listener = MockTelemetryReadyReportsInfoListener::new();
@@ -1486,6 +1579,7 @@ mod tests {
             ready_reports_info_listener.clone(),
             BinderFeatures::default(),
         );
+        let status_receiver = ready_reports_info_listener.expect_call();
 
         // Send report to metric report listener
         let mut report = MetricsReport::new();
@@ -1497,7 +1591,7 @@ mod tests {
             reportNumber: REPORT_NUMBER,
         };
 
-        test_environment.service.metrics_report_listener.on_report_ready(report);
+        test_environment.service.data.metrics_report_listener.on_report_ready(report);
 
         // Validate sent report readiness
         test_environment
@@ -1505,13 +1599,13 @@ mod tests {
             .getReadyReportsInfo(&binder_ready_reports_info_listener)
             .await
             .unwrap();
-        assert_eq!(
-            ready_reports_info_listener.get_status_code(),
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS
-        );
-        assert_eq!(ready_reports_info_listener.get_status_message(), "Number of ready reports: 1");
-        assert_eq!(ready_reports_info_listener.get_num_on_ready_reports_info_calls(), 1);
-        let ready_reports_info = ready_reports_info_listener.get_ready_reports_info();
+
+        let (status_code, status_message) = status_receiver.await.unwrap();
+        assert_eq!(status_code, StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS);
+        assert_eq!(status_message, "Number of ready reports: 1");
+        let ready_reports_info = ready_reports_info_listener
+            .get_ready_reports_info()
+            .expect("Ready reports info should be set");
         assert_eq!(ready_reports_info.len(), 1);
         assert_eq!(ready_reports_info[0].metricsConfigUuid, UUID1);
         assert_eq!(ready_reports_info[0].reportNumber, REPORT_NUMBER);
@@ -1522,6 +1616,8 @@ mod tests {
             report_listener.clone(),
             BinderFeatures::default(),
         );
+        let status_receiver = report_listener.expect_call();
+
         // Extract the report
         test_environment
             .service
@@ -1529,18 +1625,23 @@ mod tests {
             .await
             .unwrap();
 
+        let (status_code, _status_message) = status_receiver.await.unwrap();
+        assert_eq!(status_code, StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS);
+
         // Validate no reports are ready
+        let status_receiver = ready_reports_info_listener.expect_call();
         test_environment
             .service
             .getReadyReportsInfo(&binder_ready_reports_info_listener)
             .await
             .unwrap();
-        assert_eq!(
-            ready_reports_info_listener.get_status_code(),
-            StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS
-        );
-        assert_eq!(ready_reports_info_listener.get_status_message(), "Number of ready reports: 0");
-        assert_eq!(ready_reports_info_listener.get_num_on_ready_reports_info_calls(), 2);
-        assert!(ready_reports_info_listener.get_ready_reports_info().is_empty());
+
+        let (status_code, status_message) = status_receiver.await.unwrap();
+        assert_eq!(status_code, StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS);
+        assert_eq!(status_message, "Number of ready reports: 0");
+        assert!(ready_reports_info_listener
+            .get_ready_reports_info()
+            .expect("Ready reports info should be set")
+            .is_empty());
     }
 }

@@ -25,6 +25,9 @@ interface ITelemetryService {
      * This API takes a byte buffer as a parameter, however this is safe as metrics configurations
      * are simple serialized protobuffers without descriptors (expected to be less than 10KB).
      *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
+     *
      * @param apiCallId unique integer id assigned to each API call
      * @param metricsConfig serialized metrics config byte array
      */
@@ -33,6 +36,9 @@ interface ITelemetryService {
     /**
      * Activates a MetricsConfig based on uuid. This will also create objects
      * related to the MetricsConfig.
+     *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
      *
      * @param apiCallId unique integer id assigned to each API call
      * @param metricsConfigUuid uuid of the metricsConfig that needs to be activated
@@ -43,6 +49,9 @@ interface ITelemetryService {
      * Deactivates a MetricsConfig based on uuid. This will also destroy objects
      * related to the MetricsConfig.
      *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
+     *
      * @param apiCallId unique integer id assigned to each API call
      * @param metricsConfigUuid uuid of the metricsConfig that needs to be deactivated
      */
@@ -52,6 +61,9 @@ interface ITelemetryService {
      * Removes a MetricsConfig based on uuid. This will also remove outputs produced by the
      * MetricsConfig.
      *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
+     *
      * @param apiCallId unique integer id assigned to each API call
      * @param metricsConfigUuid uuid of the metricsConfig that needs to be removed
      */
@@ -59,6 +71,9 @@ interface ITelemetryService {
 
     /**
      * Removes all MetricsConfigs. This will also remove all MetricsConfig outputs.
+     *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
      *
      * @param apiCallId unique integer id assigned to each API call
      */
@@ -69,6 +84,9 @@ interface ITelemetryService {
      * a serialized protobuf message by calling the callback function of the listener sent as a
      * function argument.
      *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported using provided listener.
+     *
      * @param listener callback used by telemetry service to send back list of active configs
      */
     void getActiveMetricsConfigUuids(in ITelemetryConfigListListener listener);
@@ -78,12 +96,18 @@ interface ITelemetryService {
      * a serialized protobuf message by calling the callback function of the listener sent as a
      * function argument.
      *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported using provided listener.
+     *
      * @param listener callback used by telemetry service to send back list of inactive configs
      */
     void getInactiveMetricsConfigUuids(in ITelemetryConfigListListener listener);
 
     /**
      * Sends finished telemetry report with the specified metrics report info.
+     *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported using provided listener.
      *
      * @param metricsReportInfo info of the generated report which is requested
      * @param listener listener that is called when the requested report is ready
@@ -94,6 +118,9 @@ interface ITelemetryService {
     /**
      * Sends finished telemetry reports info: metricsConfigUuid, reportConfigName and reportNumber
      *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported using provided listener.
+     *
      * @param listener Listener that is used to send IDs of ready reports
      */
     void getReadyReportsInfo(in ITelemetryReadyReportsInfoListener listener);
@@ -101,6 +128,9 @@ interface ITelemetryService {
     /**
      * Registers a listener for receiving notifications when a metrics report is ready. If a
      * listener is already registered an error is returned.
+     *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
      *
      * @param listener implementation of ITelemetryReportReadyListener, responsible for informing
      * the client about reports which are ready for consumption
@@ -118,6 +148,9 @@ interface ITelemetryService {
 
     /**
      * Registers a callback for receiving misc status codes for telemetry service.
+     *
+     * This method is asynchronous and always returns immediately.
+     * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
      *
      * @param listener implementation of ITelemetryMiscStatusListener, responsible for sending
      * status codes back to the client
