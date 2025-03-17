@@ -6,7 +6,7 @@ mod callbacks;
 mod managers;
 mod status;
 
-use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
+pub use sdv_telemetry_status_codes_bindgen::TelemetryServiceStatusCodes;
 pub use status::{
     AggregationPublisherErrorDetails, ConditionalTriggerErrorDetails, FileIOErrorDetails,
     MetricsReportGeneratorErrorDetails, ServiceErrorDetails, ServicePublisherErrorDetails,
