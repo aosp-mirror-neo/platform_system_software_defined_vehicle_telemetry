@@ -9,7 +9,11 @@ use log::{error, info, trace};
 use protobuf::Message;
 use rust_to_c::TelemetryServiceHolder;
 use rust_to_c::TelemetryServiceStatus;
-use sdv_telemetry_rust_wrapper as rust_to_c;
+use sdv_telemetry_rust_wrapper::StatusDetails::{
+    AggregationPublisherErrorDetails, MetricsReportGeneratorErrorDetails,
+    ServicePublisherErrorDetails,
+};
+use sdv_telemetry_rust_wrapper::{self as rust_to_c, TelemetryServiceStatusCodes};
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::collections::HashSet;
@@ -89,11 +93,29 @@ async fn wrapped_main() -> anyhow::Result<()> {
     // Note: In real world application this should happen in a separate method, and extra logic needs
     // to be added to take appropriate actions based on the status codes received.
     task::spawn(async move {
+        let mut errored_uuids = HashSet::new();
         while let Some(status) = misc_status_rx.recv().await {
-            info!(
-                "Received status from service, status code: {:?} status msg: {}",
-                status.code, status.message
-            );
+            if status.code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
+                let config_uuid = match status.details {
+                    Some(AggregationPublisherErrorDetails(d)) => Some(d.metrics_config_uuid),
+                    Some(ServicePublisherErrorDetails(d)) => Some(d.metrics_config_uuid),
+                    Some(MetricsReportGeneratorErrorDetails(d)) => Some(d.metrics_config_uuid),
+                    _ => None,
+                };
+                if let Some(config_uuid) = config_uuid {
+                    errored_uuids.insert(config_uuid);
+                }
+
+                info!(
+                    "Received error from service, code: {:?} msg: {}",
+                    status.code, status.message
+                );
+            } else {
+                info!(
+                    "Received success message from service, code: {:?} msg: {}",
+                    status.code, status.message
+                );
+            }
         }
     });
 
