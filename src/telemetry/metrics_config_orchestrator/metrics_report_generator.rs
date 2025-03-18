@@ -13,6 +13,7 @@ use std::marker::{Send, Sync};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
+use uuid::Uuid;
 
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::{
@@ -158,6 +159,7 @@ impl MetricsReportGeneratorImpl {
             let mut report = MetricsReport::new();
             report.config_activation_timestamp =
                 Some(self.config_activation_timestamp.clone()).into();
+            report.error_ids = error_ids;
             report.metrics_config_uuid.clone_from(&self.config_uuid);
             report.metrics_config_version = self.config_version;
             report.report_config_name.clone_from(&self.name);
@@ -165,7 +167,7 @@ impl MetricsReportGeneratorImpl {
             report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
             report.report_timestamp = Some(Timestamp::now()).into();
             report.report_reason = report_reason.into();
-            report.error_ids = error_ids;
+            report.report_uuid = Uuid::new_v4().to_string();
 
             debug!(
                 "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
@@ -324,6 +326,7 @@ mod test {
             report.config_activation_timestamp.unwrap(),
             generator.config_activation_timestamp
         );
+        assert!(report.error_ids.is_empty(), "Unexpected error ids: {:?}", report.error_ids);
         assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
         assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
@@ -333,7 +336,7 @@ mod test {
             Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
         );
         assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
-        assert!(report.error_ids.is_empty());
+        assert!(!Uuid::try_parse(&report.report_uuid).unwrap().is_nil());
 
         // as built by MockMessageBuilder
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();

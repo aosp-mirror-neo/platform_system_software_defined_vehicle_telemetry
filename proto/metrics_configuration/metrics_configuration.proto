@@ -263,7 +263,8 @@ message MetricsReport {
   // Required.
   // Monotonously increasing report number in Metrics Configuration.
   // Starts from 1 and incremented by 1 for each new report.
-  // Report numbers are reset after a power down (turn off) or process restart.
+  // Report numbers are reset after a power down (turn off), process restart
+  // and Metrics Config deactivation.
   int32 report_number = 1;
 
   // Required.
@@ -313,6 +314,10 @@ message MetricsReport {
   // Identifiers of errors occurred while generating the report.
   // Full error information is sent back with Misc Status Listener.
   repeated int64 error_ids = 9;
+
+  // Required.
+  // Unique Metrics Report identifier.
+  string report_uuid = 10;
 }
 
 // Builds a protobuf message of some given type, where the content of the
