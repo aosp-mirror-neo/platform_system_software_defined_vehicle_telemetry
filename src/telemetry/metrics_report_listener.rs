@@ -8,7 +8,6 @@ use google_sdv_telemetry::binder::Strong;
 use log::warn;
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -54,11 +53,8 @@ impl MetricsReportListener {
             reportNumber: metrics_report.report_number,
         };
 
-        // Insert the report and panic if report with the same key already exists.
-        self.metrics_report_store
-            .lock()
-            .try_insert_value(report_info.clone(), metrics_report)
-            .unwrap();
+        // TODO(b/384783248): use surrogate key and don't overwrite reports.
+        self.metrics_report_store.lock().insert(report_info.clone(), metrics_report);
 
         if let Some((listener, _)) = self.report_ready_listener.lock().as_ref() {
             if let Err(e) = listener.deref().onReady(&report_info) {
@@ -119,6 +115,7 @@ pub(crate) mod tests {
 
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::BnTelemetryReportReadyListener;
     use parking_lot::Mutex;
+    use protobuf::{reflect::ReflectEqMode, MessageFull};
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
@@ -194,7 +191,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn on_report_ready_success() {
+    fn on_report_ready_notifies_listener() {
         let report_listener = Arc::new(create_default_metrics_report_listener());
         let mock_listener = MockTelemetryReportReadyListener::new();
         let binder_listener = BnTelemetryReportReadyListener::new_binder(
@@ -212,6 +209,29 @@ pub(crate) mod tests {
                 reportConfigName: REPORT_NAME.to_owned(),
                 reportNumber: REPORT_NUMBER
             }
+        );
+    }
+
+    #[test]
+    fn on_report_ready_overwrites_report() {
+        let report_listener = Arc::new(create_default_metrics_report_listener());
+        let report = create_metrics_report();
+
+        report_listener.on_report_ready(report.clone());
+        report_listener.on_report_ready(report.clone());
+
+        let stored_reports = report_listener
+            .metrics_report_store
+            .lock()
+            .values()
+            .take(2)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(stored_reports.len(), 1);
+        assert!(
+            stored_reports[0].reflect_eq(&report, &ReflectEqMode::default()),
+            "Unexpected stored report: {:?}",
+            stored_reports[0]
         );
     }
 
