@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
+use log::error;
 use sdv_telemetry_expr::{
     node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
     node_value::NodeValue,
@@ -297,9 +298,14 @@ impl ConditionalTrigger {
             }
         };
 
-        let condition_result = condition_checker.check(node_value).unwrap_or_else(|err| {
-            panic!("Failed to perform comparison for trigger {}: {err:#}", self.get_name())
-        });
+        let condition_result = match condition_checker.check(node_value) {
+            Ok(condition_result) => condition_result,
+            Err(err) => {
+                error!("Failed to perform comparison for trigger {}: {err:#}", self.get_name());
+                return;
+            }
+        };
+
         if condition_result {
             self.base.fire_trigger(activation_id, context).await;
         }
