@@ -33,6 +33,7 @@ rust_defaults {
         "libtokio",
         "libtokio_stream",
         "libtokio_util",
+        "libuuid",
         // keep-sorted end
     ],
     proc_macros: [
