@@ -8,7 +8,6 @@ import google.sdv.telemetry.ITelemetryMiscStatusListener;
 import google.sdv.telemetry.ITelemetryReadyReportsInfoListener;
 import google.sdv.telemetry.ITelemetryReportListener;
 import google.sdv.telemetry.ITelemetryReportReadyListener;
-import google.sdv.telemetry.MetricsReportInfo;
 
 /**
  * Telemetry system for software defined vehicle has three main components: Telemetry service, Data
@@ -104,19 +103,19 @@ interface ITelemetryService {
     void getInactiveMetricsConfigUuids(in ITelemetryConfigListListener listener);
 
     /**
-     * Sends finished telemetry report with the specified metrics report info.
+     * Sends finished telemetry report with the specified metrics report UUID.
      *
      * This method is asynchronous and always returns immediately.
      * Execution result is reported using provided listener.
      *
-     * @param metricsReportInfo info of the generated report which is requested
+     * @param reportUuid UUID of the generated report which is requested
      * @param listener listener that is called when the requested report is ready
      */
     void getMetricsReport(
-            in MetricsReportInfo metricsReportInfo, in ITelemetryReportListener listener);
+            in @utf8InCpp String reportUuid, in ITelemetryReportListener listener);
 
     /**
-     * Sends finished telemetry reports info: metricsConfigUuid, reportConfigName and reportNumber
+     * Sends reportUuids of all finished telemetry reports
      *
      * This method is asynchronous and always returns immediately.
      * Execution result is reported using provided listener.
@@ -126,8 +125,8 @@ interface ITelemetryService {
     void getReadyReportsInfo(in ITelemetryReadyReportsInfoListener listener);
 
     /**
-     * Registers a listener for receiving notifications when a metrics report is ready. If a
-     * listener is already registered an error is returned.
+     * Registers a listener for receiving notifications when a metrics report is ready.
+     * If a listener is already registered, an error is returned.
      *
      * This method is asynchronous and always returns immediately.
      * Execution result is reported through ITelemetryApiStatusListener using provided apiCallId.
@@ -158,8 +157,8 @@ interface ITelemetryService {
     void registerMiscStatusListener(in int apiCallId, in ITelemetryMiscStatusListener listener);
 
     /**
-     * Clears listener to stop receiving notifications when a report or telemetry error is ready. If
-     * a listener is already unregistered, the call has no effect.
+     * Clears listener to stop receiving notifications when a report or telemetry error is ready.
+     * If a listener is already unregistered, the call has no effect.
      */
     void unregisterReportReadyListener();
 

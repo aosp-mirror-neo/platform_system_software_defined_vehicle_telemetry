@@ -2,7 +2,6 @@
 
 #include "ready_reports_info_listener_impl.h"
 
-#include "aidl/google/sdv/telemetry/MetricsReportInfo.h"
 #include "lib.h"
 
 #include <android-base/logging.h>
@@ -19,17 +18,13 @@ ReadyReportsInfoListenerImpl::ReadyReportsInfoListenerImpl(
 
 ndk::ScopedAStatus ReadyReportsInfoListenerImpl::sendReadyReportsInfo(
         TelemetryServiceStatusCodes statusCode, const std::string& statusMessage,
-        const std::vector<aidl::google::sdv::telemetry::MetricsReportInfo>& ready_reports_info) {
-    std::vector<MetricsReportInfo> converted_info;
-    converted_info.reserve(ready_reports_info.size());
-    for (const auto& report_info : ready_reports_info) {
-        converted_info.emplace_back(
-                MetricsReportInfo{.metrics_config_uuid = report_info.metricsConfigUuid.c_str(),
-                                  .report_config_name = report_info.reportConfigName.c_str(),
-                                  .report_number = report_info.reportNumber});
-    }
-    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str(), converted_info.data(),
-                  converted_info.size());
+        const std::vector<std::string>& report_uuids) {
+    std::vector<const char*> uuid_c_strings;
+    uuid_c_strings.reserve(report_uuids.size());
+    std::transform(report_uuids.begin(), report_uuids.end(), std::back_inserter(uuid_c_strings),
+                   [](auto& uuid) { return uuid.c_str(); });
+    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str(), uuid_c_strings.data(),
+                  uuid_c_strings.size());
     return ndk::ScopedAStatus::ok();
 }
 

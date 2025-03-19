@@ -23,7 +23,7 @@ use clap::Parser;
 use futures::{StreamExt, TryStreamExt};
 use protobuf::Message;
 use log::{error, info};
-use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatus};
+use sdv_telemetry_rust_wrapper::{TelemetryServiceStatus};
 use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
 use std::{
     collections::HashMap, collections::HashSet, ops::Deref, path::Path, path::PathBuf, pin::pin,
@@ -166,7 +166,7 @@ async fn run_telemetry_client(
             break;
         }
 
-        let report_info = tokio::select! {
+        let report_uuid = tokio::select! {
             biased;
             _ = sleep_until(deadline) => {
                 info!("Simulation time limit reached.");
@@ -179,11 +179,11 @@ async fn run_telemetry_client(
                 }
                 continue;
             },
-            report_info = await_next_report(&mut report_ready_rx) => report_info?,
+            report_uuid = await_next_report(&mut report_ready_rx) => report_uuid?,
         };
 
-        let report = get_report(&telemetry_service, &report_info).await?;
-        metrics_configs_tracker.process_new_report(&report_info, report)?;
+        let report = get_report(&telemetry_service, &report_uuid).await?;
+        metrics_configs_tracker.process_new_report(report)?;
         num_reports += 1;
     }
 
@@ -306,8 +306,8 @@ fn handle_telemetry_service_status_updates(
 
 /// Returns when the receiving channel receives a new report.
 async fn await_next_report(
-    report_ready_tx: &mut UnboundedReceiver<ReportInfo>,
-) -> Result<ReportInfo, SimulatorError> {
+    report_ready_tx: &mut UnboundedReceiver<String>,
+) -> Result<String, SimulatorError> {
     report_ready_tx.recv().await.ok_or_else(|| SimulatorError::Error {
         error_message: "Report listener dropped.".to_owned(),
     })

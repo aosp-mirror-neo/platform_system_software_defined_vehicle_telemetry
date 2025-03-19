@@ -1,7 +1,7 @@
 // Copyright 2024 Google LLC
 
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatus};
+use sdv_telemetry_rust_wrapper::{TelemetryServiceHolder, TelemetryServiceStatus};
 use std::{future::Future, time::Duration};
 use tokio::{
     sync::{mpsc, mpsc::UnboundedReceiver},
@@ -34,19 +34,17 @@ pub fn get_telemetry_service_instance() -> Result<TelemetryServiceHolder, Simula
 /// telemetry service does not respond.
 pub async fn get_telemetry_service_listeners(
     telemetry_service: &TelemetryServiceHolder,
-) -> Result<
-    (UnboundedReceiver<ReportInfo>, UnboundedReceiver<TelemetryServiceStatus>),
-    SimulatorError,
-> {
-    let (report_ready_tx, report_ready_rx) = mpsc::unbounded_channel::<ReportInfo>();
+) -> Result<(UnboundedReceiver<String>, UnboundedReceiver<TelemetryServiceStatus>), SimulatorError>
+{
+    let (report_ready_tx, report_ready_rx) = mpsc::unbounded_channel::<String>();
     let (misc_status_tx, misc_status_rx) = mpsc::unbounded_channel::<TelemetryServiceStatus>();
 
     let misc_status_callback = move |status| {
         let _ = misc_status_tx.send(status);
     };
 
-    let report_ready_callback = move |report_info| {
-        let _ = report_ready_tx.send(report_info);
+    let report_ready_callback = move |report_uuid: &str| {
+        let _ = report_ready_tx.send(report_uuid.to_owned());
     };
 
     run_with_timeout(
@@ -61,22 +59,16 @@ pub async fn get_telemetry_service_listeners(
     Ok((report_ready_rx, misc_status_rx))
 }
 
-/// Retrieves a report with the gived uuid, report config name and report number
-/// from the telemetry service.
+/// Retrieves a report with the gived uuid from the telemetry service.
 pub async fn get_report(
     telemetry_service: &TelemetryServiceHolder,
-    report_info: &ReportInfo,
+    report_uuid: &str,
 ) -> Result<MetricsReport, SimulatorError> {
-    telemetry_service
-        .get_metrics_report(report_info)
-        .await
-        .map_err(|error| SimulatorError::Error {
-            error_message: format!(
-                "Failed to read report number {} for report config \"{}\" from telemetry service: \"{error}\"",
-                report_info.report_number,
-                report_info.report_config_name
-            ),
-        })
+    telemetry_service.get_metrics_report(report_uuid).await.map_err(|error| SimulatorError::Error {
+        error_message: format!(
+            "Failed to read report {report_uuid} from telemetry service: \"{error}\""
+        ),
+    })
 }
 
 /// Calls the telemetry service API to add a serialized metrics config. Checks

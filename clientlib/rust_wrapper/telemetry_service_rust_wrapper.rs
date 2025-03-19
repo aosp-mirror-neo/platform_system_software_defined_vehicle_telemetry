@@ -37,17 +37,6 @@ pub struct TelemetryError {
 /// Represents the result of a telemetry service call.
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 
-/// Represents the callback argument of the report ready callback.
-#[derive(Debug)]
-pub struct ReportInfo {
-    /// The metrics config UUID
-    pub metrics_config_uuid: String,
-    /// The name of the `MetricsReportConfig` that was used to generate the report
-    pub report_config_name: String,
-    /// The report number
-    pub report_number: i32,
-}
-
 /// Struct used to wrap ServiceHolder received from C in a typesafe manner
 #[repr(transparent)]
 pub struct TelemetryServiceHolder(*mut ServiceHolder);
@@ -317,14 +306,13 @@ impl TelemetryServiceHolder {
     /// `TelemetryServiceStatus` as a parameter.
     ///
     /// @param `report_ready_callback` function closure gets called when a report is ready. The
-    /// `report_ready_callback` takes String, String and i32 that specify metrics config uuid,
-    /// metrics report name and report number of the report that is ready, respectively.
+    /// `report_ready_callback` takes a string that specifies metrics report UUID.
     ///
     /// @return an error code and error message in case of incorrect parameters
     pub async fn init(
         &self,
         misc_status_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
-        report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(&str) + Send + Sync + 'static,
     ) -> TelemetryResult<()> {
         info!("Initializing telemetry service");
 
@@ -418,13 +406,12 @@ impl TelemetryServiceHolder {
     /// client, along with the uuid of the metrics config for which the report is ready.
     ///
     /// @param report_ready_callback function closure gets called when a report is ready. The
-    /// report_ready_callback takes String, String and i32 that specify
-    /// metrics config uuid, metrics report name and report number of the report that is ready, respectively.
+    /// report_ready_callback takes a string that specifies metrics report UUID.
     ///
     /// @return an error code and error message in case of incorrect parameters
     async fn set_report_ready_listener(
         &self,
-        report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(&str) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
         metrics_report_manager::set_report_ready_listener(self, report_ready_callback).await
     }
@@ -441,23 +428,18 @@ impl TelemetryServiceHolder {
 
     /// Tells the telemetry service to send a metrics report with the given uuid and report number.
     ///
-    /// @param metrics_config_uuid uuid of the metrics configuration of the requested report
-    /// @param report_config_name name of the metrics report config of the requested report
-    /// @param report_number report number of the requested metrics report
+    /// @param report_uuid UUID of the requested report
     ///
     /// @return MetricsReport in case of success, an error code and error message in case of failure
-    pub async fn get_metrics_report(
-        &self,
-        report_info: &ReportInfo,
-    ) -> TelemetryResult<MetricsReport> {
-        metrics_report_manager::get_metrics_report(self, report_info).await
+    pub async fn get_metrics_report(&self, report_uuid: &str) -> TelemetryResult<MetricsReport> {
+        metrics_report_manager::get_metrics_report(self, report_uuid).await
     }
 
     /// Tells the telemetry service to send info of the reports which are ready.
     ///
-    /// @return in case of success, a list of ReportInfo objects containing metrics config uuid, metrics config
-    /// report name and report_number, or an error code and error message in case of failure
-    pub async fn get_ready_reports_info(&self) -> TelemetryResult<Vec<ReportInfo>> {
+    /// @return in case of success, a list of Strings containing metrics report UUIDs,
+    /// or an error code and error message in case of failure
+    pub async fn get_ready_reports_info(&self) -> TelemetryResult<Vec<String>> {
         metrics_report_manager::get_ready_reports_info(self).await
     }
 
@@ -589,11 +571,7 @@ mod test {
         assert_send_sync(service.get_active_metrics_config_uuids());
         assert_send_sync(service.get_inactive_metrics_config_uuids());
 
-        assert_send_sync(service.get_metrics_report(&ReportInfo {
-            metrics_config_uuid: "".to_owned(),
-            report_config_name: "".to_owned(),
-            report_number: 0,
-        }));
+        assert_send_sync(service.get_metrics_report(&String::default()));
 
         assert_send_sync(service.get_ready_reports_info());
     }

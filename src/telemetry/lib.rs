@@ -23,7 +23,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::{
     ITelemetryReadyReportsInfoListener::ITelemetryReadyReportsInfoListener,
     ITelemetryReportListener::ITelemetryReportListener,
     ITelemetryReportReadyListener::ITelemetryReportReadyListener,
-    ITelemetryService::ITelemetryServiceAsyncServer, MetricsReportInfo::MetricsReportInfo,
+    ITelemetryService::ITelemetryServiceAsyncServer,
 };
 use log::{error, info, warn};
 use protobuf::Message;
@@ -452,24 +452,24 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
     #[instrument(skip(self, report_listener))]
     async fn getMetricsReport(
         &self,
-        metrics_report_info: &MetricsReportInfo,
+        report_uuid: &str,
         report_listener: &binder::Strong<dyn ITelemetryReportListener>,
     ) -> binder::Result<()> {
-        info!("getMetricsReport: {}", metrics_report_info.metricsConfigUuid);
+        info!("getMetricsReport: {}", report_uuid);
 
-        let metrics_report_info = metrics_report_info.clone();
+        let report_uuid = report_uuid.to_owned();
         let report_listener = report_listener.clone();
         let data_reference = Arc::downgrade(&self.data);
         tokio::spawn(async move {
             let Some(data) = data_reference.upgrade() else { return };
-            match data.metrics_report_listener.get_metrics_report(&metrics_report_info) {
+            match data.metrics_report_listener.get_metrics_report(&report_uuid) {
                 Ok(metrics_report) => {
                     let serialized_report: &[u8] = &metrics_report
                         .write_to_bytes()
                         .expect("Report serialization should be successful");
                     if let Err(e) = report_listener.deref().onReport(
                         StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
-                        &metrics_report_info.metricsConfigUuid,
+                        &report_uuid,
                         serialized_report,
                     ) {
                         warn!("Unable to send report to the client: {:?}", e);
@@ -501,7 +501,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let data_reference = Arc::downgrade(&self.data);
         tokio::spawn(async move {
             let Some(data) = data_reference.upgrade() else { return };
-            let ready_reports_info = data.metrics_report_listener.get_ready_reports_info();
+            let ready_reports_info = data.metrics_report_listener.get_ready_report_uuids();
 
             if let Err(e) = report_listener.deref().sendReadyReportsInfo(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
@@ -550,7 +550,6 @@ mod tests {
         ITelemetryReadyReportsInfoListener::BnTelemetryReadyReportsInfoListener,
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
-        MetricsReportInfo::MetricsReportInfo,
     };
     use parking_lot::Mutex;
     use protobuf::Message;
@@ -569,7 +568,6 @@ mod tests {
     use crate::status_listener::SetMiscStatusListenerError;
 
     const MAX_PERSISTENT_CONFIGURATION_SIZE_MB: usize = 10 * 1024 * 1024; // 10Mbs
-    const REPORT_NUMBER: i32 = 42;
     const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
 
@@ -676,7 +674,7 @@ mod tests {
     /// This struct is defined to implement ITelemetryReportReadyListener AIDL interface for unit testing purposes
     #[derive(Clone)]
     struct MockTelemetryReadyReportsInfoListener {
-        ready_reports_info: Arc<Mutex<Option<Vec<MetricsReportInfo>>>>,
+        ready_reports_info: Arc<Mutex<Option<Vec<String>>>>,
         status_sender: Arc<Mutex<Option<oneshot::Sender<(StatusCodes, String)>>>>,
     }
 
@@ -696,7 +694,7 @@ mod tests {
             receiver
         }
 
-        fn get_ready_reports_info(&self) -> Option<Vec<MetricsReportInfo>> {
+        fn get_ready_reports_info(&self) -> Option<Vec<String>> {
             self.ready_reports_info.lock().take()
         }
     }
@@ -706,7 +704,7 @@ mod tests {
             &self,
             status_code: StatusCodes,
             status_message: &str,
-            ready_reports_info: &[MetricsReportInfo],
+            ready_reports_info: &[String],
         ) -> binder::Result<()> {
             assert!(self
                 .ready_reports_info
@@ -729,7 +727,7 @@ mod tests {
     #[derive(Clone)]
     struct MockTelemetryReportReadyListener {
         num_on_ready_report_calls: Arc<Mutex<i32>>,
-        metrics_report_info: Arc<Mutex<MetricsReportInfo>>,
+        report_uuid: Arc<Mutex<String>>,
     }
 
     impl binder::Interface for MockTelemetryReportReadyListener {}
@@ -738,7 +736,7 @@ mod tests {
         fn new() -> Self {
             Self {
                 num_on_ready_report_calls: Arc::new(Mutex::new(0)),
-                metrics_report_info: Arc::new(Mutex::new(MetricsReportInfo::default())),
+                report_uuid: Arc::new(Mutex::new(String::default())),
             }
         }
 
@@ -746,21 +744,16 @@ mod tests {
             *self.num_on_ready_report_calls.lock()
         }
 
-        fn get_report_number(&self) -> i32 {
-            self.metrics_report_info.lock().reportNumber
-        }
-
         fn get_uuid(&self) -> String {
-            self.metrics_report_info.lock().metricsConfigUuid.clone()
+            self.report_uuid.lock().clone()
         }
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, metrics_report_info: &MetricsReportInfo) -> binder::Result<()> {
-            let mut num_calls = self.num_on_ready_report_calls.lock();
-            *num_calls += 1;
-            let mut report_info = self.metrics_report_info.lock();
-            *report_info = metrics_report_info.clone();
+        fn onReady(&self, report_uuid: &str) -> binder::Result<()> {
+            *self.num_on_ready_report_calls.lock() += 1;
+            *self.report_uuid.lock() = report_uuid.to_owned();
+
             Ok(())
         }
     }
@@ -1362,16 +1355,10 @@ mod tests {
             .await
             .unwrap();
 
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: UUID1.to_string(),
-            reportConfigName: String::default(),
-            reportNumber: REPORT_NUMBER,
-        };
         // Call onReady on report ready listener
-        report_ready_listener.onReady(&report_info).unwrap();
+        report_ready_listener.onReady(UUID1).unwrap();
 
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
-        assert_eq!(REPORT_NUMBER, report_ready_listener.get_report_number());
         assert_eq!(UUID1, &report_ready_listener.get_uuid());
     }
 
@@ -1516,7 +1503,6 @@ mod tests {
             .unwrap();
 
         // Setting Report Listener
-
         let report_listener = MockTelemetryReportListener::new();
         let binder_report_listener = BnTelemetryReportListener::new_binder(
             report_listener.clone(),
@@ -1526,29 +1512,20 @@ mod tests {
 
         // Send report to metric report listener
         let mut report = MetricsReport::new();
-        report.metrics_config_uuid = UUID1.to_string();
-        report.report_number = REPORT_NUMBER;
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: UUID1.to_string(),
-            reportConfigName: String::default(),
-            reportNumber: REPORT_NUMBER,
-        };
+        report.report_uuid = UUID1.to_string();
 
         // Call on_report_ready callback on metrics report listener
         test_environment.service.data.metrics_report_listener.on_report_ready(report);
-        test_environment
-            .service
-            .getMetricsReport(&report_info, &binder_report_listener)
-            .await
-            .unwrap();
+        test_environment.service.getMetricsReport(UUID1, &binder_report_listener).await.unwrap();
 
         let (status_code, status_message) = status_receiver.await.unwrap();
-        assert_eq!(StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, status_code);
-        assert_eq!(UUID1, status_message);
+        assert_eq!(
+            (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, UUID1),
+            (status_code, status_message.as_str())
+        );
         let metrics_report =
             report_listener.get_metrics_report().expect("Metrics report should be set");
-        assert_eq!(UUID1, metrics_report.metrics_config_uuid);
-        assert_eq!(REPORT_NUMBER, metrics_report.report_number);
+        assert_eq!(UUID1, metrics_report.report_uuid);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1582,15 +1559,7 @@ mod tests {
         let status_receiver = ready_reports_info_listener.expect_call();
 
         // Send report to metric report listener
-        let mut report = MetricsReport::new();
-        report.metrics_config_uuid = UUID1.to_string();
-        report.report_number = REPORT_NUMBER;
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: UUID1.to_string(),
-            reportConfigName: String::default(),
-            reportNumber: REPORT_NUMBER,
-        };
-
+        let report = MetricsReport { report_uuid: UUID1.to_owned(), ..Default::default() };
         test_environment.service.data.metrics_report_listener.on_report_ready(report);
 
         // Validate sent report readiness
@@ -1607,8 +1576,7 @@ mod tests {
             .get_ready_reports_info()
             .expect("Ready reports info should be set");
         assert_eq!(ready_reports_info.len(), 1);
-        assert_eq!(ready_reports_info[0].metricsConfigUuid, UUID1);
-        assert_eq!(ready_reports_info[0].reportNumber, REPORT_NUMBER);
+        assert_eq!(ready_reports_info[0], UUID1);
 
         // Setting Report Listener
         let report_listener = MockTelemetryReportListener::new();
@@ -1619,11 +1587,7 @@ mod tests {
         let status_receiver = report_listener.expect_call();
 
         // Extract the report
-        test_environment
-            .service
-            .getMetricsReport(&report_info, &binder_report_listener)
-            .await
-            .unwrap();
+        test_environment.service.getMetricsReport(UUID1, &binder_report_listener).await.unwrap();
 
         let (status_code, _status_message) = status_receiver.await.unwrap();
         assert_eq!(status_code, StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS);

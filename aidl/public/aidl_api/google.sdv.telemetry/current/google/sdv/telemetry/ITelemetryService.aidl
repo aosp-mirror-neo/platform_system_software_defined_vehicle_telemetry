@@ -28,7 +28,7 @@ interface ITelemetryService {
     void getActiveMetricsConfigUuids(in google.sdv.telemetry.ITelemetryConfigListListener listener);
     void getInactiveMetricsConfigUuids(
             in google.sdv.telemetry.ITelemetryConfigListListener listener);
-    void getMetricsReport(in google.sdv.telemetry.MetricsReportInfo metricsReportInfo,
+    void getMetricsReport(in @utf8InCpp String reportUuid,
             in google.sdv.telemetry.ITelemetryReportListener listener);
     void getReadyReportsInfo(in google.sdv.telemetry.ITelemetryReadyReportsInfoListener listener);
     void registerReportReadyListener(

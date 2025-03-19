@@ -18,18 +18,6 @@ extern "C" {
 // Opaque Pointer holding an instance of the telemetry_service.
 typedef struct ServiceHolder ServiceHolder;
 
-// Information of telemetry metrics reports
-typedef struct MetricsReportInfo {
-    // UUID of the Metrics Config
-    const char* metrics_config_uuid;
-
-    // Name of the Metrics Report Config
-    const char* report_config_name;
-
-    // Report number of the finished report
-    const int32_t report_number;
-} MetricsReportInfo;
-
 /**
  * The status callback function relays the status of the API call back
  * to the client it was associated with.
@@ -55,10 +43,10 @@ typedef void (*MiscStatusCallbackFunction)(void*, const struct TelemetryServiceS
  * The report ready listener is called every time a new Metrics Report is ready to be downloaded.
  *
  * @param void* Pointer to the callback object associated with the callback function.
- * @param metrics_report_info* pointer to the info of the ready report.
+ * @param report_uuid* pointer to the UUID of the ready report.
  *
  */
-typedef void (*ReportReadyCallbackFunction)(void*, const MetricsReportInfo*);
+typedef void (*ReportReadyCallbackFunction)(void*, const char*);
 
 /**
  * The get report callback function relays the status of the get_metrics_report API call
@@ -83,12 +71,11 @@ typedef void (*GetSerializedDataCallbackFunction)(void*, int, const char*, const
  * @param void* Pointer to the callback object associated with the callback function.
  * @param int32_t status code indicating the outcome of the API call
  * @param const char* status message adding more context to the outcome of the API call.
- * @param const MetricsReportInfo* pointer to the array of MetricsReportInfo containing info of
-   ready metrics reports.
+ * @param const char* const* pointer to the array of UUIDs of the ready metrics reports.
  * @param size_t number of ready reports.
  *
  */
-typedef void (*ReadyReportsInfoCallbackFunction)(void*, int, const char*, const MetricsReportInfo*,
+typedef void (*ReadyReportsInfoCallbackFunction)(void*, int, const char*, const char* const*,
                                                  size_t);
 
 /**
@@ -99,12 +86,12 @@ typedef void (*ReadyReportsInfoCallbackFunction)(void*, int, const char*, const 
  * @param void* Pointer to the callback object associated with the callback function.
  * @param int32_t status code indicating the outcome of the API call
  * @param const char* status message adding more context to the outcome of the API call.
- * @param const char** pointer to the array of strings containing config uuids
+ * @param const char* const* pointer to the array of strings containing config uuids
  * Null if the API call failed
  * @param size_t size of the string array
  *
  */
-typedef void (*ConfigListCallbackFunction)(void*, int, const char*, const char**, size_t);
+typedef void (*ConfigListCallbackFunction)(void*, int, const char*, const char* const*, size_t);
 
 /**
  * Gets an instance of telemetry_service and type casts it to an opaque
@@ -286,7 +273,7 @@ int32_t clear_report_ready_listener(ServiceHolder* holder, void** outPreviousRep
  * report listener object. If report is not found, an error is sent to the status listener.
  *
  * @param holder An opaque pointer holding a reference to the telemetry_service
- * @param metrics_report_info* pointer to the info of the requested metrics report
+ * @param report_uuid* pointer to the UUID of the requested metrics report
  *
  * @param listener Reference to report listener object.
  * @param cbFunc pointer to callback function. Callback function is used to send the metrics report
@@ -294,8 +281,8 @@ int32_t clear_report_ready_listener(ServiceHolder* holder, void** outPreviousRep
  *
  * @return an integer status code that validates the parameters provided to the API
  */
-int32_t get_metrics_report(ServiceHolder* holder, const MetricsReportInfo* metrics_report_info,
-                           void* listener, GetSerializedDataCallbackFunction cbFunc);
+int32_t get_metrics_report(ServiceHolder* holder, const char* report_uuid, void* listener,
+                           GetSerializedDataCallbackFunction cbFunc);
 
 /**
  * Tells the telemetry service to send information of metrics reports which are ready.

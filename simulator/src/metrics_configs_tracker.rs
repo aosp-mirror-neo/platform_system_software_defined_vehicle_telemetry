@@ -3,7 +3,7 @@
 use protobuf::{text_format::print_to_string_pretty, MessageDyn};
 use sdv_telemetry_proto_rust::metrics_configuration::publisher::Publisher_type as PublisherTypeProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
-use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder};
+use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -123,40 +123,33 @@ impl MetricsConfigsTracker {
     /// config uuid, returns an error if the UUID is not found.
     pub fn get_metrics_config_info(
         &mut self,
-        report_info: &ReportInfo,
+        report: &MetricsReport,
     ) -> Result<&mut MetricsConfigInfo, SimulatorError> {
-        self.metrics_configs.get_mut(&report_info.metrics_config_uuid).ok_or_else(|| {
-            SimulatorError::OrphanReport { uuid: report_info.metrics_config_uuid.clone() }
+        self.metrics_configs.get_mut(&report.metrics_config_uuid).ok_or_else(|| {
+            SimulatorError::OrphanReport { uuid: report.metrics_config_uuid.clone() }
         })
     }
 
     /// Appends the report number, timestamp and content to the report log
     /// in a human readable format. If set in application args, also writes
     /// binary report to a file.
-    pub fn process_new_report(
-        &mut self,
-        report_info: &ReportInfo,
-        report: MetricsReport,
-    ) -> Result<(), SimulatorError> {
+    pub fn process_new_report(&mut self, report: MetricsReport) -> Result<(), SimulatorError> {
         let reports_directory = self.output_directory.join(io::REPORTS_DIR_NAME);
 
-        let metrics_config = self.get_metrics_config_info(report_info)?;
-        let (report_config, message_descriptor) =
-            metrics_config.get_report_config_info(report_info)?;
+        let metrics_config = self.get_metrics_config_info(&report)?;
+        let (report_config, message_descriptor) = metrics_config.get_report_config_info(&report)?;
 
         if let Some(report_file_names) = &mut report_config.report_file_names {
             let output_file_name = format!(
                 "{}_{}_{}.pb",
-                report_info.metrics_config_uuid,
-                report_info.report_config_name,
-                report.report_number
+                report.metrics_config_uuid, report.report_config_name, report.report_number
             );
             let output_file_path = reports_directory.join(&output_file_name);
             write_report_to_file(&output_file_path, &report)?;
             report_file_names.push(output_file_name);
         }
 
-        let report_content = decode_report(&report, message_descriptor, report_info)?;
+        let report_content = decode_report(&report, message_descriptor)?;
         let readable_report = create_readable_report(&report, report_content.clone_box())?;
         report_config.append_report_log(readable_report)?;
         report_config.num_reports += 1;

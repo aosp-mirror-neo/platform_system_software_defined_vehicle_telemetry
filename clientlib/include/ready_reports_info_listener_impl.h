@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include "aidl/google/sdv/telemetry/MetricsReportInfo.h"
 #include "callback_container.h"
 #include "callback_functions.h"
 
@@ -17,10 +16,9 @@ class ReadyReportsInfoListenerImpl :
 public:
     explicit ReadyReportsInfoListenerImpl(Callback<ReadyReportsInfoCallbackFunction> callback);
 
-    ndk::ScopedAStatus sendReadyReportsInfo(
-            TelemetryServiceStatusCodes statusCode, const std::string& statusMessage,
-            const std::vector<::aidl::google::sdv::telemetry::MetricsReportInfo>&
-                    ready_reports_info) override;
+    ndk::ScopedAStatus sendReadyReportsInfo(TelemetryServiceStatusCodes statusCode,
+                                            const std::string& statusMessage,
+                                            const std::vector<std::string>& report_uuids) override;
 
 private:
     Callback<ReadyReportsInfoCallbackFunction> mCallback;

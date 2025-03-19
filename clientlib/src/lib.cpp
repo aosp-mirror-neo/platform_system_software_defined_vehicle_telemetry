@@ -119,10 +119,10 @@ int32_t clear_report_ready_listener(ServiceHolder* holder, void** outPreviousRep
     });
 }
 
-int32_t get_metrics_report(ServiceHolder* holder, const MetricsReportInfo* metrics_report_info,
-                           void* listener, GetSerializedDataCallbackFunction cbFunc) {
+int32_t get_metrics_report(ServiceHolder* holder, const char* report_uuid, void* listener,
+                           GetSerializedDataCallbackFunction cbFunc) {
     return callClient("getMetricsReport", holder, [&](auto& client) {
-        return client.get_metrics_report(metrics_report_info, listener, cbFunc);
+        return client.get_metrics_report(report_uuid, listener, cbFunc);
     });
 }
 

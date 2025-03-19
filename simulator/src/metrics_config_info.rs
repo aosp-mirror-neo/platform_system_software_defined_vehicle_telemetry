@@ -1,7 +1,7 @@
 // Copyright 2024 Google LLC
 
 use protobuf::reflect::MessageDescriptor;
-use sdv_telemetry_rust_wrapper::ReportInfo;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::{
     collections::{HashMap, HashSet},
     fmt,
@@ -89,11 +89,11 @@ impl MetricsConfigInfo {
 
     pub fn get_report_config_info(
         &mut self,
-        report_info: &ReportInfo,
+        report: &MetricsReport,
     ) -> Result<(&mut ReportConfigStatus, &MessageDescriptor), SimulatorError> {
         let report_config_status =
-            self.report_configs.get_mut(&report_info.report_config_name).ok_or_else(|| {
-                SimulatorError::OrphanReport { uuid: report_info.metrics_config_uuid.clone() }
+            self.report_configs.get_mut(&report.report_config_name).ok_or_else(|| {
+                SimulatorError::OrphanReport { uuid: report.metrics_config_uuid.clone() }
             })?;
 
         let message_descriptor = self

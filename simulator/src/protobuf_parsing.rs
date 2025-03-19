@@ -5,7 +5,6 @@ use protobuf::{
     MessageDyn,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
-use sdv_telemetry_rust_wrapper::ReportInfo;
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::{
     collections::{HashMap, HashSet},
@@ -68,7 +67,6 @@ pub fn parse_message_descriptors(
 pub fn decode_report(
     report: &MetricsReport,
     message_descriptor: &MessageDescriptor,
-    report_info: &ReportInfo,
 ) -> Result<Box<dyn MessageDyn>, SimulatorError> {
     // unpack_dyn returns a Result<Option<Box<dyn MessageDyn>>> where the result returns an error if
     // the content of the Any messages matches the message descriptor but it fails to parse the
@@ -77,13 +75,13 @@ pub fn decode_report(
         .report_data
         .unpack_dyn(message_descriptor)
         .map_err(|error| SimulatorError::FailedToDecodeReport {
-            report_config_name: report_info.report_config_name.clone(),
+            report_config_name: report.report_config_name.clone(),
             error,
         })?
         .ok_or_else(|| SimulatorError::ProgrammingError {
             error_message: format!(
                 "Could not decode report for report config \"{}\" with descriptor proto \"{}\"",
-                report_info.report_config_name.clone(),
+                report.report_config_name.clone(),
                 message_descriptor.name()
             ),
         })

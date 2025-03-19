@@ -1,13 +1,11 @@
 // Copyright 2023 Google LLC
 
-use google_sdv_telemetry::aidl::google::sdv::telemetry::{
-    ITelemetryReportReadyListener::ITelemetryReportReadyListener,
-    MetricsReportInfo::MetricsReportInfo,
-};
+use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
 use google_sdv_telemetry::binder::Strong;
 use log::warn;
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -16,7 +14,7 @@ use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 
 pub(super) struct MetricsReportListener {
     /// Hashmap to store the MetricsReport until the client asks for it.
-    metrics_report_store: Mutex<HashMap<MetricsReportInfo, MetricsReport>>,
+    metrics_report_store: Mutex<HashMap<String, MetricsReport>>,
     /// Report Ready listener to inform the client when a report is ready
     report_ready_listener:
         Mutex<Option<(Strong<dyn ITelemetryReportReadyListener>, binder::DeathRecipient)>>,
@@ -47,17 +45,16 @@ impl MetricsReportListener {
     }
 
     pub(super) fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: metrics_report.metrics_config_uuid.clone(),
-            reportConfigName: metrics_report.report_config_name.clone(),
-            reportNumber: metrics_report.report_number,
-        };
+        let report_uuid = metrics_report.report_uuid.clone();
 
-        // TODO(b/384783248): use surrogate key and don't overwrite reports.
-        self.metrics_report_store.lock().insert(report_info.clone(), metrics_report);
+        // Insert the report and panic if report with the same key already exists.
+        self.metrics_report_store
+            .lock()
+            .try_insert_value(report_uuid.clone(), metrics_report)
+            .unwrap();
 
         if let Some((listener, _)) = self.report_ready_listener.lock().as_ref() {
-            if let Err(e) = listener.deref().onReady(&report_info) {
+            if let Err(e) = listener.deref().onReady(&report_uuid) {
                 warn!("Error when trying to notify client about a new report: {:?}", e);
             }
         }
@@ -65,20 +62,16 @@ impl MetricsReportListener {
 
     pub(super) fn get_metrics_report(
         &self,
-        report_info: &MetricsReportInfo,
+        report_uuid: &str,
     ) -> Result<MetricsReport, MetricsReportListenerError> {
-        let report = {
-            let mut report_container = self.metrics_report_store.lock();
-            report_container.remove(report_info)
-        };
-        let Some(metrics_report) = report else {
+        let Some(metrics_report) = self.metrics_report_store.lock().remove(report_uuid) else {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
         };
 
         Ok(metrics_report)
     }
 
-    pub(super) fn get_ready_reports_info(&self) -> Vec<MetricsReportInfo> {
+    pub(super) fn get_ready_report_uuids(&self) -> Vec<String> {
         self.metrics_report_store.lock().keys().cloned().collect()
     }
 
@@ -115,16 +108,12 @@ pub(crate) mod tests {
 
     use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::BnTelemetryReportReadyListener;
     use parking_lot::Mutex;
-    use protobuf::{reflect::ReflectEqMode, MessageFull};
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-
-    const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
-    const REPORT_NAME: &str = "report1";
-    const REPORT_NUMBER: i32 = 42;
+    use uuid::Uuid;
 
     #[derive(Clone)]
     struct MockTelemetryReportReadyListener {
-        last_call: Arc<Mutex<Option<MetricsReportInfo>>>,
+        last_call: Arc<Mutex<Option<String>>>,
     }
 
     impl binder::Interface for MockTelemetryReportReadyListener {}
@@ -134,14 +123,14 @@ pub(crate) mod tests {
             Self { last_call: Arc::new(Mutex::new(None)) }
         }
 
-        pub fn get_last_call(&self) -> MetricsReportInfo {
+        pub fn get_last_call(&self) -> String {
             self.last_call.lock().take().unwrap()
         }
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, report_info: &MetricsReportInfo) -> binder::Result<()> {
-            self.last_call.lock().replace(report_info.clone());
+        fn onReady(&self, report_uuid: &str) -> binder::Result<()> {
+            self.last_call.lock().replace(report_uuid.to_owned());
             Ok(())
         }
     }
@@ -183,11 +172,11 @@ pub(crate) mod tests {
     }
 
     fn create_metrics_report() -> MetricsReport {
-        let mut metrics_report = MetricsReport::new();
-        metrics_report.metrics_config_uuid = UUID.to_owned();
-        metrics_report.report_config_name = REPORT_NAME.to_owned();
-        metrics_report.report_number = REPORT_NUMBER;
-        metrics_report
+        MetricsReport {
+            report_uuid: Uuid::new_v4().to_string(),
+            metrics_config_uuid: Uuid::new_v4().to_string(),
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -199,54 +188,31 @@ pub(crate) mod tests {
             binder::BinderFeatures::default(),
         );
         report_listener.set_report_ready_listener(binder_listener).unwrap();
+        let metrics_report = create_metrics_report();
 
-        report_listener.on_report_ready(create_metrics_report());
+        report_listener.on_report_ready(metrics_report.clone());
 
-        assert_eq!(
-            mock_listener.get_last_call(),
-            MetricsReportInfo {
-                metricsConfigUuid: UUID.to_owned(),
-                reportConfigName: REPORT_NAME.to_owned(),
-                reportNumber: REPORT_NUMBER
-            }
-        );
+        assert_eq!(mock_listener.get_last_call(), metrics_report.report_uuid);
     }
 
     #[test]
-    fn on_report_ready_overwrites_report() {
+    #[should_panic]
+    fn on_report_ready_same_report_panics() {
         let report_listener = Arc::new(create_default_metrics_report_listener());
         let report = create_metrics_report();
 
         report_listener.on_report_ready(report.clone());
         report_listener.on_report_ready(report.clone());
-
-        let stored_reports = report_listener
-            .metrics_report_store
-            .lock()
-            .values()
-            .take(2)
-            .cloned()
-            .collect::<Vec<_>>();
-        assert_eq!(stored_reports.len(), 1);
-        assert!(
-            stored_reports[0].reflect_eq(&report, &ReflectEqMode::default()),
-            "Unexpected stored report: {:?}",
-            stored_reports[0]
-        );
     }
 
     #[test]
     fn get_metrics_report_success() {
         let report_listener = Arc::new(create_default_metrics_report_listener());
         let metrics_report = create_metrics_report();
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: metrics_report.metrics_config_uuid.clone(),
-            reportConfigName: metrics_report.report_config_name.clone(),
-            reportNumber: metrics_report.report_number,
-        };
         report_listener.on_report_ready(metrics_report.clone());
 
-        let retrieved_report = report_listener.get_metrics_report(&report_info).unwrap();
+        let retrieved_report =
+            report_listener.get_metrics_report(&metrics_report.report_uuid).unwrap();
 
         assert_eq!(retrieved_report, metrics_report);
     }
@@ -255,13 +221,8 @@ pub(crate) mod tests {
     fn get_metrics_report_not_found() {
         let report_listener = Arc::new(create_default_metrics_report_listener());
         let metrics_report = create_metrics_report();
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: metrics_report.metrics_config_uuid.clone(),
-            reportConfigName: metrics_report.report_config_name.clone(),
-            reportNumber: metrics_report.report_number,
-        };
 
-        let err = report_listener.get_metrics_report(&report_info).unwrap_err();
+        let err = report_listener.get_metrics_report(&metrics_report.report_uuid).unwrap_err();
 
         assert!(
             matches!(err, MetricsReportListenerError::MetricsReportNotFound),
@@ -270,19 +231,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn get_ready_reports_info_success() {
+    fn get_ready_report_uuids_success() {
         let report_listener = Arc::new(create_default_metrics_report_listener());
         let metrics_report = create_metrics_report();
         report_listener.on_report_ready(metrics_report.clone());
-        let report_info = MetricsReportInfo {
-            metricsConfigUuid: metrics_report.metrics_config_uuid.clone(),
-            reportConfigName: metrics_report.report_config_name.clone(),
-            reportNumber: metrics_report.report_number,
-        };
 
-        let ready_reports_info = report_listener.get_ready_reports_info();
+        let ready_report_uuids = report_listener.get_ready_report_uuids();
 
-        assert_eq!(ready_reports_info, vec![report_info]);
+        assert_eq!(ready_report_uuids, vec![metrics_report.report_uuid]);
     }
 
     #[test]
