@@ -278,7 +278,6 @@ impl ConfigurablePublisherRegistry {
                 service_name
             );
         }
-
         Ok(())
     }
 
@@ -374,8 +373,10 @@ mod tests {
     use super::*;
 
     use binder::BinderFeatures;
-    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriber;
-    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisher::BnConfigurablePublisher;
+    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
+        IConfigurablePublisher::BnConfigurablePublisher,
+        ISubscriber::ISubscriber,
+    };
     use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::IConfigurablePublisherSubscription::{
         IConfigurablePublisherSubscription,
         BnConfigurablePublisherSubscription,
@@ -728,7 +729,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn unregister_incorrect_service_name_gets_ignored() {
+    async fn unregister_incorrect_service_name_returns_ok() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
@@ -744,9 +745,10 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await.unwrap();
+        let res = configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await;
 
         assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
+        assert!(res.is_ok());
     }
 
     #[tokio::test]
