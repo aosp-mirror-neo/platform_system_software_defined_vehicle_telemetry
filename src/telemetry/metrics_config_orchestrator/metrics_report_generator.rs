@@ -47,6 +47,7 @@ pub(crate) struct MetricsReportGeneratorImpl {
     name: String,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     report_incomplete: bool,
+    report_initial: bool,
     report_number: AtomicI32,
     subscriber: TriggerSubscriber,
     triggers: Vec<Arc<dyn Trigger>>,
@@ -60,6 +61,13 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
     async fn activate(self: Arc<Self>) {
         let mut is_active = self.is_active.lock().await;
         assert!(!*is_active, "Unable to activate metrics report generator: it's already active");
+
+        if self.report_initial {
+            debug!("Generating Initial Metrics Report");
+            let res = Arc::clone(&self.message_builder)
+                .build(&Arc::new(self.node_evaluation_context_factory.create()));
+            self.generate_report(res, ReportReason::INITIAL, None).await;
+        }
 
         // Subscribing to triggers one by one. In theory, it should be possible to also spawn
         // subscription tasks in parallel as an optimization.
@@ -75,7 +83,6 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
                 )
                 .await;
         }
-
         *is_active = true;
     }
 
@@ -122,6 +129,7 @@ impl MetricsReportGeneratorImpl {
             message_builder,
             name: metrics_report_config.name.clone(),
             report_incomplete: metrics_report_config.report_incomplete,
+            report_initial: metrics_report_config.report_initial,
             report_number: 1.into(),
             subscriber,
             triggers,
@@ -227,20 +235,24 @@ mod test {
     const REPORT_CONFIG_NAME: &str = "name";
     const FIELD_NAME: &str = "field_name";
 
-    fn create_report_config_proto() -> MetricsReportConfig {
+    fn create_report_config_proto(report_initial: bool) -> MetricsReportConfig {
         let mut config = MetricsReportConfig::new();
         REPORT_CONFIG_NAME.clone_into(&mut config.name);
         config.report_incomplete = true;
+        config.report_initial = report_initial;
         config
     }
 
     fn create_default_generator() -> MetricsReportGeneratorImpl {
-        create_generator(Arc::new(MockMessageBuilder::new()))
+        create_generator(Arc::new(MockMessageBuilder::new()), false)
     }
 
-    fn create_generator(message_builder: Arc<MockMessageBuilder>) -> MetricsReportGeneratorImpl {
+    fn create_generator(
+        message_builder: Arc<MockMessageBuilder>,
+        report_initial: bool,
+    ) -> MetricsReportGeneratorImpl {
         MetricsReportGeneratorImpl::new(
-            &create_report_config_proto(),
+            &create_report_config_proto(report_initial),
             Timestamp::now(),
             CONFIG_UUID.to_owned(),
             CONFIG_VERSION,
@@ -292,11 +304,48 @@ mod test {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn activate_with_report_initial_creates_report() {
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let mut generator = create_generator(Arc::clone(&message_builder), true);
+        let (tx, mut rx) = mpsc::channel(2);
+        generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
+        let generator = Arc::new(generator);
+
+        // Activate the generator.
+        Arc::clone(&generator).activate().await;
+
+        // Wait for report to be delivered.
+        let report = rx.recv().await.unwrap();
+
+        // Verify the report.
+        assert_eq!(
+            report.config_activation_timestamp.unwrap(),
+            generator.config_activation_timestamp
+        );
+        assert!(report.error_ids.is_empty(), "Unexpected error ids: {:?}", report.error_ids);
+        assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
+        assert_eq!(report.metrics_config_version, CONFIG_VERSION);
+        assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
+        assert_eq!(report.report_number, 1);
+        assert!(
+            // Less than 1 hour old.
+            Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
+        );
+        assert!(matches!(report.report_reason.unwrap(), ReportReason::INITIAL));
+        assert!(!Uuid::try_parse(&report.report_uuid).unwrap().is_nil());
+
+        // as built by MockMessageBuilder
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     async fn on_trigger_fired_creates_reports() {
         let trigger = Arc::new(create_trigger());
 
         let message_builder = Arc::new(MockMessageBuilder::new());
-        let mut generator = create_generator(Arc::clone(&message_builder));
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
         let (tx, mut rx) = mpsc::channel(2);
         generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
@@ -356,7 +405,7 @@ mod test {
             },
         });
 
-        let mut generator = create_generator(Arc::clone(&message_builder));
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
         let (tx, rx) = oneshot_callback();
         generator.status_reporter = Arc::new(StatusReporterImpl::new(tx));
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
@@ -399,7 +448,7 @@ mod test {
             )
                 .into()
         });
-        let mut generator = create_generator(Arc::new(message_builder));
+        let mut generator = create_generator(Arc::new(message_builder), false);
         let (tx, rx) = oneshot_callback();
         generator.report_ready_callback = Arc::new(tx);
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
@@ -432,7 +481,7 @@ mod test {
             ))
             .boxed(),
         );
-        let mut generator = create_generator(Arc::clone(&message_builder));
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
         let (tx, rx) = oneshot_callback();
         generator.report_ready_callback = Arc::new(tx);
         generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
@@ -464,7 +513,7 @@ mod test {
             ))
             .boxed(),
         );
-        let mut generator = create_generator(Arc::clone(&message_builder));
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
         let (tx, rx) = oneshot_callback();
         generator.report_ready_callback = Arc::new(tx);
         generator.status_reporter = Arc::new(StatusReporterImpl::new(|_| {}));
