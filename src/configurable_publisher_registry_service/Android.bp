@@ -48,6 +48,7 @@ rust_test {
     defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     rustlibs: [
         // keep-sorted start
+        "librand",
         "libsample_publisher_proto",
         "libsdv_telemetry_test_utils",
         // keep-sorted end

@@ -18,8 +18,7 @@
 // later when a module using the interface is updated, e.g., Mainline modules.
 
 package google.sdv.telemetry.configurable_publisher;
-
 @VintfStability
 interface ISubscriber {
-    void sendData(in byte[] data);
+  void sendData(in byte[] data);
 }

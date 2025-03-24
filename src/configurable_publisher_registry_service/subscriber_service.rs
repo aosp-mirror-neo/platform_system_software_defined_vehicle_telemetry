@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::ISubscriberAsyncServer;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ConfigurablePublisherStatusCodes::ConfigurablePublisherStatusCodes as StatusCodes, ISubscriber::ISubscriberAsyncServer};
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
@@ -25,7 +25,10 @@ impl ISubscriberAsyncServer for SubscriberService {
                 (self.new_message_callback.lock())(Err(
                     ServicePublisherAccessorError::MessageParsingFailed(err.into()),
                 ));
-                Err(binder::Status::new_service_specific_error_str(-1, Some(binder_msg)))
+                Err(binder::Status::new_service_specific_error_str(
+                    StatusCodes::SEND_DATA_DESERIALIZATION_FAILED.0,
+                    Some(binder_msg),
+                ))
             },
             |msg| {
                 (self.new_message_callback.lock())(Ok(msg));
@@ -63,7 +66,11 @@ mod tests {
         let err_binder = wrapper.sendData(&[0xFF]).await.unwrap_err();
         let err_callback = rx.await.unwrap_err();
 
-        assert_eq!(err_binder.service_specific_error(), -1, "Unexpected error: {err_binder:?}");
+        assert_eq!(
+            err_binder.service_specific_error(),
+            StatusCodes::SEND_DATA_DESERIALIZATION_FAILED.0,
+            "Unexpected error: {err_binder:?}"
+        );
         assert!(
             matches!(err_callback, ServicePublisherAccessorError::MessageParsingFailed(_)),
             "Unexpected error: {err_callback:?}"
