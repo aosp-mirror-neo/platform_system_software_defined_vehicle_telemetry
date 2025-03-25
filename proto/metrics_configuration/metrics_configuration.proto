@@ -256,6 +256,11 @@ message MetricsReportConfig {
   // the activation context, the context will be populated with the latest
   // published message.
   ProtoMessageBuilder message_builder = 4;
+
+  // Optional.
+  // Specifies whether to send an initial report when the corresponding
+  // metrics config is activated. Default value is set to false
+  bool report_initial = 5;
 }
 
 // Report message that is sent to the OEM application.
@@ -283,6 +288,8 @@ message MetricsReport {
     // Report generated because Metrics Configuration data collection
     // was finished.
     INCOMPLETE_FINISHED = 4;
+    // Report generated because the report_initial flag was set to true
+    INITIAL = 5;
   }
 
   // Required.

@@ -45,7 +45,9 @@ Created because {}
 
 fn report_incomplete(report_reason: ReportReason) -> bool {
     match report_reason {
-        ReportReason::REPORT_TYPE_UNSPECIFIED | ReportReason::REGULAR => false,
+        ReportReason::REPORT_TYPE_UNSPECIFIED | ReportReason::REGULAR | ReportReason::INITIAL => {
+            false
+        }
         ReportReason::INCOMPLETE_SHUTDOWN
         | ReportReason::INCOMPLETE_END
         | ReportReason::INCOMPLETE_FINISHED => true,
@@ -59,6 +61,7 @@ fn format_report_reason(report_reason: ReportReason) -> String {
         ReportReason::INCOMPLETE_FINISHED => "finish trigger was triggered".to_owned(),
         ReportReason::REPORT_TYPE_UNSPECIFIED => "REPORT_TYPE_UNSPECIFIED".to_owned(),
         ReportReason::REGULAR => "report was triggered".to_owned(),
+        ReportReason::INITIAL => "initial report was triggered".to_owned(),
     }
 }
 
