@@ -212,6 +212,11 @@ message ServicePublisher {
   // - TODO: b/373332101 - Not yet implemented for configurable publishers.
   // - TODO: b/373332617 - Not yet implemented for getter publishers.
   google.protobuf.Duration sub_sampling_interval = 4;
+
+  // Optional.
+  // Specifies whether to retrieve the last published message when subscribing to the service.
+  // Only applicable to subscription connection type.
+  bool fetch_last_message = 5;
 }
 
 // When triggered uses message builder to create a new message according
