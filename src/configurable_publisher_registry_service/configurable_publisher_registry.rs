@@ -135,6 +135,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        _fetch_last_message: bool,
         // TODO: b/373332101 - Not yet implemented.
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
@@ -648,6 +649,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -668,6 +670,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -689,6 +692,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -712,6 +716,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -738,6 +743,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),

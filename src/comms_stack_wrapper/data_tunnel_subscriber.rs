@@ -44,8 +44,9 @@ impl DataTunnelSubscriber {
     pub(super) async fn create_subscription(
         &self,
         unit_identifier: UnitIdentifier,
-        sub_sampling_interval: &SubSamplingInterval,
+        fetch_last_message: bool,
         message_descriptor: MessageDescriptor,
+        sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
@@ -55,7 +56,7 @@ impl DataTunnelSubscriber {
             self.ctx.clone().await,
             &unit_identifier,
             sub_sampling_interval.as_duration(),
-            dt::SubscriberOptions { fetch_last_message: false },
+            dt::SubscriberOptions { fetch_last_message },
         )
         .await
         .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;

@@ -72,6 +72,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
@@ -83,6 +84,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
                 .create_subscription(
                     service_name,
                     configuration,
+                    fetch_last_message,
                     sub_sampling_interval,
                     new_message_callback,
                     cancellation_callback,
@@ -308,6 +310,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 configuration_msg.as_ref(),
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -333,6 +336,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME2,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -357,6 +361,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME2,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -381,6 +386,7 @@ mod tests {
             .create_subscription(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),

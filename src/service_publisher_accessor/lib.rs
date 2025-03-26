@@ -67,6 +67,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,

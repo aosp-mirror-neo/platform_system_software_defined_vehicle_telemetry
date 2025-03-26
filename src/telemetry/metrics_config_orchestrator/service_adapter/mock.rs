@@ -78,6 +78,7 @@ impl ServiceAdapter for MockServiceAdapter {
         self: Arc<Self>,
         _service_name: &str,
         configuration: Option<&Any>,
+        _fetch_last_message: bool,
         _sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,

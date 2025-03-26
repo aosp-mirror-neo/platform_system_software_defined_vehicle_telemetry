@@ -54,6 +54,7 @@ pub(crate) trait ServiceAdapter: Send + Sync {
         self: Arc<Self>,
         service_name: &str,
         configuration: Option<&Any>,
+        fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
@@ -190,6 +191,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
         self: Arc<Self>,
         service_name: &str,
         configuration: Option<&Any>,
+        fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
         mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
@@ -203,6 +205,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 .create_subscription(
                     service_name,
                     configuration,
+                    fetch_last_message,
                     sub_sampling_interval,
                     Box::new(move |msg| match msg {
                         Ok(msg) => new_message_callback(&msg.into()),
@@ -264,6 +267,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         .create_subscription(
                             service_name,
                             None,
+                            fetch_last_message,
                             sub_sampling_interval,
                             Box::new(move |msg| match msg {
                                 Ok(msg) => {
@@ -593,6 +597,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -615,6 +620,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -638,6 +644,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -667,6 +674,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -689,6 +697,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -717,6 +726,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -727,6 +737,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME_2,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -764,6 +775,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -774,6 +786,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -811,6 +824,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -821,6 +835,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::MAX,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_fn_box(),
@@ -866,6 +881,7 @@ pub(super) mod tests {
                 .subscribe(
                     SERVICE_NAME,
                     None,
+                    false,
                     &SubSamplingInterval::ZERO,
                     Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
                     create_empty_fn_box(),
@@ -901,6 +917,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 Box::new(move || tx1(())),
@@ -913,6 +930,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 Box::new(move || tx2(())),
@@ -938,6 +956,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -959,6 +978,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -983,6 +1003,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1006,6 +1027,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1030,6 +1052,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1053,6 +1076,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1065,6 +1089,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1089,6 +1114,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1101,6 +1127,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1163,6 +1190,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 Some(&Any::new()),
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -1208,6 +1236,7 @@ pub(super) mod tests {
             .subscribe(
                 SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),

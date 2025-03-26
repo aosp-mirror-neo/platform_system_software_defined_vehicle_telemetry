@@ -568,13 +568,14 @@ mod tests {
         let trigger = create_valid_data_trigger();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Getter,
-            Arc::new(MockServiceAdapter::new()),
             Arc::clone(&factory.node_evaluation_context_factory),
+            Arc::new(MockServiceAdapter::new()),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -602,13 +603,14 @@ mod tests {
         let trigger = create_valid_data_trigger();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::new(MockServiceAdapter::new()),
             Arc::clone(&factory.node_evaluation_context_factory),
+            Arc::new(MockServiceAdapter::new()),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 

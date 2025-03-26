@@ -40,16 +40,16 @@ pub(crate) enum ConnectionType {
 }
 
 pub(crate) struct ServicePublisher {
-    pub(crate) configuration: Option<Any>,
-    pub(crate) sub_sampling_interval: SubSamplingInterval,
-    pub(crate) connection_type: ConnectionType,
-    pub(crate) service_name: String,
-
     base: BasePublisher,
-    service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
-    state: AsyncMutex<ServicePublisherState>,
+    configuration: Option<Any>,
+    connection_type: ConnectionType,
+    fetch_last_message: bool,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+    service_name: String,
+    state: AsyncMutex<ServicePublisherState>,
     status_reporter: Arc<dyn StatusReporter>,
+    sub_sampling_interval: SubSamplingInterval,
 }
 
 #[derive(strum_macros::Display)]
@@ -251,25 +251,29 @@ impl ServicePublisher {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         name: String,
+        configuration: Option<Any>,
+        connection_type: ConnectionType,
+        fetch_last_message: bool,
         metrics_config_uuid: String,
         service_name: String,
-        configuration: Option<Any>,
         sub_sampling_interval: SubSamplingInterval,
-        connection_type: ConnectionType,
-        service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+
+        // Dependencies
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+        service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name, metrics_config_uuid),
             configuration,
-            sub_sampling_interval,
             connection_type,
+            fetch_last_message,
+            node_evaluation_context_factory,
             service_adapter,
             service_name,
             state: ServicePublisherState::Inactive.into(),
-            node_evaluation_context_factory,
             status_reporter,
+            sub_sampling_interval,
         }
     }
 
@@ -434,6 +438,7 @@ impl ServicePublisher {
                     .subscribe(
                         &self.service_name,
                         self.configuration.as_ref(),
+                        self.fetch_last_message,
                         &self.sub_sampling_interval,
                         Box::new(move |msg| {
                             sender
@@ -556,13 +561,14 @@ mod tests {
     ) -> Arc<ServicePublisher> {
         Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Getter,
-            service_adapter,
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            service_adapter,
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ))
     }
@@ -572,13 +578,14 @@ mod tests {
     ) -> Arc<ServicePublisher> {
         Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ))
     }
@@ -703,13 +710,14 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Getter,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -748,13 +756,14 @@ mod tests {
         let (tx, rx) = oneshot_callback();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Getter,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(tx)),
         ));
 
@@ -793,13 +802,14 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Getter,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -825,13 +835,14 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            Some(Any::pack(Empty::default_instance()).unwrap()),
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            Some(Any::pack(Empty::default_instance()).unwrap()),
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -885,13 +896,14 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -944,13 +956,14 @@ mod tests {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -972,13 +985,14 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
@@ -1006,13 +1020,14 @@ mod tests {
         let (tx, rx) = oneshot_callback();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(tx)),
         ));
 
@@ -1044,13 +1059,14 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Subscription,
+            false,
             CONFIG_UUID.to_owned(),
             SERVICE_NAME.to_owned(),
-            None,
             SubSamplingInterval::ZERO,
-            ConnectionType::Subscription,
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 

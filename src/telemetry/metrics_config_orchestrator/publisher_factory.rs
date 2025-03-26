@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use anyhow::anyhow;
-use protobuf::{reflect::FileDescriptor, EnumOrUnknown};
+use protobuf::{reflect::FileDescriptor, well_known_types::any::Any, EnumOrUnknown};
 use sdv_telemetry_expr::node::Node;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     publisher::Publisher_type as PublisherTypeProto,
@@ -81,6 +81,22 @@ pub(crate) struct PublisherFactoryImpl {
     message_builder_factory: Arc<dyn MessageBuilderFactory>,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+    service_publisher_new_func: Box<
+        dyn Fn(
+                String,
+                bool,
+                Option<Any>,
+                ConnectionType,
+                String,
+                String,
+                SubSamplingInterval,
+                Arc<dyn NodeEvaluationContextFactory>,
+                Arc<dyn ServiceAdapter + Send + Sync>,
+                Arc<dyn StatusReporter>,
+            ) -> Box<dyn Publisher>
+            + Send
+            + Sync,
+    >,
     status_reporter: Arc<dyn StatusReporter>,
 }
 
@@ -94,19 +110,20 @@ impl PublisherFactory for PublisherFactoryImpl {
         Self::verify_name_set(publisher_proto)?;
         let publisher_name = publisher_proto.name.clone();
         match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
-                Ok(Arc::new(ServicePublisher::new(
-                    publisher_name,
-                    metrics_config_uuid,
-                    service_publisher.service_name.clone(),
-                    service_publisher.configuration.as_ref().cloned(),
-                    Self::get_sub_sampling_interval(service_publisher)?,
-                    Self::get_connection_type(service_publisher.connection_type)?,
-                    Arc::clone(&self.service_adapter),
-                    Arc::clone(&self.node_evaluation_context_factory),
-                    Arc::clone(&self.status_reporter),
-                )))
-            }
+            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => Ok((self
+                .service_publisher_new_func)(
+                publisher_name,
+                service_publisher.fetch_last_message,
+                service_publisher.configuration.as_ref().cloned(),
+                Self::get_connection_type(service_publisher.connection_type)?,
+                metrics_config_uuid,
+                service_publisher.service_name.clone(),
+                Self::get_sub_sampling_interval(service_publisher)?,
+                Arc::clone(&self.node_evaluation_context_factory),
+                Arc::clone(&self.service_adapter),
+                Arc::clone(&self.status_reporter),
+            )
+            .into()),
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
                 .create_aggregation_publisher(
                     publisher_name,
@@ -153,9 +170,34 @@ impl PublisherFactoryImpl {
         status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
+            node_evaluation_context_factory,
             message_builder_factory,
             service_adapter,
-            node_evaluation_context_factory,
+            service_publisher_new_func: Box::new(
+                |name,
+                 fetch_last_message,
+                 configuration,
+                 connection_type,
+                 metrics_config_uuid,
+                 service_name,
+                 sub_sampling_interval,
+                 node_evaluation_context_factory,
+                 service_adapter,
+                 status_reporter| {
+                    Box::new(ServicePublisher::new(
+                        name,
+                        configuration,
+                        connection_type,
+                        fetch_last_message,
+                        metrics_config_uuid,
+                        service_name,
+                        sub_sampling_interval,
+                        node_evaluation_context_factory,
+                        service_adapter,
+                        status_reporter,
+                    ))
+                },
+            ),
             status_reporter,
         }
     }
@@ -247,6 +289,7 @@ mod tests {
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::collections::HashMap;
+    use std::sync::OnceLock;
     use std::time::Duration;
 
     use crate::metrics_config_orchestrator::service_adapter::{
@@ -255,11 +298,10 @@ mod tests {
     use crate::metrics_config_orchestrator::{
         message_builder_factory::mock::MockMessageBuilderFactory,
         node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
-        trigger::periodic::PeriodicTrigger,
+        publisher::mock::MockPublisher, trigger::mock::MockTrigger,
     };
     use crate::StatusReporterImpl;
 
-    const INTERVAL: Duration = Duration::from_millis(42);
     const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
@@ -280,6 +322,7 @@ mod tests {
             self: Arc<Self>,
             _service_name: &str,
             _configuration: Option<&Any>,
+            _fetch_last_message: bool,
             _sub_sampling_interval: &SubSamplingInterval,
             _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
             _cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
@@ -300,21 +343,57 @@ mod tests {
         }
     }
 
-    fn create_default_factory() -> PublisherFactoryImpl {
+    struct DataHolder {
+        configuration: Option<Any>,
+        connection_type: ConnectionType,
+        fetch_last_message: bool,
+        metrics_config_uuid: String,
+        service_name: String,
+        sub_sampling_interval: SubSamplingInterval,
+    }
+
+    fn create_default_factory() -> (PublisherFactoryImpl, Arc<OnceLock<DataHolder>>) {
         create_factory(None)
     }
 
     fn create_factory(
         message_builder_factory: Option<MockMessageBuilderFactory>,
-    ) -> PublisherFactoryImpl {
-        PublisherFactoryImpl::new(
+    ) -> (PublisherFactoryImpl, Arc<OnceLock<DataHolder>>) {
+        let mut factory = PublisherFactoryImpl::new(
             Arc::new(message_builder_factory.unwrap_or_else(MockMessageBuilderFactory::new)),
             Arc::new(MockServiceAdapter {}),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(StatusReporterImpl::new(|err| {
                 panic!("Unexpected error: {err:?}");
             })),
-        )
+        );
+        let data_holder = Arc::new(OnceLock::new());
+        let data_holder_clone = Arc::clone(&data_holder);
+        factory.service_publisher_new_func = Box::new(
+            move |name,
+                  fetch_last_message,
+                  configuration,
+                  connection_type,
+                  metrics_config_uuid,
+                  service_name,
+                  sub_sampling_interval,
+                  _,
+                  _,
+                  _| {
+                assert!(data_holder_clone
+                    .set(DataHolder {
+                        fetch_last_message,
+                        configuration,
+                        connection_type,
+                        metrics_config_uuid: metrics_config_uuid.clone(),
+                        service_name,
+                        sub_sampling_interval,
+                    })
+                    .is_ok());
+                Box::new(MockPublisher::new(name, metrics_config_uuid))
+            },
+        );
+        (factory, data_holder)
     }
 
     fn create_publisher(name: &str) -> PublisherProto {
@@ -353,7 +432,10 @@ mod tests {
         service_publisher.configuration =
             MessageField::some(Any::pack(Empty::default_instance()).unwrap());
         service_publisher.connection_type = ConnectionTypeProto::SUBSCRIPTION.into();
+        service_publisher.fetch_last_message = true;
         SERVICE_NAME.clone_into(&mut service_publisher.service_name);
+        service_publisher.sub_sampling_interval =
+            Some(DurationProto { seconds: 1, ..Default::default() }).into();
         publisher
     }
 
@@ -363,12 +445,7 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = PeriodicTrigger::new(
-            TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
-            INTERVAL,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-        );
+        let trigger = Arc::new(MockTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned()));
 
         (publisher, trigger)
     }
@@ -421,7 +498,7 @@ mod tests {
 
     #[test]
     fn create_no_name_fails() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
 
         let err = factory.create_using_default_context(&PublisherProto::default()).err().unwrap();
 
@@ -430,7 +507,7 @@ mod tests {
 
     #[test]
     fn create_service_publisher_invalid_connection_type_fails() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
         let publisher = create_service_publisher_with_invalid_connection_type();
 
         let err = factory.create_using_default_context(&publisher).err().unwrap();
@@ -444,13 +521,12 @@ mod tests {
 
     #[test]
     fn create_service_publisher_unspecified_connection_type_maps_to_subscription() {
-        let factory = create_default_factory();
+        let (factory, data_holder) = create_default_factory();
         let publisher = create_service_publisher_with_unspecified_connection_type();
 
-        let res = factory.create_using_default_context(&publisher).unwrap();
+        let _res = factory.create_using_default_context(&publisher).unwrap();
 
-        let res_publisher = &res.downcast_arc::<ServicePublisher>().ok().unwrap();
-        assert!(matches!(res_publisher.connection_type, ConnectionType::Subscription));
+        assert!(matches!(data_holder.get().unwrap().connection_type, ConnectionType::Subscription));
     }
 
     parameterized_test!(
@@ -458,7 +534,7 @@ mod tests {
         create_service_publisher,
 
         |publisher| {
-            let factory = create_default_factory();
+            let (factory, _) = create_default_factory();
             let err = factory.create_using_default_context(&publisher).err().unwrap();
 
             assert!(
@@ -474,31 +550,37 @@ mod tests {
 
     #[test]
     fn create_service_publisher_success() {
-        let factory = create_default_factory();
+        let (factory, data_holder) = create_default_factory();
         let publisher = create_valid_service_publisher();
 
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
         assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
-        let res_publisher = res.downcast_arc::<ServicePublisher>().ok().unwrap();
 
+        let data_holder_value = data_holder.get().unwrap();
         let configuration_value =
-            res_publisher.configuration.as_ref().expect("Configuration should be set");
+            data_holder_value.configuration.as_ref().expect("Configuration should be set");
         let any_value = configuration_value
             .unpack::<Empty>()
             .unwrap()
             .expect("The value of Any should be an Empty");
         assert_eq!(&any_value, Empty::default_instance());
-        assert!(matches!(res_publisher.connection_type, ConnectionType::Subscription));
-        assert_eq!(res_publisher.service_name, SERVICE_NAME);
+        assert!(matches!(data_holder_value.connection_type, ConnectionType::Subscription));
+        assert!(data_holder_value.fetch_last_message);
+        assert_eq!(data_holder_value.metrics_config_uuid, CONFIG_UUID);
+        assert_eq!(data_holder_value.service_name, SERVICE_NAME);
+        assert_eq!(
+            data_holder_value.sub_sampling_interval,
+            SubSamplingInterval::try_from(Duration::from_secs(1)).unwrap()
+        )
     }
 
     #[test]
     fn create_aggregation_publisher_message_builder_factory_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
         message_builder_factory.fail_create();
-        let factory = create_factory(Some(message_builder_factory));
+        let (factory, _) = create_factory(Some(message_builder_factory));
         let (publisher, trigger) = create_valid_aggregation_publisher();
 
         let err = factory.create_using_context_with(&publisher, Some(vec![trigger])).err().unwrap();
@@ -508,7 +590,7 @@ mod tests {
 
     #[test]
     fn create_aggregation_publisher_success() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
         let (publisher, trigger) = create_valid_aggregation_publisher();
 
         let res = factory
@@ -525,7 +607,7 @@ mod tests {
 
     #[test]
     fn validate_no_name_fails() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
 
         let err = factory.validate_using_default_context(&PublisherProto::default()).unwrap_err();
 
@@ -534,7 +616,7 @@ mod tests {
 
     #[test]
     fn validate_service_publisher_invalid_connection_type_fails() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
         let publisher = create_service_publisher_with_invalid_connection_type();
 
         let err = factory.validate_using_default_context(&publisher).unwrap_err();
@@ -548,7 +630,7 @@ mod tests {
 
     #[test]
     fn validate_service_publisher_unspecified_connection_type_success() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
         let publisher = create_service_publisher_with_unspecified_connection_type();
 
         factory.validate_using_default_context(&publisher).unwrap();
@@ -559,7 +641,7 @@ mod tests {
         validate_service_publisher,
 
         |publisher| {
-            let factory = create_default_factory();
+            let (factory, _) = create_default_factory();
             let err = factory.validate_using_default_context(&publisher).unwrap_err();
 
             assert!(
@@ -575,7 +657,7 @@ mod tests {
 
     #[test]
     fn validate_service_publisher_success() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
         let publisher = create_valid_service_publisher();
 
         factory.validate_using_default_context(&publisher).unwrap();
@@ -585,7 +667,7 @@ mod tests {
     fn validate_aggregation_publisher_message_builder_factory_error_fails() {
         let mut message_builder_factory = MockMessageBuilderFactory::new();
         message_builder_factory.fail_validate();
-        let factory = create_factory(Some(message_builder_factory));
+        let (factory, _) = create_factory(Some(message_builder_factory));
         let (publisher, _) = create_valid_aggregation_publisher();
 
         let err = factory.validate_using_default_context(&publisher).unwrap_err();
@@ -595,7 +677,7 @@ mod tests {
 
     #[test]
     fn validate_aggregation_publisher_declarative_aggregation_success() {
-        let factory = create_default_factory();
+        let (factory, _) = create_default_factory();
         let (publisher, _) = create_valid_aggregation_publisher();
 
         factory.validate_using_default_context(&publisher).unwrap();

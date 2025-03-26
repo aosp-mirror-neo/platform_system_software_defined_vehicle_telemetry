@@ -129,6 +129,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         &self,
         service_name: &str,
         configuration: Option<&Any>,
+        fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
@@ -163,8 +164,9 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 self.data_tunnel_subscriber
                     .create_subscription(
                         unit_identifier,
-                        sub_sampling_interval,
+                        fetch_last_message,
                         message_descriptor,
+                        sub_sampling_interval,
                         new_message_callback,
                         cancellation_callback,
                     )
@@ -676,6 +678,7 @@ mod integration_tests {
             .create_subscription(
                 INVALID_SERVICE_NAME,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -696,6 +699,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -730,6 +734,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -763,6 +768,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -774,6 +780,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
                 create_empty_fn_box(),
@@ -803,14 +810,17 @@ mod integration_tests {
         .await
         .unwrap();
 
+        write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
+        write_message(&publisher, TestMessage { int_field: 2, ..Default::default() });
+
         let subscriber = create_accessor(ctx);
 
-        let (tx1, mut rx1) =
-            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>>();
+        let (tx1, mut rx1) = mpsc::unbounded_channel();
         let outcome1 = subscriber
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx1.send(message).unwrap()),
                 create_empty_fn_box(),
@@ -824,6 +834,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx2.send(message).unwrap()),
                 create_empty_fn_box(),
@@ -872,6 +883,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &notification_interval,
                 Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
                 create_empty_fn_box(),
@@ -941,6 +953,7 @@ mod integration_tests {
                 .create_subscription(
                     &service_name,
                     None,
+                    false,
                     &sub_sampling_interval,
                     Box::new(move |message| tx.send(message).unwrap()),
                     create_empty_fn_box(),
@@ -1162,6 +1175,7 @@ mod integration_tests {
             .create_subscription(
                 &service_name,
                 None,
+                false,
                 &SubSamplingInterval::ZERO,
                 Box::new(tx),
                 create_empty_fn_box(),
