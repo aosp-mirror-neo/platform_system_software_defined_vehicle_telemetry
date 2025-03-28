@@ -12,7 +12,6 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
-use thiserror::Error;
 
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
@@ -60,7 +59,7 @@ pub(crate) struct PublisherFactoryValidateContext<'a> {
     pub node_types: &'a [Option<NodeValueType>],
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum PublisherFactoryError {
     #[error("ServicePublisher contains invalid connection type {connection_type}")]
     InvalidConnectionType { connection_type: i32 },

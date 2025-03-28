@@ -18,7 +18,6 @@ use sdv_telemetry_expr::{
 use sdv_telemetry_utils::value_holder::ValueHolder;
 use std::collections::HashMap;
 use std::sync::Arc;
-use thiserror::Error;
 
 use value_aggregator::ValueAggregator;
 
@@ -45,14 +44,14 @@ pub(crate) struct MessageBuilderImpl {
     value_providers: Vec<(String, Arc<Node>)>,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("Message build failed for field {field_name}: {error}")]
 pub struct MessageBuilderError {
     pub field_name: String,
     pub error: MessageBuilderErrorType,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum MessageBuilderErrorType {
     #[error("Unable to assign value to field: {e}")]
     BadAggregation { e: AggregationError },

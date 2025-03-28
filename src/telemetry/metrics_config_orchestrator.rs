@@ -44,7 +44,6 @@ use sdv_telemetry_utils::{
 use std::collections::{HashMap, HashSet};
 use std::marker::Sync;
 use std::sync::Arc;
-use thiserror::Error;
 use tokio::sync::Mutex as AsyncMutex;
 
 // Crate dependencies.
@@ -102,7 +101,7 @@ pub trait MetricsConfigOrchestrator {
     ) -> Result<(), MetricsConfigOrchestratorError>;
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum MetricsConfigOrchestratorError {
     #[error("Cycle detected in the publisher and trigger dependency graph")]
     CycledPublishersTriggers,

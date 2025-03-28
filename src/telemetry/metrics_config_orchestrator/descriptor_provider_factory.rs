@@ -12,7 +12,6 @@ use sdv_telemetry_service_publisher_accessor::{
 use sdv_telemetry_utils::descriptor_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
-use thiserror::Error;
 
 use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderImpl;
 
@@ -26,7 +25,7 @@ pub(crate) trait DescriptorProviderFactory: Send + Sync {
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError>;
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum DescriptorProviderFactoryError {
     #[error("AggregationPublisher {pub_name} is invalid because it did not specify a ProtoMessageBuilder")]
     InvalidAggregationPublisher { pub_name: String },

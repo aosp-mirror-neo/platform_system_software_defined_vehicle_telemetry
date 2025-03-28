@@ -20,7 +20,6 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
-use thiserror::Error;
 use tokio::io;
 use uuid::Uuid;
 
@@ -72,7 +71,7 @@ pub trait MetricsConfigManager {
     async fn get_inactive_metrics_config_uuids(&self) -> Vec<String>;
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum MetricsConfigManagerError {
     #[error("Config Orchestrator Error: {error}")]
     ConfigOrchestratorError {

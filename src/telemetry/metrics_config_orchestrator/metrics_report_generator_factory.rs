@@ -8,7 +8,6 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
-use thiserror::Error;
 
 use crate::metrics_config_orchestrator::message_builder_factory::{
     MessageBuilderFactory, MessageBuilderFactoryCreateContext, MessageBuilderFactoryError,
@@ -58,7 +57,7 @@ pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
     pub trigger_protos: &'a HashMap<String, ()>,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum MetricsReportGeneratorFactoryError {
     #[error("MetricsReportConfig doesn't have a name")]
     NameNotSet,

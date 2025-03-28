@@ -26,7 +26,6 @@ use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
-use thiserror::Error;
 
 // Crate dependencies.
 use crate::subscriber_service::SubscriberService;
@@ -47,7 +46,7 @@ pub struct ConfigurablePublisherRegistrySubscription {
     configurable_publisher_subscription: binder::Strong<dyn IConfigurablePublisherSubscription>,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum ConfigurablePublisherRegistryRegisterError {
     #[error("Error when making a call to Binder: {error:?}")]
     BinderError {

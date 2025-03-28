@@ -10,7 +10,6 @@ use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdv_telemetry_utils::descriptor_utils;
 use std::collections::HashMap;
 use std::sync::Arc;
-use thiserror::Error;
 
 use crate::metrics_config_orchestrator::message_builder::value_aggregator_factory::{
     ValueAggregatorFactory, ValueAggregatorFactoryCreateContext, ValueAggregatorFactoryError,
@@ -46,7 +45,7 @@ pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
     pub node_types: &'a [Option<NodeValueType>],
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum MessageBuilderFactoryError {
     #[error("Message {message_type} is not found in the provided file descriptor protos")]
     MessageNotFound { message_type: String },

@@ -12,9 +12,8 @@ pub(super) mod sum_aggregator;
 pub(super) mod vector_aggregator;
 
 use sdv_telemetry_expr::{node_error::NodeEvaluationError, node_value::NodeValue};
-use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum AggregationError {
     #[error("Evaluation of expression node failed: {e}")]
     ExpressionEvaluationError {

@@ -15,7 +15,6 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
 };
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
-use thiserror::Error;
 
 use super::trigger::conditional::{ConditionType, ConditionalTrigger, EdgeOptions};
 use super::trigger::data::DataTrigger;
@@ -58,7 +57,7 @@ pub(crate) struct TriggerFactoryValidateContext<'a> {
     pub publishers: &'a HashMap<String, &'a PublisherProto>,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum TriggerFactoryError {
     #[error("Incorrect conditional trigger node index {node_index}")]
     IncorrectNodeIndex { node_index: u32 },

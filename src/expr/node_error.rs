@@ -6,17 +6,16 @@ use sdv_telemetry_proto_rust::expression::combination_node::Operator as Operator
 use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as NodeValueProto;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use std::sync::Arc;
-use thiserror::Error;
 
 /// A wrapper for NodeEvaluationError containing index of the node causing it
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 #[error("Processing node at index {index} failed: {err}")]
 pub struct NodeError {
     pub index: usize,
     pub err: NodeEvaluationError,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum NodeEvaluationError {
     // general errors
     #[error("Node is out of bounds, expression nodes have size {n}")]
@@ -106,7 +105,7 @@ pub enum NodeEvaluationError {
 }
 
 /// Error returned by MessageProvider
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum MessageProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
@@ -119,20 +118,20 @@ pub enum MessageProviderError {
 }
 
 /// Error returned by DescriptorProvider
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum DescriptorProviderError {
     /// Publisher name is invalid.
     #[error("Publisher name is invalid")]
     InvalidPublisherName,
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum FunctionLeafNodeArgumentError {
     #[error("GetCurrentTimestampError: {0}")]
     GetCurrentTimestampError(FunctionLeafNodeGetCurrentTimestampArgumentError),
 }
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum FunctionLeafNodeGetCurrentTimestampArgumentError {
     #[error("Time source is not set")]
     TimeSourceNotSet,

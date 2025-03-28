@@ -5,7 +5,6 @@ use sdv_telemetry_expr::node::Node;
 use sdv_telemetry_expr::node_value_type::{NodeValueType, NodeValueTypeExtension};
 use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
 use std::sync::Arc;
-use thiserror::Error;
 
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::{
     avg_aggregator::AvgAggregator, count_aggregator::CountAggregator,
@@ -16,7 +15,7 @@ use crate::metrics_config_orchestrator::message_builder::value_aggregator::{
 };
 use crate::metrics_config_orchestrator::message_builder::ValueAggregator;
 
-#[derive(Error, Debug)]
+#[derive(thiserror::Error, Debug)]
 pub(crate) enum ValueAggregatorFactoryError {
     #[error(
         "Cannot assign values to unsupported protobuf field types, such as strings, bytes, maps"
