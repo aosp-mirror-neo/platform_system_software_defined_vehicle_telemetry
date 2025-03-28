@@ -21,7 +21,6 @@ pub(crate) mod mock;
 type TriggerCallbackFn = CallbackFn<Arc<NodeEvaluationContext>>;
 
 #[async_trait]
-#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait Trigger: Send + Sync {
     /// Returns the name of the trigger.
     fn get_name(&self) -> &str;
@@ -44,9 +43,6 @@ pub(crate) trait Trigger: Send + Sync {
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber);
 }
-
-#[cfg(test)]
-downcast_rs::impl_downcast!(sync Trigger);
 
 #[derive(Clone, Eq, Hash, PartialEq, strum_macros::Display)]
 #[strum(serialize_all = "title_case")]

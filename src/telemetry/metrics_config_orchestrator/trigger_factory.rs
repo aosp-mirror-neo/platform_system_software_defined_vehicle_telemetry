@@ -89,6 +89,19 @@ pub(crate) enum TriggerFactoryError {
 }
 
 pub(crate) struct TriggerFactoryImpl {
+    conditional_trigger_new_func: Box<
+        dyn Fn(
+                String,
+                ConditionType,
+                String,
+                Arc<Node>,
+                Vec<Arc<dyn Trigger>>,
+                Arc<dyn NodeEvaluationContextFactory>,
+                Arc<dyn StatusReporter>,
+            ) -> Arc<dyn Trigger>
+            + Send
+            + Sync,
+    >,
     data_trigger_new_func:
         Box<dyn Fn(String, String, Arc<dyn Publisher>) -> Arc<dyn Trigger> + Send + Sync>,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
@@ -156,12 +169,12 @@ impl TriggerFactory for TriggerFactoryImpl {
                     .iter()
                     .map(|name| Arc::clone(&context.triggers[name]) as Arc<dyn Trigger>)
                     .collect();
-                ConditionalTrigger::new(
+                (self.conditional_trigger_new_func)(
                     trigger_name,
-                    metrics_config_uuid,
                     condition_type,
-                    triggers,
+                    metrics_config_uuid,
                     Arc::clone(selector_expression),
+                    triggers,
                     Arc::clone(&self.node_evaluation_context_factory),
                     Arc::clone(&self.status_reporter),
                 )
@@ -232,6 +245,25 @@ impl TriggerFactoryImpl {
             data_trigger_new_func: Box::new(|name, metrics_config_uuid, publisher| {
                 DataTrigger::new(name, metrics_config_uuid, publisher)
             }),
+            conditional_trigger_new_func: Box::new(
+                |name,
+                 condition_type,
+                 metrics_config_uuid,
+                 selector_expression,
+                 triggers,
+                 node_evaluation_context_factory,
+                 status_reporter| {
+                    ConditionalTrigger::new(
+                        name,
+                        condition_type,
+                        metrics_config_uuid,
+                        selector_expression,
+                        triggers,
+                        node_evaluation_context_factory,
+                        status_reporter,
+                    )
+                },
+            ),
             node_evaluation_context_factory,
             periodic_trigger_new_func: Box::new(
                 |name, metrics_config_uuid, interval, node_evaluation_context_factory| {
@@ -428,6 +460,12 @@ mod tests {
         publisher: Arc<dyn Publisher>,
     }
 
+    struct ConditionalTriggerData {
+        condition_type: ConditionType,
+        selector_expression: Arc<Node>,
+        triggers: Vec<Arc<dyn Trigger>>,
+    }
+
     struct PeriodicTriggerData {
         interval: Duration,
     }
@@ -518,6 +556,30 @@ mod tests {
                 assert!(data_holder_clone.set(DataTriggerData { publisher }).is_ok());
                 Arc::new(MockTrigger::new(name, metrics_config_uuid))
             });
+            data_holder
+        }
+
+        fn capture_conditional_trigger(&mut self) -> Arc<OnceLock<ConditionalTriggerData>> {
+            let data_holder = Arc::new(OnceLock::new());
+            let data_holder_clone = Arc::clone(&data_holder);
+            self.conditional_trigger_new_func = Box::new(
+                move |name,
+                      condition_type,
+                      metrics_config_uuid,
+                      selector_expression,
+                      triggers,
+                      _node_evaluation_context_factory,
+                      _status_reporter| {
+                    assert!(data_holder_clone
+                        .set(ConditionalTriggerData {
+                            condition_type,
+                            selector_expression,
+                            triggers,
+                        })
+                        .is_ok());
+                    Arc::new(MockTrigger::new(name, metrics_config_uuid))
+                },
+            );
             data_holder
         }
 
@@ -886,7 +948,8 @@ mod tests {
 
     #[test]
     fn create_conditional_trigger_success() {
-        let factory = create_factory();
+        let mut factory = create_factory();
+        let data_holder = factory.capture_conditional_trigger();
         let (trigger, parent_triggers) =
             create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
 
@@ -904,13 +967,14 @@ mod tests {
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
         assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
-        let res_trigger = res.downcast_arc::<ConditionalTrigger>().ok().unwrap();
+        let data_holder_value = data_holder.get().unwrap();
+        assert_eq!(data_holder_value.condition_type, ConditionType::AllChanges);
         // selector_expression should match the node at index 0
-        assert!(Arc::ptr_eq(&res_trigger.selector_expression, &node_0));
-        assert!(!Arc::ptr_eq(&res_trigger.selector_expression, &node_1));
-        assert_eq!(res_trigger.triggers.len(), 1);
+        assert!(Arc::ptr_eq(&data_holder_value.selector_expression, &node_0));
+        assert!(!Arc::ptr_eq(&data_holder_value.selector_expression, &node_1));
+        assert_eq!(data_holder_value.triggers.len(), 1);
         assert!(Arc::ptr_eq(
-            &res_trigger.triggers[0],
+            &data_holder_value.triggers[0],
             &(Arc::clone(&parent_triggers.unwrap()[0]) as Arc<dyn Trigger>)
         ));
     }
@@ -938,24 +1002,17 @@ mod tests {
         create_conditional_trigger_with_condition_type,
 
         |condition_type, matcher| {
-            let factory = create_factory();
+            let mut factory = create_factory();
+            let data_holder = factory.capture_conditional_trigger();
             let node = Arc::new(create_node());
 
             let (mut trigger, parent_triggers) = create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
             trigger.mut_conditional_trigger().condition_type = condition_type;
 
-            let result = factory.create_using_context_with(
-                &trigger,
-                Some(vec![node]),
-                vec![None],
-                None,
-                parent_triggers,
-            );
+            factory.create_using_context_with(&trigger, Some(vec![node]), vec![None], None, parent_triggers).unwrap();
 
-            assert_that!(
-                result.unwrap().downcast_arc::<ConditionalTrigger>().ok().unwrap().condition_type,
-                matcher
-            );
+            let data_holder_value = data_holder.get().unwrap();
+            assert_that!(data_holder_value.condition_type, matcher);
         },
 
         all_changes_default: (

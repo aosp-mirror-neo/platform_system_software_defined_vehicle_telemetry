@@ -59,14 +59,12 @@ pub(crate) enum ConditionType {
 
 pub(crate) struct ConditionalTrigger {
     base: BaseTrigger,
-
-    pub(crate) triggers: Vec<Arc<dyn Trigger>>,
-    pub(crate) selector_expression: Arc<Node>,
-    pub(crate) condition_type: ConditionType,
-
-    subscriber: TriggerSubscriber,
+    condition_type: ConditionType,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    selector_expression: Arc<Node>,
     status_reporter: Arc<dyn StatusReporter>,
+    subscriber: TriggerSubscriber,
+    triggers: Vec<Arc<dyn Trigger>>,
 }
 
 #[async_trait]
@@ -252,10 +250,12 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
 impl ConditionalTrigger {
     pub(crate) fn new(
         name: String,
-        metrics_config_uuid: String,
         condition_type: ConditionType,
-        triggers: Vec<Arc<dyn Trigger>>,
+        metrics_config_uuid: String,
         selector_expression: Arc<Node>,
+        triggers: Vec<Arc<dyn Trigger>>,
+
+        // Dependencies
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         status_reporter: Arc<dyn StatusReporter>,
     ) -> Arc<Self> {
@@ -265,12 +265,12 @@ impl ConditionalTrigger {
                 metrics_config_uuid,
                 Weak::clone(me) as Weak<dyn Activatable<_, _>>,
             ),
-            triggers,
-            selector_expression,
             condition_type,
-            subscriber: TriggerSubscriber::ConditionalTrigger { name },
             node_evaluation_context_factory,
+            selector_expression,
             status_reporter,
+            subscriber: TriggerSubscriber::ConditionalTrigger { name },
+            triggers,
         })
     }
 
@@ -389,10 +389,10 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
             condition_type,
-            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
+            CONFIG_UUID.to_owned(),
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         );
@@ -467,13 +467,13 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
             ConditionType::AllChanges,
+            CONFIG_UUID.to_owned(),
+            Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             vec![
                 Arc::<MockTrigger>::clone(&parent_trigger1),
                 Arc::<MockTrigger>::clone(&parent_trigger2),
             ],
-            Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         );
@@ -521,10 +521,10 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
             ConditionType::IsTrue,
-            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
+            CONFIG_UUID.to_owned(),
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         );
