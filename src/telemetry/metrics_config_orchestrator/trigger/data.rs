@@ -17,8 +17,7 @@ use crate::metrics_config_orchestrator::Publisher;
 
 pub(crate) struct DataTrigger {
     base: BaseTrigger,
-
-    pub(crate) publisher: Arc<dyn Publisher>,
+    publisher: Arc<dyn Publisher>,
 }
 
 #[async_trait]

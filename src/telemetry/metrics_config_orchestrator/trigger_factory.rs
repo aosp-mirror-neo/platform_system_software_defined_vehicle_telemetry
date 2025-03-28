@@ -89,6 +89,8 @@ pub(crate) enum TriggerFactoryError {
 }
 
 pub(crate) struct TriggerFactoryImpl {
+    data_trigger_new_func:
+        Box<dyn Fn(String, String, Arc<dyn Publisher>) -> Arc<dyn Trigger> + Send + Sync>,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     periodic_trigger_new_func: Box<
         dyn Fn(String, String, Duration, Arc<dyn NodeEvaluationContextFactory>) -> Arc<dyn Trigger>
@@ -121,7 +123,7 @@ impl TriggerFactory for TriggerFactoryImpl {
                     });
                 }
 
-                DataTrigger::new(
+                (self.data_trigger_new_func)(
                     trigger_name,
                     metrics_config_uuid,
                     Arc::<dyn Publisher>::clone(publisher),
@@ -227,6 +229,9 @@ impl TriggerFactoryImpl {
         status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
+            data_trigger_new_func: Box::new(|name, metrics_config_uuid, publisher| {
+                DataTrigger::new(name, metrics_config_uuid, publisher)
+            }),
             node_evaluation_context_factory,
             periodic_trigger_new_func: Box::new(
                 |name, metrics_config_uuid, interval, node_evaluation_context_factory| {
@@ -419,6 +424,10 @@ mod tests {
     const SERVICE_NAME: &str = "service_name";
     const TRIGGER_NAME: &str = "trigger";
 
+    struct DataTriggerData {
+        publisher: Arc<dyn Publisher>,
+    }
+
     struct PeriodicTriggerData {
         interval: Duration,
     }
@@ -502,6 +511,16 @@ mod tests {
     }
 
     impl TriggerFactoryImpl {
+        fn capture_data_trigger(&mut self) -> Arc<OnceLock<DataTriggerData>> {
+            let data_holder = Arc::new(OnceLock::new());
+            let data_holder_clone = Arc::clone(&data_holder);
+            self.data_trigger_new_func = Box::new(move |name, metrics_config_uuid, publisher| {
+                assert!(data_holder_clone.set(DataTriggerData { publisher }).is_ok());
+                Arc::new(MockTrigger::new(name, metrics_config_uuid))
+            });
+            data_holder
+        }
+
         fn capture_periodic_trigger(&mut self) -> Arc<OnceLock<PeriodicTriggerData>> {
             let data_holder = Arc::new(OnceLock::new());
             let data_holder_clone = Arc::clone(&data_holder);
@@ -632,7 +651,8 @@ mod tests {
 
     #[test]
     fn create_data_trigger_success() {
-        let factory = create_factory();
+        let mut factory = create_factory();
+        let data_holder = factory.capture_data_trigger();
         let trigger = create_valid_data_trigger();
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
@@ -659,8 +679,8 @@ mod tests {
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
         assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
-        let res_trigger = res.downcast_arc::<DataTrigger>().ok().unwrap();
-        assert!(Arc::ptr_eq(&res_trigger.publisher, &(publisher as Arc<dyn Publisher>)));
+        let data_holder_value = data_holder.get().unwrap();
+        assert!(Arc::ptr_eq(&data_holder_value.publisher, &(publisher as Arc<dyn Publisher>)));
     }
 
     #[test]
