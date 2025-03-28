@@ -21,8 +21,7 @@ use crate::metrics_config_orchestrator::trigger::{
 pub(crate) struct PeriodicTrigger {
     base: BaseTrigger,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
-
-    pub(crate) interval: Duration,
+    interval: Duration,
 }
 
 impl PeriodicTrigger {

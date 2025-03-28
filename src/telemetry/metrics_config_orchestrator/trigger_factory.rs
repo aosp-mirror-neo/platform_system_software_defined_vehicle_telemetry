@@ -90,6 +90,11 @@ pub(crate) enum TriggerFactoryError {
 
 pub(crate) struct TriggerFactoryImpl {
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    periodic_trigger_new_func: Box<
+        dyn Fn(String, String, Duration, Arc<dyn NodeEvaluationContextFactory>) -> Arc<dyn Trigger>
+            + Send
+            + Sync,
+    >,
     status_reporter: Arc<dyn StatusReporter>,
 }
 
@@ -122,12 +127,14 @@ impl TriggerFactory for TriggerFactoryImpl {
                     Arc::<dyn Publisher>::clone(publisher),
                 )
             }
-            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => PeriodicTrigger::new(
-                trigger_name,
-                metrics_config_uuid,
-                Self::get_periodic_interval(periodic_trigger)?,
-                Arc::clone(&self.node_evaluation_context_factory),
-            ),
+            TriggerTypeProto::PeriodicTrigger(periodic_trigger) => {
+                (self.periodic_trigger_new_func)(
+                    trigger_name,
+                    metrics_config_uuid,
+                    Self::get_periodic_interval(periodic_trigger)?,
+                    Arc::clone(&self.node_evaluation_context_factory),
+                )
+            }
             TriggerTypeProto::ConditionalTrigger(conditional_trigger) => {
                 TriggerFactoryImpl::verify_has_parent_triggers(&conditional_trigger.trigger_names)?;
 
@@ -219,7 +226,20 @@ impl TriggerFactoryImpl {
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
-        Self { node_evaluation_context_factory, status_reporter }
+        Self {
+            node_evaluation_context_factory,
+            periodic_trigger_new_func: Box::new(
+                |name, metrics_config_uuid, interval, node_evaluation_context_factory| {
+                    PeriodicTrigger::new(
+                        name,
+                        metrics_config_uuid,
+                        interval,
+                        node_evaluation_context_factory,
+                    )
+                },
+            ),
+            status_reporter,
+        }
     }
 
     fn get_edge_options(
@@ -379,6 +399,7 @@ mod tests {
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::collections::HashMap;
+    use std::sync::OnceLock;
     use std::time::Duration;
 
     use crate::metrics_config_orchestrator::publisher::service::{
@@ -386,7 +407,7 @@ mod tests {
     };
     use crate::metrics_config_orchestrator::{
         node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
-        service_adapter::mock::MockServiceAdapter,
+        service_adapter::mock::MockServiceAdapter, trigger::mock::MockTrigger,
     };
     use crate::StatusReporterImpl;
 
@@ -398,15 +419,15 @@ mod tests {
     const SERVICE_NAME: &str = "service_name";
     const TRIGGER_NAME: &str = "trigger";
 
+    struct PeriodicTriggerData {
+        interval: Duration,
+    }
+
     fn create_factory() -> TriggerFactoryImpl {
-        TriggerFactoryImpl {
-            node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new(
-                new_stub_pal(),
-            )),
-            status_reporter: Arc::new(StatusReporterImpl::new(|err| {
-                panic!("Unexpected error: {err:?}")
-            })),
-        }
+        TriggerFactoryImpl::new(
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+        )
     }
 
     fn new_trigger(name: &str) -> TriggerProto {
@@ -481,6 +502,18 @@ mod tests {
     }
 
     impl TriggerFactoryImpl {
+        fn capture_periodic_trigger(&mut self) -> Arc<OnceLock<PeriodicTriggerData>> {
+            let data_holder = Arc::new(OnceLock::new());
+            let data_holder_clone = Arc::clone(&data_holder);
+            self.periodic_trigger_new_func = Box::new(
+                move |name, metrics_config_uuid, interval, _node_evaluation_context_factory| {
+                    assert!(data_holder_clone.set(PeriodicTriggerData { interval }).is_ok());
+                    Arc::new(MockTrigger::new(name, metrics_config_uuid))
+                },
+            );
+            data_holder
+        }
+
         // The following functions create a context with passed data and use it to call `create`
         // or `validate`. This is needed because context structs contain borrows and it's impossible
         // to have a function that creates and returns it - it can only be used in the function
@@ -632,15 +665,16 @@ mod tests {
 
     #[test]
     fn create_periodic_trigger_success() {
-        let factory = create_factory();
+        let mut factory = create_factory();
+        let data_holder = factory.capture_periodic_trigger();
         let trigger = create_valid_periodic_trigger();
 
         let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
         assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
-        let res_trigger = res.downcast_arc::<PeriodicTrigger>().ok().unwrap();
-        assert_eq!(res_trigger.interval, INTERVAL);
+        let data_holder_value = data_holder.get().unwrap();
+        assert_eq!(data_holder_value.interval, INTERVAL);
     }
 
     #[test]
