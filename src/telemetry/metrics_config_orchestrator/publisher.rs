@@ -21,7 +21,6 @@ pub(crate) mod mock;
 type CallbackFn = Box<dyn FnMut(Arc<NodeEvaluationContext>) + Send + Sync>;
 
 #[async_trait]
-#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
 pub(crate) trait Publisher: Send + Sync {
     fn get_name(&self) -> &str;
 
@@ -39,6 +38,3 @@ pub(crate) trait Publisher: Send + Sync {
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn);
     async fn unsubscribe(&self, data_trigger_name: &str);
 }
-
-#[cfg(test)]
-downcast_rs::impl_downcast!(sync Publisher);
