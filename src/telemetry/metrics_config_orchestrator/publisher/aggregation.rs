@@ -28,12 +28,11 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 };
 
 pub(crate) struct AggregationPublisher {
-    pub(crate) reset_on_get: bool,
-    pub(crate) triggers: Vec<Arc<dyn Trigger>>,
-
     base: BasePublisher,
     message_builder: Arc<dyn MessageBuilder>,
+    reset_on_get: bool,
     state: AsyncMutex<AggregationPublisherState>,
+    triggers: Vec<Arc<dyn Trigger>>,
     trigger_subscriber: TriggerSubscriber,
     status_reporter: Arc<dyn StatusReporter>,
 }
@@ -228,21 +227,22 @@ impl Publisher for AggregationPublisher {
 impl AggregationPublisher {
     pub(crate) fn new(
         name: String,
-        metrics_config_uuid: String,
         message_builder: Arc<dyn MessageBuilder>,
+        metrics_config_uuid: String,
         reset_on_get: bool,
         triggers: Vec<Arc<dyn Trigger>>,
+
+        // Dependencies
         status_reporter: Arc<dyn StatusReporter>,
     ) -> Self {
         Self {
             base: BasePublisher::new(name.clone(), metrics_config_uuid),
-            state: AggregationPublisherState::Inactive.into(),
-
             message_builder,
             reset_on_get,
+            state: AggregationPublisherState::Inactive.into(),
+            status_reporter,
             trigger_subscriber: TriggerSubscriber::AggregationPublisher { name },
             triggers,
-            status_reporter,
         }
     }
 
@@ -322,8 +322,8 @@ mod tests {
         let message_builder = Arc::new(MockMessageBuilder::new());
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
+            Arc::<MockMessageBuilder>::clone(&message_builder),
             CONFIG_UUID.to_owned(),
-            Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
             false,
             triggers,
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
@@ -367,8 +367,8 @@ mod tests {
         let message_builder = Arc::new(MockMessageBuilder::new());
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
             Arc::<MockMessageBuilder>::clone(&message_builder),
+            CONFIG_UUID.to_owned(),
             true,
             vec![Arc::<MockTrigger>::clone(&trigger)],
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
@@ -587,8 +587,8 @@ mod tests {
         let (tx, rx) = oneshot_callback();
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
             Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
+            CONFIG_UUID.to_owned(),
             false,
             vec![Arc::<MockTrigger>::clone(&trigger)],
             Arc::new(StatusReporterImpl::new(tx)),
