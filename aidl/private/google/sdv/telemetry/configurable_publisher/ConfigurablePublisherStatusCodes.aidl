@@ -46,6 +46,22 @@ enum ConfigurablePublisherStatusCodes {
      */
     REGISTER_PUBLISHER_FAILED_SERVICE_ALREADY_REGISTERED = 404,
 
+    /*
+     * Create Subscription Failed for the Configurable Publisher
+     */
+    CREATE_SUBSCRIPTION_FAILED = 405,
+
+    /*
+     * Get Latest Message Failed for the Configurable Publisher
+     */
+    GET_LATEST_MESSAGE_FAILED = 406,
+
+    /**
+     * Arbitrary Error used as a placeholder for errors not yet defined
+     * for IConfigurablePublisher
+     */
+    UNKNOWN_ERROR = 497,
+
     /**
      * Arbitrary Error used as a placeholder for errors not yet defined
      * for ISubscriber
