@@ -2,7 +2,7 @@
 
 use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::{Operator, RelationalOperator};
-use std::sync::Arc;
+use std::{fmt::Debug, sync::Arc};
 
 use crate::metrics_config_orchestrator::message_builder::value_aggregator::AggregationError;
 
@@ -45,35 +45,41 @@ impl NodeValueExtension for NodeValue {
     }
 
     fn push(&mut self, value: &NodeValue, max_length: Option<u32>) -> Result<(), AggregationError> {
-        // debug string is created now because a mutable borrow of self occurs later
-        let list_debug_string = format!("{:?}", self);
-        let err_provider = || AggregationError::VectorAppendTypeMismatch {
-            list: list_debug_string.clone(),
-            value: format!("{:?}", value),
-        };
+        // Creates error provider function to format values only when it's necessary to create an error.
+        fn create_err_provider<'a, T: Debug>(
+            v: &'a Vec<T>,
+            value: &'a NodeValue,
+        ) -> Box<dyn FnOnce() -> AggregationError + 'a> {
+            let err_provider = move || AggregationError::VectorAppendTypeMismatch {
+                list: format!("{:?}", v),
+                value: format!("{:?}", value),
+            };
+            Box::new(err_provider)
+        }
+
         match self {
             NodeValue::BoolList(v) => {
-                v.push(value.get_bool().ok_or_else(err_provider)?);
+                v.push(value.get_bool().ok_or_else(create_err_provider(v, value))?);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::Int32List(v) => {
-                v.push(value.get_int().ok_or_else(err_provider)? as i32);
+                v.push(value.get_int().ok_or_else(create_err_provider(v, value))? as i32);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::Int64List(v) => {
-                v.push(value.get_int().ok_or_else(err_provider)?);
+                v.push(value.get_int().ok_or_else(create_err_provider(v, value))?);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::FloatList(v) => {
-                v.push(value.get_double().ok_or_else(err_provider)? as f32);
+                v.push(value.get_double().ok_or_else(create_err_provider(v, value))? as f32);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::DoubleList(v) => {
-                v.push(value.get_double().ok_or_else(err_provider)?);
+                v.push(value.get_double().ok_or_else(create_err_provider(v, value))?);
                 pop_front_to_size_n(v, max_length);
             }
             NodeValue::MessageList(v) => {
-                v.push(Arc::clone(value.get_message().ok_or_else(err_provider)?));
+                v.push(Arc::clone(value.get_message().ok_or_else(create_err_provider(v, value))?));
                 pop_front_to_size_n(v, max_length);
             }
             _ => panic!("push() should never be called on non-list: {:?}", self),
