@@ -33,7 +33,7 @@ rust_bindgen {
 }
 
 rust_test {
-    name: "libsdv_telemetry_time_bindgen_tests",
+    name: "sdv_mt_telemetry_unit_time_bindgen_test",
     defaults: ["sdv_telemetry@rust_defaults"],
     crate_name: "sdv_telemetry_time_bindgen_tests",
     srcs: [
@@ -80,7 +80,7 @@ rust_library {
 }
 
 rust_test {
-    name: "libsdv_telemetry_time_wrapper_tests",
+    name: "sdv_mt_telemetry_unit_time_wrapper_test",
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper_tests",
     test_options: {

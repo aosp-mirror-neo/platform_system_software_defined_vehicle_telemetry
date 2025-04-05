@@ -85,7 +85,7 @@ rust_protobuf {
 }
 
 rust_test {
-    name: "libsdv_telemetry_simulator_unit_tests",
+    name: "sdv_mt_telemetry_unit_simulator_test",
     defaults: [
         "telemetry_simulator@rust_defaults",
     ],

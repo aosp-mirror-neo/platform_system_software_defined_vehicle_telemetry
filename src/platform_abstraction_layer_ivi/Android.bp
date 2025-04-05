@@ -28,7 +28,7 @@ rust_library {
 }
 
 rust_test {
-    name: "libsdv_telemetry_platform_abstraction_layer_ivi_unit_tests",
+    name: "sdv_mt_telemetry_unit_platform_abstraction_layer_ivi_test",
     defaults: ["libsdv_telemetry_platform_abstraction_layer_ivi_defaults"],
     crate_name: "sdv_telemetry_platform_abstraction_layer_ivi_unit_tests",
     test_options: {
