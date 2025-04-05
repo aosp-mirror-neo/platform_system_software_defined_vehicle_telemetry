@@ -48,9 +48,11 @@ impl ValueAggregator for VectorAggregator {
 mod tests {
     use super::*;
 
-    use protobuf::MessageDyn;
-    use sdv_telemetry_expr::mock::TEST_MESSAGE;
+    use sdv_telemetry_expr::dynamic_message::DynamicMessage;
+    use sdv_telemetry_test_utils::TEST_MESSAGE;
     use std::sync::Arc;
+
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 
     #[test]
     fn compute_with_int_ok() {
@@ -136,7 +138,8 @@ mod tests {
 
     #[test]
     fn compute_with_message_value_ok() {
-        let message = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+        let message = Arc::new(ProtobufDynamicMessage::new(Arc::new(TEST_MESSAGE.clone())))
+            as Arc<dyn DynamicMessage>;
         let mut aggregator = VectorAggregator::new(None);
 
         // compute 5 times to see the vector is building up
@@ -154,7 +157,8 @@ mod tests {
     #[test]
     fn compute_with_message_value_and_limited_length_ok() {
         let max_len: usize = 3;
-        let message = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+        let message = Arc::new(ProtobufDynamicMessage::new(Arc::new(TEST_MESSAGE.clone())))
+            as Arc<dyn DynamicMessage>;
         let mut aggregator = VectorAggregator::new(Some(max_len as u32));
 
         // compute 5 times and verify the output never exceeds max_len

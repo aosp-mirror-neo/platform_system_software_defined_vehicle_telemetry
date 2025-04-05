@@ -5,6 +5,8 @@ use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use std::sync::Arc;
 
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
+
 pub trait NodeEvaluationContextFactory: Send + Sync {
     fn create(&self) -> NodeEvaluationContext;
 
@@ -32,7 +34,7 @@ impl NodeEvaluationContextFactory for NodeEvaluationContextFactoryImpl {
         NodeEvaluationContext::with_publisher_message(
             self.pal.get_resumed_at(),
             publisher_name,
-            publisher_message,
+            Arc::new(ProtobufDynamicMessage::new(publisher_message)),
         )
     }
 }

@@ -16,14 +16,13 @@ rust_defaults {
         "libdashmap",
         "libdowncast_rs",
         "libfutures",
-        "libparking_lot",
+        "liblog_rust",
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_service_publisher_accessor",
         "libsdv_telemetry_time_wrapper",
         "libsdv_telemetry_utils",
         "libthiserror",
-        "libtokio",
         // keep-sorted end
     ],
     ld_flags: ["-Wl,--no-as-needed"],
@@ -46,6 +45,7 @@ rust_library {
     rustlibs: [
         // keep-sorted start
         "liblazy_static",
+        "libparking_lot",
         "libsdv_telemetry_test_proto",
         // keep-sorted end
     ],
@@ -58,8 +58,10 @@ rust_test {
         // keep-sorted start
         "libgoogletest_rust",
         "liblazy_static",
+        "libparking_lot",
         "libsdv_telemetry_test_proto",
         "libsdv_telemetry_test_utils",
+        "libtokio",
         // keep-sorted end
     ],
     test_suites: [

@@ -1,11 +1,11 @@
 // Copyright 2023 Google LLC
 
-use protobuf::MessageDyn;
-use sdv_telemetry_expr::node_error::MessageProviderError;
 use sdv_telemetry_expr::node_factory::MessageProvider;
+use sdv_telemetry_expr::{dynamic_message::DynamicMessage, node_error::MessageProviderError};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, OnceLock};
 
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 use crate::metrics_config_orchestrator::MetricsConfig;
 
 pub(super) struct MessageProviderImpl {
@@ -16,7 +16,7 @@ impl MessageProvider for MessageProviderImpl {
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError> {
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, MessageProviderError> {
         self.metrics_config
             .get()
             .expect("Metrics Config should be set")
@@ -24,7 +24,17 @@ impl MessageProvider for MessageProviderImpl {
             .get(publisher_name)
             .map_or_else(
                 move || Err(MessageProviderError::InvalidPublisherName).into(),
-                move |publisher| Arc::clone(publisher).get_latest_message().err_into(),
+                move |publisher| {
+                    Arc::clone(publisher)
+                        .get_latest_message()
+                        .map_ok(|maybe_msg| {
+                            maybe_msg.map(|msg| {
+                                Arc::new(ProtobufDynamicMessage::new(msg))
+                                    as Arc<dyn DynamicMessage>
+                            })
+                        })
+                        .err_into()
+                },
             )
     }
 }
@@ -85,7 +95,12 @@ mod tests {
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
         let message_provider = create_message_provider(metrics_config);
 
-        let res = message_provider.get_message(PUBLISHER_NAME).unwrap_sync().unwrap().unwrap();
+        let res = message_provider
+            .get_message(PUBLISHER_NAME)
+            .unwrap_sync()
+            .unwrap()
+            .unwrap()
+            .to_protobuf();
 
         assert!(Arc::ptr_eq(&res, &msg), "Expected {res:?} to equal {msg:?}");
     }

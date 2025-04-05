@@ -4,9 +4,11 @@
 
 mod msg_dyn_matcher;
 
+use lazy_static::lazy_static;
 use log::trace;
 use parking_lot::Mutex;
 use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use std::fmt::Debug;
 use std::future::Future;
 use tokio::sync::oneshot;
@@ -14,6 +16,38 @@ use tokio::sync::oneshot;
 pub use msg_dyn_matcher::msg_dyn_eq;
 pub use sdv_telemetry_test_utils_macros::parameterized_test;
 pub use sdv_telemetry_test_utils_macros::timeout;
+
+lazy_static! {
+    /// An instance of TestMessage filled with test data.
+    pub static ref TEST_MESSAGE: TestMessage = {
+        let mut test_message = TestMessage::new();
+        // initialize scalar (optional) fields
+        test_message.bool_field = true;
+        test_message.int_field = 80;
+        test_message.float_field = 100.0;
+        test_message.string_field = "Hello world".to_string();
+        test_message.enum_field = TestEnum::SOME.into();
+        test_message.bytes_field = "Hello world".as_bytes().to_vec();
+
+        // initialize nested field
+        let mut test_nested_message = TestNestedMessage::new();
+        test_nested_message.bool_field = true;
+        test_nested_message.repeated_i32s = vec![1, 2];
+        test_message.message_field = protobuf::MessageField::some(test_nested_message.clone());
+
+        // initialize repeated fields
+        test_message.repeated_bools = vec![true, true, false, true];
+        test_message.repeated_i64s = vec![3, 4, 5];
+        test_message.repeated_doubles = vec![
+            std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E];
+        test_message.repeated_enums = vec![
+            TestEnum::SOME.into(), TestEnum::SOME.into(), TestEnum::NONE.into()];
+        test_message.repeated_messages = vec![
+            test_nested_message.clone(), test_nested_message];
+
+        test_message
+    };
+}
 
 /// Generate a unique Data Tunnel topic name for testing.
 ///

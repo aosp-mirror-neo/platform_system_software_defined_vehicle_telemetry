@@ -5,12 +5,11 @@
 use protobuf::reflect::{ReflectRepeatedMut, ReflectValueBox, RuntimeType as ProtobufRuntimeType};
 use protobuf::well_known_types::any::Any;
 use protobuf::{MessageDyn, MessageFull};
+use sdv_telemetry_expr::{node_error::NodeEvaluationError, node_value::NodeValue};
 use std::sync::Arc;
 
-use crate::{node_error::NodeEvaluationError, node_value::NodeValue};
-
 /// Implementing type will be able to convert self into a ReflectValueBox.
-pub trait ToReflectValueBox {
+pub(super) trait ToReflectValueBox {
     /// This method will attempt to convert self into a ReflectValueBox of the
     /// specified protobuf type, but if self is not compatible to the specified type,
     /// an error will be returned.
@@ -21,17 +20,12 @@ pub trait ToReflectValueBox {
 }
 
 /// Extensions for ReflectRepeatedMut.
-pub trait ReflectRepeatedMutExt {
+pub(super) trait ReflectRepeatedMutExt {
     /// If NodeValue holds a list, it will push all the contents of the list into self.
     fn push_node_value_content(
         &mut self,
         node_value: &NodeValue,
     ) -> Result<(), NodeEvaluationError>;
-
-    /// Convert every vector element into a ReflectValueBox and pushes it to self.
-    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeEvaluationError>
-    where
-        T: ToReflectValueBox;
 }
 
 impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
@@ -40,27 +34,33 @@ impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
         node_value: &NodeValue,
     ) -> Result<(), NodeEvaluationError> {
         match node_value {
-            NodeValue::BoolList(v) => self.push_vec_content(v),
-            NodeValue::Int32List(v) => self.push_vec_content(v),
-            NodeValue::Int64List(v) => self.push_vec_content(v),
-            NodeValue::FloatList(v) => self.push_vec_content(v),
-            NodeValue::DoubleList(v) => self.push_vec_content(v),
-            NodeValue::MessageList(v) => self.push_vec_content(v),
+            NodeValue::BoolList(v) => push_vec_content(self, v),
+            NodeValue::Int32List(v) => push_vec_content(self, v),
+            NodeValue::Int64List(v) => push_vec_content(self, v),
+            NodeValue::FloatList(v) => push_vec_content(self, v),
+            NodeValue::DoubleList(v) => push_vec_content(self, v),
+            NodeValue::MessageList(v) => {
+                push_vec_content(self, &v.iter().map(|msg| msg.to_protobuf()).collect::<Vec<_>>())
+            }
             _ => Err(NodeEvaluationError::RepeatedFieldWrongAssignment {
                 value: format!("{:?}", node_value),
             }),
         }
     }
+}
 
-    fn push_vec_content<T>(&mut self, list: &[T]) -> Result<(), NodeEvaluationError>
-    where
-        T: ToReflectValueBox,
-    {
-        for value in list.iter() {
-            self.push(value.to_reflect_value_box(&self.element_type())?);
-        }
-        Ok(())
+/// Convert every vector element into a ReflectValueBox and pushes it to repeated.
+fn push_vec_content<T>(
+    repeated: &mut ReflectRepeatedMut<'_>,
+    list: &[T],
+) -> Result<(), NodeEvaluationError>
+where
+    T: ToReflectValueBox,
+{
+    for value in list.iter() {
+        repeated.push(value.to_reflect_value_box(&repeated.element_type())?);
     }
+    Ok(())
 }
 
 /// A NodeValue can be converted into an optional/singular protobuf reflection value. For NodeValues
@@ -87,7 +87,7 @@ impl ToReflectValueBox for NodeValue {
             Self::Int64(value) => value.to_reflect_value_box(protobuf_type),
             Self::Float(value) => value.to_reflect_value_box(protobuf_type),
             Self::Double(value) => value.to_reflect_value_box(protobuf_type),
-            Self::Message(value) => value.to_reflect_value_box(protobuf_type),
+            Self::Message(value) => value.to_protobuf().to_reflect_value_box(protobuf_type),
             Self::String(value) => value.as_str().to_reflect_value_box(protobuf_type),
             Self::ByteList(value) => value.as_slice().to_reflect_value_box(protobuf_type),
         }
@@ -267,6 +267,8 @@ mod tests {
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
     use sdv_telemetry_test_utils::parameterized_test;
 
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
+
     fn create_int32_value() -> Int32Value {
         Int32Value { value: 42, ..Default::default() }
     }
@@ -314,8 +316,8 @@ mod tests {
         msg_to_any: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
         msg_to_i32: (&create_int32_value_arc(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        msg_node_value_to_msg: (&NodeValue::Message(create_int32_value_arc()), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
-        msg_node_value_to_any: (&NodeValue::Message(create_int32_value_arc()), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
+        msg_node_value_to_msg: (&NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(create_int32_value_arc()))), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
+        msg_node_value_to_any: (&NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(create_int32_value_arc()))), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
 
         string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
         string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
@@ -367,7 +369,7 @@ mod tests {
         double_list_to_float_list: ("repeated_floats", &NodeValue::DoubleList(vec![1.0, 2.0]), vec![ReflectValueBox::F32(1.0), ReflectValueBox::F32(2.0)]),
         double_list_to_double_list: ("repeated_doubles", &NodeValue::DoubleList(vec![1.0, 2.0]), vec![ReflectValueBox::F64(1.0), ReflectValueBox::F64(2.0)]),
 
-        message_list_to_message_list: ("repeated_empty", &NodeValue::MessageList(vec![Arc::new(Empty::default())]), vec![ReflectValueBox::Message(Empty::descriptor().new_instance())]),
-        message_list_to_any_list: ("repeated_any", &NodeValue::MessageList(vec![Arc::new(Empty::default())]), vec![ReflectValueBox::Message(Box::new(Any::pack(Empty::default_instance()).unwrap()))]),
+        message_list_to_message_list: ("repeated_empty", &NodeValue::MessageList(vec![Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default())))]), vec![ReflectValueBox::Message(Empty::descriptor().new_instance())]),
+        message_list_to_any_list: ("repeated_any", &NodeValue::MessageList(vec![Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default())))]), vec![ReflectValueBox::Message(Box::new(Any::pack(Empty::default_instance()).unwrap()))]),
     );
 }

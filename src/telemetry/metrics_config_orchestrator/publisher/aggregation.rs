@@ -19,6 +19,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 use crate::status_reporter::StatusReporter;
 
@@ -280,10 +281,12 @@ impl AggregationPublisher {
         }
 
         let message = message.expect("Message should be Some if no builder errors occurred").into();
+        let context = context.to_child_context(
+            self.get_name().to_owned(),
+            Arc::new(ProtobufDynamicMessage::new(Arc::clone(&message))),
+        );
 
-        let context =
-            context.to_child_context(self.get_name().to_owned(), Arc::clone(&message)).into();
-        self.base.set_new_message(message, &context, callback_map);
+        self.base.set_new_message(message, &context.into(), callback_map);
     }
 }
 
@@ -296,12 +299,11 @@ mod tests {
         TelemetryServiceStatus::TelemetryServiceStatus,
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
-    use googletest::assert_that;
-    use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::wrappers::Int32Value;
+    use sdv_telemetry_expr::dynamic_message::DynamicMessage;
     use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
+    use sdv_telemetry_test_utils::oneshot_callback;
     use std::{future, sync::Arc};
 
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
@@ -460,8 +462,10 @@ mod tests {
             .await;
         trigger.fire().await;
 
-        let messages =
-            [rx.await, Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap()];
+        let messages = [
+            rx.await.to_protobuf(),
+            Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap(),
+        ];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
@@ -479,7 +483,10 @@ mod tests {
         ));
         let (publisher, _) =
             create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
-        let msg = Int32Value { value: 42, ..Default::default() };
+        let msg = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 42,
+            ..Default::default()
+        }))) as Arc<dyn DynamicMessage>;
 
         let (tx, rx) = oneshot_callback();
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(tx)).await;
@@ -487,7 +494,7 @@ mod tests {
         let trigger_context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
             PUBLISHER_NAME_2.to_owned(),
-            Arc::new(msg.clone()),
+            Arc::clone(&msg),
         ));
         trigger.fire_with_context(Arc::clone(&trigger_context)).await;
 
@@ -497,7 +504,7 @@ mod tests {
         let context_msg = context
             .get_message(PUBLISHER_NAME_2)
             .expect("Publisher message should be present in the context");
-        assert_that!(context_msg, msg_dyn_eq(&msg, &ReflectEqMode::default()));
+        assert!(Arc::ptr_eq(context_msg, &msg), "Unexpected message: {context_msg:?}");
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -533,7 +540,10 @@ mod tests {
         );
         trigger.fire().await;
 
-        let messages = [rx.await, publisher.get_latest_message().unwrap_sync().unwrap().unwrap()];
+        let messages = [
+            rx.await.to_protobuf(),
+            publisher.get_latest_message().unwrap_sync().unwrap().unwrap(),
+        ];
         for message in messages {
             let test_message =
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();

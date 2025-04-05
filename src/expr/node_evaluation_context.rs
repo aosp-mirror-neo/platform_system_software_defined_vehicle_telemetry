@@ -1,6 +1,5 @@
 // Copyright 2024 Google LLC
 
-use protobuf::MessageDyn;
 use sdv_telemetry_time_wrapper::Microseconds;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
@@ -8,6 +7,8 @@ use std::sync::Arc;
 
 #[cfg(any(test, feature = "test_utils"))]
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
+
+use crate::dynamic_message::DynamicMessage;
 
 #[cfg(any(test, feature = "test_utils"))]
 static NEXT_NODE_EVALUATION_CONTEXT_ID: SequenceNumber = SequenceNumber::new();
@@ -18,7 +19,7 @@ pub struct NodeEvaluationContext {
     root_id: SequenceNumberType,
 
     // Map of messages keyed by publisher name.
-    messages: HashMap<String, Arc<dyn MessageDyn>>,
+    messages: HashMap<String, Arc<dyn DynamicMessage>>,
 
     // By only querying the time once and putting it into the context, we ensure that it remains
     // constant while nodes are being evaluated, even if multiple nodes as part of the same
@@ -51,7 +52,7 @@ impl NodeEvaluationContext {
     pub fn with_publisher_message(
         resumed_at: Option<Microseconds>,
         publisher_name: String,
-        publisher_message: Arc<dyn MessageDyn>,
+        publisher_message: Arc<dyn DynamicMessage>,
     ) -> Self {
         let mut res = Self::new(resumed_at);
         res.messages
@@ -65,7 +66,7 @@ impl NodeEvaluationContext {
         self.root_id
     }
 
-    pub fn get_message(&self, publisher_name: &str) -> Option<&Arc<dyn MessageDyn>> {
+    pub fn get_message(&self, publisher_name: &str) -> Option<&Arc<dyn DynamicMessage>> {
         self.messages.get(publisher_name)
     }
 
@@ -73,7 +74,7 @@ impl NodeEvaluationContext {
     pub fn to_child_context(
         &self,
         publisher_name: String,
-        publisher_message: Arc<dyn MessageDyn>,
+        publisher_message: Arc<dyn DynamicMessage>,
     ) -> Self {
         let mut messages = self.messages.clone();
         messages

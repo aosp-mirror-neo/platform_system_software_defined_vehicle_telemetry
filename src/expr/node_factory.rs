@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use protobuf::reflect::MessageDescriptor;
 use sdv_telemetry_proto_rust::expression::{
     function_leaf_node::Function_type as FunctionLeafNodeTypeProto,
     get_current_timestamp_function::TimeSource as TimeSourceProto,
@@ -10,6 +10,7 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
+use crate::dynamic_message::DynamicMessage;
 use crate::node::{FunctionType, Node, TimeSource};
 use crate::node_error::{
     DescriptorProviderError, FunctionLeafNodeArgumentError,
@@ -65,7 +66,7 @@ pub trait MessageProvider: Send + Sync {
     fn get_message(
         &self,
         publisher_name: &str,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, MessageProviderError>;
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, MessageProviderError>;
 }
 
 /// Provides descriptors for published message types.

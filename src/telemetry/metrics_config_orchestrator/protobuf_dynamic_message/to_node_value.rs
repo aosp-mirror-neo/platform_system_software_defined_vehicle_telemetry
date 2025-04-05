@@ -1,28 +1,15 @@
-// Copyright 2023 Google LLC
+// Copyright 2025 Google LLC
 
-//! Helper functions for converting protobuf reflection types into NodeValue.
-
-use protobuf::{
-    reflect::{
-        FieldDescriptor, MessageDescriptor, ReflectFieldRef, ReflectRepeatedRef, ReflectValueRef,
-        RuntimeType as ProtobufRuntimeType,
-    },
-    MessageDyn,
-};
+use protobuf::reflect::{ReflectRepeatedRef, ReflectValueRef, RuntimeType as ProtobufRuntimeType};
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
+use sdv_telemetry_expr::node_error::NodeEvaluationError;
+use sdv_telemetry_expr::node_value::NodeValue;
 use std::sync::Arc;
 
-use crate::{node_error::NodeEvaluationError, node_value::NodeValue};
-
-pub trait MessageDescriptorExt {
-    fn get_field_value(
-        &self,
-        field_descriptor: &FieldDescriptor,
-        msg: &dyn MessageDyn,
-    ) -> Result<NodeValue, NodeEvaluationError>;
-}
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 
 /// Implementing type will be able to convert itself into a NodeValue.
-trait ToNodeValue {
+pub(super) trait ToNodeValue {
     fn to_node_value(&self) -> Result<NodeValue, NodeEvaluationError>;
 }
 
@@ -35,42 +22,6 @@ trait ReflectRepeatedRefExt {
         &self,
         transform_func: impl FnMut(ReflectValueRef) -> Result<T, NodeEvaluationError>,
     ) -> Result<Vec<T>, NodeEvaluationError>;
-}
-
-impl MessageDescriptorExt for MessageDescriptor {
-    fn get_field_value(
-        &self,
-        field_descriptor: &FieldDescriptor,
-        msg: &dyn MessageDyn,
-    ) -> Result<NodeValue, NodeEvaluationError> {
-        match field_descriptor.get_reflect(msg) {
-            // `optional` or singular protobuf field
-            ReflectFieldRef::Optional(singular_field) => singular_field.value().map_or_else(
-                move || {
-                    // "None" has different meanings based on whether a field is explicitly marked
-                    // as optional
-                    let field_full_name = field_descriptor.full_name();
-                    // proto3 optional fields will have a "synthetic oneof descriptor"
-                    let proto3_optional = self.all_oneofs().any(|oneof| {
-                        oneof.fields().any(|field| field.full_name() == field_full_name)
-                    });
-                    // proto3 optional fields track field presence, so "None" means field not set
-                    if proto3_optional {
-                        Ok(NodeValue::None)
-                    } else {
-                        // otherwise rust protobuf encodes default value as "None", so the field
-                        // value should actually be the default (either some sort of zero or None)
-                        get_default_node_value_from_type(&field_descriptor.singular_runtime_type())
-                    }
-                },
-                |field_value| field_value.to_node_value(),
-            ),
-            // `repeated` protobuf field
-            ReflectFieldRef::Repeated(repeated_field) => repeated_field.to_node_value(),
-            // map field
-            _ => Err(NodeEvaluationError::UnsupportedSingularFieldType),
-        }
-    }
 }
 
 /// An optional protobuf field value can be converted into a NodeValue.
@@ -87,7 +38,9 @@ impl ToNodeValue for ReflectValueRef<'_> {
             ReflectValueRef::Bool(v) => NodeValue::Bool(*v),
             ReflectValueRef::String(v) => NodeValue::String((*v).to_owned()),
             ReflectValueRef::Enum(_, v) => NodeValue::Int32(*v),
-            ReflectValueRef::Message(v) => NodeValue::Message(Arc::from((*v).clone_box())),
+            ReflectValueRef::Message(v) => {
+                NodeValue::Message(Arc::new(ProtobufDynamicMessage::new((*v).clone_box().into())))
+            }
             ReflectValueRef::Bytes(v) => NodeValue::ByteList((*v).to_vec()),
         })
     }
@@ -176,7 +129,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
             ProtobufRuntimeType::Message(_) => NodeValue::MessageList(self.to_vec(
                 // unwraps a protobuf message from a value reflection or error
                 |val: ReflectValueRef<'_>| {
-                    Ok(Arc::from(
+                    Ok(Arc::new(ProtobufDynamicMessage::new(
                         val.to_message()
                             .ok_or(NodeEvaluationError::TypeMismatch {
                                 msg: format!(
@@ -184,8 +137,9 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                                     self
                                 ),
                             })?
-                            .clone_box(),
-                    ))
+                            .clone_box()
+                            .into(),
+                    )) as Arc<dyn DynamicMessage>)
                 },
             )?),
             _ => {
@@ -203,22 +157,4 @@ impl ReflectRepeatedRefExt for ReflectRepeatedRef<'_> {
         // apply `transform_func` to each element in the repeated_field
         self.into_iter().map(transform_func).collect()
     }
-}
-
-fn get_default_node_value_from_type(
-    runtime_type: &ProtobufRuntimeType,
-) -> Result<NodeValue, NodeEvaluationError> {
-    Ok(match runtime_type {
-        ProtobufRuntimeType::I32 => NodeValue::Int32(0),
-        ProtobufRuntimeType::I64 => NodeValue::Int64(0),
-        ProtobufRuntimeType::U32 => NodeValue::Int64(0),
-        ProtobufRuntimeType::U64 => NodeValue::Int64(0),
-        ProtobufRuntimeType::F32 => NodeValue::Float(0.0),
-        ProtobufRuntimeType::F64 => NodeValue::Double(0.0),
-        ProtobufRuntimeType::Bool => NodeValue::Bool(false),
-        ProtobufRuntimeType::String => NodeValue::String(String::default()),
-        ProtobufRuntimeType::Enum(_) => NodeValue::Int32(0),
-        ProtobufRuntimeType::Message(_) => NodeValue::None,
-        ProtobufRuntimeType::VecU8 => NodeValue::ByteList(vec![]),
-    })
 }

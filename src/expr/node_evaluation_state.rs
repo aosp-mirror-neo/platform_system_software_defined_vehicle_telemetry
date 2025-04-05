@@ -3,10 +3,10 @@
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
 use futures::FutureExt;
-use protobuf::MessageDyn;
 use sdv_telemetry_utils::{operation_result::OperationResult, value_holder::ValueHolder};
 use std::sync::Arc;
 
+use crate::dynamic_message::DynamicMessage;
 use crate::node_error::MessageProviderError;
 use crate::node_evaluation_context::NodeEvaluationContext;
 
@@ -14,11 +14,11 @@ use crate::node_evaluation_context::NodeEvaluationContext;
 /// in different branches.
 pub struct NodeEvaluationState {
     context: Arc<NodeEvaluationContext>,
-    sync_message_cache: DashMap<String, Option<Arc<dyn MessageDyn>>>,
+    sync_message_cache: DashMap<String, Option<Arc<dyn DynamicMessage>>>,
     async_message_cache: DashMap<
         String,
         future::Shared<
-            BoxFuture<'static, Result<Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>>>,
+            BoxFuture<'static, Result<Option<Arc<dyn DynamicMessage>>, Arc<MessageProviderError>>>,
         >,
     >,
 }
@@ -43,10 +43,10 @@ impl NodeEvaluationState {
             &str,
         ) -> OperationResult<
             'static,
-            Option<Arc<dyn MessageDyn>>,
+            Option<Arc<dyn DynamicMessage>>,
             MessageProviderError,
         >,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, Arc<MessageProviderError>> {
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, Arc<MessageProviderError>> {
         if let Some(msg) = self.context.get_message(publisher_name) {
             return Ok(Some(Arc::clone(msg))).into();
         }
@@ -83,14 +83,17 @@ impl NodeEvaluationState {
 mod tests {
     use super::*;
 
-    use protobuf::well_known_types::wrappers::Int32Value;
     use std::future;
 
+    use crate::mock::MockDynamicMessage;
+
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
+    const TEST_MESSAGE_NAME: &str = "TestMessage";
 
     #[test]
     fn get_or_add_sync_message_from_context_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
+            as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
             KNOWN_PUBLISHER_NAME.to_owned(),
@@ -102,12 +105,13 @@ mod tests {
             state.get_or_add(KNOWN_PUBLISHER_NAME, |_| panic!("Should not call message factory"));
         let res_msg = result.unwrap_sync().unwrap().unwrap();
 
-        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg:?}");
     }
 
     #[test]
     fn get_or_add_sync_message_from_cache_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
+            as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
         state.sync_message_cache.insert(KNOWN_PUBLISHER_NAME.to_owned(), Some(Arc::clone(&msg)));
@@ -116,12 +120,13 @@ mod tests {
             state.get_or_add(KNOWN_PUBLISHER_NAME, |_| panic!("Should not call message factory"));
         let res_msg = result.unwrap_sync().unwrap().unwrap();
 
-        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg:?}");
     }
 
     #[test]
     fn get_or_add_sync_message_from_message_factory_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
+            as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
 
@@ -129,10 +134,10 @@ mod tests {
         let res_msg = result.unwrap_sync().unwrap().unwrap();
         let cached_value = state.sync_message_cache.get(KNOWN_PUBLISHER_NAME).unwrap();
 
-        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg:?}");
         assert!(
             Arc::ptr_eq(cached_value.as_ref().unwrap(), &msg),
-            "Unexpected message: {}",
+            "Unexpected message: {:?}",
             cached_value.as_ref().unwrap()
         )
     }
@@ -158,7 +163,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_or_add_async_message_from_cache_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
+            as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
         let msg_clone = Arc::clone(&msg);
@@ -169,13 +175,14 @@ mod tests {
             state.get_or_add(KNOWN_PUBLISHER_NAME, |_| panic!("Should not call message factory"));
         let res_msg = result.unwrap_async().await.unwrap().unwrap();
 
-        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg:?}");
     }
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_or_add_async_message_from_message_factory_success() {
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
+            as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
 
@@ -187,8 +194,8 @@ mod tests {
         let cached_future = state.async_message_cache.get(KNOWN_PUBLISHER_NAME).unwrap();
         let cached_msg = cached_future.value().clone().await.unwrap().unwrap();
 
-        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg}");
-        assert!(Arc::ptr_eq(&cached_msg, &msg), "Unexpected message: {cached_msg}");
+        assert!(Arc::ptr_eq(&res_msg, &msg), "Unexpected message: {res_msg:?}");
+        assert!(Arc::ptr_eq(&cached_msg, &msg), "Unexpected message: {cached_msg:?}");
     }
 
     #[sdv_telemetry_test_utils::timeout]

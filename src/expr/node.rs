@@ -219,14 +219,17 @@ mod tests {
     use super::*;
 
     use futures::FutureExt;
-    use protobuf::well_known_types::wrappers::Int32Value;
-    use protobuf::MessageDyn;
     use sdv_telemetry_proto_rust::expression::combination_node::{
         Operator as OperatorProto, RelationalOperator,
     };
     use std::time::SystemTime;
 
-    use crate::mock::*;
+    use crate::dynamic_message::DynamicMessage;
+    use crate::mock::{
+        MockDynamicMessage, MockMessageProvider, OP_ABSOLUTE, OP_ADD, OP_AND, OP_CEIL, OP_CONTAINS,
+        OP_DIVIDE, OP_EQ, OP_LT, OP_LT_OR_EQ, OP_MULTIPLY, OP_OR, OP_POWER, OP_ROUND,
+        OP_UNARY_MINUS, OP_XOR, TEST_DYNAMIC_MESSAGE,
+    };
     use crate::node_error::MessageProviderError;
 
     const FLOAT_FIELD_NAME: &str = "float_field";
@@ -374,7 +377,11 @@ mod tests {
         // we will evaluate every node in `nodes`, and we expect these results:
         let expected_results = [
             // index 0 = [Pi, Tau, e]
-            NodeValue::DoubleList(TEST_MESSAGE.repeated_doubles.clone()),
+            NodeValue::DoubleList(vec![
+                std::f64::consts::PI,
+                std::f64::consts::TAU,
+                std::f64::consts::E,
+            ]),
             NodeValue::Float(std::f32::consts::PI), // constant value of Pi
             NodeValue::Bool(true),                  // list contains Pi = true
             NodeValue::Bool(true),                  // true == true
@@ -578,22 +585,22 @@ mod tests {
             fields: vec![],
             message_provider: Arc::new(MockMessageProvider::new()),
         });
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+        let msg = Arc::new(MockDynamicMessage::new("TestMessage".to_owned()));
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
             KNOWN_PUBLISHER_NAME.to_owned(),
-            Arc::<Int32Value>::clone(&msg),
+            Arc::<MockDynamicMessage>::clone(&msg),
         ));
 
         let res = node.evaluate(context).unwrap_sync().unwrap();
         let NodeValue::Message(res_msg) = res else { panic!("Unexpected result: {res:?}") };
-        assert!(Arc::ptr_eq(&res_msg, &(msg as Arc<dyn MessageDyn>)));
+        assert!(Arc::ptr_eq(&res_msg, &(msg as Arc<dyn DynamicMessage>)));
     }
 
     #[test]
     fn evaluate_caches_synchronous_provider_message() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+        let msg = Arc::new(MockDynamicMessage::new("TestMessage".to_owned()));
         message_provider.set_next_sync_result(Ok(Some(msg)));
         let node1 = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
@@ -618,9 +625,9 @@ mod tests {
     #[tokio::test]
     async fn evaluate_caches_asynchronous_provider_message() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        let msg = Arc::new(Int32Value { value: 42, ..Default::default() });
+        let msg = Arc::new(MockDynamicMessage::new("TestMessage".to_owned().to_owned()));
         message_provider
-            .set_next_async_result(async { Ok(Some(msg as Arc<dyn MessageDyn>)) }.boxed());
+            .set_next_async_result(async { Ok(Some(msg as Arc<dyn DynamicMessage>)) }.boxed());
         let node1 = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
             fields: vec![],
@@ -767,7 +774,8 @@ mod tests {
     async fn evaluate_asynchronous_provider_result_success() {
         let left_message_provider = Arc::new(MockMessageProvider::new());
         left_message_provider.set_next_async_result(
-            async { Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>)) }.boxed(),
+            async { Ok(Some(Arc::clone(&TEST_DYNAMIC_MESSAGE) as Arc<dyn DynamicMessage>)) }
+                .boxed(),
         );
         let left_field_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
@@ -776,7 +784,8 @@ mod tests {
         });
         let right_message_provider = Arc::new(MockMessageProvider::new());
         right_message_provider.set_next_async_result(
-            async { Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>)) }.boxed(),
+            async { Ok(Some(Arc::clone(&TEST_DYNAMIC_MESSAGE) as Arc<dyn DynamicMessage>)) }
+                .boxed(),
         );
         let right_field_node = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),

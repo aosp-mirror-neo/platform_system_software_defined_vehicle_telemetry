@@ -11,6 +11,7 @@ mod message_builder_factory;
 mod message_provider;
 mod metrics_report_generator;
 mod metrics_report_generator_factory;
+mod protobuf_dynamic_message;
 mod publisher;
 mod publisher_factory;
 mod service_adapter;
@@ -1878,13 +1879,15 @@ mod tests {
                 .get_message(SERVICE_PUBLISHER_NAME)
                 .unwrap_sync()
                 .unwrap()
-                .unwrap();
+                .unwrap()
+                .to_protobuf();
             assert_that!(message, msg_dyn_eq(value1.as_ref(), &ReflectEqMode::default()));
             let message = message_providers[0]
                 .get_message(AGGREGATION_PUBLISHER_NAME)
                 .unwrap_sync()
                 .unwrap()
-                .unwrap();
+                .unwrap()
+                .to_protobuf();
             assert_that!(message, msg_dyn_eq(value2.as_ref(), &ReflectEqMode::default()));
         }
         let config = {

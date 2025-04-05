@@ -4,8 +4,6 @@
 //! Should be able to hold all the values in a ConstantLeafNode protobuf
 //! message, as well as all the values that a FieldLeafNode can select.
 
-use protobuf::reflect::{ReflectEqMode, ReflectFieldRef, ReflectValueRef};
-use protobuf::MessageDyn;
 use sdv_telemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
     RoundingOperator,
@@ -14,8 +12,8 @@ use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as Node
 use sdv_telemetry_proto_rust::expression::ConstantLeafNode as ConstantLeafNodeProto;
 use std::{borrow::Cow, convert::From, sync::Arc};
 
+use crate::dynamic_message::DynamicMessage;
 use crate::node_error::NodeEvaluationError;
-use crate::proto_node_value_converter::protobuf_reflection_to_node_value::MessageDescriptorExt;
 
 /// Holds a generic value.
 #[derive(Clone, Debug)]
@@ -38,8 +36,8 @@ pub enum NodeValue {
     /// A double node value.
     Double(f64),
 
-    /// A protobuf message value.
-    Message(Arc<dyn MessageDyn>),
+    /// A message value.
+    Message(Arc<dyn DynamicMessage>),
 
     /// Repeated boolean values.
     BoolList(Vec<bool>),
@@ -56,8 +54,8 @@ pub enum NodeValue {
     /// Repeated double values.
     DoubleList(Vec<f64>),
 
-    /// Repeated protobuf messages.
-    MessageList(Vec<Arc<dyn MessageDyn>>),
+    /// Repeated messages.
+    MessageList(Vec<Arc<dyn DynamicMessage>>),
 
     /// A string node value.
     String(String),
@@ -86,9 +84,7 @@ impl PartialEq for NodeValue {
                 approximately_equal(f64::from(*v1), f64::from(*v2))
             }
             (NodeValue::Double(v1), NodeValue::Double(v2)) => approximately_equal(*v1, *v2),
-            (NodeValue::Message(v1), NodeValue::Message(v2)) => {
-                v1.reflect_eq_dyn(v2.as_ref(), &ReflectEqMode::default())
-            }
+            (NodeValue::Message(v1), NodeValue::Message(v2)) => v1.equals(v2.as_ref()),
             (NodeValue::BoolList(v1), NodeValue::BoolList(v2)) => *v1 == *v2,
             (NodeValue::Int32List(v1), NodeValue::Int32List(v2)) => *v1 == *v2,
             (NodeValue::Int64List(v1), NodeValue::Int64List(v2)) => *v1 == *v2,
@@ -103,9 +99,7 @@ impl PartialEq for NodeValue {
                 v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| approximately_equal(*a, *b))
             }
             (NodeValue::MessageList(v1), NodeValue::MessageList(v2)) => {
-                let mode = ReflectEqMode::default();
-                v1.len() == v2.len()
-                    && v1.iter().zip(v2).all(|(a, b)| a.reflect_eq_dyn(b.as_ref(), &mode))
+                v1.len() == v2.len() && v1.iter().zip(v2).all(|(a, b)| a.equals(b.as_ref()))
             }
             (NodeValue::ByteList(v1), NodeValue::ByteList(v2)) => *v1 == *v2,
             _ => false,
@@ -176,7 +170,7 @@ impl NodeValue {
     }
 
     /// Returns the Message value or `None` if `Self` is not a Message.
-    pub fn get_message(&self) -> Option<&Arc<dyn MessageDyn>> {
+    pub fn get_message(&self) -> Option<&Arc<dyn DynamicMessage>> {
         if let NodeValue::Message(msg) = self {
             Some(msg)
         } else {
@@ -261,7 +255,7 @@ impl NodeValue {
 
     /// Gets a NodeValue from a protobuf message and its fields.
     pub(super) fn extract_value(
-        msg: Arc<dyn MessageDyn>,
+        msg: Arc<dyn DynamicMessage>,
         fields: &[String],
     ) -> Result<NodeValue, NodeEvaluationError> {
         // if no field names, return the message itself as the NodeValue
@@ -347,48 +341,28 @@ impl NodeValue {
 
     // private functions and methods below
 
-    /// Reads a field value from a protobuf message using the reflection.
+    /// Reads a field value from the message.
     fn extract_field_value(
-        msg: &dyn MessageDyn,
+        msg: &dyn DynamicMessage,
         fields: &[String],
     ) -> Result<NodeValue, NodeEvaluationError> {
-        let msg_descriptor = msg.descriptor_dyn();
         let field_name = &fields[0];
-        let field_descriptor =
-            msg_descriptor.field_by_name(field_name).ok_or(NodeEvaluationError::FieldNotFound {
-                field_name: field_name.clone(),
-                message_name: msg_descriptor.name().to_string(),
-            })?;
+        let field_value = msg.get_field_value(field_name)?;
 
-        // Base case for recursion: one field is provided, simply read the value
+        // Base case for recursion: one field is provided, simply return the value.
         if fields.len() == 1 {
-            return msg_descriptor.get_field_value(&field_descriptor, msg);
+            return Ok(field_value);
         }
 
-        // If fields length > 1, get nested field values iff the value is a single protobuf message,
-        // otherwise return error
-        if let ReflectFieldRef::Optional(singular_field) = field_descriptor.get_reflect(msg) {
-            match singular_field.value() {
-                Some(nested_value) => {
-                    if let ReflectValueRef::Message(msg) = nested_value {
-                        // recursively read from nested messages
-                        Self::extract_field_value(&(*msg), &fields[1..])
-                    } else {
-                        Err(NodeEvaluationError::WrongNestedFieldType {
-                            field_name: field_name.clone(),
-                            e: "A non-terminal field is singular, but is not a \
-                                protobuf message, cannot get nested fields"
-                                .to_string(),
-                        })
-                    }
-                }
-                None => Ok(NodeValue::None),
-            }
-        } else {
-            Err(NodeEvaluationError::WrongNestedFieldType {
+        // If fields length > 1, get nested field values if the value is a single message or None,
+        // otherwise return an error.
+        match field_value {
+            NodeValue::Message(msg) => Self::extract_field_value(msg.as_ref(), &fields[1..]),
+            val @ NodeValue::None => Ok(val),
+            node_value => Err(NodeEvaluationError::WrongNestedFieldType {
                 field_name: field_name.clone(),
-                e: "A non-terminal field is either repeated or a map".to_string(),
-            })
+                e: format!("Unable to get nested fields from node value {:?}", node_value),
+            }),
         }
     }
 
@@ -658,8 +632,7 @@ impl NodeValue {
             }
             NodeValue::MessageList(v) => {
                 let target_value = element.get_message().ok_or_else(err_provider)?;
-                let mode = ReflectEqMode::default();
-                v.iter().any(|x| x.reflect_eq_dyn(target_value.as_ref(), &mode))
+                v.iter().any(|x| x.equals(target_value.as_ref()))
             }
             _ => return Err(err_provider()),
         })
@@ -692,8 +665,7 @@ impl NodeValue {
             }
             NodeValue::MessageList(v) => {
                 let target_value = element.get_message().ok_or_else(err_provider)?;
-                let mode = ReflectEqMode::default();
-                v.iter().all(|x| x.reflect_eq_dyn(target_value.as_ref(), &mode))
+                v.iter().all(|x| x.equals(target_value.as_ref()))
             }
             _ => return Err(err_provider()),
         })
@@ -776,10 +748,8 @@ mod tests {
 
     use googletest::assert_that;
     use googletest::matchers::{eq, err, ok, pat};
-    use protobuf::reflect::ReflectEqMode;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
-    use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
-    use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
+    use sdv_telemetry_test_utils::parameterized_test;
     use std::f32::consts::PI as PIf32;
     use std::f64::consts::PI as PIf64;
 
@@ -844,262 +814,51 @@ mod tests {
 
     #[test]
     fn extract_value_no_field_names_ok() {
-        // setup
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
+        let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE) as Arc<dyn DynamicMessage>;
 
-        // action
         let node_value = NodeValue::extract_value(Arc::clone(&msg), &[]).unwrap();
 
-        // assert
-        assert_that!(
-            node_value,
-            pat!(NodeValue::Message(msg_dyn_eq(msg.as_ref(), &ReflectEqMode::default())))
-        );
-    }
-
-    #[test]
-    fn extract_value_explicitly_optional_field_not_set_returns_none() {
-        let msg = Arc::new(TestMessage::new()) as Arc<dyn MessageDyn>;
-
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["optional_bool_field".to_string()])
-                .unwrap(),
-            NodeValue::None
-        );
-        assert_eq!(
-            NodeValue::extract_value(msg, &["optional_int64_field".to_string()]).unwrap(),
-            NodeValue::None
-        );
-    }
-
-    #[test]
-    fn extract_value_primitive_field_not_set_uses_default_values() {
-        let msg = Arc::new(TestMessage::new()) as Arc<dyn MessageDyn>;
-
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["int_field".to_string()]).unwrap(),
-            NodeValue::Int32(0)
-        );
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["float_field".to_string()]).unwrap(),
-            NodeValue::Float(0.0)
-        );
-        assert_eq!(
-            NodeValue::extract_value(msg, &["enum_field".to_string()]).unwrap(),
-            NodeValue::Int32(0)
-        );
-    }
-
-    #[test]
-    fn extract_value_message_field_not_set_returns_none() {
-        let msg = Arc::new(TestMessage::new()) as Arc<dyn MessageDyn>;
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &["message_field".to_string()]).unwrap(),
-            NodeValue::None
-        );
-    }
-
-    #[test]
-    fn extract_value_repeated_field_not_set_returns_empty_list() {
-        let msg = Arc::new(TestMessage::new()) as Arc<dyn MessageDyn>;
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &["repeated_bools".to_string()]).unwrap(),
-            NodeValue::BoolList(vec![])
-        );
-    }
-
-    #[test]
-    fn extract_value_int_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["int_field".to_string()];
-
-        assert_eq!(NodeValue::extract_value(msg, &field_names).unwrap(), NodeValue::Int32(80));
-    }
-
-    #[test]
-    fn extract_value_float_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["float_field".to_string()];
-
-        assert_eq!(NodeValue::extract_value(msg, &field_names).unwrap(), NodeValue::Float(100.0));
-    }
-
-    #[test]
-    fn extract_value_enum_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["enum_field".to_string()];
-
-        assert_eq!(NodeValue::extract_value(msg, &field_names).unwrap(), NodeValue::Int32(1));
-    }
-
-    #[test]
-    fn extract_value_message_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["message_field".to_string()];
-        let expected_value =
-            NodeValue::Message(Arc::new(TEST_MESSAGE.message_field.clone().unwrap()));
-
-        // action
-        let node_value = NodeValue::extract_value(msg, &field_names).unwrap();
-
-        // assert
-        assert_eq!(node_value, expected_value);
-    }
-
-    #[test]
-    fn extract_value_string_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["string_field".to_string()];
-
-        let extracted = NodeValue::extract_value(msg, &field_names).unwrap();
-
-        assert_eq!(extracted, NodeValue::String("Hello world".to_string()));
-    }
-
-    #[test]
-    fn extract_value_bytes_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["bytes_field".to_string()];
-
-        let extracted = NodeValue::extract_value(msg, &field_names).unwrap();
-
-        assert_eq!(extracted, NodeValue::ByteList("Hello world".as_bytes().to_vec()));
-    }
-
-    #[test]
-    fn extract_value_field_has_default_value_ok() {
-        let mut msg = TestMessage::new();
-        msg.int_field = 0;
-        msg.float_field = 0.0;
-        msg.enum_field = TestEnum::NONE.into(); // this enum is equal to int 0
-        msg.optional_bool_field = Some(false);
-        let msg = Arc::new(msg) as Arc<dyn MessageDyn>;
-
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["int_field".to_string()]).unwrap(),
-            NodeValue::Int32(0)
-        );
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["float_field".to_string()]).unwrap(),
-            NodeValue::Float(0.0)
-        );
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["enum_field".to_string()]).unwrap(),
-            NodeValue::Int32(0)
-        );
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["optional_bool_field".to_string()])
-                .unwrap(),
-            NodeValue::Bool(false)
-        );
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["string_field".to_string()]).unwrap(),
-            NodeValue::String(String::default())
-        );
-        assert_eq!(
-            NodeValue::extract_value(Arc::clone(&msg), &["bytes_field".to_string()]).unwrap(),
-            NodeValue::ByteList(vec![])
+        assert!(
+            matches!(
+                &node_value,
+                NodeValue::Message(inner_msg) if Arc::ptr_eq(inner_msg, &msg)),
+            "Unexpected result: {node_value:?}"
         );
     }
 
     #[test]
     fn extract_value_nested_field_not_set_ok() {
-        let msg = Arc::new(TestMessage::new()) as Arc<dyn MessageDyn>;
-        let field_names = ["message_field".to_string(), "int_field".to_string()];
+        let mut msg = MockDynamicMessage::new("TestMessage".to_owned());
+        msg.set_field("message_field".to_owned(), NodeValue::None);
+        let msg = Arc::new(msg);
+        let field_names = ["message_field".to_owned(), "int_field".to_owned()];
 
         assert_eq!(NodeValue::extract_value(msg, &field_names).unwrap(), NodeValue::None);
     }
 
     #[test]
     fn extract_value_nested_singular_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["message_field".to_string(), "bool_field".to_string()];
+        let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE);
+        let field_names = ["message_field".to_owned(), "bool_field".to_owned()];
 
         assert_eq!(NodeValue::extract_value(msg, &field_names).unwrap(), NodeValue::Bool(true));
     }
 
     #[test]
-    fn extract_value_repeated_bool_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["repeated_bools".to_string()];
-        let repeated_bools = TEST_MESSAGE.repeated_bools.clone();
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &field_names).unwrap(),
-            NodeValue::BoolList(repeated_bools)
-        );
-    }
-
-    #[test]
-    fn extract_value_repeated_int_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["repeated_i64s".to_string()];
-        let repeated_i64s = TEST_MESSAGE.repeated_i64s.clone();
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &field_names).unwrap(),
-            NodeValue::Int64List(repeated_i64s)
-        );
-    }
-
-    #[test]
-    fn extract_value_repeated_double_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["repeated_doubles".to_string()];
-        let repeated_doubles = TEST_MESSAGE.repeated_doubles.clone();
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &field_names).unwrap(),
-            NodeValue::DoubleList(repeated_doubles)
-        );
-    }
-
-    #[test]
-    fn extract_value_repeated_enum_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["repeated_enums".to_string()];
-        let repeated_i32s = TEST_MESSAGE.repeated_enums.iter().map(|x| x.value()).collect();
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &field_names).unwrap(),
-            NodeValue::Int32List(repeated_i32s)
-        );
-    }
-
-    #[test]
-    fn extract_value_repeated_message_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["repeated_messages".to_string()];
-        let repeated_msgs = TEST_MESSAGE
-            .repeated_messages
-            .iter()
-            .map(|x| Arc::new(x.clone()) as Arc<dyn MessageDyn>)
-            .collect::<Vec<_>>();
-
-        assert_eq!(
-            NodeValue::extract_value(msg, &field_names).unwrap(),
-            NodeValue::MessageList(repeated_msgs)
-        );
-    }
-
-    #[test]
     fn extract_value_nested_repeated_field_ok() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["message_field".to_string(), "repeated_i32s".to_string()];
-        let repeated_i32s = TEST_MESSAGE.message_field.repeated_i32s.clone();
+        let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE);
+        let field_names = ["message_field".to_owned(), "repeated_i32s".to_owned()];
 
         assert_eq!(
             NodeValue::extract_value(msg, &field_names).unwrap(),
-            NodeValue::Int32List(repeated_i32s)
+            NodeValue::Int32List(vec![1, 2])
         );
     }
 
     #[test]
     fn extract_value_repeated_message_as_intermediate_field_name_should_err() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["repeated_messages".to_string(), "bool_field".to_string()];
+        let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE);
+        let field_names = ["repeated_messages".to_owned(), "bool_field".to_owned()];
 
         assert!(matches!(
             NodeValue::extract_value(msg, &field_names).unwrap_err(),
@@ -1109,8 +868,8 @@ mod tests {
 
     #[test]
     fn extract_value_nonexistent_field_should_err() {
-        let msg = Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>;
-        let field_names = ["foo".to_string()];
+        let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE);
+        let field_names = ["foo".to_owned()];
 
         assert!(matches!(
             NodeValue::extract_value(msg, &field_names).unwrap_err(),
@@ -1283,8 +1042,8 @@ mod tests {
         eq_list_6: (&OP_EQ, NodeValue::Int64List(vec![0, 0]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
         eq_list_7: (&OP_EQ, NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(false))),),
         eq_list_8: (&OP_EQ, NodeValue::FloatList(vec![0.5, 0.5]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_9: (&OP_EQ, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone()), Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TEST_MESSAGE.clone())), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_10: (&OP_EQ, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone()), Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TestMessage::new())), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_9: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_10: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new("TestMessage".to_owned()))), ok(eq(&NodeValue::Bool(false))),),
         eq_list_none_left: (&OP_EQ, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
         eq_list_none_right: (&OP_EQ, NodeValue::Int64List(vec![42]), NodeValue::None, ok(eq(&NodeValue::None)),),
         eq_list_incompatible_types: (&OP_EQ, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
@@ -1347,8 +1106,8 @@ mod tests {
         contains_float_3: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Int32(10), ok(eq(&NodeValue::Bool(true))),),
         contains_float_4: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(30.0), ok(eq(&NodeValue::Bool(false))),),
         contains_approximately_equal: (&OP_CONTAINS, NodeValue::DoubleList(vec![ONE.get_double().unwrap()]), ONE_EPSILON, ok(eq(&NodeValue::Bool(true))),),
-        contains_message_1: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TEST_MESSAGE.clone())), ok(eq(&NodeValue::Bool(true))),),
-        contains_message_2: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TestMessage::new())), ok(eq(&NodeValue::Bool(false))),),
+        contains_message_1: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(true))),),
+        contains_message_2: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new("TestMessage".to_owned()))), ok(eq(&NodeValue::Bool(false))),),
         contains_none_left: (&OP_CONTAINS, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
         contains_none_right: (&OP_CONTAINS, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
         contains_not_a_list: (&OP_CONTAINS, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
@@ -1365,8 +1124,8 @@ mod tests {
         not_contains_float_3: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Int32(10), ok(eq(&NodeValue::Bool(false))),),
         not_contains_float_4: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(30.0), ok(eq(&NodeValue::Bool(true))),),
         not_contains_approximately_equal: (&OP_DOES_NOT_CONTAIN, NodeValue::DoubleList(vec![ONE.get_double().unwrap()]), ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
-        not_contains_message_1: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TEST_MESSAGE.clone())), ok(eq(&NodeValue::Bool(false))),),
-        not_contains_message_2: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::new(TEST_MESSAGE.clone())]), NodeValue::Message(Arc::new(TestMessage::new())), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_message_1: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_message_2: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new("TestMessage".to_owned()))), ok(eq(&NodeValue::Bool(true))),),
         not_contains_none_left: (&OP_DOES_NOT_CONTAIN, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
         not_contains_none_right: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
         not_contains_not_a_list: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),

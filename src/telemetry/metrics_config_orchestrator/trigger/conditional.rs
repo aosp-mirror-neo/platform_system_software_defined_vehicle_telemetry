@@ -329,7 +329,8 @@ mod tests {
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::MessageDyn;
     use sdv_telemetry_expr::{
-        mock::MockMessageProvider, node::Node, node_error::MessageProviderError,
+        dynamic_message::DynamicMessage, mock::MockMessageProvider, node::Node,
+        node_error::MessageProviderError,
     };
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_utils::oneshot_callback;
@@ -338,6 +339,7 @@ mod tests {
     use std::collections::HashMap;
     use std::future;
 
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
     use crate::metrics_config_orchestrator::trigger::mock::{
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
     };
@@ -491,8 +493,14 @@ mod tests {
             .await;
         Arc::clone(&trigger).activate(ACTIVATION_ID).await;
 
-        let msg1 = Arc::new(Int32Value { value: 1, ..Default::default() });
-        let msg2 = Arc::new(Int32Value { value: 2, ..Default::default() });
+        let msg1 = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 1,
+            ..Default::default()
+        })));
+        let msg2 = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 2,
+            ..Default::default()
+        })));
 
         // Set the first message and fire the first parent trigger.
         message_provider.set_next_sync_result(Ok(Some(msg1)));
@@ -539,10 +547,11 @@ mod tests {
             .subscribe(&TriggerSubscriber::MetricsConfigEnd, callback_listener2.create_callback())
             .await;
 
-        message_provider.set_next_sync_result(Ok(Some(Arc::new(Int32Value {
+        let msg = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
             value: 1,
             ..Default::default()
-        }))));
+        })));
+        message_provider.set_next_sync_result(Ok(Some(msg)));
         parent_trigger.fire_with_context(Arc::clone(&parent_context)).await;
 
         let child_context1 = callback_listener1.wait_for_callback_fired().await;
@@ -566,7 +575,7 @@ mod tests {
 
             let mut ctx_to_msg_map = HashMap::new();
             for msg in messages.iter() {
-                message_provider.set_next_sync_result(Ok(msg.cloned()));
+                message_provider.set_next_sync_result(Ok(msg.map(|msg| Arc::new(ProtobufDynamicMessage::new(Arc::clone(msg))) as Arc<dyn DynamicMessage>)));
 
                 let context = NodeEvaluationContext::new(None);
                 if let Some(msg) = msg {
@@ -619,8 +628,12 @@ mod tests {
             setup_active_conditional_trigger(ConditionType::IsTrue).await;
 
         let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
-        message_provider
-            .set_next_async_result(future::ready(Ok(Some(msg as Arc<dyn MessageDyn>))).boxed());
+        message_provider.set_next_async_result(
+            future::ready(Ok(Some(
+                Arc::new(ProtobufDynamicMessage::new(msg)) as Arc<dyn DynamicMessage>
+            )))
+            .boxed(),
+        );
         parent_trigger.fire().await;
         callback_listener.wait_for_callback_fired().await;
 

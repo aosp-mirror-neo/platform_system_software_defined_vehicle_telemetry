@@ -1,16 +1,12 @@
 // Copyright 2023 Google LLC
 
+mod node_value_to_protobuf_reflection;
 mod value_aggregator;
 pub(super) mod value_aggregator_factory;
-
-pub(super) use value_aggregator::AggregationError;
 
 use log::trace;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_telemetry_expr::proto_node_value_converter::node_value_to_protobuf_reflection::{
-    ReflectRepeatedMutExt, ToReflectValueBox,
-};
 use sdv_telemetry_expr::{
     node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
     node_evaluation_state::NodeEvaluationState, node_value::NodeValue,
@@ -19,6 +15,11 @@ use sdv_telemetry_utils::value_holder::ValueHolder;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::metrics_config_orchestrator::message_builder::node_value_to_protobuf_reflection::{
+    ReflectRepeatedMutExt, ToReflectValueBox,
+};
+
+pub(super) use value_aggregator::AggregationError;
 use value_aggregator::ValueAggregator;
 
 pub(crate) trait MessageBuilder: Send + Sync {
@@ -184,14 +185,17 @@ mod tests {
     use lazy_static::lazy_static;
     use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
     use protobuf::{reflect::ReflectEqMode, MessageField, MessageFull};
-    use sdv_telemetry_expr::mock::{MockMessageProvider, TEST_MESSAGE};
+    use sdv_telemetry_expr::dynamic_message::DynamicMessage;
+    use sdv_telemetry_expr::mock::MockMessageProvider;
     use sdv_telemetry_expr::node_error::MessageProviderError;
     use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_proto_rust::expression::combination_node::{ArithmeticOperator, Operator};
     use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
-    use sdv_telemetry_test_utils::msg_dyn_eq;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, TEST_MESSAGE};
     use std::sync::Arc;
     use value_aggregator::mock::MockValueAggregator;
+
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 
     lazy_static! {
         static ref REFLECT_EQ_MODE: ReflectEqMode = ReflectEqMode::default();
@@ -305,8 +309,18 @@ mod tests {
         let builder = create_message_builder_with_constant_leaf_nodes(
             TestMessage::descriptor(),
             vec![
-                (ANY_FIELD_NAME, NodeValue::Message(Arc::new(TEST_NESTED_MESSAGE.clone()))),
-                (MESSAGE_FIELD_NAME, NodeValue::Message(Arc::new(TEST_NESTED_MESSAGE.clone()))),
+                (
+                    ANY_FIELD_NAME,
+                    NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(
+                        TEST_NESTED_MESSAGE.clone(),
+                    )))),
+                ),
+                (
+                    MESSAGE_FIELD_NAME,
+                    NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(
+                        TEST_NESTED_MESSAGE.clone(),
+                    )))),
+                ),
             ],
         );
 
@@ -357,6 +371,7 @@ mod tests {
         expected_message.repeated_messages = vec![TEST_NESTED_MESSAGE.clone(); 2];
 
         // create MessageBuilderImpl struct object, this is the subject of the test
+        let msg = Arc::new(ProtobufDynamicMessage::new(Arc::new(TEST_NESTED_MESSAGE.clone())));
         let builder = create_message_builder_with_constant_leaf_nodes(
             TestMessage::descriptor(),
             vec![
@@ -365,11 +380,7 @@ mod tests {
                     // field name
                     REPEATED_MESSAGE_FIELD_NAME,
                     // value to assign to this field = a vector of 2 messages
-                    NodeValue::MessageList(vec![
-                        Arc::new(TEST_NESTED_MESSAGE.clone())
-                            as Arc<dyn MessageDyn>;
-                        2
-                    ]),
+                    NodeValue::MessageList(vec![msg; 2]),
                 ),
             ],
         );
@@ -499,7 +510,12 @@ mod tests {
     fn build_node_value_incompatible_with_message_field_fails() {
         let builder = create_message_builder_with_constant_leaf_nodes(
             TestMessage::descriptor(),
-            vec![(MESSAGE_FIELD_NAME, NodeValue::Message(Arc::new(Timestamp::new())))],
+            vec![(
+                MESSAGE_FIELD_NAME,
+                NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(
+                    Timestamp::new(),
+                )))),
+            )],
         );
 
         // action
@@ -632,7 +648,10 @@ mod tests {
         // Setup a field node that returns the value of the test message int field.
         let message_provider = Arc::new(MockMessageProvider::new());
         message_provider.set_next_async_result(
-            future::ready(Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>))).boxed(),
+            future::ready(Ok(Some(Arc::new(ProtobufDynamicMessage::new(Arc::new(
+                TEST_MESSAGE.clone(),
+            ))) as Arc<dyn DynamicMessage>)))
+            .boxed(),
         );
         let field_node = Arc::new(Node::FieldLeaf {
             publisher_name: String::default(),
@@ -664,8 +683,9 @@ mod tests {
     #[test]
     fn build_shares_node_evaluation_context() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        message_provider
-            .set_next_sync_result(Ok(Some(Arc::new(TEST_MESSAGE.clone()) as Arc<dyn MessageDyn>)));
+        message_provider.set_next_sync_result(Ok(Some(Arc::new(ProtobufDynamicMessage::new(
+            Arc::new(TEST_MESSAGE.clone()),
+        )) as Arc<dyn DynamicMessage>)));
         let field_node1 = Arc::new(Node::FieldLeaf {
             publisher_name: PUBLISHER_NAME.to_owned(),
             fields: vec![INT_FIELD_NAME.to_owned()],

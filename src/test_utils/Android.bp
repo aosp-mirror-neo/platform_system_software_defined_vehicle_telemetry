@@ -13,6 +13,7 @@ rust_protobuf {
         "-I external/protobuf/src",
     ],
     source_stem: "sdv_telemetry_test_proto",
+    product_available: true,
     vendor_available: true,
 }
 
@@ -36,11 +37,13 @@ rust_defaults {
     rustlibs: [
         // keep-sorted start
         "libgoogletest_rust",
+        "liblazy_static",
         "liblog_rust",
         "liblogger",
         "libparking_lot",
         "libprotobuf",
         "librand",
+        "libsdv_telemetry_test_proto",
         "libtokio",
         // keep-sorted end
     ],
@@ -59,13 +62,18 @@ rust_library {
     crate_name: "sdv_telemetry_test_utils",
 }
 
-rust_test_host {
+rust_test {
     name: "libsdv_telemetry_test_utils_unit_tests",
-    host_cross_supported: false,
     defaults: ["libsdv_telemetry_test_utils_defaults"],
     rustlibs: [
         // keep-sorted start
         "libtokio",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
         // keep-sorted end
     ],
     test_options: {
