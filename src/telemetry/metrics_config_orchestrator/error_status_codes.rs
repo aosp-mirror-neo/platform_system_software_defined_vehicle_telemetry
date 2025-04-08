@@ -2,9 +2,13 @@
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes;
 
-use sdv_telemetry_expr::node_error::{
-    DescriptorProviderError, FunctionLeafNodeArgumentError,
-    FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError, NodeEvaluationError,
+use sdv_telemetry_expr::{
+    dynamic_message::ProtobufConversionError,
+    node_error::{
+        DescriptorProviderError, FunctionLeafNodeArgumentError,
+        FunctionLeafNodeGetCurrentTimestampArgumentError, MessageProviderError,
+        NodeEvaluationError,
+    },
 };
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 
@@ -22,7 +26,6 @@ impl ErrorStatusCodes for MessageBuilderError {
         match &self.error {
             MessageBuilderErrorType::BadAggregation { e } => e.get_status_code(),
             MessageBuilderErrorType::ExpressionEvaluationError { e } => e.get_status_code(),
-            MessageBuilderErrorType::FailedToAssignValueToField { e } => e.get_status_code(),
         }
     }
 }
@@ -46,6 +49,7 @@ impl ErrorStatusCodes for NodeEvaluationError {
             NodeEvaluationError::MessageProviderError { e } => e.get_status_code(),
             NodeEvaluationError::DescriptorProviderError { e } => e.get_status_code(),
             NodeEvaluationError::FunctionLeafNodeArgumentError { error } => error.get_status_code(),
+            NodeEvaluationError::ProtobufConversionError(e) => e.get_status_code(),
             NodeEvaluationError::IndexOutOfBound { .. }
             | NodeEvaluationError::CyclicDependency { .. }
             | NodeEvaluationError::NodeTypeNotSet
@@ -119,6 +123,12 @@ impl ErrorStatusCodes for FunctionLeafNodeGetCurrentTimestampArgumentError {
                 StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR
             }
         }
+    }
+}
+
+impl ErrorStatusCodes for ProtobufConversionError {
+    fn get_status_code(&self) -> StatusCodes {
+        StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR
     }
 }
 

@@ -4,17 +4,19 @@ use super::*;
 
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use protobuf::MessageDyn;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
+
 /// The builder will build a TestMessage defined in `src/test_utils/test_message.proto`
 pub(crate) struct MockMessageBuilder {
     next_error: Mutex<Option<MessageBuilderError>>,
-    next_async_result:
-        Mutex<Option<BoxFuture<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>>>,
+    next_async_result: Mutex<
+        Option<BoxFuture<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>>,
+    >,
     num_reset_calls: AtomicU32,
     result_callback: Mutex<
         Option<
@@ -23,7 +25,7 @@ pub(crate) struct MockMessageBuilder {
                         &NodeEvaluationContext,
                     ) -> ValueHolder<
                         'static,
-                        (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>),
+                        (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
                     > + Send
                     + Sync,
             >,
@@ -35,7 +37,7 @@ impl MessageBuilder for MockMessageBuilder {
     fn build(
         self: Arc<Self>,
         context: &Arc<NodeEvaluationContext>,
-    ) -> ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)> {
+    ) -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)> {
         if let Some(error) = self.next_error.lock().take() {
             return (None, vec![error]).into();
         }
@@ -46,7 +48,10 @@ impl MessageBuilder for MockMessageBuilder {
             result_callback(context)
         } else {
             ValueHolder::Synchronous((
-                Some(Box::new(TestMessage { int_field: 1, ..Default::default() })),
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 1,
+                    ..Default::default()
+                })))),
                 vec![],
             ))
         }
@@ -77,7 +82,7 @@ impl MockMessageBuilder {
 
     pub(crate) fn set_next_async_result(
         &self,
-        future: BoxFuture<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
+        future: BoxFuture<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>,
     ) {
         self.next_async_result.lock().replace(future);
     }
@@ -87,7 +92,7 @@ impl MockMessageBuilder {
         callback: impl Fn(
                 &NodeEvaluationContext,
             )
-                -> ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>
+                -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>
             + Send
             + Sync
             + 'static,

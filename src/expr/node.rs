@@ -219,9 +219,11 @@ mod tests {
     use super::*;
 
     use futures::FutureExt;
+    use protobuf::MessageFull;
     use sdv_telemetry_proto_rust::expression::combination_node::{
         Operator as OperatorProto, RelationalOperator,
     };
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::time::SystemTime;
 
     use crate::dynamic_message::DynamicMessage;
@@ -585,7 +587,7 @@ mod tests {
             fields: vec![],
             message_provider: Arc::new(MockMessageProvider::new()),
         });
-        let msg = Arc::new(MockDynamicMessage::new("TestMessage".to_owned()));
+        let msg = Arc::new(MockDynamicMessage::new(TestMessage::descriptor()));
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
             KNOWN_PUBLISHER_NAME.to_owned(),
@@ -600,7 +602,7 @@ mod tests {
     #[test]
     fn evaluate_caches_synchronous_provider_message() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        let msg = Arc::new(MockDynamicMessage::new("TestMessage".to_owned()));
+        let msg = Arc::new(MockDynamicMessage::new(TestMessage::descriptor()));
         message_provider.set_next_sync_result(Ok(Some(msg)));
         let node1 = Arc::new(Node::FieldLeaf {
             publisher_name: KNOWN_PUBLISHER_NAME.to_owned(),
@@ -625,7 +627,7 @@ mod tests {
     #[tokio::test]
     async fn evaluate_caches_asynchronous_provider_message() {
         let message_provider = Arc::new(MockMessageProvider::new());
-        let msg = Arc::new(MockDynamicMessage::new("TestMessage".to_owned().to_owned()));
+        let msg = Arc::new(MockDynamicMessage::new(TestMessage::descriptor()));
         message_provider
             .set_next_async_result(async { Ok(Some(msg as Arc<dyn DynamicMessage>)) }.boxed());
         let node1 = Arc::new(Node::FieldLeaf {

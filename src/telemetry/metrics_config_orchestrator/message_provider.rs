@@ -100,7 +100,8 @@ mod tests {
             .unwrap_sync()
             .unwrap()
             .unwrap()
-            .to_protobuf();
+            .to_protobuf()
+            .unwrap();
 
         assert!(Arc::ptr_eq(&res, &msg), "Expected {res:?} to equal {msg:?}");
     }

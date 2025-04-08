@@ -83,17 +83,18 @@ impl NodeEvaluationState {
 mod tests {
     use super::*;
 
+    use protobuf::MessageFull;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use std::future;
 
     use crate::mock::MockDynamicMessage;
 
     const KNOWN_PUBLISHER_NAME: &str = "publisher_foo";
-    const TEST_MESSAGE_NAME: &str = "TestMessage";
 
     #[test]
     fn get_or_add_sync_message_from_context_success() {
-        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
-            as Arc<dyn DynamicMessage>;
+        let msg =
+            Arc::new(MockDynamicMessage::new(TestMessage::descriptor())) as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
             KNOWN_PUBLISHER_NAME.to_owned(),
@@ -110,8 +111,8 @@ mod tests {
 
     #[test]
     fn get_or_add_sync_message_from_cache_success() {
-        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
-            as Arc<dyn DynamicMessage>;
+        let msg =
+            Arc::new(MockDynamicMessage::new(TestMessage::descriptor())) as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
         state.sync_message_cache.insert(KNOWN_PUBLISHER_NAME.to_owned(), Some(Arc::clone(&msg)));
@@ -125,8 +126,8 @@ mod tests {
 
     #[test]
     fn get_or_add_sync_message_from_message_factory_success() {
-        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
-            as Arc<dyn DynamicMessage>;
+        let msg =
+            Arc::new(MockDynamicMessage::new(TestMessage::descriptor())) as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
 
@@ -163,8 +164,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_or_add_async_message_from_cache_success() {
-        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
-            as Arc<dyn DynamicMessage>;
+        let msg =
+            Arc::new(MockDynamicMessage::new(TestMessage::descriptor())) as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
         let msg_clone = Arc::clone(&msg);
@@ -181,8 +182,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_or_add_async_message_from_message_factory_success() {
-        let msg = Arc::new(MockDynamicMessage::new(TEST_MESSAGE_NAME.to_owned()))
-            as Arc<dyn DynamicMessage>;
+        let msg =
+            Arc::new(MockDynamicMessage::new(TestMessage::descriptor())) as Arc<dyn DynamicMessage>;
         let context = Arc::new(NodeEvaluationContext::new(None));
         let state = NodeEvaluationState::new(Arc::clone(&context));
 

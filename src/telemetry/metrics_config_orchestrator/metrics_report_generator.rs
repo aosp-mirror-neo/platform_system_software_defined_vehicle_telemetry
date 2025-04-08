@@ -3,12 +3,13 @@
 use async_trait::async_trait;
 use log::debug;
 use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
-use protobuf::MessageDyn;
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
 };
 use sdv_telemetry_utils::value_holder::ValueHolder;
+use std::fmt::Display;
 use std::marker::{Send, Sync};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::Arc;
@@ -142,52 +143,70 @@ impl MetricsReportGeneratorImpl {
 
     async fn generate_report(
         &self,
-        build_result: ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
+        build_result: ValueHolder<
+            'static,
+            (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
+        >,
         report_reason: ReportReason,
         trigger_name: Option<&str>,
     ) {
         let (build_result, builder_errors) = build_result.into_future().await;
 
-        let error_ids = builder_errors.iter().map(|err| {
-            let metrics_config_uuid = self.config_uuid.clone();
-            let metrics_report_name = self.name.clone();
-            self.status_reporter.report(
-                err.get_status_code(),
-                format!("Metrics config {metrics_config_uuid} metrics report generation for '{metrics_report_name}' failed due to message builder error: {err}"),
-                StatusDetails::MetricsReportGeneratorErrorDetails(
-                    MetricsReportGeneratorErrorDetails {
-                        metricsConfigUUID: metrics_config_uuid,
-                        metricsReportName: metrics_report_name,
-                        fieldName: err.field_name.clone(),
-                    },
-            ))
-        }).collect::<Vec<_>>();
+        let error_ids = builder_errors
+            .into_iter()
+            .map(|err| self.report_error(err, |err| err.field_name))
+            .collect::<Vec<_>>();
 
-        if let Some(report_data) = build_result {
-            let mut report = MetricsReport::new();
-            report.config_activation_timestamp =
-                Some(self.config_activation_timestamp.clone()).into();
-            report.error_ids = error_ids;
-            report.metrics_config_uuid.clone_from(&self.config_uuid);
-            report.metrics_config_version = self.config_version;
-            report.report_config_name.clone_from(&self.name);
-            report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
-            report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
-            report.report_timestamp = Some(Timestamp::now()).into();
-            report.report_reason = report_reason.into();
-            report.report_uuid = Uuid::new_v4().to_string();
+        let Some(report_data) = build_result else {
+            return;
+        };
+        let report_data = match report_data.to_protobuf() {
+            Ok(report_data) => report_data,
+            Err(err) => {
+                self.report_error(err, |err| err.field_name);
+                return;
+            }
+        };
 
-            debug!(
-                "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
-                report.report_config_name,
-                report.report_number,
-                report_reason,
-                trigger_name.unwrap_or("[none]"),
-                report.metrics_config_uuid,
-            );
+        let mut report = MetricsReport::new();
+        report.config_activation_timestamp = Some(self.config_activation_timestamp.clone()).into();
+        report.error_ids = error_ids;
+        report.metrics_config_uuid.clone_from(&self.config_uuid);
+        report.metrics_config_version = self.config_version;
+        report.report_config_name.clone_from(&self.name);
+        report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+        report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
+        report.report_timestamp = Some(Timestamp::now()).into();
+        report.report_reason = report_reason.into();
+        report.report_uuid = Uuid::new_v4().to_string();
 
-            (self.report_ready_callback)(report);
-        }
+        debug!(
+            "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
+            report.report_config_name,
+            report.report_number,
+            report_reason,
+            trigger_name.unwrap_or("[none]"),
+            report.metrics_config_uuid,
+        );
+
+        (self.report_ready_callback)(report);
+    }
+
+    fn report_error<T: ErrorStatusCodes + Display>(
+        &self,
+        err: T,
+        field_name_provider: impl FnOnce(T) -> String,
+    ) -> i64 {
+        self.status_reporter.report(
+            err.get_status_code(),
+            format!("Metrics config {} metrics report generation for '{}' failed due to message builder error: {}", self.config_uuid, self.name, err),
+            StatusDetails::MetricsReportGeneratorErrorDetails(
+                MetricsReportGeneratorErrorDetails {
+                    metricsConfigUUID: self.config_uuid.clone(),
+                    metricsReportName: self.name.clone(),
+                    fieldName: field_name_provider(err),
+                },
+        ))
     }
 
     fn on_trigger_fired(
@@ -213,7 +232,6 @@ mod test {
         TelemetryServiceStatus::TelemetryServiceStatus,
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
-    use protobuf::MessageDyn;
     use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -226,7 +244,7 @@ mod test {
     };
     use crate::metrics_config_orchestrator::{
         node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
-        trigger::mock::MockTrigger,
+        protobuf_dynamic_message::ProtobufDynamicMessage, trigger::mock::MockTrigger,
     };
     use crate::StatusReporterImpl;
 
@@ -361,8 +379,8 @@ mod test {
         // Setup generator to return an error to make sure no reports can be generated past this point.
         message_builder.set_next_error(MessageBuilderError {
             field_name: String::default(),
-            error: MessageBuilderErrorType::FailedToAssignValueToField {
-                e: NodeEvaluationError::ConstantValueNotSet,
+            error: MessageBuilderErrorType::ExpressionEvaluationError {
+                e: NodeEvaluationError::DivideByZero,
             },
         });
 
@@ -440,10 +458,10 @@ mod test {
         let message_builder = MockMessageBuilder::new();
         message_builder.set_result_callback(|context| {
             (
-                Some(Box::new(TestMessage {
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
                     repeated_i64s: vec![i64::try_from(context.root_id()).unwrap()],
                     ..Default::default()
-                }) as Box<dyn MessageDyn>),
+                }))) as Box<dyn DynamicMessage>),
                 vec![],
             )
                 .into()
@@ -475,8 +493,10 @@ mod test {
         let message_builder = Arc::new(MockMessageBuilder::new());
         message_builder.set_next_async_result(
             future::ready((
-                Some(Box::new(TestMessage { int_field: 2, ..Default::default() })
-                    as Box<dyn MessageDyn>),
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 2,
+                    ..Default::default()
+                }))) as Box<dyn DynamicMessage>),
                 vec![],
             ))
             .boxed(),
@@ -502,8 +522,10 @@ mod test {
         let message_builder = Arc::new(MockMessageBuilder::new());
         message_builder.set_next_async_result(
             future::ready((
-                Some(Box::new(TestMessage { int_field: 2, ..Default::default() })
-                    as Box<dyn MessageDyn>),
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 2,
+                    ..Default::default()
+                }))) as Box<dyn DynamicMessage>),
                 vec![MessageBuilderError {
                     field_name: FIELD_NAME.to_owned(),
                     error: MessageBuilderErrorType::ExpressionEvaluationError {

@@ -2,10 +2,10 @@
 
 use protobuf::reflect::{MessageDescriptor, ReflectFieldRef, RuntimeType as ProtobufRuntimeType};
 use protobuf::MessageDyn;
-use sdv_telemetry_expr::dynamic_message::DynamicMessage;
+use sdv_telemetry_expr::dynamic_message::{DynamicMessage, ProtobufConversionError};
 use sdv_telemetry_expr::node_error::NodeEvaluationError;
 use sdv_telemetry_expr::node_value::NodeValue;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 mod to_node_value;
 
@@ -14,7 +14,6 @@ use to_node_value::ToNodeValue;
 /// Wrapper for protobuf MessageDyn that implements Telemetry expression evaluation
 /// DynamicMessage trait.
 pub(super) struct ProtobufDynamicMessage {
-    field_names: LazyLock<Vec<String>, Box<dyn FnOnce() -> Vec<String> + Send + Sync>>,
     message: Arc<dyn MessageDyn>,
     message_descriptor: MessageDescriptor,
 }
@@ -26,8 +25,8 @@ impl std::fmt::Debug for ProtobufDynamicMessage {
 }
 
 impl DynamicMessage for ProtobufDynamicMessage {
-    fn get_all_field_names(&self) -> &[String] {
-        &self.field_names
+    fn get_descriptor(&self) -> &MessageDescriptor {
+        &self.message_descriptor
     }
 
     fn get_field_value(&self, field_name: &str) -> Result<NodeValue, NodeEvaluationError> {
@@ -70,26 +69,15 @@ impl DynamicMessage for ProtobufDynamicMessage {
         }
     }
 
-    fn get_type_name(&self) -> &str {
-        self.message_descriptor.full_name()
-    }
-
-    fn to_protobuf(&self) -> Arc<dyn MessageDyn> {
-        Arc::clone(&self.message)
+    fn to_protobuf(&self) -> Result<Arc<dyn MessageDyn>, ProtobufConversionError> {
+        Ok(Arc::clone(&self.message))
     }
 }
 
 impl ProtobufDynamicMessage {
     pub(super) fn new(message: Arc<dyn MessageDyn>) -> Self {
         let message_descriptor = message.descriptor_dyn();
-        let message_descriptor_clone = message_descriptor.clone();
-        Self {
-            field_names: LazyLock::new(Box::new(move || {
-                message_descriptor_clone.fields().map(|field| field.name().to_owned()).collect()
-            })),
-            message,
-            message_descriptor,
-        }
+        Self { message, message_descriptor }
     }
 
     fn get_default_node_value_from_type(

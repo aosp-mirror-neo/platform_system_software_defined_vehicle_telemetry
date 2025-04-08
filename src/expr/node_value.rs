@@ -14,6 +14,7 @@ use std::{borrow::Cow, convert::From, sync::Arc};
 
 use crate::dynamic_message::DynamicMessage;
 use crate::node_error::NodeEvaluationError;
+use crate::node_value_type::NodeValueType;
 
 /// Holds a generic value.
 #[derive(Clone, Debug)]
@@ -193,6 +194,26 @@ impl NodeValue {
             Some(val)
         } else {
             None
+        }
+    }
+
+    pub fn get_node_value_type(&self) -> Option<NodeValueType> {
+        match self {
+            NodeValue::None => None,
+            NodeValue::Bool(_) => Some(NodeValueType::Bool),
+            NodeValue::Int32(_) | NodeValue::Int64(_) => Some(NodeValueType::Int),
+            NodeValue::Float(_) | NodeValue::Double(_) => Some(NodeValueType::Float),
+            NodeValue::Message(msg) => {
+                Some(NodeValueType::Message { descriptor: Some(msg.get_descriptor().to_owned()) })
+            }
+            NodeValue::BoolList(_) => Some(NodeValueType::BoolList),
+            NodeValue::Int32List(_) | NodeValue::Int64List(_) => Some(NodeValueType::IntList),
+            NodeValue::FloatList(_) | NodeValue::DoubleList(_) => Some(NodeValueType::FloatList),
+            NodeValue::MessageList(vec) => Some(NodeValueType::MessageList {
+                descriptor: vec.first().map(|msg| msg.get_descriptor().to_owned()),
+            }),
+            NodeValue::String(_) => Some(NodeValueType::String),
+            NodeValue::ByteList(_) => Some(NodeValueType::ByteList),
         }
     }
 
@@ -748,7 +769,9 @@ mod tests {
 
     use googletest::assert_that;
     use googletest::matchers::{eq, err, ok, pat};
+    use protobuf::MessageFull;
     use sdv_telemetry_proto_rust::expression::ConstantLeafNode;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
     use sdv_telemetry_test_utils::parameterized_test;
     use std::f32::consts::PI as PIf32;
     use std::f64::consts::PI as PIf64;
@@ -828,8 +851,8 @@ mod tests {
 
     #[test]
     fn extract_value_nested_field_not_set_ok() {
-        let mut msg = MockDynamicMessage::new("TestMessage".to_owned());
-        msg.set_field("message_field".to_owned(), NodeValue::None);
+        let mut msg = MockDynamicMessage::new(TestMessage::descriptor());
+        msg.set_field_value("message_field".to_owned(), NodeValue::None);
         let msg = Arc::new(msg);
         let field_names = ["message_field".to_owned(), "int_field".to_owned()];
 
@@ -867,13 +890,14 @@ mod tests {
     }
 
     #[test]
-    fn extract_value_nonexistent_field_should_err() {
-        let msg = Arc::clone(&*TEST_DYNAMIC_MESSAGE);
+    fn extract_value_propagates_error() {
+        let msg = Arc::new(MockDynamicMessage::new(TestMessage::descriptor()));
+        msg.set_next_error(NodeEvaluationError::ConstantValueNotSet);
         let field_names = ["foo".to_owned()];
 
         assert!(matches!(
             NodeValue::extract_value(msg, &field_names).unwrap_err(),
-            NodeEvaluationError::FieldNotFound { .. }
+            NodeEvaluationError::ConstantValueNotSet
         ));
     }
 
@@ -1043,7 +1067,7 @@ mod tests {
         eq_list_7: (&OP_EQ, NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(false))),),
         eq_list_8: (&OP_EQ, NodeValue::FloatList(vec![0.5, 0.5]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(true))),),
         eq_list_9: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_10: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new("TestMessage".to_owned()))), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_10: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(false))),),
         eq_list_none_left: (&OP_EQ, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
         eq_list_none_right: (&OP_EQ, NodeValue::Int64List(vec![42]), NodeValue::None, ok(eq(&NodeValue::None)),),
         eq_list_incompatible_types: (&OP_EQ, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
@@ -1107,7 +1131,7 @@ mod tests {
         contains_float_4: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(30.0), ok(eq(&NodeValue::Bool(false))),),
         contains_approximately_equal: (&OP_CONTAINS, NodeValue::DoubleList(vec![ONE.get_double().unwrap()]), ONE_EPSILON, ok(eq(&NodeValue::Bool(true))),),
         contains_message_1: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(true))),),
-        contains_message_2: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new("TestMessage".to_owned()))), ok(eq(&NodeValue::Bool(false))),),
+        contains_message_2: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(false))),),
         contains_none_left: (&OP_CONTAINS, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
         contains_none_right: (&OP_CONTAINS, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
         contains_not_a_list: (&OP_CONTAINS, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
@@ -1125,7 +1149,7 @@ mod tests {
         not_contains_float_4: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(30.0), ok(eq(&NodeValue::Bool(true))),),
         not_contains_approximately_equal: (&OP_DOES_NOT_CONTAIN, NodeValue::DoubleList(vec![ONE.get_double().unwrap()]), ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
         not_contains_message_1: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(false))),),
-        not_contains_message_2: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new("TestMessage".to_owned()))), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_message_2: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(true))),),
         not_contains_none_left: (&OP_DOES_NOT_CONTAIN, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
         not_contains_none_right: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
         not_contains_not_a_list: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),

@@ -5,16 +5,18 @@
 use futures::future::BoxFuture;
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
+use protobuf::MessageFull;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_proto_rust::expression::combination_node::{
     ArithmeticOperator, LogicalOperator, Operator as OperatorProto, RelationalOperator,
     RoundingOperator,
 };
+use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::dynamic_message::DynamicMessage;
+use crate::dynamic_message::{DynamicMessage, ProtobufConversionError};
 use crate::node_error::{DescriptorProviderError, MessageProviderError, NodeEvaluationError};
 use crate::node_factory::{DescriptorProvider, MessageProvider};
 use crate::node_value::NodeValue;
@@ -78,26 +80,26 @@ lazy_static! {
     pub static ref OP_CEIL: OperatorProto =
         OperatorProto::RoundingOperator(RoundingOperator::CEIL.into());
     pub static ref TEST_DYNAMIC_MESSAGE: Arc<MockDynamicMessage> = {
-        let mut test_message = MockDynamicMessage::new("TestMessage".to_owned());
+        let mut test_message = MockDynamicMessage::new(TestMessage::descriptor());
         // initialize scalar (optional) fields
-        test_message.set_field("bool_field".to_owned(), NodeValue::Bool(true));
-        test_message.set_field("int_field".to_owned(), NodeValue::Int32(80));
-        test_message.set_field("float_field".to_owned(), NodeValue::Float(100.0));
-        test_message.set_field("string_field".to_owned(), NodeValue::String("Hello world".to_string()));
-        test_message.set_field("bytes_field".to_owned(), NodeValue::ByteList("Hello world".as_bytes().to_vec()));
+        test_message.set_field_value("bool_field".to_owned(), NodeValue::Bool(true));
+        test_message.set_field_value("int_field".to_owned(), NodeValue::Int32(80));
+        test_message.set_field_value("float_field".to_owned(), NodeValue::Float(100.0));
+        test_message.set_field_value("string_field".to_owned(), NodeValue::String("Hello world".to_owned()));
+        test_message.set_field_value("bytes_field".to_owned(), NodeValue::ByteList("Hello world".as_bytes().to_vec()));
 
         // initialize nested field
-        let mut test_nested_message = MockDynamicMessage::new("TestNestedMessage".to_owned());
-        test_nested_message.set_field("bool_field".to_owned(), NodeValue::Bool(true));
-        test_nested_message.set_field("repeated_i32s".to_owned(), NodeValue::Int32List(vec![1, 2]));
+        let mut test_nested_message = MockDynamicMessage::new(TestNestedMessage::descriptor());
+        test_nested_message.set_field_value("bool_field".to_owned(), NodeValue::Bool(true));
+        test_nested_message.set_field_value("repeated_i32s".to_owned(), NodeValue::Int32List(vec![1, 2]));
         let test_nested_message = Arc::new(test_nested_message);
-        test_message.set_field("message_field".to_owned(), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&test_nested_message)));
+        test_message.set_field_value("message_field".to_owned(), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&test_nested_message)));
 
         // initialize repeated fields
-        test_message.set_field("repeated_bools".to_owned(), NodeValue::BoolList(vec![true, true, false, true]));
-        test_message.set_field("repeated_i64s".to_owned(), NodeValue::Int64List(vec![3, 4, 5]));
-        test_message.set_field("repeated_doubles".to_owned(), NodeValue::DoubleList(vec![std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E]));
-        test_message.set_field("repeated_messages".to_owned(), NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&test_nested_message), test_nested_message]));
+        test_message.set_field_value("repeated_bools".to_owned(), NodeValue::BoolList(vec![true, true, false, true]));
+        test_message.set_field_value("repeated_i64s".to_owned(), NodeValue::Int64List(vec![3, 4, 5]));
+        test_message.set_field_value("repeated_doubles".to_owned(), NodeValue::DoubleList(vec![std::f64::consts::PI, std::f64::consts::TAU, std::f64::consts::E]));
+        test_message.set_field_value("repeated_messages".to_owned(), NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&test_nested_message), test_nested_message]));
 
         Arc::new(test_message)
     };
@@ -105,24 +107,21 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct MockDynamicMessage {
-    all_field_names: Vec<String>,
+    descriptor: MessageDescriptor,
     field_values: HashMap<String, NodeValue>,
     next_error: Mutex<Option<NodeEvaluationError>>,
-    type_name: String,
 }
 
 impl MockDynamicMessage {
-    pub fn new(type_name: String) -> Self {
-        Self {
-            all_field_names: vec![],
-            field_values: HashMap::new(),
-            next_error: None.into(),
-            type_name,
-        }
+    pub fn new(descriptor: MessageDescriptor) -> Self {
+        Self { descriptor, field_values: HashMap::new(), next_error: None.into() }
     }
 
-    pub fn set_field(&mut self, field_name: String, field_value: NodeValue) {
-        self.all_field_names.push(field_name.clone());
+    pub fn set_field_value(&mut self, field_name: String, field_value: NodeValue) {
+        assert!(
+            self.descriptor.field_by_name(&field_name).is_some(),
+            "Unknown field: {field_name}"
+        );
         self.field_values.insert(field_name, field_value);
     }
 
@@ -132,8 +131,8 @@ impl MockDynamicMessage {
 }
 
 impl DynamicMessage for MockDynamicMessage {
-    fn get_all_field_names(&self) -> &[String] {
-        &self.all_field_names
+    fn get_descriptor(&self) -> &MessageDescriptor {
+        &self.descriptor
     }
 
     fn get_field_value(&self, field_name: &str) -> Result<NodeValue, NodeEvaluationError> {
@@ -141,22 +140,13 @@ impl DynamicMessage for MockDynamicMessage {
             return Err(error);
         }
 
-        self.field_values.get(field_name).map_or_else(
-            || {
-                Err(NodeEvaluationError::FieldNotFound {
-                    field_name: field_name.to_owned(),
-                    message_name: self.get_type_name().to_owned(),
-                })
-            },
-            |node_value| Ok(node_value.clone()),
-        )
+        Ok(self
+            .field_values
+            .get(field_name)
+            .map_or_else(|| NodeValue::None, |node_value| node_value.clone()))
     }
 
-    fn get_type_name(&self) -> &str {
-        &self.type_name
-    }
-
-    fn to_protobuf(&self) -> Arc<dyn MessageDyn> {
+    fn to_protobuf(&self) -> Result<Arc<dyn MessageDyn>, ProtobufConversionError> {
         panic!("to_protobuf should not be called in tests");
     }
 }

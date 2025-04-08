@@ -928,7 +928,7 @@ mod tests {
         subscribe_receiver.await.unwrap();
 
         service_adapter.publish_new_message(&msg).await;
-        let received_message = rx.await.to_protobuf();
+        let received_message = rx.await.to_protobuf().unwrap();
 
         assert!(
             Arc::ptr_eq(&received_message, &msg),
@@ -1178,7 +1178,7 @@ mod tests {
             .await;
         service_adapter.publish_new_message(&msg).await;
 
-        let received_message = rx.await.to_protobuf();
+        let received_message = rx.await.to_protobuf().unwrap();
         let latest_message = publisher.get_latest_message().unwrap_sync().unwrap().unwrap();
         assert!(
             Arc::ptr_eq(&received_message, &msg),

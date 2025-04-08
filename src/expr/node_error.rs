@@ -7,6 +7,8 @@ use sdv_telemetry_proto_rust::expression::constant_leaf_node::Node_value as Node
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use std::sync::Arc;
 
+use crate::dynamic_message::ProtobufConversionError;
+
 /// A wrapper for NodeEvaluationError containing index of the node causing it
 #[derive(thiserror::Error, Debug)]
 #[error("Processing node at index {index} failed: {err}")]
@@ -98,6 +100,8 @@ pub enum NodeEvaluationError {
     ContainsOperatorIncompatibleOperands,
 
     // errors related to converting a node value into a protobuf reflection object
+    #[error(transparent)]
+    ProtobufConversionError(#[from] Box<ProtobufConversionError>),
     #[error("Cannot assign {value} to a repeated field")]
     RepeatedFieldWrongAssignment { value: String },
     #[error("Cannot convert {value} to a protobuf reflection of type {refl_type}")]

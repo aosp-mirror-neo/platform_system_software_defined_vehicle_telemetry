@@ -39,9 +39,12 @@ impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
             NodeValue::Int64List(v) => push_vec_content(self, v),
             NodeValue::FloatList(v) => push_vec_content(self, v),
             NodeValue::DoubleList(v) => push_vec_content(self, v),
-            NodeValue::MessageList(v) => {
-                push_vec_content(self, &v.iter().map(|msg| msg.to_protobuf()).collect::<Vec<_>>())
-            }
+            NodeValue::MessageList(v) => push_vec_content(
+                self,
+                &v.iter()
+                    .map(|msg| msg.to_protobuf().map_err(Box::new))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
             _ => Err(NodeEvaluationError::RepeatedFieldWrongAssignment {
                 value: format!("{:?}", node_value),
             }),
@@ -87,7 +90,9 @@ impl ToReflectValueBox for NodeValue {
             Self::Int64(value) => value.to_reflect_value_box(protobuf_type),
             Self::Float(value) => value.to_reflect_value_box(protobuf_type),
             Self::Double(value) => value.to_reflect_value_box(protobuf_type),
-            Self::Message(value) => value.to_protobuf().to_reflect_value_box(protobuf_type),
+            Self::Message(value) => {
+                value.to_protobuf().map_err(Box::new)?.to_reflect_value_box(protobuf_type)
+            }
             Self::String(value) => value.as_str().to_reflect_value_box(protobuf_type),
             Self::ByteList(value) => value.as_slice().to_reflect_value_box(protobuf_type),
         }

@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use protobuf::MessageDyn;
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::{
@@ -9,6 +10,7 @@ use sdv_telemetry_utils::{
     value_holder::ValueHolder,
 };
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::{Arc, Weak};
 use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -115,14 +117,17 @@ impl Publisher for AggregationPublisher {
         #[async_trait]
         impl
             AsyncEventHandler<(
-                ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
+                ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>,
                 Arc<NodeEvaluationContext>,
             )> for AggregationPublisherHandler
         {
             async fn handle(
                 &mut self,
                 (build_result, context): (
-                    ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
+                    ValueHolder<
+                        'static,
+                        (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
+                    >,
                     Arc<NodeEvaluationContext>,
                 ),
             ) {
@@ -247,9 +252,31 @@ impl AggregationPublisher {
         }
     }
 
+    fn report_error<T: ErrorStatusCodes + Display>(
+        &self,
+        err: T,
+        field_name_provider: impl FnOnce(T) -> String,
+    ) {
+        let metrics_config_uuid = self.get_metrics_config_uuid();
+        let publisher_name = self.get_name();
+        self.status_reporter.report(
+            err.get_status_code(),
+            format!("Metrics config {metrics_config_uuid} aggregation publisher {publisher_name} failed to build message: {err}"),
+            StatusDetails::AggregationPublisherErrorDetails(
+                AggregationPublisherErrorDetails {
+                    metricsConfigUUID: metrics_config_uuid.to_owned(),
+                    publisherName: publisher_name.to_owned(),
+                    fieldName: field_name_provider(err),
+                },
+        ));
+    }
+
     async fn on_new_message(
         &self,
-        build_result: ValueHolder<'static, (Option<Box<dyn MessageDyn>>, Vec<MessageBuilderError>)>,
+        build_result: ValueHolder<
+            'static,
+            (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
+        >,
         context: Arc<NodeEvaluationContext>,
     ) {
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
@@ -262,25 +289,25 @@ impl AggregationPublisher {
         let (message, builder_errors) = build_result.into_future().await;
         if !builder_errors.is_empty() {
             for err in builder_errors {
-                let publisher_name = self.get_name().to_owned();
-                let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
-                self.status_reporter.report(
-                    err.get_status_code(),
-                    format!("Metrics config {metrics_config_uuid} aggregation publisher {publisher_name} failed to build message: {err}"),
-                    StatusDetails::AggregationPublisherErrorDetails(
-                        AggregationPublisherErrorDetails {
-                            metricsConfigUUID: metrics_config_uuid,
-                            publisherName: publisher_name,
-                            fieldName: err.field_name.clone(),
-                        },
-                ));
+                self.report_error(err, |err| err.field_name);
             }
 
             // Don't set new message if at least one error has occurred
             return;
         }
 
-        let message = message.expect("Message should be Some if no builder errors occurred").into();
+        let message = match message
+            .expect("Message should be Some if no builder errors occurred")
+            // TODO(b/408041402): Remove once data collection no longer relies on protobuf.
+            .to_protobuf()
+        {
+            Ok(message) => message,
+            Err(err) => {
+                self.report_error(err, |err| err.field_name);
+                return;
+            }
+        };
+
         let context = context.to_child_context(
             self.get_name().to_owned(),
             Arc::new(ProtobufDynamicMessage::new(Arc::clone(&message))),
@@ -463,7 +490,7 @@ mod tests {
         trigger.fire().await;
 
         let messages = [
-            rx.await.to_protobuf(),
+            rx.await.to_protobuf().unwrap(),
             Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap(),
         ];
         for message in messages {
@@ -532,8 +559,10 @@ mod tests {
 
         message_builder.set_next_async_result(
             future::ready((
-                Some(Box::new(TestMessage { int_field: 2, ..Default::default() })
-                    as Box<dyn MessageDyn>),
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 2,
+                    ..Default::default()
+                }))) as Box<dyn DynamicMessage>),
                 vec![],
             ))
             .boxed(),
@@ -541,7 +570,7 @@ mod tests {
         trigger.fire().await;
 
         let messages = [
-            rx.await.to_protobuf(),
+            rx.await.to_protobuf().unwrap(),
             publisher.get_latest_message().unwrap_sync().unwrap().unwrap(),
         ];
         for message in messages {
