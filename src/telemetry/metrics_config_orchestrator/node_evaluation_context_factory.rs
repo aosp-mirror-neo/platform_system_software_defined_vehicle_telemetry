@@ -1,11 +1,10 @@
 // Copyright 2025 Google LLC
 
-use protobuf::MessageDyn;
-use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
+use sdv_telemetry_expr::{
+    dynamic_message::DynamicMessage, node_evaluation_context::NodeEvaluationContext,
+};
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use std::sync::Arc;
-
-use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 
 pub trait NodeEvaluationContextFactory: Send + Sync {
     fn create(&self) -> NodeEvaluationContext;
@@ -13,7 +12,7 @@ pub trait NodeEvaluationContextFactory: Send + Sync {
     fn create_with_publisher_message(
         &self,
         publisher_name: String,
-        publisher_message: Arc<dyn MessageDyn>,
+        publisher_message: Arc<dyn DynamicMessage>,
     ) -> NodeEvaluationContext;
 }
 
@@ -29,12 +28,12 @@ impl NodeEvaluationContextFactory for NodeEvaluationContextFactoryImpl {
     fn create_with_publisher_message(
         &self,
         publisher_name: String,
-        publisher_message: Arc<dyn MessageDyn>,
+        publisher_message: Arc<dyn DynamicMessage>,
     ) -> NodeEvaluationContext {
         NodeEvaluationContext::with_publisher_message(
             self.pal.get_resumed_at(),
             publisher_name,
-            Arc::new(ProtobufDynamicMessage::new(publisher_message)),
+            publisher_message,
         )
     }
 }
@@ -56,9 +55,12 @@ mod tests {
     use sdv_telemetry_platform_abstraction_layer::MockPal;
     use sdv_telemetry_time_wrapper::Microseconds;
 
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
+
     lazy_static! {
         static ref PUBLISHER_NAME: String = "name".to_owned();
-        static ref PUBLISHER_MESSAGE: Arc<dyn MessageDyn> = Arc::new(Empty::new());
+        static ref PUBLISHER_MESSAGE: Arc<dyn DynamicMessage> =
+            Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::new())));
     }
 
     #[googletest::test]

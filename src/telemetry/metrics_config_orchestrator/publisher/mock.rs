@@ -2,7 +2,7 @@
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use protobuf::MessageDyn;
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
@@ -14,7 +14,7 @@ use crate::metrics_config_orchestrator::publisher::CallbackFn;
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
-    pub latest_message: Option<Arc<dyn MessageDyn>>,
+    pub latest_message: Option<Arc<dyn DynamicMessage>>,
 
     name: String,
     metrics_config_uuid: String,
@@ -42,7 +42,8 @@ impl Publisher for MockPublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError> {
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>
+    {
         if let Some(err) = self.latest_message_error.lock().take() {
             return Err(err).into();
         }

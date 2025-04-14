@@ -1,7 +1,6 @@
 // Copyright 2024 Google LLC
 
 use async_trait::async_trait;
-use protobuf::MessageDyn;
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
@@ -21,7 +20,6 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
-use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
 use crate::status_reporter::StatusReporter;
 
@@ -73,7 +71,8 @@ impl Publisher for AggregationPublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError> {
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>
+    {
         let latest_message = self.base.get_latest_message();
         if self.reset_on_get {
             self.base.reset_latest_message();
@@ -296,22 +295,8 @@ impl AggregationPublisher {
             return;
         }
 
-        let message = match message
-            .expect("Message should be Some if no builder errors occurred")
-            // TODO(b/408041402): Remove once data collection no longer relies on protobuf.
-            .to_protobuf()
-        {
-            Ok(message) => message,
-            Err(err) => {
-                self.report_error(err, |err| err.field_name);
-                return;
-            }
-        };
-
-        let context = context.to_child_context(
-            self.get_name().to_owned(),
-            Arc::new(ProtobufDynamicMessage::new(Arc::clone(&message))),
-        );
+        let message = message.expect("Message should be Some if no builder errors occurred").into();
+        let context = context.to_child_context(self.get_name().to_owned(), Arc::clone(&message));
 
         self.base.set_new_message(message, &context.into(), callback_map);
     }
@@ -327,6 +312,7 @@ mod tests {
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
     use protobuf::well_known_types::wrappers::Int32Value;
+    use protobuf::MessageDyn;
     use sdv_telemetry_expr::dynamic_message::DynamicMessage;
     use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -335,6 +321,7 @@ mod tests {
 
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
     use crate::metrics_config_orchestrator::message_builder::MessageBuilderErrorType;
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::StatusReporterImpl;
 
@@ -491,7 +478,13 @@ mod tests {
 
         let messages = [
             rx.await.to_protobuf().unwrap(),
-            Arc::clone(&publisher).get_latest_message().unwrap_sync().unwrap().unwrap(),
+            Arc::clone(&publisher)
+                .get_latest_message()
+                .unwrap_sync()
+                .unwrap()
+                .unwrap()
+                .to_protobuf()
+                .unwrap(),
         ];
         for message in messages {
             let test_message =
@@ -571,7 +564,7 @@ mod tests {
 
         let messages = [
             rx.await.to_protobuf().unwrap(),
-            publisher.get_latest_message().unwrap_sync().unwrap().unwrap(),
+            publisher.get_latest_message().unwrap_sync().unwrap().unwrap().to_protobuf().unwrap(),
         ];
         for message in messages {
             let test_message =

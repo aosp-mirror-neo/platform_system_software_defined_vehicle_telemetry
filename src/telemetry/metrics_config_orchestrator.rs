@@ -857,8 +857,8 @@ mod tests {
     };
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-    use protobuf::MessageDyn;
     use protobuf::{well_known_types, MessageFull};
+    use protobuf_dynamic_message::ProtobufDynamicMessage;
     use sdv_telemetry_expr::{
         node_error::NodeEvaluationError, node_factory::MessageProvider, node_value::NodeValue,
         node_value_type::NodeValueType,
@@ -1836,13 +1836,15 @@ mod tests {
 
         let mut service_publisher_mock =
             MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned(), UUID.to_owned());
-        service_publisher_mock.latest_message.replace(Arc::clone(&value1) as Arc<dyn MessageDyn>);
+        service_publisher_mock
+            .latest_message
+            .replace(Arc::new(ProtobufDynamicMessage::new(Arc::<Int32Value>::clone(&value1))));
 
         let mut aggregation_publisher_mock =
             MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned(), UUID.to_owned());
         aggregation_publisher_mock
             .latest_message
-            .replace(Arc::clone(&value2) as Arc<dyn MessageDyn>);
+            .replace(Arc::new(ProtobufDynamicMessage::new(Arc::<Int32Value>::clone(&value2))));
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let factory_calls = Arc::new(Mutex::new(Vec::new()));

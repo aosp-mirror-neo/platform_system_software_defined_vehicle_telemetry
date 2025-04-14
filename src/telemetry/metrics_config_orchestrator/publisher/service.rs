@@ -6,6 +6,7 @@ use futures::FutureExt;
 use log::{debug, info, warn};
 use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, ServicePublisherAccessorError, SubSamplingInterval,
 };
@@ -24,6 +25,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactory;
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
@@ -106,7 +108,8 @@ impl Publisher for ServicePublisher {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError> {
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>
+    {
         if let Some(message) = self.base.get_latest_message() {
             return Ok(Some(message)).into();
         }
@@ -123,10 +126,9 @@ impl Publisher for ServicePublisher {
                 }
                 ServicePublisherState::ActiveSubscribed { .. } => return Ok(None),
             };
-            Ok(message_provider
-                .get_latest_message(self.configuration.as_ref())
-                .await?
-                .map(|msg| msg.into()))
+            Ok(message_provider.get_latest_message(self.configuration.as_ref()).await?.map(|msg| {
+                Arc::new(ProtobufDynamicMessage::new(msg.into())) as Arc<dyn DynamicMessage>
+            }))
         }
         .boxed()
         .into()
@@ -483,12 +485,14 @@ impl ServicePublisher {
     }
 
     async fn on_new_message(&self, message: Arc<dyn MessageDyn>) {
+        let message = Arc::new(ProtobufDynamicMessage::new(message));
+
         // Create context outside of the lock, so that the date/time is set as fast as possible,
         // and not just at the moment when the lock is obtained.
-        let context = Arc::new(
-            self.node_evaluation_context_factory
-                .create_with_publisher_message(self.get_name().to_owned(), Arc::clone(&message)),
-        );
+        let context = Arc::new(self.node_evaluation_context_factory.create_with_publisher_message(
+            self.get_name().to_owned(),
+            Arc::<ProtobufDynamicMessage>::clone(&message),
+        ));
 
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
         let mut state_lock = self.state.lock().await;
@@ -1179,7 +1183,8 @@ mod tests {
         service_adapter.publish_new_message(&msg).await;
 
         let received_message = rx.await.to_protobuf().unwrap();
-        let latest_message = publisher.get_latest_message().unwrap_sync().unwrap().unwrap();
+        let latest_message =
+            publisher.get_latest_message().unwrap_sync().unwrap().unwrap().to_protobuf().unwrap();
         assert!(
             Arc::ptr_eq(&received_message, &msg),
             "Expected {received_message:?} to equal {msg:?}"
@@ -1198,8 +1203,14 @@ mod tests {
         service_adapter.set_next_message_provider(message_provider);
         let publisher = create_active_getter_service_publisher(service_adapter).await;
 
-        let latest_message =
-            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap().unwrap();
+        let latest_message = Arc::clone(&publisher)
+            .get_latest_message()
+            .unwrap_async()
+            .await
+            .unwrap()
+            .unwrap()
+            .to_protobuf()
+            .unwrap();
 
         assert_that!(latest_message, msg_dyn_eq(message.as_ref(), &ReflectEqMode::default()));
     }

@@ -1,7 +1,7 @@
 // Copyright 2023 Google LLC
 
 use async_trait::async_trait;
-use protobuf::MessageDyn;
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::operation_result::OperationResult;
@@ -30,7 +30,7 @@ pub(crate) trait Publisher: Send + Sync {
 
     fn get_latest_message(
         self: Arc<Self>,
-    ) -> OperationResult<'static, Option<Arc<dyn MessageDyn>>, ServicePublisherAccessorError>;
+    ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>;
 
     async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError>;
     async fn deactivate(&self) -> anyhow::Result<()>;

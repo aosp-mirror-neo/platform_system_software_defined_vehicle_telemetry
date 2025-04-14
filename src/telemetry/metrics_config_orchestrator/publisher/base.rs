@@ -1,8 +1,9 @@
 // Copyright 2024 Google LLC
 
 use parking_lot::Mutex;
-use protobuf::MessageDyn;
-use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
+use sdv_telemetry_expr::{
+    dynamic_message::DynamicMessage, node_evaluation_context::NodeEvaluationContext,
+};
 use std::{collections::HashMap, sync::Arc};
 
 use super::CallbackFn;
@@ -10,7 +11,7 @@ use super::CallbackFn;
 pub(super) struct BasePublisher {
     name: String,
     metrics_config_uuid: String,
-    latest_message: Mutex<Option<Arc<dyn MessageDyn>>>,
+    latest_message: Mutex<Option<Arc<dyn DynamicMessage>>>,
 }
 
 impl BasePublisher {
@@ -26,13 +27,13 @@ impl BasePublisher {
         &self.metrics_config_uuid
     }
 
-    pub(super) fn get_latest_message(&self) -> Option<Arc<dyn MessageDyn>> {
+    pub(super) fn get_latest_message(&self) -> Option<Arc<dyn DynamicMessage>> {
         self.latest_message.lock().as_ref().map(Arc::clone)
     }
 
     pub(super) fn set_new_message(
         &self,
-        message: Arc<dyn MessageDyn>,
+        message: Arc<dyn DynamicMessage>,
         context: &Arc<NodeEvaluationContext>,
         callback_map: &mut HashMap<String, CallbackFn>,
     ) {
