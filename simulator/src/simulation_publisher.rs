@@ -78,13 +78,13 @@ impl SimulationPublisher {
                 return Err(());
             };
 
+            tokio::time::sleep(data_entry.delay).await;
+
             debug!("Publishing message: {}", print_to_string_pretty(data_entry.message.as_ref()));
             *strong_self.latest_message.lock() = Some(data_entry.message_bytes.clone());
             for subscriber in strong_self.subscribers.lock().values() {
                 let _ = subscriber.sendData(&data_entry.message_bytes);
             }
-
-            tokio::time::sleep(data_entry.delay).await;
         }
 
         Ok(())
