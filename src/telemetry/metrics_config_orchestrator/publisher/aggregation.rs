@@ -8,6 +8,7 @@ use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
     value_holder::ValueHolder,
 };
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{Arc, Weak};
@@ -101,9 +102,23 @@ impl Publisher for AggregationPublisher {
                     &self.trigger_subscriber,
                     Box::new(move |context| {
                         // Synchronously build aggregated message and enqueue the result.
-                        let message_builder = Arc::clone(&self_reference.upgrade().expect("Callback should only be called when aggregation publisher is active").message_builder);
-                        let build_result = message_builder.build(&context);
-                        sender_clone.send((build_result, context)).expect("Callback should only receive messages when subscribed")
+                        let self_clone = self_reference.upgrade().expect(
+                            "Callback should only be called when aggregation publisher is active",
+                        );
+                        let eval_context =
+                            if let Some(latest_message) = self_clone.base.get_latest_message() {
+                                Cow::Owned(Arc::new(context.to_child_context(
+                                    self_clone.base.get_name().to_owned(),
+                                    latest_message,
+                                )))
+                            } else {
+                                Cow::Borrowed(&context)
+                            };
+                        let build_result =
+                            Arc::clone(&self_clone.message_builder).build(&eval_context);
+                        sender_clone
+                            .send((build_result, context))
+                            .expect("Callback should only receive messages when subscribed")
                     }),
                 )
                 .await;
@@ -491,6 +506,52 @@ mod tests {
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
             assert_eq!(test_message.int_field, 1);
         }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_passes_latest_message_to_builder_when_triggered() {
+        let trigger = Arc::new(MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            CONFIG_UUID.to_owned(),
+            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
+        ));
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let (tx, rx) = oneshot_callback();
+        // Capture the context passed to the message builder
+        message_builder.set_result_callback(move |ctx| {
+            tx(Arc::clone(ctx));
+            ValueHolder::Synchronous((None, vec![]))
+        });
+
+        let publisher = Arc::new(AggregationPublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            Arc::<MockMessageBuilder>::clone(&message_builder),
+            CONFIG_UUID.to_owned(),
+            false,
+            vec![Arc::<MockTrigger>::clone(&trigger)],
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+        ));
+
+        // Set a latest message before activation
+        let latest_msg = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 99,
+            ..Default::default()
+        }))) as Arc<dyn DynamicMessage>;
+        publisher.base.set_new_message(
+            Arc::clone(&latest_msg),
+            &Arc::new(NodeEvaluationContext::new(None)),
+            &mut HashMap::new(),
+        );
+
+        // Activate and fire trigger
+        Arc::clone(&publisher).activate().await.unwrap();
+        trigger.fire().await;
+
+        // Verify the context received by the message builder
+        let received_context = rx.await;
+        let context_msg = received_context.get_message(PUBLISHER_NAME).unwrap();
+        assert!(Arc::ptr_eq(context_msg, &latest_msg), "Unexpected message: {context_msg:?}");
     }
 
     #[sdv_telemetry_test_utils::timeout]

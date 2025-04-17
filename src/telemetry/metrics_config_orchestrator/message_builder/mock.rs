@@ -22,7 +22,7 @@ pub(crate) struct MockMessageBuilder {
         Option<
             Box<
                 dyn Fn(
-                        &NodeEvaluationContext,
+                        &Arc<NodeEvaluationContext>,
                     ) -> ValueHolder<
                         'static,
                         (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
@@ -90,7 +90,7 @@ impl MockMessageBuilder {
     pub(crate) fn set_result_callback(
         &self,
         callback: impl Fn(
-                &NodeEvaluationContext,
+                &Arc<NodeEvaluationContext>,
             )
                 -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>
             + Send
