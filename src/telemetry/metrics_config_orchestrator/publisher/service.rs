@@ -116,11 +116,9 @@ impl Publisher for ServicePublisher {
 
         async move {
             let message_provider = match &*self.state.lock().await {
-                ServicePublisherState::Inactive => panic!(
-                    "Publisher {} is inactive and cannot provide latest message",
-                    self.get_name()
-                ),
-                ServicePublisherState::Pending { .. } => return Ok(None),
+                ServicePublisherState::Inactive | ServicePublisherState::Pending { .. } => {
+                    return Ok(None)
+                }
                 ServicePublisherState::ActiveGetter { message_provider } => {
                     Arc::clone(message_provider)
                 }
@@ -1228,6 +1226,32 @@ mod tests {
         let err = publisher.get_latest_message().unwrap_async().await.unwrap_err();
 
         assert!(err.to_string().contains(ERROR_STRING), "Unexpected error: {:?}", err);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_latest_message_inactive_returns_none() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher = create_inactive_subscription_service_publisher(Some(service_adapter));
+
+        let latest_message =
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+
+        assert!(latest_message.is_none());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_latest_message_pending_returns_none() {
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
+        let publisher =
+            create_inactive_subscription_service_publisher(Some(Arc::clone(&service_adapter)));
+        Arc::clone(&publisher).activate().await.unwrap();
+
+        let latest_message =
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+
+        assert!(latest_message.is_none());
     }
 
     #[sdv_telemetry_test_utils::timeout]
