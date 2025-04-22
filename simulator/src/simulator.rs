@@ -69,6 +69,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
     match cli_args.command {
         Commands::TelemetryClient { telemetry_client_args } => {
             run_telemetry_client(
+                None,
                 &telemetry_client_args.metrics_config_paths,
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
@@ -85,11 +86,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
             sleep(cli_args.max_simulation_time).await;
         }
         Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
-            // Publishers will unregister when dropped.
-            let _registered_publishers = parse_register_and_start_simulation_publishers(
-                &simulation_publisher_args.publisher_config_paths,
-            )?;
             run_telemetry_client(
+                Some(simulation_publisher_args.publisher_config_paths),
                 &telemetry_client_args.metrics_config_paths,
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
@@ -104,6 +102,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
 }
 
 async fn run_telemetry_client(
+    publisher_config_paths: Option<Vec<PathBuf>>,
     metrics_config_paths: &Vec<PathBuf>,
     no_binary_reports: bool,
     max_report_count: Option<u64>,
@@ -131,6 +130,13 @@ async fn run_telemetry_client(
     for uuid in &metrics_config_uuids {
         metrics_configs_tracker.activate_metrics_config(&telemetry_service, uuid).await?;
     }
+
+    // Publishers will unregister when dropped.
+    let _publishers = if let Some(paths) = publisher_config_paths {
+        parse_register_and_start_simulation_publishers(&paths)?
+    } else {
+        Vec::new()
+    };
 
     // There are three conditions that stop the simulation, if any one of them is true:
     //
