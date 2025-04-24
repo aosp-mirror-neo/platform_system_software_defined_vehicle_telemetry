@@ -6,15 +6,19 @@ use log::warn;
 use parking_lot::Mutex;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::ops::Deref;
 use std::sync::Arc;
 
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 
+const MAX_METRICS_REPORT_STORE_SIZE: usize = 1024;
+
 pub(super) struct MetricsReportListener {
     /// Hashmap to store the MetricsReport until the client asks for it.
     metrics_report_store: Mutex<HashMap<String, MetricsReport>>,
+    /// Queue to keep track of the order of report insertion for FIFO eviction.
+    insertion_order: Mutex<VecDeque<String>>,
     /// Report Ready listener to inform the client when a report is ready
     report_ready_listener:
         Mutex<Option<(Strong<dyn ITelemetryReportReadyListener>, binder::DeathRecipient)>>,
@@ -39,19 +43,29 @@ impl MetricsReportListener {
     pub(super) fn new() -> Self {
         Self {
             metrics_report_store: Mutex::new(HashMap::new()),
+            insertion_order: Mutex::new(VecDeque::new()),
             report_ready_listener: Mutex::new(None),
             listener_binder_adapter: Box::new(BinderAdapterImpl {}),
         }
     }
 
     pub(super) fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
+        let mut store = self.metrics_report_store.lock();
+        let mut insertion_order = self.insertion_order.lock();
+
+        if store.len() == MAX_METRICS_REPORT_STORE_SIZE {
+            if let Some(oldest_report_uuid) = insertion_order.pop_front() {
+                store.remove(&oldest_report_uuid);
+            }
+        }
+
         let report_uuid = metrics_report.report_uuid.clone();
 
         // Insert the report and panic if report with the same key already exists.
-        self.metrics_report_store
-            .lock()
+        store
             .try_insert_value(report_uuid.clone(), metrics_report)
-            .unwrap();
+            .expect("Metrics Report UUIDs should be unique");
+        insertion_order.push_back(report_uuid.clone());
 
         if let Some((listener, _)) = self.report_ready_listener.lock().as_ref() {
             if let Err(e) = listener.deref().onReady(&report_uuid) {
@@ -203,6 +217,37 @@ pub(crate) mod tests {
 
         report_listener.on_report_ready(report.clone());
         report_listener.on_report_ready(report.clone());
+    }
+
+    #[test]
+    fn on_report_ready_overflow_fifo() {
+        let report_listener = Arc::new(create_default_metrics_report_listener());
+        let mut report_uuids = Vec::new();
+
+        for i in 0..MAX_METRICS_REPORT_STORE_SIZE + 1 {
+            let metrics_report = MetricsReport {
+                report_uuid: format!("report-{}", i),
+                metrics_config_uuid: Uuid::new_v4().to_string(),
+                ..Default::default()
+            };
+            report_uuids.push(metrics_report.report_uuid.clone());
+            report_listener.on_report_ready(metrics_report);
+        }
+
+        assert_eq!(
+            report_listener.metrics_report_store.lock().len(),
+            MAX_METRICS_REPORT_STORE_SIZE
+        );
+
+        // Check that the FIFO report was removed.
+        let fifo_report_uuid = report_uuids.first().unwrap();
+        let err = report_listener.get_metrics_report(fifo_report_uuid).unwrap_err();
+        assert!(matches!(err, MetricsReportListenerError::MetricsReportNotFound));
+
+        // Check that the last added report still exists.
+        let last_report_uuid = report_uuids.last().unwrap();
+        let report = report_listener.get_metrics_report(last_report_uuid).unwrap();
+        assert_eq!(report.report_uuid, *last_report_uuid);
     }
 
     #[test]
