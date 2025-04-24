@@ -40,6 +40,7 @@ impl SdvRpcClient {
     pub(super) async fn get_message_provider(
         &self,
         unit_identifier: UnitIdentifier,
+        config_descriptor: MessageDescriptor,
         message_descriptor: MessageDescriptor,
     ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         let client = rpc::Client::create(
@@ -52,6 +53,7 @@ impl SdvRpcClient {
 
         struct ServicePublisherMessageProviderImpl {
             client: rpc::Client,
+            config_descriptor: MessageDescriptor,
             message_descriptor: MessageDescriptor,
         }
 
@@ -61,7 +63,8 @@ impl SdvRpcClient {
                 &self,
                 configuration: Option<&Any>,
             ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
-                let configuration_bytes = SdvRpcClient::serialize_configuration(configuration);
+                let configuration_bytes =
+                    SdvRpcClient::serialize_configuration(configuration, &self.config_descriptor)?;
                 let response_bytes = self
                     .client
                     .unary_call(GET_LATEST_MESSAGE_METHOD, &configuration_bytes)
@@ -83,6 +86,7 @@ impl SdvRpcClient {
 
         Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl {
             client,
+            config_descriptor,
             message_descriptor,
         })))
     }
@@ -91,6 +95,7 @@ impl SdvRpcClient {
         &self,
         unit_identifier: UnitIdentifier,
         configuration: Option<&Any>,
+        config_descriptor: MessageDescriptor,
         message_descriptor: MessageDescriptor,
         mut new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
@@ -105,7 +110,7 @@ impl SdvRpcClient {
         .await
         .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
 
-        let configuration_bytes = Self::serialize_configuration(configuration);
+        let configuration_bytes = Self::serialize_configuration(configuration, &config_descriptor)?;
         let mut response_stream = client
             .server_streaming_call(CREATE_SUBSCRIPTION_METHOD, &configuration_bytes)
             .await
@@ -132,7 +137,7 @@ impl SdvRpcClient {
                     }
                     Some(Some(result)) => {
                         let buffer = match result
-                            .with_context(|| "RPC server stream produced an intermittent error")
+                            .context("RPC server stream produced an intermittent error")
                         {
                             Ok(buffer) => buffer,
                             Err(err) => {
@@ -145,7 +150,7 @@ impl SdvRpcClient {
 
                         let message = message_descriptor
                             .parse_from_bytes(&buffer)
-                            .with_context(|| "Failed to parse the protobuf message")
+                            .context("Failed to parse the protobuf message")
                             .map_err(ServicePublisherAccessorError::MessageParsingFailed);
                         (new_message_callback)(message);
                     }
@@ -162,58 +167,47 @@ impl SdvRpcClient {
     pub(super) async fn get_message_descriptor(
         vsidl_provider: &dyn VsidlConfigProviderV1,
         service_unit_definition: &ServiceUnitDefinition,
-    ) -> anyhow::Result<MessageDescriptor> {
-        let create_subscription_descriptor = Self::get_response_descriptor_for_method(
+    ) -> anyhow::Result<(MessageDescriptor, MessageDescriptor)> {
+        let (create_subscription_req, create_subscription_res) = Self::get_descriptor_for_method(
             vsidl_provider,
             service_unit_definition,
             CREATE_SUBSCRIPTION_METHOD,
         )
-        .await?;
-        let get_latest_message_descriptor = Self::get_response_descriptor_for_method(
+        .await?
+        .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
+        let (get_latest_message_req, get_latest_message_res) = Self::get_descriptor_for_method(
             vsidl_provider,
             service_unit_definition,
             GET_LATEST_MESSAGE_METHOD,
         )
-        .await?;
-
-        match (create_subscription_descriptor, get_latest_message_descriptor) {
-            (None, None) => Err(anyhow!(
-                "VSIDL provider was unable to provide RPC method descriptor for {}|{}",
-                service_unit_definition.get_service_bundle_identity().get_fqin(),
-                service_unit_definition.get_unit_type()
-            )),
-            (None, Some(descriptor)) | (Some(descriptor), None) => Ok(descriptor),
-
-            (
-                Some(a @ /* type for clarity: */ MessageDescriptor { .. }),
-                Some(b @ /* type for clarity: */ MessageDescriptor { .. }),
-            ) => {
-                // We want to ensure that both `MessageDescriptor`s describe the same message. We
-                // MUST NOT compare the `MessageDescriptor`s directly, because they are only equal
-                // if the message is defined in the exact same file and position within that file.
-                //
-                // Instead, we need to compare the `DescriptorProto`s (returned by
-                // `MessageDescriptor::proto`), which describe the actual message formats,
-                // irrespective of the file they are in, as well as the "full name" (= package name
-                // + message name).
-                if a.proto() == b.proto() && a.full_name() == b.full_name() {
-                    Ok(a)
-                } else {
-                    Err(anyhow!(
-                        "VSIDL provider returned conflicting RPC method descriptors for {}|{}",
+        .await?
+        .map_or_else(|| (None, None), |(req, res)| (Some(req), Some(res)));
+        let req_descriptor =
+            get_either_or_ensure_equal(create_subscription_req, get_latest_message_req)
+                .with_context(|| {
+                    format!(
+                        "Retrieving request descriptor for {}|{}",
                         service_unit_definition.get_service_bundle_identity().get_fqin(),
                         service_unit_definition.get_unit_type()
-                    ))
-                }
-            }
-        }
+                    )
+                })?;
+        let res_descriptor =
+            get_either_or_ensure_equal(create_subscription_res, get_latest_message_res)
+                .with_context(|| {
+                    format!(
+                        "Retrieving response descriptor for {}|{}",
+                        service_unit_definition.get_service_bundle_identity().get_fqin(),
+                        service_unit_definition.get_unit_type()
+                    )
+                })?;
+        Ok((req_descriptor, res_descriptor))
     }
 
-    async fn get_response_descriptor_for_method(
+    async fn get_descriptor_for_method(
         vsidl_provider: &dyn VsidlConfigProviderV1,
         service_unit_definition: &ServiceUnitDefinition,
         method_name: &str,
-    ) -> anyhow::Result<Option<MessageDescriptor>> {
+    ) -> anyhow::Result<Option<(MessageDescriptor, MessageDescriptor)>> {
         let Some(rpc_descriptor) = vsidl_provider
             .get_rpc_method_descriptor(
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
@@ -225,23 +219,41 @@ impl SdvRpcClient {
             return Ok(None);
         };
 
-        let Some(response_descriptor) = rpc_descriptor.response_message else {
+        let Some(request_message) = rpc_descriptor.request_message else {
+            bail!(
+                "VSIDL provider descriptor for {}|{} has no request message",
+                service_unit_definition.get_service_bundle_identity().get_fqin(),
+                service_unit_definition.get_unit_type()
+            );
+        };
+        let Some(response_message) = rpc_descriptor.response_message else {
             bail!(
                 "VSIDL provider descriptor for {}|{} has no response message",
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
                 service_unit_definition.get_unit_type()
             );
         };
-        Ok(Some(response_descriptor))
+
+        Ok(Some((request_message, response_message)))
     }
 
-    fn serialize_configuration(configuration: Option<&Any>) -> Vec<u8> {
-        if let Some(conf_msg) = configuration {
-            conf_msg.write_to_bytes()
-        } else {
-            Empty::default_instance().write_to_bytes()
-        }
-        .expect("Configuration serialization should be successful")
+    fn serialize_configuration(
+        configuration: Option<&Any>,
+        descriptor: &MessageDescriptor,
+    ) -> Result<Vec<u8>, ServicePublisherAccessorError> {
+        configuration
+            .map_or_else(
+                || Empty::default_instance().write_to_bytes().context("Serialization failed"),
+                |config| {
+                    config
+                        .unpack_dyn(descriptor)
+                        .context("Failed unpacking")?
+                        .ok_or(anyhow!("Type mismatch between {config:?} and {descriptor:?}"))?
+                        .write_to_bytes_dyn()
+                        .context("Serialization failed")
+                },
+            )
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)
     }
 }
 
@@ -250,5 +262,33 @@ impl ServicePublisherSubscription for SdvRpcSubscription {
     async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
         // This drops `self` and therefore cancels the subscription via the `DropGuard`.
         Ok(())
+    }
+}
+
+fn get_either_or_ensure_equal(
+    a: Option<MessageDescriptor>,
+    b: Option<MessageDescriptor>,
+) -> anyhow::Result<MessageDescriptor> {
+    match (a, b) {
+        (None, None) => Err(anyhow!("VSIDL provider was unable to provide RPC method descriptor")),
+        (None, Some(descriptor)) | (Some(descriptor), None) => Ok(descriptor),
+        (
+            Some(a @ /* type for clarity: */ MessageDescriptor { .. }),
+            Some(b @ /* type for clarity: */ MessageDescriptor { .. }),
+        ) => {
+            // We want to ensure that both `MessageDescriptor`s describe the same message. We
+            // MUST NOT compare the `MessageDescriptor`s directly, because they are only equal
+            // if the message is defined in the exact same file and position within that file.
+            //
+            // Instead, we need to compare the `DescriptorProto`s (returned by
+            // `MessageDescriptor::proto`), which describe the actual message formats,
+            // irrespective of the file they are in, as well as the "full name" (= package name
+            // + message name).
+            if a.proto() == b.proto() && a.full_name() == b.full_name() {
+                Ok(a)
+            } else {
+                Err(anyhow!("VSIDL provider returned conflicting RPC method descriptors"))
+            }
+        }
     }
 }

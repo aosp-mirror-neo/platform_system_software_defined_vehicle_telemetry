@@ -10,7 +10,7 @@ use futures::{FutureExt, StreamExt};
 use log::{debug, error, info, warn};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
-use protobuf::{Message, MessageDyn};
+use protobuf::{Message, MessageDyn, MessageFull};
 use sdv_comms::sd::{
     ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitMetadata,
     UnitNameDiscoveryArgs,
@@ -74,7 +74,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 return Ok(None);
             };
 
-            let message_descriptor = self
+            let (_, message_descriptor) = self
                 .parse_telemetry_metadata(&service_name, &service_unit_definition)
                 .await
                 .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
@@ -108,7 +108,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(GetMessageProviderOutcome::NotRegistered);
         };
 
-        let message_descriptor = self
+        let (config_descriptor, message_descriptor) = self
             .parse_telemetry_metadata(&service_name, &service_unit_definition)
             .await
             .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
@@ -120,7 +120,10 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 .data_tunnel_subscriber
                 .get_message_provider(unit_identifier, message_descriptor),
             UnitMetadata::Server(_) => {
-                self.sdv_rpc_client.get_message_provider(unit_identifier, message_descriptor).await
+                let config_descriptor = config_descriptor.unwrap_or(Any::descriptor());
+                self.sdv_rpc_client
+                    .get_message_provider(unit_identifier, config_descriptor, message_descriptor)
+                    .await
             }
         }
     }
@@ -152,7 +155,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             });
         };
 
-        let message_descriptor = self
+        let (config_descriptor, message_descriptor) = self
             .parse_telemetry_metadata(&service_name, &service_unit_definition)
             .await
             .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
@@ -173,10 +176,12 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                     .await
             }
             UnitMetadata::Server(_) => {
+                let config_descriptor = config_descriptor.unwrap_or(Any::descriptor());
                 self.sdv_rpc_client
                     .create_subscription(
                         unit_identifier,
                         configuration,
+                        config_descriptor,
                         message_descriptor,
                         new_message_callback,
                         cancellation_callback,
@@ -351,7 +356,7 @@ impl CommsStackAccessor {
         &self,
         service_name: &ServiceName,
         service_unit_definition: &ServiceUnitDefinition,
-    ) -> anyhow::Result<MessageDescriptor> {
+    ) -> anyhow::Result<(Option<MessageDescriptor>, MessageDescriptor)> {
         let app_metadata = service_unit_definition.get_application_metadata();
         if !app_metadata.is_empty() {
             debug!("Service unit definition for {service_name} contains application metadata, using it to retrieve descriptor");
@@ -369,7 +374,9 @@ impl CommsStackAccessor {
             return descriptor_utils::find_message_by_full_name(
                 &file_descriptors,
                 &publisher_metadata.message_full_name
-            ).ok_or_else(|| {
+            )
+                .map(|message_descriptor| (None, message_descriptor))
+                .ok_or_else(|| {
                 anyhow!(
                     "Message named \"{}\" not found in file descriptors ({} file descriptors provided)",
                     publisher_metadata.message_full_name,
@@ -385,20 +392,22 @@ impl CommsStackAccessor {
             .await
             .ok_or_else(|| anyhow!("VSIDL provider is not available"))?;
         match service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => {
+            UnitMetadata::Publisher(_) => Ok((
+                None,
                 DataTunnelSubscriber::get_message_descriptor(
                     vsidl_provider.as_ref(),
                     service_unit_definition,
                 )
-                .await
-            }
-            UnitMetadata::Server(_) => {
-                SdvRpcClient::get_message_descriptor(
-                    vsidl_provider.as_ref(),
-                    service_unit_definition,
-                )
-                .await
-            }
+                .await?,
+            )),
+            UnitMetadata::Server(_) => SdvRpcClient::get_message_descriptor(
+                vsidl_provider.as_ref(),
+                service_unit_definition,
+            )
+            .await
+            .map(|(config_descriptor, message_descriptor)| {
+                (Some(config_descriptor), message_descriptor)
+            }),
         }
     }
 }
@@ -452,29 +461,44 @@ mod integration_tests {
             message_full_name: Int32Value::descriptor().full_name().to_owned(),
             ..Default::default()
         };
-        static ref RPC_DESCRIPTOR_INT32_RESPONSE: RpcMethodDescriptor = RpcMethodDescriptor {
+        static ref RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE: RpcMethodDescriptor =
+            RpcMethodDescriptor {
+                request_message: Some(Int32Value::descriptor()),
+                response_message: Some(Int32Value::descriptor()),
+            };
+        static ref RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE: RpcMethodDescriptor =
+            RpcMethodDescriptor {
+                request_message: Some(BoolValue::descriptor()),
+                response_message: Some(BoolValue::descriptor()),
+            };
+        static ref RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST1: RpcMethodDescriptor =
+            RpcMethodDescriptor {
+                request_message: Some(TestBoolValue1::descriptor()),
+                response_message: Some(TestBoolValue1::descriptor()),
+            };
+        static ref RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST2: RpcMethodDescriptor =
+            RpcMethodDescriptor {
+                request_message: Some(TestBoolValue2::descriptor()),
+                response_message: Some(TestBoolValue2::descriptor()),
+            };
+        static ref RPC_DESCRIPTOR_NO_REQUEST: RpcMethodDescriptor = RpcMethodDescriptor {
             request_message: None,
-            response_message: Some(Int32Value::descriptor()),
+            response_message: Some(BoolValue::descriptor())
         };
-        static ref RPC_DESCRIPTOR_BOOL_RESPONSE: RpcMethodDescriptor = RpcMethodDescriptor {
-            request_message: None,
-            response_message: Some(BoolValue::descriptor()),
-        };
-        static ref RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1: RpcMethodDescriptor = RpcMethodDescriptor {
-            request_message: None,
-            response_message: Some(TestBoolValue1::descriptor()),
-        };
-        static ref RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2: RpcMethodDescriptor = RpcMethodDescriptor {
-            request_message: None,
-            response_message: Some(TestBoolValue2::descriptor()),
+        static ref RPC_DESCRIPTOR_NO_RESPONSE: RpcMethodDescriptor = RpcMethodDescriptor {
+            request_message: Some(BoolValue::descriptor()),
+            response_message: None
         };
     }
 
     #[test]
     fn test_constants_are_as_expected() {
-        let original = RPC_DESCRIPTOR_BOOL_RESPONSE.response_message.as_ref().unwrap().clone();
-        let test1 = RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1.response_message.as_ref().unwrap().clone();
-        let test2 = RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.response_message.as_ref().unwrap().clone();
+        let original =
+            RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE.response_message.as_ref().unwrap().clone();
+        let test1 =
+            RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST1.response_message.as_ref().unwrap().clone();
+        let test2 =
+            RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST2.response_message.as_ref().unwrap().clone();
 
         // None of the message descriptors should be equal, since they all come from different
         // files.
@@ -502,9 +526,6 @@ mod integration_tests {
         assert_eq!(test1.file_descriptor().package(), test2.file_descriptor().package());
         assert_eq!(test1.full_name(), test2.full_name());
     }
-
-    const RPC_DESCRIPTOR_NO_RESPONSE: RpcMethodDescriptor =
-        RpcMethodDescriptor { request_message: None, response_message: None };
 
     #[derive(MatcherBase)]
     struct MessageDescriptorAndFullNameEq {
@@ -1061,8 +1082,8 @@ mod integration_tests {
         ),
         vsidl_provider_is_ignored_if_message_metadata_set: (
             /* message_metadata:             */ Some(MESSAGE_METADATA_INT32.clone()),
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE.clone()),
             ok(some(pat!(ServicePublisherMetadata {
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
@@ -1070,11 +1091,17 @@ mod integration_tests {
 
         create_subscription_metadata: (
             /* message_metadata:             */ None,
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ None,
             ok(some(pat!(ServicePublisherMetadata {
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
+        ),
+        create_subscription_metadata_missing_request: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_NO_REQUEST.clone()),
+            /* get_latest_message_metadata:  */ None,
+            err(displays_as(contains_substring("has no request message"))),
         ),
         create_subscription_metadata_missing_response: (
             /* message_metadata:             */ None,
@@ -1086,10 +1113,16 @@ mod integration_tests {
         get_latest_message_metadata: (
             /* message_metadata:             */ None,
             /* create_subscription_metadata: */ None,
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
             ok(some(pat!(ServicePublisherMetadata {
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
+        ),
+        get_latest_message_metadata_missing_request: (
+            /* message_metadata:             */ None,
+            /* create_subscription_metadata: */ None,
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_NO_REQUEST.clone()),
+            err(displays_as(contains_substring("has no request message"))),
         ),
         get_latest_message_metadata_missing_response: (
             /* message_metadata:             */ None,
@@ -1100,16 +1133,16 @@ mod integration_tests {
 
         create_subscription_and_get_latest_message_metadata_equal: (
             /* message_metadata:             */ None,
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
             ok(some(pat!(ServicePublisherMetadata {
                 message_descriptor: message_descriptor_and_full_name_eq(Int32Value::descriptor()),
             }))),
         ),
         create_subscription_and_get_latest_message_metadata_equal_but_from_different_files_but_same_package: (
             /* message_metadata:             */ None,
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST1.clone()),
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST1.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST2.clone()),
             ok(some(pat!(ServicePublisherMetadata {
                 message_descriptor: all!(
                     message_descriptor_and_full_name_eq(TestBoolValue1::descriptor()),
@@ -1119,26 +1152,26 @@ mod integration_tests {
         ),
         create_subscription_and_get_latest_message_metadata_equal_but_from_different_files_and_different_packages: (
             /* message_metadata:             */ None,
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE_TEST2.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST2.clone()),
             err(displays_as(contains_substring("VSIDL provider returned conflicting RPC method descriptors"))),
         ),
         create_subscription_and_get_latest_message_metadata_differ_1: (
             /* message_metadata:             */ None,
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_RESPONSE.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE.clone()),
             err(displays_as(contains_substring("VSIDL provider returned conflicting RPC method descriptors"))),
         ),
         create_subscription_and_get_latest_message_metadata_differ_2: (
             /* message_metadata:             */ None,
-            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_NO_RESPONSE.clone()),
             err(displays_as(contains_substring("has no response message"))),
         ),
         create_subscription_and_get_latest_message_metadata_differ_3: (
             /* message_metadata:             */ None,
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_NO_RESPONSE.clone()),
-            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_RESPONSE.clone()),
+            /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
             err(displays_as(contains_substring("has no response message"))),
         ),
     );
