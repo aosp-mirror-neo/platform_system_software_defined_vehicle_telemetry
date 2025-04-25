@@ -8,7 +8,7 @@ use futures::future::{self, BoxFuture};
 use futures::StreamExt;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::{any::Any, empty::Empty};
-use protobuf::{Message, MessageDyn};
+use protobuf::{Message, MessageDyn, MessageFull};
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::sd::ServiceUnitDefinition;
@@ -245,12 +245,16 @@ impl SdvRpcClient {
             .map_or_else(
                 || Empty::default_instance().write_to_bytes().context("Serialization failed"),
                 |config| {
-                    config
-                        .unpack_dyn(descriptor)
-                        .context("Failed unpacking")?
-                        .ok_or(anyhow!("Type mismatch between {config:?} and {descriptor:?}"))?
-                        .write_to_bytes_dyn()
-                        .context("Serialization failed")
+                    if *descriptor == Any::descriptor() {
+                        config.write_to_bytes()
+                    } else {
+                        config
+                            .unpack_dyn(descriptor)
+                            .context("Failed unpacking")?
+                            .ok_or(anyhow!("Type mismatch between {config:?} and {descriptor:?}"))?
+                            .write_to_bytes_dyn()
+                    }
+                    .context("Serialization failed")
                 },
             )
             .map_err(ServicePublisherAccessorError::MetadataParsingFailed)
