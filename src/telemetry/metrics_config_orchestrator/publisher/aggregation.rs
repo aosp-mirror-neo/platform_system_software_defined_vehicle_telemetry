@@ -212,7 +212,14 @@ impl Publisher for AggregationPublisher {
         let mut state_lock = self.state.lock().await;
 
         if let AggregationPublisherState::Active { callback_map, .. } = &mut *state_lock {
-            callback_map.try_insert_value(data_trigger_name.to_owned(), callback).unwrap_or_else(|_| panic!("Unable to subscribe to publisher {}: data trigger {} is already subscribed", self.get_name(), data_trigger_name));
+            callback_map.try_insert_value(data_trigger_name.to_owned(), callback).unwrap_or_else(
+                |_| {
+                    panic!(
+                    "Unable to subscribe to publisher {}: data trigger {} is already subscribed",
+                    self.get_name(),
+                    data_trigger_name)
+                },
+            );
         } else {
             panic!(
                 "Unable to subscribe to publisher {}: it's in {} state",
