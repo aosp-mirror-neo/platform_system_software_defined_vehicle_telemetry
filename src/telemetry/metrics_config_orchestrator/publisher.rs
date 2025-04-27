@@ -32,7 +32,7 @@ pub(crate) trait Publisher: Send + Sync {
         self: Arc<Self>,
     ) -> OperationResult<'static, Option<Arc<dyn DynamicMessage>>, ServicePublisherAccessorError>;
 
-    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError>;
+    async fn activate(self: Arc<Self>);
     async fn deactivate(&self) -> anyhow::Result<()>;
 
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn);

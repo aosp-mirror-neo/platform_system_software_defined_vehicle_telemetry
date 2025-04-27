@@ -37,9 +37,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
     Publisher as PublisherProto, Trigger as TriggerProto,
 };
-use sdv_telemetry_service_publisher_accessor::{
-    ServicePublisherAccessor, ServicePublisherAccessorError,
-};
+use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
 };
@@ -142,8 +140,6 @@ pub(crate) enum MetricsConfigOrchestratorError {
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
     #[error("End trigger cannot be set if start trigger is not set")]
     NoStartTriggerDefined,
-    #[error("Unable to activate publisher {publisher_name}: {error:#}")]
-    UnableToActivatePublisher { publisher_name: String, error: ServicePublisherAccessorError },
 }
 
 /// Struct for default implementation of MetricsConfigOrchestrator.
@@ -334,14 +330,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Activate publishers one by one in topologically sorted order.
         for publisher_name in &config.ordered_publisher_names {
-            Arc::clone(&config.publishers[publisher_name]).activate().await.map_err(|error| {
-                // TODO(b/356331084): Handle already activated publishers.
-                self.configs.lock().remove(&config_proto.uuid);
-                MetricsConfigOrchestratorError::UnableToActivatePublisher {
-                    publisher_name: publisher_name.to_owned(),
-                    error,
-                }
-            })?;
+            Arc::clone(&config.publishers[publisher_name]).activate().await;
         }
 
         // Once publishers are activated, it's unsafe to return errors without rolling back all state changes,
@@ -849,7 +838,6 @@ impl MetricsConfigOrchestratorImpl {
 mod tests {
     use super::*;
 
-    use anyhow::anyhow;
     use googletest::assert_that;
     use parking_lot::Mutex;
     use protobuf::descriptor::{
@@ -1965,41 +1953,6 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn initialize_config_publisher_doesnt_activate_fails() {
-        // Setup mock factory.
-        let mut publisher_mock =
-            MockPublisher::new(SOME_PUBLISHER_NAME.to_owned(), UUID.to_owned());
-        publisher_mock.set_activate_callback(move |_| {
-            Some(ServicePublisherAccessorError::FailedToSubscribe(anyhow!("Error")))
-        });
-
-        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
-        orchestrator.publisher_factory().add_publishers(vec![publisher_mock.into()]);
-
-        // Create MetricsConfig proto.
-        let mut publisher = PublisherProto::new();
-        SOME_PUBLISHER_NAME.clone_into(&mut publisher.name);
-
-        let mut config = MetricsConfigProto::new();
-        UUID.clone_into(&mut config.uuid);
-        config.publishers.push(publisher);
-
-        let err = orchestrator.initialize_config(&config).await.unwrap_err();
-
-        assert!(
-            matches!(&err, MetricsConfigOrchestratorError::UnableToActivatePublisher {
-                publisher_name,
-                error: ServicePublisherAccessorError::FailedToSubscribe(e)
-            }
-            if publisher_name == SOME_PUBLISHER_NAME && e.to_string() == "Error"),
-            "Unexpected error: {:?}",
-            err
-        );
-        assert_eq!(orchestrator.configs.lock().len(), 0);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
     async fn initialize_config_only_end_trigger_set_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
@@ -2065,7 +2018,6 @@ mod tests {
         let factory_calls_clone = Arc::clone(&factory_calls);
         publisher_mock.set_activate_callback(move |name| {
             factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()));
-            None
         });
 
         // Create and setup mock report generator.
@@ -2212,7 +2164,6 @@ mod tests {
         let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher1_mock.set_activate_callback(move |name| {
             activate_calls_clone.lock().push(name.to_owned());
-            None
         });
 
         let mut service_publisher_mock =
@@ -2220,7 +2171,6 @@ mod tests {
         let activate_calls_clone = Arc::clone(&activate_calls);
         service_publisher_mock.set_activate_callback(move |name| {
             activate_calls_clone.lock().push(name.to_owned());
-            None
         });
 
         let mut aggregation_publisher2_mock =
@@ -2228,7 +2178,6 @@ mod tests {
         let activate_calls_clone = Arc::clone(&activate_calls);
         aggregation_publisher2_mock.set_activate_callback(move |name| {
             activate_calls_clone.lock().push(name.to_owned());
-            None
         });
 
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();

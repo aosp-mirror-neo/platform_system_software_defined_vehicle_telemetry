@@ -86,9 +86,6 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
             ConfigOrchestratorError::NoStartTriggerDefined { .. } => {
                 StatusCodes::ADD_METRICS_CONFIG_FAILED
             }
-            ConfigOrchestratorError::UnableToActivatePublisher { .. } => {
-                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED
-            }
             _ => StatusCodes::ADD_METRICS_CONFIG_FAILED,
         },
         ConfigManagerError::InvalidConfigUuid { .. } => {

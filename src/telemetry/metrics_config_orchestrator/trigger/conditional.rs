@@ -333,19 +333,17 @@ mod tests {
         node_error::MessageProviderError,
     };
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
+    use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
     use std::future;
 
+    use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
     use crate::metrics_config_orchestrator::trigger::mock::{
         MockCallbackListener, MockSubscriptionManager, MockTrigger,
-    };
-    use crate::metrics_config_orchestrator::{
-        node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
-        ServicePublisherAccessorError,
     };
     use crate::StatusReporterImpl;
 

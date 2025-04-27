@@ -18,8 +18,7 @@ pub(crate) struct MockPublisher {
 
     name: String,
     metrics_config_uuid: String,
-    activate_callback:
-        Option<Box<dyn Fn(&str) -> Option<ServicePublisherAccessorError> + Send + Sync>>,
+    activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     deactivate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
     latest_message_error: Mutex<Option<ServicePublisherAccessorError>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
@@ -51,14 +50,10 @@ impl Publisher for MockPublisher {
         Ok(self.latest_message.clone()).into()
     }
 
-    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError> {
+    async fn activate(self: Arc<Self>) {
         if let Some(callback) = &self.activate_callback {
-            if let Some(error) = callback(&self.name) {
-                return Err(error);
-            }
+            callback(&self.name)
         }
-
-        Ok(())
     }
 
     async fn deactivate(&self) -> anyhow::Result<()> {
@@ -106,7 +101,7 @@ impl MockPublisher {
 
     pub(crate) fn set_activate_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<ServicePublisherAccessorError> + Send + Sync + 'static,
+        callback: impl Fn(&str) + Send + Sync + 'static,
     ) {
         self.activate_callback.replace(Box::new(callback));
     }
