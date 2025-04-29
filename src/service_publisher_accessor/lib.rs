@@ -151,7 +151,7 @@ impl fmt::Debug for GetMessageProviderOutcome {
 #[async_trait]
 pub trait ServicePublisherSubscription: Send + Sync {
     /// Ends the underlying subscription.
-    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()>;
+    async fn unsubscribe(self: Box<Self>);
 }
 
 impl CreateSubscriptionOutcome {

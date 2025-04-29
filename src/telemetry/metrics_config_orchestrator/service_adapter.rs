@@ -62,7 +62,7 @@ pub(crate) trait ServiceAdapter: Send + Sync {
 
     /// Deactivate specified subscription.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
-    async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()>;
+    async fn unsubscribe(&self, subscription: ServiceSubscription);
 
     /// Registers a callback that will be called when a service with the specified string
     /// service_name becomes available.
@@ -340,10 +340,10 @@ impl ServiceAdapter for ServiceAdapterImpl {
             .map(|subscription_type| ServiceSubscription { subscription_type }))
     }
 
-    async fn unsubscribe(&self, subscription: ServiceSubscription) -> anyhow::Result<()> {
+    async fn unsubscribe(&self, subscription: ServiceSubscription) {
         match subscription.subscription_type {
             ServiceSubscriptionType::Configured { accessor_subscription } => {
-                accessor_subscription.unsubscribe().await?;
+                accessor_subscription.unsubscribe().await;
             }
             ServiceSubscriptionType::Shared {
                 service_name,
@@ -370,7 +370,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                             // Remove entry and unsubscribe from the underlying subscription
                             // if the last callback was removed.
                             let (_, (underlying_subscription, _, _)) = o.remove_entry();
-                            underlying_subscription.unsubscribe().await?;
+                            underlying_subscription.unsubscribe().await;
                         }
                     }
                     Entry::Vacant(v) => {
@@ -379,8 +379,6 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 }
             }
         }
-
-        Ok(())
     }
 
     async fn register_availability_callback(
@@ -965,32 +963,7 @@ pub(super) mod tests {
             .unwrap();
 
         // Try unsubscribing using invalid subscription.
-        service_adapter.unsubscribe(create_invalid_subscription()).await.unwrap();
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn unsubscribe_configured_accessor_returns_error_fails() {
-        let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = create_service_adapter(Arc::clone(&accessor));
-
-        let subscription = Arc::clone(&service_adapter)
-            .subscribe(
-                SERVICE_NAME,
-                Some(&Any::new()),
-                false,
-                &SubSamplingInterval::ZERO,
-                create_empty_message_handler(),
-                create_empty_fn_box(),
-            )
-            .await
-            .unwrap()
-            .expect("Subscription should be available");
-        accessor.set_next_error(anyhow!(ERROR_MESSAGE));
-        let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
-
-        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
-        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
+        service_adapter.unsubscribe(create_invalid_subscription()).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1011,34 +984,9 @@ pub(super) mod tests {
             .await
             .unwrap()
             .expect("Subscription should be available");
-        service_adapter.unsubscribe(subscription).await.unwrap();
+        service_adapter.unsubscribe(subscription).await;
 
         // Verify the number of registry unsubscribe calls.
-        assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn unsubscribe_shared_accessor_returns_error_fails() {
-        let accessor = Arc::new(MockServicePublisherAccessor::new());
-        let service_adapter = create_service_adapter(Arc::clone(&accessor));
-
-        let subscription = Arc::clone(&service_adapter)
-            .subscribe(
-                SERVICE_NAME,
-                None,
-                false,
-                &SubSamplingInterval::ZERO,
-                create_empty_message_handler(),
-                create_empty_fn_box(),
-            )
-            .await
-            .unwrap()
-            .expect("Subscription should be available");
-        accessor.set_next_error(anyhow!(ERROR_MESSAGE));
-        let err = service_adapter.unsubscribe(subscription).await.unwrap_err();
-
-        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
     }
 
@@ -1060,7 +1008,7 @@ pub(super) mod tests {
             .await
             .unwrap()
             .expect("Subscription should be available");
-        service_adapter.unsubscribe(subscription).await.unwrap();
+        service_adapter.unsubscribe(subscription).await;
 
         // Verify the number of registry unsubscribe calls.
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);
@@ -1098,7 +1046,7 @@ pub(super) mod tests {
             .unwrap()
             .expect("Subscription should be available");
 
-        service_adapter.unsubscribe(subscription).await.unwrap();
+        service_adapter.unsubscribe(subscription).await;
 
         // Verify the number of registry unsubscribe calls.
         assert_eq!(accessor.get_num_unsubscribe_calls(), 0);
@@ -1136,8 +1084,8 @@ pub(super) mod tests {
             .unwrap()
             .expect("Subscription should be available");
 
-        service_adapter.unsubscribe(subscription).await.unwrap();
-        service_adapter.unsubscribe(subscription2).await.unwrap();
+        service_adapter.unsubscribe(subscription).await;
+        service_adapter.unsubscribe(subscription2).await;
 
         // Verify the number of registry unsubscribe calls.
         assert_eq!(accessor.get_num_unsubscribe_calls(), 1);

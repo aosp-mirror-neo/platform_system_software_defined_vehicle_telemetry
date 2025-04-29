@@ -12,7 +12,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     ISubscriber::BnSubscriber,
     PublisherInfo::PublisherInfo,
 };
-use log::info;
+use log::{info, warn};
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
@@ -302,9 +302,10 @@ impl ConfigurablePublisherRegistry {
 
 #[async_trait]
 impl ServicePublisherSubscription for ConfigurablePublisherRegistrySubscription {
-    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
-        self.configurable_publisher_subscription.unsubscribe()?;
-        Ok(())
+    async fn unsubscribe(self: Box<Self>) {
+        if let Err(err) = self.configurable_publisher_subscription.unsubscribe() {
+            warn!("Failed to unsubscribe from configurable publisher: {err:?}");
+        }
     }
 }
 
@@ -699,7 +700,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        subscription.unsubscribe().await.unwrap();
+        subscription.unsubscribe().await;
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 1);

@@ -115,19 +115,13 @@ impl ServiceAdapter for MockServiceAdapter {
         }
     }
 
-    async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
+    async fn unsubscribe(&self, _subscription: ServiceSubscription) {
         self.num_unsubscribe_calls.fetch_add(1, Ordering::AcqRel);
-
-        if let Some(error) = self.next_error.lock().take() {
-            return Err(error);
-        }
 
         if self.block_unsubscribe {
             self.notify_unsubscribing.notify_one();
             future::pending::<()>().await;
         }
-
-        Ok(())
     }
 
     async fn register_availability_callback(

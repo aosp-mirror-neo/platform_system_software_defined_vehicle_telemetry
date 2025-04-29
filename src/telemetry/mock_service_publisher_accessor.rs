@@ -303,16 +303,14 @@ impl ServicePublisherMessageProvider for MockServicePublisherMessageProvider {
 
 #[async_trait]
 impl ServicePublisherSubscription for MockServicePublisherSubscription {
-    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
+    async fn unsubscribe(self: Box<Self>) {
         let data_reference = self.data.upgrade().unwrap();
         let mut data = data_reference.lock();
         data.num_unsubscribe_calls += 1;
-        data.check_next_error()?;
 
         let _ = data
             .new_message_callbacks
             .remove(&(self.service_name, self.sub_sampling_interval))
             .unwrap();
-        Ok(())
     }
 }

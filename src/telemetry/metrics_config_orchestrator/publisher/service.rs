@@ -171,10 +171,7 @@ impl Publisher for ServicePublisher {
                     self.get_name()
                 );
 
-                self.service_adapter
-                    .unsubscribe(service_subscription)
-                    .await
-                    .with_context(|| "Service adapter failed to process unsubscription request")?;
+                self.service_adapter.unsubscribe(service_subscription).await;
             }
         }
 

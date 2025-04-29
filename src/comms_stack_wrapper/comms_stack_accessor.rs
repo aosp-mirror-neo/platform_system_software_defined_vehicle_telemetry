@@ -1229,7 +1229,7 @@ mod integration_tests {
 
         // Unsubscribe to avoid error sent to `create_subscription` callback triggered by publisher
         // being dropped while still subscribed.
-        subscription.unsubscribe().await.unwrap();
+        subscription.unsubscribe().await;
     }
 
     #[sdv_telemetry_test_utils::timeout]

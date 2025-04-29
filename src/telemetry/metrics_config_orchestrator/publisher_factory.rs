@@ -358,7 +358,7 @@ mod tests {
             unreachable!()
         }
 
-        async fn unsubscribe(&self, _subscription: ServiceSubscription) -> anyhow::Result<()> {
+        async fn unsubscribe(&self, _subscription: ServiceSubscription) {
             unreachable!()
         }
 

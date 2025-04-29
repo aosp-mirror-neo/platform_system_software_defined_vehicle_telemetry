@@ -394,9 +394,8 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let res = subscription.unsubscribe().await;
+        subscription.unsubscribe().await;
 
-        assert!(res.is_ok(), "Unexpected result: {:?}", res);
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);
         assert_eq!(service_publisher.get_num_unsubscribe_calls(), 1);
     }

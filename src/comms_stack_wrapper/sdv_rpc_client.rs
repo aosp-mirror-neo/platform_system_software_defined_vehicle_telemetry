@@ -263,9 +263,8 @@ impl SdvRpcClient {
 
 #[async_trait]
 impl ServicePublisherSubscription for SdvRpcSubscription {
-    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
+    async fn unsubscribe(self: Box<Self>) {
         // This drops `self` and therefore cancels the subscription via the `DropGuard`.
-        Ok(())
     }
 }
 

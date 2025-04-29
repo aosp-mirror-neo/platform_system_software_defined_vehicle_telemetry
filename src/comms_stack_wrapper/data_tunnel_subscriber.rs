@@ -226,8 +226,7 @@ impl DataTunnelSubscriber {
 
 #[async_trait]
 impl ServicePublisherSubscription for DataTunnelSubscription {
-    async fn unsubscribe(self: Box<Self>) -> anyhow::Result<()> {
+    async fn unsubscribe(self: Box<Self>) {
         // This drops `self` and therefore cancels the subscription via the `DropGuard`.
-        Ok(())
     }
 }
