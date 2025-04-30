@@ -2,6 +2,7 @@
 
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::PublisherInfo::PublisherInfo as PublisherInfoAidl;
 
+/// Describes a configurable publisher
 #[derive(Debug)]
 pub struct PublisherInfo {
     /// Name of the publisher service. Must be unique across all publishers

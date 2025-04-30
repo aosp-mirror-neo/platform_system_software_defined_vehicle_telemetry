@@ -2,31 +2,35 @@
 
 mod subscription;
 
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::{ISubscriber, ISubscriberAsync};
-use log::{info, error};
+use log::{error, info};
 use protobuf::Message;
 use sample_publisher_proto::sample_publisher::SampleMessage;
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
+use sdv_configurable_publisher_rust_wrapper::configurable_publisher::{
+    ConfigurablePublisher, ConfigurablePublisherError,
+};
+use sdv_configurable_publisher_rust_wrapper::configurable_publisher_subscription::ConfigurablePublisherSubscription;
+use sdv_configurable_publisher_rust_wrapper::subscriber::Subscriber;
 use subscription::RandomIntegerPublisherSubscription;
 
 pub struct RandomIntegerPublisher {
     next_subscription_id: SequenceNumber,
     latest_message: Mutex<Option<SampleMessage>>,
-    subscribers: Mutex<
-        HashMap<SequenceNumberType, binder::Strong<dyn ISubscriberAsync<binder_tokio::Tokio>>>,
-    >,
+    subscribers: Mutex<HashMap<SequenceNumberType, Box<dyn Subscriber>>>,
+    weak_self: Weak<RandomIntegerPublisher>,
 }
 
 impl RandomIntegerPublisher {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Arc<Self> {
+        Arc::new_cyclic(|weak_self| RandomIntegerPublisher {
             next_subscription_id: SequenceNumber::new(),
             latest_message: None.into(),
             subscribers: HashMap::new().into(),
-        }
+            weak_self: Weak::clone(weak_self),
+        })
     }
 
     pub async fn activate(self: &Arc<Self>) {
@@ -38,36 +42,16 @@ impl RandomIntegerPublisher {
                 message.write_to_bytes().expect("Message should be successfully serialized");
             self.latest_message.lock().unwrap().replace(message);
 
-            let subscribers =
-                self.subscribers.lock().unwrap().values().cloned().collect::<Vec<_>>();
-            for subscriber in subscribers {
-                if let Err(err) = subscriber.sendData(&message_bytes).await {
-                    error!("Error while sending message to subscriber: {err:?}");
+            {
+                let guard = self.subscribers.lock().unwrap();
+                for subscriber in guard.values() {
+                    if let Err(err) = subscriber.send_data(&message_bytes) {
+                        error!("Error while sending message to subscriber: {err:?}");
+                    }
                 }
             }
 
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }
-    }
-
-    pub fn create_subscription(
-        self: &Arc<Self>,
-        subscriber: &binder::Strong<dyn ISubscriber>,
-        _config: Option<&[u8]>,
-    ) -> RandomIntegerPublisherSubscription {
-        let subscription_id = self.next_subscription_id.next();
-        self.subscribers.lock().unwrap().insert(subscription_id, subscriber.clone().into_async());
-        RandomIntegerPublisherSubscription::new(Arc::downgrade(self), subscription_id)
-    }
-
-    pub fn get_latest_message(&self) -> Option<Vec<u8>> {
-        let latest_message = self.latest_message.lock().unwrap();
-        if let Some(msg) = &*latest_message {
-            info!("Reporting latest message {msg}");
-            Some(msg.write_to_bytes().expect("Message should be successfully serialized"))
-        } else {
-            info!("Reporting no latest message");
-            None
         }
     }
 
@@ -76,12 +60,43 @@ impl RandomIntegerPublisher {
     }
 }
 
+impl ConfigurablePublisher for RandomIntegerPublisher {
+    fn create_subscription(
+        &self,
+        subscriber: Box<dyn Subscriber>,
+        _config: Option<&[u8]>,
+    ) -> Result<Box<dyn ConfigurablePublisherSubscription>, ConfigurablePublisherError> {
+        let subscription_id = self.next_subscription_id.next();
+        self.subscribers.lock().unwrap().insert(subscription_id, subscriber);
+        Ok(Box::new(RandomIntegerPublisherSubscription::new(
+            Weak::clone(&self.weak_self),
+            subscription_id,
+        )))
+    }
+
+    fn get_latest_message(
+        &self,
+        _configuration: Option<&[u8]>,
+    ) -> Result<Option<Vec<u8>>, ConfigurablePublisherError> {
+        let latest_message = self.latest_message.lock().unwrap();
+        if let Some(msg) = &*latest_message {
+            info!("Reporting latest message {msg}");
+            match msg.write_to_bytes() {
+                Ok(bytes) => Ok(Some(bytes)),
+                Err(_) => Err(ConfigurablePublisherError::GetLatestMessageFailed),
+            }
+        } else {
+            info!("Reporting no latest message");
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use binder::BinderFeatures;
-    use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::ISubscriber::{BnSubscriber, ISubscriber};
+    use sdv_configurable_publisher_rust_wrapper::subscriber::SubscriberError;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -90,10 +105,8 @@ mod tests {
         tx: mpsc::UnboundedSender<Vec<u8>>,
     }
 
-    impl binder::Interface for MockSubscriber {}
-
-    impl ISubscriber for MockSubscriber {
-        fn sendData(&self, data: &[u8]) -> binder::Result<()> {
+    impl Subscriber for MockSubscriber {
+        fn send_data(&self, data: &[u8]) -> Result<(), SubscriberError> {
             self.tx.send(data.to_vec()).unwrap();
             Ok(())
         }
@@ -108,20 +121,26 @@ mod tests {
     #[tokio::test]
     async fn activate_success() {
         let (tx, mut rx) = mpsc::unbounded_channel();
-        let mock_subscriber = MockSubscriber::new(tx);
-        let bn_subscriber =
-            BnSubscriber::new_binder(mock_subscriber.clone(), BinderFeatures::default());
+        let mock_subscriber = Box::new(MockSubscriber::new(tx));
         let publisher = Arc::new(RandomIntegerPublisher::new());
         let publisher_clone = Arc::clone(&publisher);
 
-        publisher.create_subscription(&bn_subscriber, None);
+        let _ = publisher.create_subscription(mock_subscriber, None);
         tokio::spawn(async move {
             publisher_clone.activate().await;
         });
 
         let recv_msg = SampleMessage::parse_from_bytes(&rx.recv().await.unwrap()).unwrap();
         let latest_msg =
-            SampleMessage::parse_from_bytes(&publisher.get_latest_message().unwrap()).unwrap();
+            SampleMessage::parse_from_bytes(&publisher.get_latest_message(None).unwrap().unwrap())
+                .unwrap();
         assert_eq!(recv_msg.sample_data, latest_msg.sample_data);
+    }
+
+    #[tokio::test]
+    async fn get_latest_message_no_message() {
+        let publisher = RandomIntegerPublisher::new();
+        let latest_msg = publisher.get_latest_message(None).unwrap();
+        assert!(latest_msg.is_none());
     }
 }

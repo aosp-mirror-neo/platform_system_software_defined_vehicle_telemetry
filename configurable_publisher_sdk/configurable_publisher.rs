@@ -1,5 +1,4 @@
 // Copyright 2025 Google LLC
-#![allow(dead_code)]
 
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     ConfigurablePublisherStatusCodes::ConfigurablePublisherStatusCodes as StatusCodes,
@@ -15,14 +14,18 @@ use binder::{BinderFeatures, Interface, Result as BinderResult, Status, Strong};
 use std::ffi::CString;
 use std::sync::Arc;
 
+/// Errors returned by objects that implement the ConfigurablePublisher trait
 #[derive(thiserror::Error, Debug)]
 pub enum ConfigurablePublisherError {
+    /// Failed to get the latest message; none found for the configuration.
     #[error("No message found for the given configuration")]
     GetLatestMessageFailed,
 
+    /// Failed to create a new subscription.
     #[error("Create Subcription Failed")]
     CreateSubscriptionFailed,
 
+    /// An unexpected or unspecified error occurred.
     #[error("An unknown error occurred")]
     UnknownError,
 }
@@ -42,7 +45,7 @@ fn to_binder_error(error: ConfigurablePublisherError) -> Status {
 
     let c_string_message = CString::new(error_message_str.as_str()).unwrap_or_else(|_| {
         panic!(
-            "CRITICAL: Original message ('{}') contained null bytes. This is unrecoverable.",
+            "Original message ('{}') contained null bytes. This is unrecoverable.",
             error_message_str
         )
     });
@@ -90,15 +93,16 @@ impl ConfigurablePublisherAidlImpl {
     }
 }
 
+/// The trait passed by clients when they register a new configurable publisher
 pub trait ConfigurablePublisher: Send + Sync {
-    // Subscribes to a registered publisher by passing a Subscriber trait object
+    /// Subscribes to a registered publisher by passing a Subscriber trait object
     fn create_subscription(
         &self,
         subscriber: Box<dyn Subscriber>,
         configuration: Option<&[u8]>,
     ) -> Result<Box<dyn ConfigurablePublisherSubscription>, ConfigurablePublisherError>;
 
-    // Provides the latest message for the provided configuration
+    /// Provides the latest message for the provided configuration
     fn get_latest_message(
         &self,
         configuration: Option<&[u8]>,

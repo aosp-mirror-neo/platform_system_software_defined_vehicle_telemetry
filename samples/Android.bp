@@ -141,6 +141,7 @@ rust_defaults {
         "libprotobuf",
         "librand",
         "libsample_publisher_proto",
+        "libsdv_configurable_publisher_rust_wrapper",
         "libsdv_telemetry_utils",
         "libtokio",
         // keep-sorted end

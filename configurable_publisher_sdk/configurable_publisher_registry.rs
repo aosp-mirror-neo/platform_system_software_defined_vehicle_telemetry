@@ -14,15 +14,21 @@ use crate::configurable_publisher::ConfigurablePublisher;
 use crate::configurable_publisher::ConfigurablePublisherAidlImpl;
 use crate::publisher_info::PublisherInfo;
 
+/// Errors returned to client when interacting with the configurable publisher registry service
 #[derive(thiserror::Error, Debug)]
 pub enum ConfigurablePublisherRegistryError {
+    /// Failed to initialize the underlying service, often due to a binder error.
     #[error("Unable to initialize service: {error:?}")]
     CreateServiceFailed {
+        /// The specific status code from the binder service indicating the cause.
         #[from]
         error: binder::StatusCode,
     },
+
+    /// An error occurred during a call to the Binder interface.
     #[error("Error when making a call to Binder: {error:?}")]
     BinderError {
+        /// The detailed status from the binder call.
         #[from]
         error: binder::Status,
     },
@@ -35,6 +41,8 @@ pub struct ConfigurablePublisherRegistry {
 }
 
 impl ConfigurablePublisherRegistry {
+    /// Fetched a strong reference to IConfigurablePublisherRegistry and initializes client
+    /// facing ConfigurablePublisherRegistry
     pub fn new() -> Result<Self, ConfigurablePublisherRegistryError> {
         let configurable_publisher_registry_descriptor = format!(
             "{}/default",
@@ -51,6 +59,7 @@ impl ConfigurablePublisherRegistry {
         })
     }
 
+    /// Attempts to register a ConfigurablePublisher with telemetry service
     pub fn register_publisher(
         &mut self,
         publisher_info: PublisherInfo,
@@ -69,6 +78,7 @@ impl ConfigurablePublisherRegistry {
         Ok(())
     }
 
+    /// Attempts to unregister a ConfigurablePublisher from telemetry service
     pub fn unregister_publisher(
         &mut self,
         service_name: &str,
