@@ -1,0 +1,68 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+android_app {
+    name: "telemetry_java_sample_ivi_publisher",
+    vendor: true,
+    sdk_version: "system_current",
+    srcs: [
+        "sample_ivi_publisher/BinderServiceAccessor.java",
+        "sample_ivi_publisher/IPublisherImpl.java",
+        "sample_ivi_publisher/IPublisherSubscriptionImpl.java",
+        "sample_ivi_publisher/JavaSampleIviPublisher.java",
+        ":sdv_telemetry_error_report_publisher_proto",
+    ],
+    manifest: "sample_ivi_publisher/AndroidManifest.xml",
+    static_libs: [
+        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "libprotobuf-java-lite",
+    ],
+    proto: {
+        type: "lite",
+        local_include_dirs: [
+            ":sdv_telemetry_error_report_publisher_proto",
+        ],
+    },
+    optimize: {
+        enabled: false,
+    },
+    privileged: true,
+    jni_libs: ["libbinder_accessor"],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
+}
+
+android_app {
+    name: "telemetry_java_sample_ivi_publisher_prod",
+    product_specific: true,
+    sdk_version: "system_current",
+    srcs: [
+        "sample_ivi_publisher/BinderServiceAccessor.java",
+        "sample_ivi_publisher/IPublisherImpl.java",
+        "sample_ivi_publisher/IPublisherSubscriptionImpl.java",
+        "sample_ivi_publisher/JavaSampleIviPublisherProd.java",
+        ":sdv_telemetry_error_report_publisher_proto",
+    ],
+    manifest: "sample_ivi_publisher/AndroidManifestProd.xml",
+    static_libs: [
+        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "libprotobuf-java-lite",
+    ],
+    proto: {
+        type: "lite",
+        local_include_dirs: [
+            ":sdv_telemetry_error_report_publisher_proto",
+        ],
+    },
+    optimize: {
+        enabled: false,
+    },
+    privileged: true,
+    jni_libs: ["libbinder_accessor"],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
+}

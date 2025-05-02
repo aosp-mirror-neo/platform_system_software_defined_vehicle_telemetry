@@ -1,0 +1,30 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_binary {
+    name: "dt_telemetry_sample_publisher",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: ["publish_sample.rs"],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libsample_publisher_proto",
+        "libsdv_comms_rs",
+        "libsdv_proto_reflection_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        // keep-sorted end
+    ],
+    vendor: true,
+}

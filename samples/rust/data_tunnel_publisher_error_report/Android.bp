@@ -1,0 +1,48 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_binary {
+    name: "telemetry_sample_data_tunnel_publisher_error_report",
+    srcs: ["error_report_publisher.rs"],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "liberror_report_publisher_proto",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libsdv_comms_rs",
+        "libsdv_proto_reflection_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        // keep-sorted end
+    ],
+    vendor: true,
+}
+
+rust_protobuf {
+    name: "liberror_report_publisher_proto",
+    crate_name: "error_report_publisher_proto",
+    protos: [
+        "error_report_publisher.proto",
+    ],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "configurable_publisher_source",
+    vendor: true,
+}
+
+filegroup {
+    name: "sdv_telemetry_error_report_publisher_proto",
+    srcs: ["error_report_publisher.proto"],
+}

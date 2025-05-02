@@ -1,0 +1,19 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+cc_library {
+    name: "libbinder_accessor",
+    srcs: ["binder_access.cpp"],
+    vendor_available: true,
+    shared_libs: [
+        "liblog",
+        "libbinder_ndk",
+    ],
+    header_libs: ["jni_headers"],
+    stl: "c++_shared",
+    visibility: ["//system/software_defined_vehicle/telemetry/samples/java"],
+}

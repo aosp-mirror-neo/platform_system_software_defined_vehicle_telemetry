@@ -1,0 +1,44 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_binary {
+    name: "telemetry_sample_data_tunnel_publisher_tire_pressure",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: ["tire_pressure_publisher.rs"],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "librand",
+        "libsdv_comms_rs",
+        "libsdv_proto_reflection_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_utils",
+        "libtire_pressure_publisher_proto",
+        "libtokio",
+        // keep-sorted end
+    ],
+    vendor: true,
+}
+
+rust_protobuf {
+    name: "libtire_pressure_publisher_proto",
+    crate_name: "tire_pressure_publisher_proto",
+    protos: [
+        "tire_pressure_publisher.proto",
+    ],
+    proto_flags: [
+        "-I external/protobuf/src",
+        "-I .",
+    ],
+    source_stem: "configurable_publisher_source",
+    vendor: true,
+}
