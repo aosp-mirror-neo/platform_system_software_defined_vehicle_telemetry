@@ -32,6 +32,10 @@ use sdv_telemetry_expr::{
     node_value_type::NodeValueType,
 };
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
+use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::{
+    Aggregated_field_value, AvgAggregation, CountAggregation, DeltaAggregation, MaxAggregation,
+    MinAggregation, NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
+};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
@@ -165,7 +169,7 @@ pub(super) struct MetricsConfig {
     uuid: String,
     state: AsyncMutex<MetricsConfigState>,
     metrics_report_generators: Vec<Arc<dyn MetricsReportGenerator>>,
-    ordered_publisher_names: Vec<String>,
+    ordered_publisher_names: OrderedPublisherNames,
     publishers: HashMap<String, Arc<dyn Publisher>>,
     start_trigger: Option<Arc<dyn Trigger>>,
     end_trigger: Option<Arc<dyn Trigger>>,
@@ -183,6 +187,21 @@ pub(super) enum MetricsConfigState {
     /// Data collection finished and won't restart.
     /// This is the terminal state.
     Finished,
+}
+
+// Topologically sorted publisher names grouped by their required time of activation
+pub(super) struct OrderedPublisherNames {
+    // List of names of publishers which should be activated when the config is initialized,
+    // i.e. when no start_trigger is set or start_trigger firing depends on these publishers
+    on_config_initialization: Vec<String>,
+    // List of names of publishers which should be activated only when data collection is started,
+    // i.e. after start_trigger firing
+    on_start_trigger_fired: Vec<String>,
+}
+
+enum DependencyContainer<'a> {
+    Publisher { publisher_proto: &'a PublisherProto },
+    Trigger { trigger_proto: &'a TriggerProto },
 }
 
 #[async_trait]
@@ -219,12 +238,15 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         let (expression_nodes, node_types) =
             self.create_expression_nodes(config_proto, &node_factory_context)?;
 
-        // Iterate over topologically sorted vector of publishers and triggers and create encapsulated objects.
+        // Build graph of triggers and publishers dependencies for sorting them topologically
+        let dependency_map = Self::build_dependency_map(config_proto)?;
+
+        // Sort publisher and triggers topologically, iterate over sorted vector and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
         // Store topologically sorted list of publisher names in order to activate them in the topological order.
         let mut ordered_publisher_names = vec![];
         let (publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
-            config_proto,
+            &dependency_map,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
             |publisher_proto, triggers| {
                 let context = PublisherFactoryCreateContext {
@@ -296,6 +318,20 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             },
         )?;
 
+        // Extend dependencies_map with publishers used in expression evaluation and find which
+        // publishers start_trigger is dependent on. Cycles are now allowed in dependencies_map
+        let start_trigger_publisher_names =
+            Self::get_start_trigger_dependencies(config_proto, dependency_map, &expression_nodes);
+
+        let (on_config_initialization, on_start_trigger_fired) = match start_trigger_publisher_names
+        {
+            // No start_trigger is set, so all publishers should be activated immediately
+            None => (ordered_publisher_names, vec![]),
+            Some(start_trigger_publisher_names) => ordered_publisher_names
+                .into_iter()
+                .partition(|name| start_trigger_publisher_names.contains(name.as_str())),
+        };
+
         // Create MetricsConfig.
         let (start_trigger, end_trigger, finish_trigger) =
             Self::get_lifecycle_triggers(&triggers, config_proto)?;
@@ -303,7 +339,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             uuid: config_proto.uuid.clone(),
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: metrics_report_configs.into_values().collect(),
-            ordered_publisher_names,
+            ordered_publisher_names: OrderedPublisherNames {
+                on_config_initialization,
+                on_start_trigger_fired,
+            },
             publishers,
             start_trigger: start_trigger.cloned(),
             end_trigger: end_trigger.cloned(),
@@ -328,8 +367,9 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             .set_metrics_config(&config)
             .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
-        // Activate publishers one by one in topologically sorted order.
-        for publisher_name in &config.ordered_publisher_names {
+        // Activate publishers which should be activated immediately one by one
+        // in topologically sorted order.
+        for publisher_name in &config.ordered_publisher_names.on_config_initialization {
             Arc::clone(&config.publishers[publisher_name]).activate().await;
         }
 
@@ -401,10 +441,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     end_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigEnd).await;
                 }
 
-                // Deactivate metrics report generators.
-                for generator in &config.metrics_report_generators {
-                    generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
-                }
+                Self::end_data_collection(&config, ReportReason::INCOMPLETE_FINISHED).await;
             }
             state => {
                 panic!(
@@ -415,7 +452,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         };
 
         // Deactivate publishers in reverse topologically sorted order.
-        for publisher_name in config.ordered_publisher_names.iter().rev() {
+        for publisher_name in config.ordered_publisher_names.on_config_initialization.iter().rev() {
             config.publishers[publisher_name].deactivate().await;
         }
 
@@ -457,9 +494,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             .validate(&config_proto.expression_nodes, &node_factory_context)
             .map_err(|e| MetricsConfigOrchestratorError::InvalidExpressionNodes { e })?;
 
+        let dependency_map = Self::build_dependency_map(config_proto)?;
+
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
         let (_publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
-            config_proto,
+            &dependency_map,
             |publisher_proto, _triggers| {
                 let context = PublisherFactoryValidateContext {
                     node_types: &node_types,
@@ -604,9 +643,28 @@ impl MetricsConfigOrchestratorImpl {
     }
 
     async fn start_data_collection(config: &Arc<MetricsConfig>) {
+        // If start trigger is set and has fired, activate publishers used only for data collection
+        // in topologically sorted order
+        for publisher_name in &config.ordered_publisher_names.on_start_trigger_fired {
+            let publisher = &config.publishers[publisher_name];
+            Arc::clone(publisher).activate().await;
+        }
         // Activate metrics report generators.
         for generator in &config.metrics_report_generators {
             Arc::clone(generator).activate().await;
+        }
+    }
+
+    async fn end_data_collection(config: &Arc<MetricsConfig>, reason: ReportReason) {
+        // Deactivate metrics report generators.
+        for generator in &config.metrics_report_generators {
+            Arc::clone(generator).deactivate(reason).await;
+        }
+        // Deactivate publishers used only for data collection
+        // in reversed topologically sorted order
+        for publisher_name in config.ordered_publisher_names.on_start_trigger_fired.iter().rev() {
+            let publisher = &config.publishers[publisher_name];
+            Arc::clone(publisher).deactivate().await;
         }
     }
 
@@ -627,27 +685,12 @@ impl MetricsConfigOrchestratorImpl {
             .await;
     }
 
-    /// Topologically sort publishers and triggers declared in the protobuf message
-    /// and try to fold the sorted list using provided functions.
-    fn try_fold_topoligically_sorted_publishers_triggers<'a, TTrig, TPub>(
-        config_proto: &'a MetricsConfigProto,
-        mut publisher_func: impl FnMut(
-            &'a PublisherProto,
-            &HashMap<String, TTrig>,
-        ) -> Result<TPub, MetricsConfigOrchestratorError>,
-        mut trigger_func: impl FnMut(
-            &'a TriggerProto,
-            &HashMap<String, TPub>,
-            &HashMap<String, TTrig>,
-        ) -> Result<TTrig, MetricsConfigOrchestratorError>,
-    ) -> Result<(HashMap<String, TPub>, HashMap<String, TTrig>), MetricsConfigOrchestratorError>
-    {
-        enum DependencyContainer<'a> {
-            Publisher { publisher_proto: &'a PublisherProto },
-            Trigger { trigger_proto: &'a TriggerProto },
-        }
-
-        // Build dependency map for topological sorting.
+    fn build_dependency_map(
+        config_proto: &MetricsConfigProto,
+    ) -> Result<
+        HashMap<(&str, &str), (DependencyContainer<'_>, Vec<(&str, &str)>)>,
+        MetricsConfigOrchestratorError,
+    > {
         let dependency_map = config_proto.publishers.iter().try_fold(
             HashMap::new(),
             |mut acc, publisher_proto| match acc.try_insert_value(
@@ -707,7 +750,24 @@ impl MetricsConfigOrchestratorImpl {
                     }),
                 }
             })?;
+        Ok(dependency_map)
+    }
 
+    /// Topologically sort publishers and triggers declared in the protobuf message
+    /// and try to fold the sorted list using provided functions.
+    fn try_fold_topoligically_sorted_publishers_triggers<'a, TTrig, TPub>(
+        dependency_map: &'a HashMap<(&str, &str), (DependencyContainer<'_>, Vec<(&str, &str)>)>,
+        mut publisher_func: impl FnMut(
+            &'a PublisherProto,
+            &HashMap<String, TTrig>,
+        ) -> Result<TPub, MetricsConfigOrchestratorError>,
+        mut trigger_func: impl FnMut(
+            &'a TriggerProto,
+            &HashMap<String, TPub>,
+            &HashMap<String, TTrig>,
+        ) -> Result<TTrig, MetricsConfigOrchestratorError>,
+    ) -> Result<(HashMap<String, TPub>, HashMap<String, TTrig>), MetricsConfigOrchestratorError>
+    {
         // Retrieve topologically sorted vector of keys.
         let sorted_vector = dependency_map
             .to_topological_sorted_vec(|(_, dependencies)| dependencies)
@@ -738,6 +798,109 @@ impl MetricsConfigOrchestratorImpl {
                 Ok((publishers, triggers))
             },
         )
+    }
+
+    fn get_start_trigger_dependencies(
+        config_proto: &MetricsConfigProto,
+        dependency_map: HashMap<(&str, &str), (DependencyContainer<'_>, Vec<(&str, &str)>)>,
+        expression_nodes: &[Arc<Node>],
+    ) -> Option<HashSet<String>> {
+        if config_proto.start_trigger_name.is_empty() {
+            return None;
+        }
+
+        // DependencyContainer holds object's proto which is no longer needed since the object is
+        // already created
+        let mut dependency_map =
+            dependency_map.into_iter().map(|(k, v)| (k, v.1)).collect::<HashMap<_, _>>();
+
+        let mut add_node_dependencies = |key, node_index: usize| {
+            let mut node_publishers = HashSet::new();
+            expression_nodes[node_index].get_node_publishers(&mut node_publishers);
+            for publisher_name in node_publishers {
+                let entry = dependency_map.entry(key).or_insert(vec![]);
+                entry.push((PUBLISHER, publisher_name));
+            }
+        };
+
+        // Add conditional trigger dependencies on expression node publishers
+        for trigger_proto in &config_proto.triggers {
+            let Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) =
+                &trigger_proto.trigger_type
+            else {
+                continue;
+            };
+            let index = conditional_trigger
+                .selector_node_index
+                .expect("Selector node index should be set") as usize;
+            add_node_dependencies((TRIGGER, trigger_proto.name.as_ref()), index);
+        }
+
+        // Add aggregation publisher dependencies on expression node publishers
+        for publisher_proto in &config_proto.publishers {
+            let Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) =
+                &publisher_proto.publisher_type
+            else {
+                continue;
+            };
+            for field_assignment in &aggregation_publisher.message_builder.field_assignments {
+                let Some(ref aggregated_field_value) = field_assignment.aggregated_field_value
+                else {
+                    continue;
+                };
+
+                match aggregated_field_value {
+                    Aggregated_field_value::CountAggregation(CountAggregation { .. }) => {}
+                    Aggregated_field_value::NoAggregation(NoAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::VectorAggregation(VectorAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::MaxAggregation(MaxAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::MinAggregation(MinAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::AvgAggregation(AvgAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::SumAggregation(SumAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::StdDevAggregation(StdDevAggregation {
+                        expression_node_index,
+                        ..
+                    })
+                    | Aggregated_field_value::DeltaAggregation(DeltaAggregation {
+                        expression_node_index,
+                        ..
+                    }) => {
+                        let index = expression_node_index
+                            .expect("Expression node index should be set")
+                            as usize;
+
+                        add_node_dependencies((PUBLISHER, publisher_proto.name.as_ref()), index);
+                    }
+                    _ => panic!("Unexpected aggregation type"),
+                };
+            }
+        }
+
+        let key = (TRIGGER, config_proto.start_trigger_name.as_str());
+        let mut dependencies =
+            dependency_map.get_key_dependencies(&key, |dependencies| dependencies);
+        dependencies.retain(|&k| k.0 == PUBLISHER);
+        let publisher_names =
+            dependencies.into_iter().map(|k| k.1.to_owned()).collect::<HashSet<_>>();
+        Some(publisher_names)
     }
 
     // Lifecycle event handlers.
@@ -811,10 +974,7 @@ impl MetricsConfigOrchestratorImpl {
                 .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
                 .await;
 
-            // Deactivate metrics report generators.
-            for generator in &config.metrics_report_generators {
-                Arc::clone(generator).deactivate(ReportReason::INCOMPLETE_END).await;
-            }
+            Self::end_data_collection(&config, ReportReason::INCOMPLETE_END).await;
 
             // Subscribe to start trigger.
             Self::subscribe_to_start_trigger(
@@ -849,9 +1009,9 @@ mod tests {
         node_error::NodeEvaluationError, node_factory::MessageProvider, node_value::NodeValue,
         node_value_type::NodeValueType,
     };
-    use sdv_telemetry_proto_rust::expression::Node as NodeProto;
+    use sdv_telemetry_proto_rust::expression::{FieldLeafNode, Node as NodeProto};
     use sdv_telemetry_proto_rust::metrics_configuration::{
-        AggregationPublisher as AggregationPublisherProto,
+        proto_message_builder, AggregationPublisher as AggregationPublisherProto,
         ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
         MetricsConfig as MetricsConfigProto, MetricsReportConfig,
         PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Publisher as PublisherProto,
@@ -875,6 +1035,7 @@ mod tests {
     type MockedMetricsConfigOrchestratorImpl = MetricsConfigOrchestratorImpl;
 
     const AGGREGATION_PUBLISHER_NAME: &str = "AggregationPublisher1";
+    const PARENT_TRIGGER_NAME: &str = "ParentTrigger1";
     const CONDITIONAL_TRIGGER_NAME: &str = "ConditionalTrigger1";
     const DATA_TRIGGER_NAME: &str = "DataTrigger1";
     const END_TRIGGER_NAME: &str = "end_trigger";
@@ -887,7 +1048,10 @@ mod tests {
     const SOME_PUBLISHER_NAME: &str = "Publisher1";
     const SOME_TRIGGER_NAME: &str = "Trigger1";
     const START_TRIGGER_NAME: &str = "start_trigger";
+    const START_AGGREGATION_PUBLISHER_NAME: &str = "StartAggregationPublisher";
+    const COLLECT_AGGREGATION_PUBLISHER_NAME: &str = "CollectAggregationPublisher";
     const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
+    const FIELD_NAME: &str = "field_name";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
 
     struct MockMetricsReportGenerator {
@@ -1583,6 +1747,142 @@ mod tests {
         config
     }
 
+    // Create a config with start_trigger dependency on service_publisher through
+    // aggregation_publisher expression nodes
+    fn create_config_with_aggregation_publisher_expression_nodes() -> MetricsConfigProto {
+        // Create publisher protos
+        let mut service_publisher_proto = PublisherProto::new();
+        SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher_proto.name);
+        let mut start_aggregation_publisher_proto = PublisherProto::new();
+        START_AGGREGATION_PUBLISHER_NAME.clone_into(&mut start_aggregation_publisher_proto.name);
+        let mut collect_aggregation_publisher_proto = PublisherProto::new();
+        COLLECT_AGGREGATION_PUBLISHER_NAME
+            .clone_into(&mut collect_aggregation_publisher_proto.name);
+        // Create trigger protos
+        let mut start_trigger_proto = TriggerProto::new();
+        START_TRIGGER_NAME.clone_into(&mut start_trigger_proto.name);
+        let mut end_trigger_proto = TriggerProto::new();
+        END_TRIGGER_NAME.clone_into(&mut end_trigger_proto.name);
+        let mut finish_trigger_proto = TriggerProto::new();
+        FINISH_TRIGGER_NAME.clone_into(&mut finish_trigger_proto.name);
+
+        // Setup start_aggregation_publisher used only to start data collection.
+        // Publisher's expression node is a field leaf node accessing service_publisher.
+        // This publisher is activated immediately on config initialization
+        let mut proto_field_assignment = proto_message_builder::FieldAssignment::new();
+        proto_field_assignment.field_name = FIELD_NAME.to_string();
+        proto_field_assignment.set_no_aggregation(NoAggregation {
+            expression_node_index: Some(0),
+            ..Default::default()
+        });
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        proto_message_builder.field_assignments.push(proto_field_assignment);
+        let start_aggregation_publisher =
+            start_aggregation_publisher_proto.mut_aggregation_publisher();
+        start_aggregation_publisher.message_builder =
+            protobuf::MessageField::some(proto_message_builder);
+
+        // Set start_trigger to fire when aggregation publisher publishes a message.
+        // This indirectly creates start_trigger's dependency on service publisher which is only a
+        // part of expression node, making service_publisher be activated before start trigger fires
+        let data_trigger = start_trigger_proto.mut_data_trigger();
+        data_trigger.publisher_name.clone_from(&start_aggregation_publisher_proto.name);
+
+        // Setup collect_aggregation_publisher used for data collection.
+        // This publisher is activated only after start_trigger fires
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        let collect_aggregation_publisher =
+            collect_aggregation_publisher_proto.mut_aggregation_publisher();
+        collect_aggregation_publisher.message_builder =
+            protobuf::MessageField::some(proto_message_builder);
+        collect_aggregation_publisher.trigger_names.push(start_trigger_proto.name.clone());
+
+        // Setup expression field leaf node
+        let mut node_proto = NodeProto::new();
+        node_proto.set_field_leaf_node(FieldLeafNode {
+            publisher_name: SERVICE_PUBLISHER_NAME.to_owned(),
+            ..Default::default()
+        });
+
+        // Build metrics config
+        let mut config = MetricsConfigProto::new();
+
+        UUID.clone_into(&mut config.uuid);
+        config.start_trigger_name.clone_from(&start_trigger_proto.name);
+        config.end_trigger_name.clone_from(&end_trigger_proto.name);
+        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.descriptor_protos = create_test_file_descriptor_protos();
+        config.publishers.extend([
+            service_publisher_proto,
+            start_aggregation_publisher_proto,
+            collect_aggregation_publisher_proto,
+        ]);
+        config.triggers.extend([start_trigger_proto, end_trigger_proto, finish_trigger_proto]);
+        config.expression_nodes.extend([node_proto]);
+
+        config
+    }
+
+    // Create a config with start_trigger dependency on service_publisher through
+    // conditional_trigger selector node index
+    fn create_config_with_conditional_trigger_expression_nodes() -> MetricsConfigProto {
+        // Create publisher protos
+        let mut service_publisher_proto = PublisherProto::new();
+        SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher_proto.name);
+        let mut aggregation_publisher_proto = PublisherProto::new();
+        AGGREGATION_PUBLISHER_NAME.clone_into(&mut aggregation_publisher_proto.name);
+
+        // Create trigger protos
+        let mut parent_trigger_proto = TriggerProto::new();
+        PARENT_TRIGGER_NAME.clone_into(&mut parent_trigger_proto.name);
+        let mut start_trigger_proto = TriggerProto::new();
+        START_TRIGGER_NAME.clone_into(&mut start_trigger_proto.name);
+        let mut end_trigger_proto = TriggerProto::new();
+        END_TRIGGER_NAME.clone_into(&mut end_trigger_proto.name);
+        let mut finish_trigger_proto = TriggerProto::new();
+        FINISH_TRIGGER_NAME.clone_into(&mut finish_trigger_proto.name);
+
+        // Create aggregation_publisher which is supposed to be used only for data collection.
+        // It will be activated only after start_trigger fires
+        let mut proto_message_builder = ProtoMessageBuilder::new();
+        proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
+        let aggregation_publisher = aggregation_publisher_proto.mut_aggregation_publisher();
+        aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
+
+        // Setup expression field lead node
+        let mut node_proto = NodeProto::new();
+        node_proto.set_field_leaf_node(FieldLeafNode {
+            publisher_name: SERVICE_PUBLISHER_NAME.to_owned(),
+            ..Default::default()
+        });
+
+        // Setup start_trigger as a conditional which depends on service publisher
+        let conditional_trigger = start_trigger_proto.mut_conditional_trigger();
+        conditional_trigger.trigger_names.push(parent_trigger_proto.name.clone());
+        conditional_trigger.selector_node_index = Some(0);
+
+        // Build metrics config
+        let mut config = MetricsConfigProto::new();
+
+        UUID.clone_into(&mut config.uuid);
+        config.start_trigger_name.clone_from(&start_trigger_proto.name);
+        config.end_trigger_name.clone_from(&end_trigger_proto.name);
+        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.descriptor_protos = create_test_file_descriptor_protos();
+        config.publishers.extend([service_publisher_proto, aggregation_publisher_proto]);
+        config.triggers.extend([
+            parent_trigger_proto,
+            start_trigger_proto,
+            end_trigger_proto,
+            finish_trigger_proto,
+        ]);
+        config.expression_nodes.extend([node_proto]);
+
+        config
+    }
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn initialize_config_duplicate_publisher_name_fails() {
@@ -2084,10 +2384,10 @@ mod tests {
         tokio::task::yield_now().await;
 
         let expected_calls = vec![
-            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
             (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
+            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
             (ACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
             (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
             (UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
@@ -2282,6 +2582,175 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn initialize_config_with_expression_nodes_publisher_publishers_activated_on_usage() {
+        // Setup trigger mocks.
+        let start_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            START_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigStart,
+        ));
+        let end_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            END_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigEnd,
+        ));
+
+        let finish_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            FINISH_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigFinish,
+        ));
+
+        // Create activation callbacks
+        let activate_container = Arc::new(Mutex::new(HashSet::new()));
+        let activate_container_clone = Arc::clone(&activate_container);
+        let activate_callback = move |name: &str| {
+            activate_container_clone.lock().insert(name.to_owned());
+        };
+
+        // Setup mock publishers.
+        let mut service_publisher_mock =
+            MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        service_publisher_mock.set_activate_callback(activate_callback.clone());
+
+        let mut start_aggregation_publisher_mock =
+            MockPublisher::new(START_AGGREGATION_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        start_aggregation_publisher_mock.set_activate_callback(activate_callback.clone());
+
+        let mut collect_aggregation_publisher_mock =
+            MockPublisher::new(COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        collect_aggregation_publisher_mock.set_activate_callback(activate_callback.clone());
+
+        // Setup orchestrator with real node factory (not mocked)
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.node_factory = Box::new(NodeFactoryImpl::new());
+
+        orchestrator.publisher_factory().add_publishers(vec![
+            Arc::new(service_publisher_mock),
+            Arc::new(start_aggregation_publisher_mock),
+            Arc::new(collect_aggregation_publisher_mock),
+        ]);
+        orchestrator.trigger_factory().add_triggers(vec![
+            Arc::clone(&start_trigger_mock),
+            Arc::clone(&end_trigger_mock),
+            Arc::clone(&finish_trigger_mock),
+        ]);
+
+        // Create metrics config with publisher and trigger protos
+        let config = create_config_with_aggregation_publisher_expression_nodes();
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Verify required publishers were activated before start trigger fired.
+        // Activation order here can be any regardless of aggregation publisher's expression_node
+        // dependency on service publisher because expressions do not impact topological sorting
+        assert_eq!(
+            *activate_container.lock(),
+            [SERVICE_PUBLISHER_NAME.to_owned(), START_AGGREGATION_PUBLISHER_NAME.to_owned()]
+                .into_iter()
+                .collect()
+        );
+
+        // Start data collection and verify data collection aggregation publisher was activated
+        start_trigger_mock.fire().await;
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
+        assert_eq!(
+            *activate_container.lock(),
+            [
+                SERVICE_PUBLISHER_NAME.to_owned(),
+                START_AGGREGATION_PUBLISHER_NAME.to_owned(),
+                COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned()
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn initialize_config_with_expression_nodes_trigger_publishers_activated_on_usage() {
+        // Setup trigger mocks.
+        let parent_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            START_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::ConditionalTrigger { name: START_TRIGGER_NAME.to_owned() },
+        ));
+        let start_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            START_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigStart,
+        ));
+        let end_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            END_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigEnd,
+        ));
+
+        let finish_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            FINISH_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigFinish,
+        ));
+
+        // Create activation callbacks
+        let activate_container = Arc::new(Mutex::new(HashSet::new()));
+        let activate_container_clone = Arc::clone(&activate_container);
+        let activate_callback = move |name: &str| {
+            activate_container_clone.lock().insert(name.to_owned());
+        };
+
+        // Setup mock publishers.
+        let mut service_publisher_mock =
+            MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        service_publisher_mock.set_activate_callback(activate_callback.clone());
+
+        let mut aggregation_publisher_mock =
+            MockPublisher::new(AGGREGATION_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        aggregation_publisher_mock.set_activate_callback(activate_callback.clone());
+
+        // Setup orchestrator with real node factory (not mocked)
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.node_factory = Box::new(NodeFactoryImpl::new());
+
+        orchestrator.publisher_factory().add_publishers(vec![
+            Arc::new(service_publisher_mock),
+            Arc::new(aggregation_publisher_mock),
+        ]);
+        orchestrator.trigger_factory().add_triggers(vec![
+            Arc::clone(&parent_trigger_mock),
+            Arc::clone(&start_trigger_mock),
+            Arc::clone(&end_trigger_mock),
+            Arc::clone(&finish_trigger_mock),
+        ]);
+
+        // Create metrics config with publisher and trigger protos
+        let config = create_config_with_conditional_trigger_expression_nodes();
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Verify service_publisher was activated before start_trigger fired
+        assert_eq!(
+            *activate_container.lock(),
+            [SERVICE_PUBLISHER_NAME.to_owned()].into_iter().collect()
+        );
+
+        // Start data collection and verify data collection aggregation publisher was activated
+        start_trigger_mock.fire().await;
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
+        assert_eq!(
+            *activate_container.lock(),
+            [SERVICE_PUBLISHER_NAME.to_owned(), AGGREGATION_PUBLISHER_NAME.to_owned(),]
+                .into_iter()
+                .collect()
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     async fn finish_config_invalid_config_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
@@ -2418,14 +2887,11 @@ mod tests {
         );
 
         // Verify the order of calls.
+        // Note: aggregation publisher depends on start_trigger which doesn't fire before the config
+        // is finished, so no activation and deactivation happens for it
         assert_eq!(
             *name_container.lock(),
-            [
-                FINISH_TRIGGER_NAME,
-                START_TRIGGER_NAME,
-                AGGREGATION_PUBLISHER_NAME,
-                SERVICE_PUBLISHER_NAME
-            ]
+            [FINISH_TRIGGER_NAME, START_TRIGGER_NAME, SERVICE_PUBLISHER_NAME]
         );
     }
 
@@ -2578,6 +3044,98 @@ mod tests {
                 AGGREGATION_PUBLISHER_NAME,
                 SERVICE_PUBLISHER_NAME
             ]
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn finish_config_publishers_deactivated_on_usage() {
+        // Setup trigger mocks.
+        let start_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            START_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigStart,
+        ));
+        let end_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            END_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigEnd,
+        ));
+
+        let finish_trigger_mock = Arc::new(MockTrigger::new_for_subscriber(
+            FINISH_TRIGGER_NAME.to_owned(),
+            UUID.to_owned(),
+            TriggerSubscriber::MetricsConfigFinish,
+        ));
+
+        // Create deactivation callback
+        let deactivation_container = Arc::new(Mutex::new(HashSet::new()));
+        let set_deactivation_callback = |publisher_mock: &mut MockPublisher| {
+            let deactivation_container_clone = Arc::clone(&deactivation_container);
+            publisher_mock.set_deactivate_callback(move |name| {
+                deactivation_container_clone.lock().insert(name.to_owned());
+            });
+        };
+
+        // Setup mock publishers.
+        let mut service_publisher_mock =
+            MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        set_deactivation_callback(&mut service_publisher_mock);
+
+        let mut start_aggregation_publisher_mock =
+            MockPublisher::new(START_AGGREGATION_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        set_deactivation_callback(&mut start_aggregation_publisher_mock);
+
+        let mut collect_aggregation_publisher_mock =
+            MockPublisher::new(COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned(), UUID.to_owned());
+        set_deactivation_callback(&mut collect_aggregation_publisher_mock);
+
+        // Setup orchestrator with real node factory (not mocked)
+        let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        orchestrator.node_factory = Box::new(NodeFactoryImpl::new());
+
+        orchestrator.publisher_factory().add_publishers(vec![
+            Arc::new(service_publisher_mock),
+            Arc::new(start_aggregation_publisher_mock),
+            Arc::new(collect_aggregation_publisher_mock),
+        ]);
+        orchestrator.trigger_factory().add_triggers(vec![
+            Arc::clone(&start_trigger_mock),
+            Arc::clone(&end_trigger_mock),
+            Arc::clone(&finish_trigger_mock),
+        ]);
+
+        // Create metrics config with publisher and trigger protos
+        let config = create_config_with_aggregation_publisher_expression_nodes();
+
+        // Initialize config.
+        orchestrator.initialize_config(&config).await.unwrap();
+
+        // Start data collection
+        start_trigger_mock.fire().await;
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
+
+        // Stop data collection and verify data collection publisher was deactivated after end trigger fired.
+        end_trigger_mock.fire().await;
+        // Yield to make sure trigger handler task is processed.
+        tokio::task::yield_now().await;
+        assert_eq!(
+            *deactivation_container.lock(),
+            [COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned()].into_iter().collect()
+        );
+
+        // Finish config and verify all publishers are deactivated
+        orchestrator.finish_config(UUID).await.unwrap();
+        assert_eq!(
+            *deactivation_container.lock(),
+            [
+                COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned(),
+                SERVICE_PUBLISHER_NAME.to_owned(),
+                START_AGGREGATION_PUBLISHER_NAME.to_owned()
+            ]
+            .into_iter()
+            .collect()
         );
     }
 

@@ -3,6 +3,7 @@
 use sdv_telemetry_proto_rust::expression::combination_node::Operator as OperatorProto;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -176,6 +177,23 @@ impl Node {
             },
         }
     }
+
+    pub fn get_node_publishers<'a>(self: &'a Arc<Self>, publisher_names: &mut HashSet<&'a str>) {
+        match self.as_ref() {
+            Node::ConstantLeaf { .. } | Node::FunctionLeaf { .. } => {}
+            Node::FieldLeaf { publisher_name, .. } => {
+                publisher_names.insert(publisher_name.as_ref());
+            }
+            Node::Combination { left, right, .. } => {
+                if let Some(left_node) = left {
+                    left_node.get_node_publishers(publisher_names);
+                }
+                if let Some(right_node) = right {
+                    right_node.get_node_publishers(publisher_names);
+                }
+            }
+        }
+    }
 }
 
 /// Pretty print Node's debug string, reducing clutter caused by Option<Arc<T>>.
@@ -240,6 +258,14 @@ mod tests {
 
     fn create_node_evaluation_context() -> NodeEvaluationContext {
         NodeEvaluationContext::new(None)
+    }
+
+    fn build_field_leaf(publisher_name: String) -> Arc<Node> {
+        Arc::new(Node::FieldLeaf {
+            publisher_name,
+            fields: vec![FLOAT_FIELD_NAME.to_owned()],
+            message_provider: Arc::new(MockMessageProvider::with_default_message()),
+        })
     }
 
     #[test]
@@ -804,5 +830,65 @@ mod tests {
         let res = combination_node.evaluate(context).unwrap_async().await.unwrap();
 
         assert_eq!(&res, &NodeValue::Bool(true));
+    }
+
+    #[test]
+    fn get_node_publishers_constant_node_success() {
+        let constant_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) });
+
+        let mut node_publishers = HashSet::new();
+        constant_node.get_node_publishers(&mut node_publishers);
+        assert_eq!(node_publishers, HashSet::<&str>::new());
+    }
+
+    #[test]
+    fn get_node_publishers_duplicates_success() {
+        let field_node_1 = build_field_leaf(KNOWN_PUBLISHER_NAME.to_owned());
+        let field_node_2 = build_field_leaf(KNOWN_PUBLISHER_NAME.to_owned());
+        let combination_node = Arc::new(Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::EQ.into()),
+            left: Some(field_node_1),
+            right: Some(field_node_2),
+        });
+
+        let mut node_publishers = HashSet::new();
+        combination_node.get_node_publishers(&mut node_publishers);
+        assert_eq!(node_publishers, [KNOWN_PUBLISHER_NAME].into_iter().collect());
+    }
+
+    #[test]
+    fn get_node_publishers_combination_success() {
+        const PUBLISHER_1_NAME: &str = "publisher1";
+        const PUBLISHER_2_NAME: &str = "publisher2";
+
+        // Build combination node 1 with constant and field leaves
+        let constant_node = Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) });
+        let field_node_1 = build_field_leaf(PUBLISHER_1_NAME.to_owned());
+        let combination_node_1 = Arc::new(Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::GT.into()),
+            left: Some(constant_node),
+            right: Some(field_node_1),
+        });
+
+        // Build combination node 2 with field and None leaves
+        let field_node_2 = build_field_leaf(PUBLISHER_2_NAME.to_owned());
+        let combination_node_2 = Arc::new(Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::LT.into()),
+            left: None,
+            right: Some(field_node_2),
+        });
+
+        // Build root node
+        let root_combination_node = Arc::new(Node::Combination {
+            operator: OperatorProto::RelationalOperator(RelationalOperator::EQ.into()),
+            left: Some(combination_node_1),
+            right: Some(combination_node_2),
+        });
+
+        // Find publishers present in root node subtree
+        let mut node_publishers = HashSet::new();
+        root_combination_node.get_node_publishers(&mut node_publishers);
+
+        assert_eq!(node_publishers, [PUBLISHER_1_NAME, PUBLISHER_2_NAME].into_iter().collect());
     }
 }

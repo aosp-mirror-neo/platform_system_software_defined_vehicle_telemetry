@@ -3,7 +3,7 @@
 //! This module implements code extensions for HashMaps and Vector
 
 use std::collections::hash_map::{Entry, OccupiedEntry};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 
 /// Additional HashMap functions that are either not available in the standard library, or hidden
@@ -20,6 +20,19 @@ pub trait HashMapExtension<K: Eq + Hash, V> {
         &self,
         dependency_selector: F,
     ) -> Option<Vec<&K>>;
+
+    /// Returns list of keys which the given key is dependent on
+    ///
+    /// # Arguments
+    ///
+    /// * `key` key to determine dependencies
+    /// * `dependency_selector` - A function that accepts HashMap value and returns keys that are
+    ///   dependent on the corresponding entry.
+    fn get_key_dependencies<'a, F: Fn(&V) -> &[K]>(
+        &'a self,
+        key: &'a K,
+        dependency_selector: F,
+    ) -> HashSet<&'a K>;
 
     /// Tries to insert a key-value pair into the map, and returns a mutable reference to the value
     /// in the entry.
@@ -85,6 +98,29 @@ impl<K: Eq + Hash, V> HashMapExtension<K, V> for HashMap<K, V> {
         }
     }
 
+    fn get_key_dependencies<'a, F: Fn(&V) -> &[K]>(
+        &'a self,
+        key: &'a K,
+        dependency_selector: F,
+    ) -> HashSet<&'a K> {
+        let mut processed_keys = HashSet::new();
+        let mut queue: VecDeque<&K> = VecDeque::new();
+        queue.push_back(key);
+        processed_keys.insert(key);
+
+        while let Some(key) = queue.pop_front() {
+            if let Some(value) = self.get(key) {
+                for dependency in dependency_selector(value) {
+                    if processed_keys.insert(dependency) {
+                        queue.push_back(dependency);
+                    }
+                }
+            }
+        }
+
+        processed_keys
+    }
+
     fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, OccupiedEntry<K, V>> {
         match self.entry(key) {
             Entry::Occupied(o) => Err(o),
@@ -144,5 +180,47 @@ mod tests {
         assert_eq!(occupied_entry.get(), &1);
         assert_eq!(map.get("key"), Some(&1));
         assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn get_key_dependencies_empty() {
+        let dependencies = HashMap::<i32, Vec<i32>>::new();
+        let key = 0;
+        assert_eq!(dependencies.get_key_dependencies(&key, |adj| adj), [0].iter().collect());
+    }
+
+    #[test]
+    fn get_key_dependencies_two_components() {
+        /*
+           A -> C -> D -> E   G <-> F
+           \       ^
+            \     /
+             -> B
+        */
+
+        let mut dependencies = HashMap::new();
+        dependencies.insert("A", vec!["B", "C"]);
+        dependencies.insert("B", vec!["D"]);
+        dependencies.insert("C", vec!["D"]);
+        dependencies.insert("D", vec!["E"]);
+        dependencies.insert("G", vec!["F"]);
+        dependencies.insert("F", vec!["G"]);
+
+        assert_eq!(
+            dependencies.get_key_dependencies(&"A", |adj| adj),
+            ["A", "B", "C", "D", "E"].iter().collect()
+        );
+        assert_eq!(
+            dependencies.get_key_dependencies(&"B", |adj| adj),
+            ["B", "D", "E"].iter().collect()
+        );
+        assert_eq!(
+            dependencies.get_key_dependencies(&"C", |adj| adj),
+            ["C", "D", "E"].iter().collect()
+        );
+        assert_eq!(dependencies.get_key_dependencies(&"D", |adj| adj), ["D", "E"].iter().collect());
+        assert_eq!(dependencies.get_key_dependencies(&"E", |adj| adj), ["E"].iter().collect());
+        assert_eq!(dependencies.get_key_dependencies(&"F", |adj| adj), ["F", "G"].iter().collect());
+        assert_eq!(dependencies.get_key_dependencies(&"G", |adj| adj), ["F", "G"].iter().collect());
     }
 }

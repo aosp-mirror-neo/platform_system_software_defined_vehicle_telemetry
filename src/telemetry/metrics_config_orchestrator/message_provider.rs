@@ -52,7 +52,7 @@ mod tests {
 
     use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
-    use crate::metrics_config_orchestrator::MetricsConfigState;
+    use crate::metrics_config_orchestrator::{MetricsConfigState, OrderedPublisherNames};
 
     const ERROR_MESSAGE: &str = "error message";
     const PUBLISHER_NAME: &str = "publisher";
@@ -67,7 +67,10 @@ mod tests {
             uuid: String::default(),
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: vec![],
-            ordered_publisher_names: vec![],
+            ordered_publisher_names: OrderedPublisherNames {
+                on_config_initialization: vec![],
+                on_start_trigger_fired: vec![],
+            },
             publishers: HashMap::new(),
             start_trigger: None,
             end_trigger: None,
