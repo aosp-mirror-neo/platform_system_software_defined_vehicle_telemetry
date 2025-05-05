@@ -163,7 +163,7 @@ impl Publisher for ServicePublisher {
         self.activate_impl(state_lock).await
     }
 
-    async fn deactivate(&self) -> anyhow::Result<()> {
+    async fn deactivate(&self) {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         let old_state = mem::replace(&mut *state_lock, ServicePublisherState::Inactive);
@@ -200,8 +200,6 @@ impl Publisher for ServicePublisher {
         // Reset latest message.
         // The publisher is unsubscribed from underlying data sources, so no callback will change it back to some stale message.
         self.base.reset_latest_message();
-
-        Ok(())
     }
 
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn) {
@@ -836,7 +834,7 @@ mod tests {
             ServicePublisherState::PendingActivation { .. }
         ));
 
-        Arc::clone(&publisher).deactivate().await.unwrap();
+        Arc::clone(&publisher).deactivate().await;
         assert!(matches!(*publisher.state.lock().await, ServicePublisherState::Inactive { .. }));
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
@@ -910,7 +908,7 @@ mod tests {
             ServicePublisherState::ActivationNotPossible
         ));
 
-        Arc::clone(&publisher).deactivate().await.unwrap();
+        Arc::clone(&publisher).deactivate().await;
         assert!(matches!(*publisher.state.lock().await, ServicePublisherState::Inactive));
 
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
@@ -1149,7 +1147,7 @@ mod tests {
         ));
 
         Arc::clone(&publisher).activate().await;
-        publisher.deactivate().await.unwrap();
+        publisher.deactivate().await;
 
         // Ensure availability callback is ignored.
         service_adapter.call_availability_callback();
@@ -1378,7 +1376,7 @@ mod tests {
         ));
 
         Arc::clone(&publisher).activate().await;
-        publisher.deactivate().await.unwrap();
+        publisher.deactivate().await;
         service_adapter.notify_cancelled();
         tokio::task::yield_now().await;
 
@@ -1403,7 +1401,7 @@ mod tests {
     async fn deactivate_when_inactive_panics() {
         let publisher = create_inactive_subscription_service_publisher(None);
 
-        publisher.deactivate().await.unwrap();
+        publisher.deactivate().await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1412,7 +1410,7 @@ mod tests {
     async fn deactivate_with_subscriptions_panics() {
         let publisher = create_service_publisher_with_subscription(None).await;
 
-        publisher.deactivate().await.unwrap();
+        publisher.deactivate().await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1422,7 +1420,7 @@ mod tests {
         let publisher =
             create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
 
-        publisher.deactivate().await.unwrap();
+        publisher.deactivate().await;
 
         let state = publisher.state.lock().await;
         assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
@@ -1437,7 +1435,7 @@ mod tests {
         let publisher =
             create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
 
-        publisher.deactivate().await.unwrap();
+        publisher.deactivate().await;
 
         let state = publisher.state.lock().await;
         assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);

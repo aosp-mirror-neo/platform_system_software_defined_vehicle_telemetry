@@ -164,7 +164,7 @@ impl Publisher for AggregationPublisher {
         };
     }
 
-    async fn deactivate(&self) -> anyhow::Result<()> {
+    async fn deactivate(&self) {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         match &*state_lock {
@@ -201,8 +201,6 @@ impl Publisher for AggregationPublisher {
 
         // Change state to Inactive and release the mutex.
         *state_lock = AggregationPublisherState::Inactive;
-
-        Ok(())
     }
 
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn) {
@@ -441,7 +439,7 @@ mod tests {
     async fn deactivate_when_inactive_panics() {
         let (publisher, _) = create_inactive_aggregation_publisher(vec![]);
 
-        let _ = publisher.deactivate().await;
+        publisher.deactivate().await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -450,7 +448,7 @@ mod tests {
     async fn deactivate_with_subscriptions_panics() {
         let publisher = create_aggregation_publisher_with_subscription(vec![]).await;
 
-        let _ = publisher.deactivate().await;
+        publisher.deactivate().await;
     }
 
     #[sdv_telemetry_test_utils::timeout]

@@ -19,7 +19,7 @@ pub(crate) struct MockPublisher {
     name: String,
     metrics_config_uuid: String,
     activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    deactivate_callback: Option<Box<dyn Fn(&str) -> Option<anyhow::Error> + Send + Sync>>,
+    deactivate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     latest_message_error: Mutex<Option<ServicePublisherAccessorError>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
@@ -56,14 +56,10 @@ impl Publisher for MockPublisher {
         }
     }
 
-    async fn deactivate(&self) -> anyhow::Result<()> {
+    async fn deactivate(&self) {
         if let Some(callback) = &self.deactivate_callback {
-            if let Some(error) = callback(&self.name) {
-                return Err(error);
-            }
+            callback(&self.name);
         }
-
-        Ok(())
     }
 
     async fn subscribe(&self, data_trigger_name: &str, new_message_callback: CallbackFn) {
@@ -108,7 +104,7 @@ impl MockPublisher {
 
     pub(crate) fn set_deactivate_callback(
         &mut self,
-        callback: impl Fn(&str) -> Option<anyhow::Error> + Send + Sync + 'static,
+        callback: impl Fn(&str) + Send + Sync + 'static,
     ) {
         self.deactivate_callback.replace(Box::new(callback));
     }

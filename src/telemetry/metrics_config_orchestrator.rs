@@ -416,9 +416,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Deactivate publishers in reverse topologically sorted order.
         for publisher_name in config.ordered_publisher_names.iter().rev() {
-            if let Err(err) = config.publishers[publisher_name].deactivate().await {
-                error!("Error when trying to deactivate publisher {}: {}.", publisher_name, err);
-            }
+            config.publishers[publisher_name].deactivate().await;
         }
 
         // Change state to Finished and release the mutex.
@@ -2337,7 +2335,6 @@ mod tests {
         let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().push(name.to_owned());
-            None
         });
 
         let mut aggregation_publisher_mock =
@@ -2345,7 +2342,6 @@ mod tests {
         let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().push(name.to_owned());
-            None
         });
 
         // Setup orchestrator.
@@ -2465,7 +2461,6 @@ mod tests {
         let name_container_clone = Arc::clone(&name_container);
         service_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().push(name.to_owned());
-            None
         });
 
         let mut aggregation_publisher_mock =
@@ -2473,7 +2468,6 @@ mod tests {
         let name_container_clone = Arc::clone(&name_container);
         aggregation_publisher_mock.set_deactivate_callback(move |name| {
             name_container_clone.lock().push(name.to_owned());
-            None
         });
 
         // Setup mock report generator.
