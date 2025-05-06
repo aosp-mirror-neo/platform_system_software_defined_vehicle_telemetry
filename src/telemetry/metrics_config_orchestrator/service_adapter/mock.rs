@@ -129,6 +129,9 @@ impl ServiceAdapter for MockServiceAdapter {
         _service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
+        if let Some(error) = self.next_error.lock().take() {
+            return Err(error);
+        }
         self.num_register_availability_callback_calls.fetch_add(1, Ordering::AcqRel);
         self.availability_callback.lock().replace(callback);
         if self.return_availability_callback_registration {

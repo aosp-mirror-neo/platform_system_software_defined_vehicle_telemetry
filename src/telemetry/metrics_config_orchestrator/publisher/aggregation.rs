@@ -82,7 +82,7 @@ impl Publisher for AggregationPublisher {
         Ok(latest_message).into()
     }
 
-    async fn activate(self: Arc<Self>) -> Result<(), ServicePublisherAccessorError> {
+    async fn activate(self: Arc<Self>) {
         // Lock state mutex and hold it until the state transition is complete.
         let mut state_lock = self.state.lock().await;
         assert!(
@@ -162,8 +162,6 @@ impl Publisher for AggregationPublisher {
             callback_map: HashMap::new(),
             _event_processor: event_processor,
         };
-
-        Ok(())
     }
 
     async fn deactivate(&self) -> anyhow::Result<()> {
@@ -374,7 +372,7 @@ mod tests {
     ) -> (Arc<dyn Publisher>, Arc<MockMessageBuilder>) {
         let (publisher, message_builder) = create_inactive_aggregation_publisher(triggers);
 
-        Arc::clone(&publisher).activate().await.unwrap();
+        Arc::clone(&publisher).activate().await;
 
         (publisher, message_builder)
     }
@@ -412,7 +410,7 @@ mod tests {
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
         ));
 
-        Arc::clone(&publisher).activate().await.unwrap();
+        Arc::clone(&publisher).activate().await;
         trigger.fire().await;
         let msg1 = Arc::clone(&publisher)
             .get_latest_message()
@@ -434,7 +432,7 @@ mod tests {
     async fn activate_when_active_panics() {
         let (publisher, _) = create_active_aggregation_publisher(vec![]).await;
 
-        let _ = publisher.activate().await;
+        publisher.activate().await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -552,7 +550,7 @@ mod tests {
         );
 
         // Activate and fire trigger
-        Arc::clone(&publisher).activate().await.unwrap();
+        Arc::clone(&publisher).activate().await;
         trigger.fire().await;
 
         // Verify the context received by the message builder
@@ -694,7 +692,7 @@ mod tests {
             Arc::new(StatusReporterImpl::new(tx)),
         ));
 
-        Arc::clone(&publisher).activate().await.unwrap();
+        Arc::clone(&publisher).activate().await;
 
         trigger.fire().await;
 
