@@ -1,6 +1,0 @@
-// Copyright 2023 Google LLC
-
-package {
-    default_team: "trendy_team_connectivity_telemetry",
-    default_applicable_licenses: ["sdv_license"],
-}
