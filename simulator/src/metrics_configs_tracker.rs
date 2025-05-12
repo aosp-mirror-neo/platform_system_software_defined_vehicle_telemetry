@@ -123,11 +123,11 @@ impl MetricsConfigsTracker {
     /// config uuid, returns an error if the UUID is not found.
     pub fn get_metrics_config_info(
         &mut self,
-        report: &MetricsReport,
+        config_uuid: String,
     ) -> Result<&mut MetricsConfigInfo, SimulatorError> {
-        self.metrics_configs.get_mut(&report.metrics_config_uuid).ok_or_else(|| {
-            SimulatorError::OrphanReport { uuid: report.metrics_config_uuid.clone() }
-        })
+        self.metrics_configs
+            .get_mut(&config_uuid)
+            .ok_or_else(|| SimulatorError::OrphanReport { uuid: config_uuid.clone() })
     }
 
     /// Appends the report number, timestamp and content to the report log
@@ -136,7 +136,7 @@ impl MetricsConfigsTracker {
     pub fn process_new_report(&mut self, report: MetricsReport) -> Result<(), SimulatorError> {
         let reports_directory = self.output_directory.join(io::REPORTS_DIR_NAME);
 
-        let metrics_config = self.get_metrics_config_info(&report)?;
+        let metrics_config = self.get_metrics_config_info(report.metrics_config_uuid.clone())?;
         let (report_config, message_descriptor) = metrics_config.get_report_config_info(&report)?;
 
         if let Some(report_file_names) = &mut report_config.report_file_names {

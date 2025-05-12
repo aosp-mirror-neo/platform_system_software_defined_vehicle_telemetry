@@ -18,13 +18,14 @@ ReadyReportsInfoListenerImpl::ReadyReportsInfoListenerImpl(
 
 ndk::ScopedAStatus ReadyReportsInfoListenerImpl::sendReadyReportsInfo(
         TelemetryServiceStatusCodes statusCode, const std::string& statusMessage,
-        const std::vector<std::string>& report_uuids) {
-    std::vector<const char*> uuid_c_strings;
-    uuid_c_strings.reserve(report_uuids.size());
-    std::transform(report_uuids.begin(), report_uuids.end(), std::back_inserter(uuid_c_strings),
-                   [](auto& uuid) { return uuid.c_str(); });
-    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str(), uuid_c_strings.data(),
-                  uuid_c_strings.size());
+        const std::vector<aidl::google::sdv::telemetry::MetricsReportInfo>& ready_reports_info) {
+    std::vector<MetricsReportInfo> info;
+    info.reserve(ready_reports_info.size());
+    for (const auto& report_info : ready_reports_info) {
+        info.emplace_back(MetricsReportInfo{.config_uuid = report_info.configUuid.c_str(),
+                                            .report_uuid = report_info.reportUuid.c_str()});
+    }
+    mCallback.run(std::to_underlying(statusCode), statusMessage.c_str(), info.data(), info.size());
     return ndk::ScopedAStatus::ok();
 }
 

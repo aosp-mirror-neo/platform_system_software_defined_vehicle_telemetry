@@ -498,7 +498,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let data_reference = Arc::downgrade(&self.data);
         tokio::spawn(async move {
             let Some(data) = data_reference.upgrade() else { return };
-            let ready_reports_info = data.metrics_report_listener.get_ready_report_uuids();
+            let ready_reports_info = data.metrics_report_listener.get_ready_reports_info();
 
             if let Err(e) = report_listener.deref().sendReadyReportsInfo(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
@@ -547,6 +547,7 @@ mod tests {
         ITelemetryReadyReportsInfoListener::BnTelemetryReadyReportsInfoListener,
         ITelemetryReportListener::BnTelemetryReportListener,
         ITelemetryReportReadyListener::BnTelemetryReportReadyListener,
+        MetricsReportInfo::MetricsReportInfo,
     };
     use parking_lot::Mutex;
     use protobuf::Message;
@@ -701,13 +702,11 @@ mod tests {
             &self,
             status_code: StatusCodes,
             status_message: &str,
-            ready_reports_info: &[String],
+            ready_reports_info: &[MetricsReportInfo],
         ) -> binder::Result<()> {
-            assert!(self
-                .ready_reports_info
-                .lock()
-                .replace(ready_reports_info.to_owned())
-                .is_none());
+            let info =
+                ready_reports_info.iter().map(|item| item.reportUuid.clone()).collect::<Vec<_>>();
+            assert!(self.ready_reports_info.lock().replace(info).is_none());
             self.status_sender
                 .lock()
                 .take()
@@ -747,10 +746,9 @@ mod tests {
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, report_uuid: &str) -> binder::Result<()> {
+        fn onReady(&self, report_info: &MetricsReportInfo) -> binder::Result<()> {
             *self.num_on_ready_report_calls.lock() += 1;
-            *self.report_uuid.lock() = report_uuid.to_owned();
-
+            *self.report_uuid.lock() = report_info.reportUuid.clone();
             Ok(())
         }
     }
@@ -1352,8 +1350,9 @@ mod tests {
             .await
             .unwrap();
 
+        let report_info = MetricsReportInfo { reportUuid: UUID1.to_string(), ..Default::default() };
         // Call onReady on report ready listener
-        report_ready_listener.onReady(UUID1).unwrap();
+        report_ready_listener.onReady(&report_info).unwrap();
 
         assert_eq!(1, report_ready_listener.get_num_on_ready_report_calls());
         assert_eq!(UUID1, &report_ready_listener.get_uuid());

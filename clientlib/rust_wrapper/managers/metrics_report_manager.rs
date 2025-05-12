@@ -5,14 +5,14 @@ use crate::callbacks::{
     call_api_with_status_callback,
 };
 use crate::{
-    SendSyncPtr, TelemetryError, TelemetryResult, TelemetryServiceHolder,
+    ReportInfo, SendSyncPtr, TelemetryError, TelemetryResult, TelemetryServiceHolder,
     TelemetryServiceStatusCodes,
 };
 
 use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use std::ffi::{c_char, c_void, CStr, CString};
+use std::ffi::{c_void, CStr, CString};
 
 /// Callback that handles report ready event.
 ///
@@ -21,10 +21,10 @@ use std::ffi::{c_char, c_void, CStr, CString};
 /// * `listener` points to a valid `MetricsReportReadyListener` originally sent to the caller as
 ///    part of the `set_report_ready_listener` API call.
 ///
-/// * `metrics_report_uuid` points to a valid C raw string provided by ReadyReportListener
+/// * `metrics_report_info` points to a valid 'MetricsReportInfo' provided by ReadyReportListener
 unsafe extern "C" fn on_report_ready(
     listener: *mut std::ffi::c_void,
-    metrics_report_uuid: *const c_char,
+    metrics_report_info: *const rust_to_c::MetricsReportInfo,
 ) {
     // SAFETY: The caller sends back the reference to `MetricsReportReadyListener` that was
     // originally sent to the caller during as part of the `set_report_ready_listener` API call.
@@ -33,30 +33,36 @@ unsafe extern "C" fn on_report_ready(
     // calls to `on_report_ready` can still access the same `listener`.
     let listener = unsafe { &mut *(listener as *mut MetricsReportReadyListener) };
 
-    let metrics_report_uuid =
+    // SAFETY: The caller has provided a valid pointer to `MetricsReportInfo`
+    let metrics_report_info = unsafe { *metrics_report_info };
+    let config_uuid =
         // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
         // requirements.
-        unsafe { CStr::from_ptr(metrics_report_uuid) }.to_str().unwrap();
+        unsafe { CStr::from_ptr(metrics_report_info.config_uuid) }.to_str().unwrap().to_owned();
+    let report_uuid =
+        // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
+        // requirements.
+        unsafe { CStr::from_ptr(metrics_report_info.report_uuid) }.to_str().unwrap().to_owned();
 
-    info!("Report ready: {metrics_report_uuid}");
+    info!("Report ready: config UUID {config_uuid:?}, report UUID {report_uuid:?}");
 
-    (listener.callback)(metrics_report_uuid);
+    (listener.callback)(ReportInfo { config_uuid, report_uuid });
 }
 
 /// Struct used to wrap the report ready callback received from the client.
 struct MetricsReportReadyListener {
-    callback: Box<dyn Fn(&str) + Send + Sync>,
+    callback: Box<dyn Fn(ReportInfo) + Send + Sync>,
 }
 
 impl MetricsReportReadyListener {
-    fn new(callback: Box<dyn Fn(&str) + Send + Sync>) -> Self {
+    fn new(callback: Box<dyn Fn(ReportInfo) + Send + Sync>) -> Self {
         Self { callback }
     }
 }
 
 pub async fn set_report_ready_listener(
     service: &TelemetryServiceHolder,
-    report_ready_callback: impl Fn(&str) + Send + Sync + 'static,
+    report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
 ) -> TelemetryResult<String> {
     let raw_listener = SendSyncPtr(Box::into_raw(Box::new(MetricsReportReadyListener::new(
         Box::new(report_ready_callback),
@@ -145,7 +151,7 @@ pub async fn get_metrics_report(
 
 pub async fn get_ready_reports_info(
     service: &TelemetryServiceHolder,
-) -> TelemetryResult<Vec<String>> {
+) -> TelemetryResult<Vec<ReportInfo>> {
     call_api_with_ready_reports_info_callback(move |callback_data, callback| {
         // SAFETY: the caller has provided pointers that are used to safely get the info of ready metrics reports
         // from the telemetry service. The validity of `callback_data` and `callback` is ensured by `call_api_with_ready_reports_info_callback`.

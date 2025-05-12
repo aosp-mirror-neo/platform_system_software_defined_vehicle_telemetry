@@ -2,6 +2,8 @@
 
 package google.sdv.telemetry;
 
+import google.sdv.telemetry.MetricsReportInfo;
+
 /**
  * Enables clients to receive telemetry report ready notifications.
  */
@@ -9,7 +11,7 @@ package google.sdv.telemetry;
 oneway interface ITelemetryReportReadyListener {
     /**
      * Called by telemetry service to provide notifications on finished reports.
-     * @param reportUuid UUID of the ready report.
+     * @param metricsReportInfo info of the ready report.
      */
-    void onReady(in @utf8InCpp String reportUuid);
+    void onReady(in MetricsReportInfo metricsReportInfo);
 }

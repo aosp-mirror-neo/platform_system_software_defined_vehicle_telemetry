@@ -37,6 +37,15 @@ pub struct TelemetryError {
 /// Represents the result of a telemetry service call.
 pub type TelemetryResult<T> = Result<T, TelemetryError>;
 
+/// Represents the callback argument of the report ready callback.
+#[derive(Debug)]
+pub struct ReportInfo {
+    /// The metrics config UUID
+    pub config_uuid: String,
+    /// The metrics report UUID
+    pub report_uuid: String,
+}
+
 /// Struct used to wrap ServiceHolder received from C in a typesafe manner
 #[repr(transparent)]
 pub struct TelemetryServiceHolder(*mut ServiceHolder);
@@ -306,13 +315,14 @@ impl TelemetryServiceHolder {
     /// `TelemetryServiceStatus` as a parameter.
     ///
     /// @param `report_ready_callback` function closure gets called when a report is ready. The
-    /// `report_ready_callback` takes a string that specifies metrics report UUID.
+    /// `report_ready_callback` takes ReportInfo containing two Strings that specify metrics config
+    /// uuid and metrics report uuid of the report that is ready.
     ///
     /// @return an error code and error message in case of incorrect parameters
     pub async fn init(
         &self,
         misc_status_callback: impl Fn(TelemetryServiceStatus) + Send + Sync + 'static,
-        report_ready_callback: impl Fn(&str) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
     ) -> TelemetryResult<()> {
         info!("Initializing telemetry service");
 
@@ -405,13 +415,14 @@ impl TelemetryServiceHolder {
     /// ready. Telemetry service will call the CbFunc and pass the listener object back to the
     /// client, along with the uuid of the metrics config for which the report is ready.
     ///
-    /// @param report_ready_callback function closure gets called when a report is ready. The
-    /// report_ready_callback takes a string that specifies metrics report UUID.
+    /// @param `report_ready_callback` function closure gets called when a report is ready. The
+    /// `report_ready_callback` takes ReportInfo containing two Strings that specify metrics config
+    /// uuid and metrics report uuid of the report that is ready.
     ///
     /// @return an error code and error message in case of incorrect parameters
     async fn set_report_ready_listener(
         &self,
-        report_ready_callback: impl Fn(&str) + Send + Sync + 'static,
+        report_ready_callback: impl Fn(ReportInfo) + Send + Sync + 'static,
     ) -> TelemetryResult<String> {
         metrics_report_manager::set_report_ready_listener(self, report_ready_callback).await
     }
@@ -437,9 +448,9 @@ impl TelemetryServiceHolder {
 
     /// Tells the telemetry service to send info of the reports which are ready.
     ///
-    /// @return in case of success, a list of Strings containing metrics report UUIDs,
-    /// or an error code and error message in case of failure
-    pub async fn get_ready_reports_info(&self) -> TelemetryResult<Vec<String>> {
+    /// @return in case of success, a list of ReportInfo objects containing metrics config and
+    /// metrics report uuids, or an error code and error message in case of failure
+    pub async fn get_ready_reports_info(&self) -> TelemetryResult<Vec<ReportInfo>> {
         metrics_report_manager::get_ready_reports_info(self).await
     }
 

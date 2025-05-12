@@ -1,6 +1,9 @@
 // Copyright 2023 Google LLC
 
-use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryReportReadyListener::ITelemetryReportReadyListener;
+use google_sdv_telemetry::aidl::google::sdv::telemetry::{
+    ITelemetryReportReadyListener::ITelemetryReportReadyListener,
+    MetricsReportInfo::MetricsReportInfo,
+};
 use google_sdv_telemetry::binder::Strong;
 use log::warn;
 use parking_lot::Mutex;
@@ -15,6 +18,8 @@ use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 const MAX_METRICS_REPORT_STORE_SIZE: usize = 1024;
 
 pub(super) struct MetricsReportListener {
+    /// Mapping of Metrics Report UUID to Metrics Config UUID
+    report_to_config_map: Mutex<HashMap<String, String>>,
     /// Hashmap to store the MetricsReport until the client asks for it.
     metrics_report_store: Mutex<HashMap<String, MetricsReport>>,
     /// Queue to keep track of the order of report insertion for FIFO eviction.
@@ -42,6 +47,7 @@ pub(super) enum MetricsReportListenerError {
 impl MetricsReportListener {
     pub(super) fn new() -> Self {
         Self {
+            report_to_config_map: Mutex::new(HashMap::new()),
             metrics_report_store: Mutex::new(HashMap::new()),
             insertion_order: Mutex::new(VecDeque::new()),
             report_ready_listener: Mutex::new(None),
@@ -51,24 +57,32 @@ impl MetricsReportListener {
 
     pub(super) fn on_report_ready(self: &Arc<Self>, metrics_report: MetricsReport) {
         let mut store = self.metrics_report_store.lock();
+        let mut mapping = self.report_to_config_map.lock();
         let mut insertion_order = self.insertion_order.lock();
 
         if store.len() == MAX_METRICS_REPORT_STORE_SIZE {
             if let Some(oldest_report_uuid) = insertion_order.pop_front() {
                 store.remove(&oldest_report_uuid);
+                mapping.remove(&oldest_report_uuid);
             }
         }
 
+        let config_uuid = metrics_report.metrics_config_uuid.clone();
         let report_uuid = metrics_report.report_uuid.clone();
 
         // Insert the report and panic if report with the same key already exists.
         store
             .try_insert_value(report_uuid.clone(), metrics_report)
             .expect("Metrics Report UUIDs should be unique");
+        mapping
+            .try_insert_value(report_uuid.clone(), config_uuid.clone())
+            .expect("Metrics Report UUIDs should be unique");
         insertion_order.push_back(report_uuid.clone());
 
         if let Some((listener, _)) = self.report_ready_listener.lock().as_ref() {
-            if let Err(e) = listener.deref().onReady(&report_uuid) {
+            let report_info =
+                MetricsReportInfo { configUuid: config_uuid, reportUuid: report_uuid };
+            if let Err(e) = listener.deref().onReady(&report_info) {
                 warn!("Error when trying to notify client about a new report: {:?}", e);
             }
         }
@@ -81,12 +95,22 @@ impl MetricsReportListener {
         let Some(metrics_report) = self.metrics_report_store.lock().remove(report_uuid) else {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
         };
-
+        let Some(_) = self.report_to_config_map.lock().remove(report_uuid) else {
+            return Err(MetricsReportListenerError::MetricsReportNotFound);
+        };
         Ok(metrics_report)
     }
 
-    pub(super) fn get_ready_report_uuids(&self) -> Vec<String> {
-        self.metrics_report_store.lock().keys().cloned().collect()
+    pub(super) fn get_ready_reports_info(&self) -> Vec<MetricsReportInfo> {
+        self.report_to_config_map
+            .lock()
+            .clone()
+            .into_iter()
+            .map(|(report_uuid, config_uuid)| MetricsReportInfo {
+                configUuid: config_uuid,
+                reportUuid: report_uuid,
+            })
+            .collect()
     }
 
     pub(super) fn set_report_ready_listener(
@@ -143,8 +167,8 @@ pub(crate) mod tests {
     }
 
     impl ITelemetryReportReadyListener for MockTelemetryReportReadyListener {
-        fn onReady(&self, report_uuid: &str) -> binder::Result<()> {
-            self.last_call.lock().replace(report_uuid.to_owned());
+        fn onReady(&self, report_info: &MetricsReportInfo) -> binder::Result<()> {
+            self.last_call.lock().replace(report_info.reportUuid.clone());
             Ok(())
         }
     }
@@ -276,14 +300,16 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn get_ready_report_uuids_success() {
+    fn get_ready_reports_info_success() {
         let report_listener = Arc::new(create_default_metrics_report_listener());
         let metrics_report = create_metrics_report();
         report_listener.on_report_ready(metrics_report.clone());
 
-        let ready_report_uuids = report_listener.get_ready_report_uuids();
+        let ready_reports_info = report_listener.get_ready_reports_info();
 
-        assert_eq!(ready_report_uuids, vec![metrics_report.report_uuid]);
+        assert_eq!(ready_reports_info.len(), 1);
+        assert_eq!(ready_reports_info[0].reportUuid, metrics_report.report_uuid);
+        assert_eq!(ready_reports_info[0].configUuid, metrics_report.metrics_config_uuid);
     }
 
     #[test]

@@ -16,9 +16,10 @@ class ReadyReportsInfoListenerImpl :
 public:
     explicit ReadyReportsInfoListenerImpl(Callback<ReadyReportsInfoCallbackFunction> callback);
 
-    ndk::ScopedAStatus sendReadyReportsInfo(TelemetryServiceStatusCodes statusCode,
-                                            const std::string& statusMessage,
-                                            const std::vector<std::string>& report_uuids) override;
+    ndk::ScopedAStatus sendReadyReportsInfo(
+            TelemetryServiceStatusCodes statusCode, const std::string& statusMessage,
+            const std::vector<::aidl::google::sdv::telemetry::MetricsReportInfo>&
+                    ready_reports_info) override;
 
 private:
     Callback<ReadyReportsInfoCallbackFunction> mCallback;

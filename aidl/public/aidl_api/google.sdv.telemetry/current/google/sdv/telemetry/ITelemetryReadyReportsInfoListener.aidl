@@ -22,5 +22,6 @@ package google.sdv.telemetry;
 interface ITelemetryReadyReportsInfoListener {
     oneway void sendReadyReportsInfo(
             in google.sdv.telemetry.status.TelemetryServiceStatusCodes statusCode,
-            in @utf8InCpp String statusMessage, in @utf8InCpp String[] reportUuids);
+            in @utf8InCpp String statusMessage,
+            in google.sdv.telemetry.MetricsReportInfo[] readyReportsInfo);
 }

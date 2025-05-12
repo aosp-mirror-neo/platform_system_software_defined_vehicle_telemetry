@@ -96,8 +96,8 @@ async fn telemetry_service_simple_config_end_to_end_test() {
             move |status| {
                 info!("Received status message {:?}: {}", status.code, status.message);
             },
-            move |report_uuid| {
-                report_ready_tx.send(report_uuid.to_owned()).unwrap();
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
             },
         )
         .await
@@ -113,17 +113,18 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     service.activate_metrics_config(&config.uuid).await.unwrap();
 
     info!("Waiting for metrics report ready notification");
-    let report_uuid = report_ready_rx.recv().await.unwrap();
+    let report_info = report_ready_rx.recv().await.unwrap();
 
     info!("Reading metrics reports info");
     let ready_reports_info = service.get_ready_reports_info().await.unwrap();
     assert_eq!(ready_reports_info.len(), 1);
-    assert_eq!(ready_reports_info[0], report_uuid);
+    assert_eq!(ready_reports_info[0].config_uuid, report_info.config_uuid);
+    assert_eq!(ready_reports_info[0].report_uuid, report_info.report_uuid);
 
     info!("Retrieving metrics report");
-    let metrics_report = service.get_metrics_report(&report_uuid).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
     info!("Report received: {metrics_report:?}");
-    assert_eq!(metrics_report.report_uuid, report_uuid);
+    assert_eq!(metrics_report.report_uuid, report_info.report_uuid);
     assert_eq!(metrics_report.metrics_config_uuid, config.uuid);
 
     let ready_reports_info = service.get_ready_reports_info().await.unwrap();
@@ -434,8 +435,8 @@ async fn run_race_condition_test(config: MetricsConfig) {
             move |status| {
                 info!("Received status message {:?}: {}", status.code, status.message);
             },
-            move |report_uuid| {
-                report_ready_tx.send(report_uuid.to_owned()).unwrap();
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
             },
         )
         .await
@@ -448,12 +449,12 @@ async fn run_race_condition_test(config: MetricsConfig) {
     service.activate_metrics_config(&config.uuid).await.unwrap();
 
     info!("Waiting for metrics report ready notification");
-    let report_uuid = report_ready_rx.recv().await.unwrap();
+    let report_info = report_ready_rx.recv().await.unwrap();
 
     info!("Retrieving metrics report");
-    let metrics_report = service.get_metrics_report(&report_uuid).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
     info!("Report received: {metrics_report:?}");
-    assert_eq!(metrics_report.report_uuid, report_uuid);
+    assert_eq!(metrics_report.report_uuid, report_info.report_uuid);
     assert_eq!(metrics_report.metrics_config_uuid, config.uuid);
 
     info!("Removing metrics config");
@@ -521,7 +522,7 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
             move |status| {
                 info!("Received status message {:?}: {}", status.code, status.message);
             },
-            move |report_uuid| report_ready_tx.send(report_uuid.to_owned()).unwrap(),
+            move |report_info| report_ready_tx.send(report_info).unwrap(),
         )
         .await
         .unwrap();
@@ -545,10 +546,10 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
             .unwrap();
     }
 
-    let report_uuid = report_ready_rx.recv().await.unwrap();
+    let report_info = report_ready_rx.recv().await.unwrap();
     info!("Received metrics report notification");
 
-    let metrics_report = service.get_metrics_report(&report_uuid).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
     info!("Received metrics report");
     eprintln!("{metrics_report:?}");
 
@@ -639,8 +640,8 @@ async fn telemetry_service_someip() {
             move |status| {
                 info!("Received status message {:?}: {}", status.code, status.message);
             },
-            move |report_uuid| {
-                report_ready_tx.send(report_uuid.to_owned()).unwrap();
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
             },
         )
         .await
@@ -655,17 +656,17 @@ async fn telemetry_service_someip() {
     let mut server =
         sdv_someip_integration_test::run_vsomeip_server(VSOMEIP_SERVER_BINARY, VSOMEIP_CONFIG_FILE);
 
-    let report_uuid = report_ready_rx.recv().await.unwrap();
+    let report_info = report_ready_rx.recv().await.unwrap();
 
     service.remove_metrics_config(&config.uuid).await.unwrap();
     let _ = server.kill();
     let _ = server.wait();
     service.finish().unwrap();
 
-    let metrics_report = service.get_metrics_report(&report_uuid).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
     debug!("Report received: {metrics_report:?}");
 
-    assert_eq!(metrics_report.report_uuid, report_uuid);
+    assert_eq!(metrics_report.report_uuid, report_info.report_uuid);
     assert_eq!(metrics_report.metrics_config_uuid, config.uuid);
     assert_eq!(metrics_report.report_data.unpack::<Int32Value>().unwrap().unwrap().value, 42);
 }
@@ -695,7 +696,7 @@ async fn telemetry_service_middleware() {
             move |status| {
                 info!("Received status message {:?}: {}", status.code, status.message);
             },
-            move |report_uuid| report_ready_tx.send(report_uuid.to_owned()).unwrap(),
+            move |report_info| report_ready_tx.send(report_info).unwrap(),
         )
         .await
         .unwrap();
@@ -715,10 +716,11 @@ async fn telemetry_service_middleware() {
         publisher.publish(&message).unwrap();
     }
 
-    let report_uuid = report_ready_rx.recv().await.unwrap();
+    let report_info = report_ready_rx.recv().await.unwrap();
     info!("Received metrics report notification");
+    assert_eq!(config_uuid, report_info.config_uuid);
 
-    let metrics_report = service.get_metrics_report(&report_uuid).await.unwrap();
+    let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
     info!("Received metrics report");
     eprintln!("{metrics_report:?}");
 
@@ -727,7 +729,7 @@ async fn telemetry_service_middleware() {
 
     service.finish().unwrap();
 
-    assert_eq!(metrics_report.report_uuid, report_uuid);
+    assert_eq!(metrics_report.report_uuid, report_info.report_uuid);
     assert_eq!(metrics_report.report_reason, ReportReason::REGULAR.into());
     assert_eq!(metrics_report.metrics_config_uuid, config_uuid);
     assert_eq!(metrics_report.metrics_config_version, 1);

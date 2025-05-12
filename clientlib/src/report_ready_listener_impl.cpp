@@ -13,10 +13,15 @@ ReportReadyListenerImpl::ReportReadyListenerImpl(Callback<ReportReadyCallbackFun
     LOG(INFO) << "ReportReadyListenerImpl Created";
 }
 
-ndk::ScopedAStatus ReportReadyListenerImpl::onReady(const std::string& reportUuid) {
-    LOG(DEBUG) << "ReportReadyListenerImpl::onReady, " << reportUuid;
+ndk::ScopedAStatus ReportReadyListenerImpl::onReady(
+        const aidl::google::sdv::telemetry::MetricsReportInfo& metricsReportInfo) {
+    LOG(DEBUG) << "ReportReadyListenerImpl::onReady, " << metricsReportInfo.toString();
 
-    mCallback.run(reportUuid.c_str());
+    const char* config_uuid = metricsReportInfo.configUuid.c_str();
+    const char* report_uuid = metricsReportInfo.reportUuid.c_str();
+
+    MetricsReportInfo info{.config_uuid = config_uuid, .report_uuid = report_uuid};
+    mCallback.run(&info);
     return ndk::ScopedAStatus::ok();
 }
 

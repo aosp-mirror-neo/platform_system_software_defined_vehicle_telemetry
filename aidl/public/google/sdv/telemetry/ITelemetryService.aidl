@@ -8,6 +8,7 @@ import google.sdv.telemetry.ITelemetryMiscStatusListener;
 import google.sdv.telemetry.ITelemetryReadyReportsInfoListener;
 import google.sdv.telemetry.ITelemetryReportListener;
 import google.sdv.telemetry.ITelemetryReportReadyListener;
+import google.sdv.telemetry.MetricsReportInfo;
 
 /**
  * Telemetry system for software defined vehicle has three main components: Telemetry service, Data
@@ -115,7 +116,7 @@ interface ITelemetryService {
             in @utf8InCpp String reportUuid, in ITelemetryReportListener listener);
 
     /**
-     * Sends reportUuids of all finished telemetry reports
+     * Sends finished telemetry reports information such metrics config UUID and metrics report UUID
      *
      * This method is asynchronous and always returns immediately.
      * Execution result is reported using provided listener.

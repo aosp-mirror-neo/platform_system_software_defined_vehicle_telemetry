@@ -18,6 +18,15 @@ extern "C" {
 // Opaque Pointer holding an instance of the telemetry_service.
 typedef struct ServiceHolder ServiceHolder;
 
+// Telemetry Service Metrics Report information
+typedef struct MetricsReportInfo {
+    // UUID of the Metrics Config
+    const char* config_uuid;
+
+    // UUID of the Metrics Report
+    const char* report_uuid;
+} MetricsReportInfo;
+
 /**
  * The status callback function relays the status of the API call back
  * to the client it was associated with.
@@ -43,10 +52,10 @@ typedef void (*MiscStatusCallbackFunction)(void*, const struct TelemetryServiceS
  * The report ready listener is called every time a new Metrics Report is ready to be downloaded.
  *
  * @param void* Pointer to the callback object associated with the callback function.
- * @param report_uuid* pointer to the UUID of the ready report.
+ * @param metrics_report_info* pointer to the info object of the ready report.
  *
  */
-typedef void (*ReportReadyCallbackFunction)(void*, const char*);
+typedef void (*ReportReadyCallbackFunction)(void*, const MetricsReportInfo*);
 
 /**
  * The get report callback function relays the status of the get_metrics_report API call
@@ -71,11 +80,12 @@ typedef void (*GetSerializedDataCallbackFunction)(void*, int, const char*, const
  * @param void* Pointer to the callback object associated with the callback function.
  * @param int32_t status code indicating the outcome of the API call
  * @param const char* status message adding more context to the outcome of the API call.
- * @param const char* const* pointer to the array of UUIDs of the ready metrics reports.
+ * @param const MetricsReportInfo* pointer to the array of MetricsReportInfo objects containing
+   finished metrics reports information.
  * @param size_t number of ready reports.
  *
  */
-typedef void (*ReadyReportsInfoCallbackFunction)(void*, int, const char*, const char* const*,
+typedef void (*ReadyReportsInfoCallbackFunction)(void*, int, const char*, const MetricsReportInfo*,
                                                  size_t);
 
 /**

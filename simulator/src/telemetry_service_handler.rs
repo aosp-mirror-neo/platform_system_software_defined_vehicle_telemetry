@@ -1,7 +1,7 @@
 // Copyright 2024 Google LLC
 
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_rust_wrapper::{TelemetryServiceHolder, TelemetryServiceStatus};
+use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatus};
 use std::{future::Future, time::Duration};
 use tokio::{
     sync::{mpsc, mpsc::UnboundedReceiver},
@@ -34,17 +34,19 @@ pub fn get_telemetry_service_instance() -> Result<TelemetryServiceHolder, Simula
 /// telemetry service does not respond.
 pub async fn get_telemetry_service_listeners(
     telemetry_service: &TelemetryServiceHolder,
-) -> Result<(UnboundedReceiver<String>, UnboundedReceiver<TelemetryServiceStatus>), SimulatorError>
-{
-    let (report_ready_tx, report_ready_rx) = mpsc::unbounded_channel::<String>();
+) -> Result<
+    (UnboundedReceiver<ReportInfo>, UnboundedReceiver<TelemetryServiceStatus>),
+    SimulatorError,
+> {
+    let (report_ready_tx, report_ready_rx) = mpsc::unbounded_channel::<ReportInfo>();
     let (misc_status_tx, misc_status_rx) = mpsc::unbounded_channel::<TelemetryServiceStatus>();
 
     let misc_status_callback = move |status| {
         let _ = misc_status_tx.send(status);
     };
 
-    let report_ready_callback = move |report_uuid: &str| {
-        let _ = report_ready_tx.send(report_uuid.to_owned());
+    let report_ready_callback = move |report_info| {
+        let _ = report_ready_tx.send(report_info);
     };
 
     run_with_timeout(

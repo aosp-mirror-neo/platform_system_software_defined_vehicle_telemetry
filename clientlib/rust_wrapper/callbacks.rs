@@ -7,12 +7,14 @@ use std::ffi::{c_char, c_void, CStr};
 use std::slice;
 use tokio::sync::oneshot;
 
-use crate::{MetricsReport, TelemetryError, TelemetryResult, TelemetryServiceStatusCodes};
+use crate::{
+    MetricsReport, ReportInfo, TelemetryError, TelemetryResult, TelemetryServiceStatusCodes,
+};
 
 type OnStatusReceivedResult = TelemetryResult<String>;
 type OnConfigListReceivedResult = TelemetryResult<Vec<String>>;
 type OnReportReceivedResult = TelemetryResult<MetricsReport>;
-type OnReadyReportsInfoReceivedResult = TelemetryResult<Vec<String>>;
+type OnReadyReportsInfoReceivedResult = TelemetryResult<Vec<ReportInfo>>;
 
 /// This function abstracts the complexity of calling an async C API.
 ///
@@ -224,16 +226,16 @@ where
 ///    `call_api_with_ready_reports_info_callback` API call. It will not be valid after the function
 ///    completes.
 /// * `status_msg` must point to C raw string that satisfies `CStr::from_ptr` safety requirements.
-/// * `ready_report_uuids` must point to valid pointer array containing C raw strings that satisfy
-///   `CStr::from_ptr` safety requirements.
-/// * `ready_report_uuids_size` must contain the length of the byte array that can be parsed from
-///   `ready_report_uuids`.
+/// * `ready_reports_info` must point to a valid pointer array of MetricsReportInfo with
+///   `config_uuid` and `report_uuid` fields as C raw strings that satisfy `CStr::from_ptr` safety
+///   requirements.
+/// * `ready_reports_info_size` must contain the length of the byte array that can be parsed from `ready_reports_info`.
 unsafe extern "C" fn on_ready_reports_info_received(
     sender: *mut c_void,
     status_code: i32,
     status_msg: *const c_char,
-    ready_report_uuids: *const *const c_char,
-    ready_report_uuids_size: usize,
+    ready_reports_info: *const rust_to_c::MetricsReportInfo,
+    ready_reports_info_size: usize,
 ) {
     let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
@@ -256,18 +258,29 @@ unsafe extern "C" fn on_ready_reports_info_received(
 
     // SAFETY: The caller has provided pointers that satisfy `slice::from_raw_parts` safety
     // requirements.
-    let ready_report_uuids =
-        unsafe { slice::from_raw_parts(ready_report_uuids, ready_report_uuids_size) };
-    let ready_report_uuids = ready_report_uuids
+    let ready_reports_info =
+        unsafe { slice::from_raw_parts(ready_reports_info, ready_reports_info_size) };
+    let ready_reports_info = ready_reports_info
         .iter()
-        .map(|uuid| {
-            // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
-            // safety requirements
-            unsafe { CStr::from_ptr(*uuid) }.to_str().unwrap().to_owned()
+        .map(|info| {
+            ReportInfo {
+                // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+                // safety requirements
+                config_uuid: unsafe { CStr::from_ptr(info.config_uuid) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+                // SAFETY: The caller has provided pointers that satisfy `CStr::from_ptr`
+                // safety requirements
+                report_uuid: unsafe { CStr::from_ptr(info.report_uuid) }
+                    .to_str()
+                    .unwrap()
+                    .to_owned(),
+            }
         })
         .collect::<Vec<_>>();
 
-    sender.send(Ok(ready_report_uuids)).unwrap();
+    sender.send(Ok(ready_reports_info)).unwrap();
 }
 
 /// Safely call a C API that returns data through a `ReadyReportsInfoCallbackFunction` callback.

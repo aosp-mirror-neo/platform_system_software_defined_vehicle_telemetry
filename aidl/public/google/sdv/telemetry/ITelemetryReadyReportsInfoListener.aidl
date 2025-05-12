@@ -2,6 +2,7 @@
 
 package google.sdv.telemetry;
 
+import google.sdv.telemetry.MetricsReportInfo;
 import google.sdv.telemetry.status.TelemetryServiceStatusCodes;
 
 /**
@@ -15,8 +16,8 @@ oneway interface ITelemetryReadyReportsInfoListener {
      *
      * @param statusCode status code indicating the outcome of the sendReadyReportsInfo() API call
      * @param statusMessage status message adding more context to the outcome of the API call.
-     * @param reportUuids List of Metrics Report UUIDs representing reports which are ready.
+     * @param readyReportsInfo list of MetricsReportInfo representing reports which are ready.
      */
     void sendReadyReportsInfo(in TelemetryServiceStatusCodes statusCode,
-            in @utf8InCpp String statusMessage, in @utf8InCpp String[] reportUuids);
+            in @utf8InCpp String statusMessage, in MetricsReportInfo[] readyReportsInfo);
 }
