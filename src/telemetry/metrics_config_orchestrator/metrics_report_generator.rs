@@ -181,12 +181,13 @@ impl MetricsReportGeneratorImpl {
         report.report_uuid = Uuid::new_v4().to_string();
 
         debug!(
-            "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}",
+            "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}, report UUID: {}",
             report.report_config_name,
             report.report_number,
             report_reason,
             trigger_name.unwrap_or("[none]"),
             report.metrics_config_uuid,
+            report.report_uuid,
         );
 
         (self.report_ready_callback)(report);

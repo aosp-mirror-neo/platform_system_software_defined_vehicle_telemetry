@@ -91,9 +91,14 @@ impl MetricsConfigInfo {
         &mut self,
         report: &MetricsReport,
     ) -> Result<(&mut ReportConfigStatus, &MessageDescriptor), SimulatorError> {
-        let report_config_status =
-            self.report_configs.get_mut(&report.report_config_name).ok_or_else(|| {
-                SimulatorError::OrphanReport { uuid: report.metrics_config_uuid.clone() }
+        let report_config_status = self
+            .report_configs
+            .get_mut(&report.report_config_name)
+            .ok_or_else(|| SimulatorError::OrphanReport {
+                config_uuid: report.metrics_config_uuid.clone(),
+                report_uuid: report.report_uuid.clone(),
+                report_name: report.report_config_name.clone(),
+                message: "Failed to retrieve simulator's report_configs".to_owned(),
             })?;
 
         let message_descriptor = self
