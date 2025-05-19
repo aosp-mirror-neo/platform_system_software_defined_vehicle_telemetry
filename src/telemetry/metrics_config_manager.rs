@@ -5,7 +5,6 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::FileIOErrorDetails::FileIOErrorDetails, StatusDetails::StatusDetails,
     TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
 };
-
 use log::{error, info};
 use parking_lot::Mutex;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
@@ -20,6 +19,7 @@ use std::mem;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
+use std::time::SystemTime;
 use tokio::io;
 use uuid::Uuid;
 
@@ -312,6 +312,10 @@ impl MetricsConfigManagerImpl {
 
 #[async_trait]
 impl MetricsConfigManager for MetricsConfigManagerImpl {
+    #[tracing::instrument(skip(self, metrics_config), fields(
+        await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+            |e| e.duration()).as_nanos())
+    )]
     async fn add_metrics_config(
         &self,
         metrics_config: &[u8],
@@ -365,6 +369,10 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         Ok(config.uuid)
     }
 
+    #[tracing::instrument(skip(self, metrics_config_uuid), fields(
+        await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+            |e| e.duration()).as_nanos())
+    )]
     async fn activate_metrics_config(
         &self,
         metrics_config_uuid: &str,
@@ -411,6 +419,10 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, metrics_config_uuid), fields(
+        await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+            |e| e.duration()).as_nanos())
+    )]
     async fn deactivate_metrics_config(
         &self,
         metrics_config_uuid: &str,
@@ -434,6 +446,10 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self, metrics_config_uuid), fields(
+        await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+            |e| e.duration()).as_nanos())
+    )]
     async fn remove_metrics_config(
         &self,
         metrics_config_uuid: &str,
@@ -480,6 +496,10 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         Ok(())
     }
 
+    #[tracing::instrument(skip(self), fields(
+        await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+            |e| e.duration()).as_nanos())
+    )]
     async fn remove_all_metrics_configs(&self) -> Result<(), MetricsConfigManagerError> {
         info!("remove_all_metrics_configs");
 
