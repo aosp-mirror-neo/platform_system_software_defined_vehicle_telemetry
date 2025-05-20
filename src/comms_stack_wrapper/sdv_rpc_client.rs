@@ -8,7 +8,7 @@ use futures::future::{self, BoxFuture};
 use futures::StreamExt;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::{any::Any, empty::Empty};
-use protobuf::{Message, MessageDyn, MessageFull};
+use protobuf::{Message, MessageDyn};
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::sd::ServiceUnitDefinition;
@@ -23,6 +23,7 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 
 const CREATE_SUBSCRIPTION_METHOD: &str = "CreateSubscription";
 const GET_LATEST_MESSAGE_METHOD: &str = "GetLatestMessage";
+const PROTO_ANY_FULL_NAME: &str = "google.protobuf.Any";
 
 pub(super) struct SdvRpcClient {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
@@ -245,7 +246,7 @@ impl SdvRpcClient {
             .map_or_else(
                 || Empty::default_instance().write_to_bytes().context("Serialization failed"),
                 |config| {
-                    if *descriptor == Any::descriptor() {
+                    if descriptor.full_name() == PROTO_ANY_FULL_NAME {
                         config.write_to_bytes()
                     } else {
                         config
