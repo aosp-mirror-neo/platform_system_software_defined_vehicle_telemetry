@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
 use futures::{FutureExt, StreamExt};
-use log::{debug, error, info, warn};
+use log::{debug, error, info};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn, MessageFull};
@@ -24,10 +24,7 @@ use sdv_telemetry_service_publisher_accessor::{
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
-use sdv_telemetry_utils::{
-    descriptor_utils, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
-    option_extension::OptionExtension,
-};
+use sdv_telemetry_utils::{descriptor_utils, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS};
 use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -277,16 +274,9 @@ impl CommsStackAccessor {
         let ctx_clone = ctx.clone();
         Self::new_with_vsidl_provider_factory(ctx, move || {
             async move {
-                vsidl_provider::new_for_vendor(ctx_clone.await)
-                    .inspect_none(|| {
-                        warn!(
-                            "Unable to initialize VSIDL provider library.\
-                            Telemetry Service won't be able to retrieve VSIDL metadata"
-                        )
-                    })
-                    .map(|provider| {
-                        Arc::new(provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>
-                    })
+                Some(vsidl_provider::new_for_telemetry_agent(ctx_clone.await)).map(|provider| {
+                    Arc::new(provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>
+                })
             }
             .boxed()
         })
