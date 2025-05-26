@@ -2,9 +2,7 @@
 
 use binder::{BinderFeatures, Interface, Result as BinderResult, Strong};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ISubscriber::ISubscriber, IConfigurablePublisher::IConfigurablePublisher, IConfigurablePublisherSubscription::{IConfigurablePublisherSubscription, BnConfigurablePublisherSubscription}};
-use log::debug;
 use parking_lot::Mutex;
-use protobuf::text_format::print_to_string_pretty;
 use sdv_telemetry_utils::atomic::SequenceNumber;
 use std::{collections::HashMap, sync::Arc, sync::Weak};
 
@@ -80,7 +78,6 @@ impl SimulationPublisher {
 
             tokio::time::sleep(data_entry.delay).await;
 
-            debug!("Publishing message: {}", print_to_string_pretty(data_entry.message.as_ref()));
             *strong_self.latest_message.lock() = Some(data_entry.message_bytes.clone());
             for subscriber in strong_self.subscribers.lock().values() {
                 let _ = subscriber.sendData(&data_entry.message_bytes);
