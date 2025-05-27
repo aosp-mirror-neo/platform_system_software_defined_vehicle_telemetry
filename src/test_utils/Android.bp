@@ -42,7 +42,7 @@ rust_defaults {
         "liblogger",
         "libparking_lot",
         "libprotobuf",
-        "librand",
+        "librand-0.8",
         "libsdv_telemetry_test_proto",
         "libtokio",
         // keep-sorted end
