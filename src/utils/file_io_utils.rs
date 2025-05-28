@@ -32,6 +32,7 @@ pub async fn write_to_file(file_path: &Path, contents: &[u8]) -> io::Result<()> 
     run_file_io(|| async {
         let mut file = File::create(file_path).await?;
         file.write_all(contents).await?;
+        file.flush().await?;
         Ok(())
     })
     .await
