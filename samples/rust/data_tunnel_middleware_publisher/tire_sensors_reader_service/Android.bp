@@ -17,7 +17,7 @@ rust_binary {
         "libanyhow",
         "liblog_rust",
         "libprotobuf",
-        "librand",
+        "librand-0.8",
         "libsdv_comms_rs",
         "libsdv_log_rust",
         "libsdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader",

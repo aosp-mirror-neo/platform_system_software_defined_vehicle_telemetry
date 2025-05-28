@@ -20,7 +20,7 @@ rust_defaults {
         "liblog_rust",
         "liblogger",
         "libprotobuf",
-        "librand",
+        "librand-0.8",
         "libsample_publisher_proto",
         "libsdv_configurable_publisher_rust_wrapper",
         "libsdv_telemetry_utils",

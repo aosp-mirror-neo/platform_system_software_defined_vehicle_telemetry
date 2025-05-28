@@ -65,7 +65,7 @@ rust_test {
         "libgoogletest_rust",
         "liblazy_static",
         "libmockall",
-        "librand",
+        "librand-0.8",
         "libsdv_telemetry_expr_with_test_utils",
         "libsdv_telemetry_platform_abstraction_layer_with_test_utils",
         "libsdv_telemetry_proto_rust",
