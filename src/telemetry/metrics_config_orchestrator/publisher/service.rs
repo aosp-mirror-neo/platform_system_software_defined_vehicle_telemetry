@@ -772,6 +772,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_retries_on_adapter_error() {
+        // Retrieving message provider fails and causes retries. On retry, provider is found which
+        // activates the publisher
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
         let mut publisher = ServicePublisher::new(
@@ -786,21 +788,31 @@ mod tests {
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|_| {})),
         );
-        publisher.activation_retry_interval = Duration::from_millis(10);
+        publisher.activation_retry_interval = Duration::from_millis(3);
         let publisher = Arc::new(publisher);
 
         Arc::clone(&publisher).activate().await;
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingActivation { .. }
-        ));
 
-        // Set message provider and wait until it's requested
-        service_adapter.set_next_message_provider(MockServiceMessageProvider::new()).await.unwrap();
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::ActiveGetter { .. }
-        ));
+        // First request of message_provider happens immediately
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
+
+        // Set message provider
+        service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
+        // Wait until retry happens by waiting for the next request of message_provider
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(*publisher.state.lock().await, ServicePublisherState::ActiveGetter { .. }),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -825,17 +837,25 @@ mod tests {
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|_| {})),
         );
-        publisher.activation_retry_interval = Duration::from_millis(10);
+        publisher.activation_retry_interval = Duration::from_millis(3);
         let publisher = Arc::new(publisher);
 
         Arc::clone(&publisher).activate().await;
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingActivation { .. }
-        ));
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         Arc::clone(&publisher).deactivate().await;
-        assert!(matches!(*publisher.state.lock().await, ServicePublisherState::Inactive { .. }));
+        assert!(
+            matches!(*publisher.state.lock().await, ServicePublisherState::Inactive { .. }),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -903,10 +923,11 @@ mod tests {
         ));
 
         Arc::clone(&publisher).activate().await;
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::ActivationNotPossible
-        ));
+        assert!(
+            matches!(*publisher.state.lock().await, ServicePublisherState::ActivationNotPossible),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         Arc::clone(&publisher).deactivate().await;
         assert!(matches!(*publisher.state.lock().await, ServicePublisherState::Inactive));
@@ -918,6 +939,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_retries_if_not_found() {
+        // No message provided is found. Reactivating publisher after receiving availability
+        // notification
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let publisher = Arc::new(ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
@@ -933,16 +956,21 @@ mod tests {
         ));
 
         Arc::clone(&publisher).activate().await;
+        // First request of message_provider happens immediately
+        service_adapter.wait_message_provider_returned().await;
 
         // Fire availability callback when service is still not available.
         service_adapter.call_availability_callback();
+        // Next activation attempt happens when availability callback fired
+        service_adapter.wait_message_provider_returned().await;
+
         tokio::task::yield_now().await;
 
         // Fire availability callback when service is available.
-        let call_receiver =
-            service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
+        service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
         service_adapter.call_availability_callback();
-        call_receiver.await.unwrap();
+        // Wait until publisher state is updated by waiting for the next request of message_provider
+        service_adapter.wait_message_provider_returned().await;
 
         let state = publisher.state.lock().await;
         assert!(
@@ -950,11 +978,7 @@ mod tests {
             "Unexpected state: {}",
             *state
         );
-        assert!(
-            service_adapter.get_num_get_message_provider_calls() > 1,
-            "Unexpected number of get_message_provider calls: {}",
-            service_adapter.get_num_get_message_provider_calls()
-        );
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 3);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 1);
@@ -963,6 +987,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_changes_pending_state() {
+        // Retrieving message provider fails and causes retries. On retry, no provider is found.
+        // Publisher successfully registers for availability notifications.
         let service_adapter = Arc::new(
             MockServiceAdapter::new()
                 .with_availability_callback()
@@ -980,21 +1006,28 @@ mod tests {
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|_| {})),
         );
-        publisher.activation_retry_interval = Duration::from_millis(10);
+        publisher.activation_retry_interval = Duration::from_millis(3);
         let publisher = Arc::new(publisher);
 
         Arc::clone(&publisher).activate().await;
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingActivation { .. }
-        ));
+        // First request of message_provider happens immediately
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
-        tokio::time::sleep(Duration::from_millis(15)).await;
-
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingService { .. }
-        ));
+        // Wait until retry happens by waiting for the next request of message_provider
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(*publisher.state.lock().await, ServicePublisherState::PendingService { .. }),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -1005,6 +1038,8 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_activation_not_possible_after_retry_success() {
+        // Retrieving message provider fails and causes retries. On retry, no provider is found.
+        // Publisher attempts registering availability callback but no registration is found.
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
         let mut publisher = ServicePublisher::new(
@@ -1019,21 +1054,32 @@ mod tests {
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|_| {})),
         );
-        publisher.activation_retry_interval = Duration::from_millis(10);
+        publisher.activation_retry_interval = Duration::from_millis(3);
         let publisher = Arc::new(publisher);
 
         Arc::clone(&publisher).activate().await;
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingActivation { .. }
-        ));
 
-        tokio::time::sleep(Duration::from_millis(15)).await;
+        // First request of message_provider happens immediately
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::ActivationNotPossible { .. }
-        ));
+        // Wait until retry happens by waiting message_provider being requested for the second time
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::ActivationNotPossible { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -1044,8 +1090,13 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_getter_failed_register_availability_callback_retries() {
-        let service_adapter =
-            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        // No message provider is set. Publisher fails registering availability callback causing
+        // retries
+        let service_adapter = Arc::new(
+            MockServiceAdapter::new()
+                .with_next_register_availability_callback_error(anyhow!(ERROR_MESSAGE)),
+        );
+
         let mut publisher = ServicePublisher::new(
             PUBLISHER_NAME.to_owned(),
             None,
@@ -1058,23 +1109,74 @@ mod tests {
             Arc::<MockServiceAdapter>::clone(&service_adapter),
             Arc::new(StatusReporterImpl::new(|_| {})),
         );
-        publisher.activation_retry_interval = Duration::from_millis(10);
+        publisher.activation_retry_interval = Duration::from_millis(3);
         let publisher = Arc::new(publisher);
 
         Arc::clone(&publisher).activate().await;
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingActivation { .. }
-        ));
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
-        // Set error for register_availability_callack
-        service_adapter.set_next_error(anyhow!(ERROR_MESSAGE));
-        tokio::time::sleep(Duration::from_millis(15)).await;
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 0);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
+    }
 
-        assert!(matches!(
-            *publisher.state.lock().await,
-            ServicePublisherState::PendingActivation { .. }
-        ));
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_getter_failed_register_availability_callback_keeps_retries() {
+        // Retrieving message provider fails and causes retries. On retry, no provider is found,
+        // and publisher fails registering availability callback, which keeps retries
+        let service_adapter = Arc::new(
+            MockServiceAdapter::new()
+                .with_next_error(anyhow!(ERROR_MESSAGE))
+                .with_next_register_availability_callback_error(anyhow!(ERROR_MESSAGE)),
+        );
+
+        let mut publisher = ServicePublisher::new(
+            PUBLISHER_NAME.to_owned(),
+            None,
+            ConnectionType::Getter,
+            false,
+            CONFIG_UUID.to_owned(),
+            SERVICE_NAME.to_owned(),
+            SubSamplingInterval::ZERO,
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::<MockServiceAdapter>::clone(&service_adapter),
+            Arc::new(StatusReporterImpl::new(|_| {})),
+        );
+        publisher.activation_retry_interval = Duration::from_millis(3);
+        let publisher = Arc::new(publisher);
+
+        Arc::clone(&publisher).activate().await;
+
+        // First request of message_provider happens immediately
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
+
+        // Wait until retry happens by waiting for the next request of message_provider
+        service_adapter.wait_message_provider_returned().await;
+        assert!(
+            matches!(
+                *publisher.state.lock().await,
+                ServicePublisherState::PendingActivation { .. }
+            ),
+            "Unexpected state: {}",
+            *publisher.state.lock().await
+        );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);

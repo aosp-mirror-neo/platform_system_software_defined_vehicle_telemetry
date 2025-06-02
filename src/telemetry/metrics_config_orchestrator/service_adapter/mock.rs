@@ -20,8 +20,10 @@ pub(crate) struct MockServiceAdapter {
     pub(crate) notify_unsubscribing: Arc<Notify>,
     availability_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
     cancellation_callback: Mutex<Option<Box<dyn FnOnce() + Send + Sync>>>,
-    message_provider_returned_sender: Mutex<Option<oneshot::Sender<()>>>,
+    message_provider_returned_sender: Mutex<mpsc::UnboundedSender<()>>,
+    message_provider_returned_receiver: AsyncMutex<mpsc::UnboundedReceiver<()>>,
     next_error: Mutex<Option<anyhow::Error>>,
+    next_register_availability_callback_error: Mutex<Option<anyhow::Error>>,
     next_message_provider: Mutex<Option<MockServiceMessageProvider>>,
     next_message_provider_get_not_supported: Mutex<bool>,
     num_get_message_provider_calls: AtomicU32,
@@ -52,6 +54,9 @@ impl ServiceAdapter for MockServiceAdapter {
     ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
         self.num_get_message_provider_calls.fetch_add(1, Ordering::AcqRel);
 
+        let sender = self.message_provider_returned_sender.lock();
+        let _ = sender.send(());
+
         if let Some(error) = self.next_error.lock().take() {
             return Err(ServicePublisherAccessorError::MetadataParsingFailed(error));
         }
@@ -63,11 +68,6 @@ impl ServiceAdapter for MockServiceAdapter {
         }
 
         if let Some(message_provider) = self.next_message_provider.lock().take() {
-            let sender = self.message_provider_returned_sender.lock().take();
-            if let Some(sender) = sender {
-                let _ = sender.send(());
-            }
-
             Ok(GetMessageProviderOutcome::Success(Box::new(message_provider)))
         } else {
             Ok(GetMessageProviderOutcome::NotRegistered)
@@ -129,7 +129,7 @@ impl ServiceAdapter for MockServiceAdapter {
         _service_name: &str,
         callback: Box<dyn Fn() + Send + Sync>,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
-        if let Some(error) = self.next_error.lock().take() {
+        if let Some(error) = self.next_register_availability_callback_error.lock().take() {
             return Err(error);
         }
         self.num_register_availability_callback_calls.fetch_add(1, Ordering::AcqRel);
@@ -148,6 +148,7 @@ impl ServiceAdapter for MockServiceAdapter {
 
 impl MockServiceAdapter {
     pub(crate) fn new() -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
         Self {
             availability_callback: None.into(),
             block_subscribe: false,
@@ -155,8 +156,10 @@ impl MockServiceAdapter {
             cancellation_callback: None.into(),
             successful_subscribe_sender: None.into(),
             latest_configuration: None.into(),
-            message_provider_returned_sender: None.into(),
+            message_provider_returned_sender: tx.into(),
+            message_provider_returned_receiver: rx.into(),
             next_error: None.into(),
+            next_register_availability_callback_error: None.into(),
             next_message_provider: None.into(),
             next_message_provider_get_not_supported: false.into(),
             new_message_callback: None.into(),
@@ -195,14 +198,13 @@ impl MockServiceAdapter {
         self.availability_callback.lock().as_ref().unwrap()();
     }
 
-    pub(crate) fn set_next_message_provider(
-        &self,
-        provider: MockServiceMessageProvider,
-    ) -> oneshot::Receiver<()> {
+    pub(crate) async fn wait_message_provider_returned(&self) {
+        let mut rx = self.message_provider_returned_receiver.lock().await;
+        rx.recv().await.unwrap()
+    }
+
+    pub(crate) fn set_next_message_provider(&self, provider: MockServiceMessageProvider) {
         self.next_message_provider.lock().replace(provider);
-        let (tx, rx) = oneshot::channel();
-        self.message_provider_returned_sender.lock().replace(tx);
-        rx
     }
 
     pub(crate) fn set_next_subscribe_successful(&self) -> oneshot::Receiver<()> {
@@ -231,6 +233,14 @@ impl MockServiceAdapter {
 
     pub(crate) fn set_next_error(&self, error: anyhow::Error) {
         self.next_error.lock().replace(error);
+    }
+
+    pub(crate) fn with_next_register_availability_callback_error(
+        self,
+        error: anyhow::Error,
+    ) -> Self {
+        self.next_register_availability_callback_error.lock().replace(error);
+        self
     }
 
     pub(crate) fn with_next_message_provider_get_not_supported(self) -> Self {
