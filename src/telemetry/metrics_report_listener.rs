@@ -61,9 +61,16 @@ impl MetricsReportListener {
         let mut insertion_order = self.insertion_order.lock();
 
         if store.len() == MAX_METRICS_REPORT_STORE_SIZE {
-            if let Some(oldest_report_uuid) = insertion_order.pop_front() {
-                store.remove(&oldest_report_uuid);
-                mapping.remove(&oldest_report_uuid);
+            // Remove the oldest added report if the number of stored reports reached the limit.
+            // Since insertion_order is not updated when a report is extracted, we have to skip
+            // elements from queue beginning until we find uuid which still exists.
+            while let Some(oldest_report_uuid) = insertion_order.pop_front() {
+                if store.remove(&oldest_report_uuid).is_some() {
+                    mapping
+                        .remove(&oldest_report_uuid)
+                        .expect("Mapping should contain key if store contained key");
+                    break;
+                }
             }
         }
 
@@ -92,6 +99,10 @@ impl MetricsReportListener {
         &self,
         report_uuid: &str,
     ) -> Result<MetricsReport, MetricsReportListenerError> {
+        // We deliberately do not update insertion_order in this function in order to keep constant
+        // time complexity and not overcomplicate the implementation with LRUCache-like data
+        // structures. We instead use the fact all UUIDs are unique, and do insertion_order cleanup
+        // only when the number of objects stored reaches the limit.
         let Some(metrics_report) = self.metrics_report_store.lock().remove(report_uuid) else {
             return Err(MetricsReportListenerError::MetricsReportNotFound);
         };
@@ -272,6 +283,51 @@ pub(crate) mod tests {
         let last_report_uuid = report_uuids.last().unwrap();
         let report = report_listener.get_metrics_report(last_report_uuid).unwrap();
         assert_eq!(report.report_uuid, *last_report_uuid);
+    }
+
+    #[test]
+    fn on_report_ready_limits_size_after_report_extraction() {
+        let report_listener = Arc::new(create_default_metrics_report_listener());
+        let mut report_uuids = Vec::new();
+
+        for i in 0..MAX_METRICS_REPORT_STORE_SIZE {
+            let metrics_report = MetricsReport {
+                report_uuid: format!("report-{}", i),
+                metrics_config_uuid: Uuid::new_v4().to_string(),
+                ..Default::default()
+            };
+            report_uuids.push(metrics_report.report_uuid.clone());
+            report_listener.on_report_ready(metrics_report);
+        }
+
+        assert_eq!(
+            report_listener.metrics_report_store.lock().len(),
+            MAX_METRICS_REPORT_STORE_SIZE
+        );
+
+        // Remove the first-in report
+        let uuid = &report_uuids[0];
+        let _ = report_listener.get_metrics_report(uuid).unwrap();
+
+        // Add two new reports with the last one overflowing the limit
+        for i in 0..2 {
+            let metrics_report = MetricsReport {
+                report_uuid: format!("report-{}", i + MAX_METRICS_REPORT_STORE_SIZE),
+                metrics_config_uuid: Uuid::new_v4().to_string(),
+                ..Default::default()
+            };
+            report_uuids.push(metrics_report.report_uuid.clone());
+            report_listener.on_report_ready(metrics_report);
+        }
+
+        // Check that the second-in report was removed.
+        let uuid = &report_uuids[1];
+        let err = report_listener.get_metrics_report(uuid).unwrap_err();
+        assert!(matches!(err, MetricsReportListenerError::MetricsReportNotFound));
+        assert_eq!(
+            report_listener.metrics_report_store.lock().len(),
+            MAX_METRICS_REPORT_STORE_SIZE
+        );
     }
 
     #[test]
