@@ -56,7 +56,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
     let mut rng = rand::thread_rng();
     loop {
         for (variant, publisher) in &tire_pressure_publishers {
-            let message = TirePressure { pressure: rng.gen_range(0..100), ..Default::default() };
+            let message = TirePressure { pressure: rng.random_range(0..100), ..Default::default() };
             if let Err(err) = publisher.publish(&message) {
                 error!("Failed to publish TirePressure for variant '{variant:?}': {err:?}");
             } else {
@@ -69,7 +69,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
 
         for (variant, publisher) in &tire_temperature_publishers {
             let message =
-                TireTemperature { temperature: rng.gen_range(0..100), ..Default::default() };
+                TireTemperature { temperature: rng.random_range(0..100), ..Default::default() };
             if let Err(err) = publisher.publish(&message) {
                 error!("Failed to publish TireTemperature for variant '{variant:?}' {err:?}");
             } else {
@@ -80,7 +80,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
             }
         }
 
-        let message = VehicleSpeed { speed: rng.gen_range(0.0..150.0), ..Default::default() };
+        let message = VehicleSpeed { speed: rng.random_range(0.0..150.0), ..Default::default() };
         if let Err(err) = vehicle_speed_publisher.publish(&message) {
             error!("Failed to publish VehicleSpeed: {err:?}");
         } else {

@@ -54,8 +54,8 @@ impl SpeedDataGenerator {
                     .round() as i32;
 
                 if self.speed == 0 {
-                    self.state = State::Stopped(Stopped { ticks: rng.gen_range(5..30) });
-                } else if rng.gen_bool(0.005) {
+                    self.state = State::Stopped(Stopped { ticks: rng.random_range(5..30) });
+                } else if rng.random_bool(0.005) {
                     self.road_speed_limit = if self.road_speed_limit == 5 { 30 } else { 5 };
                 }
             }

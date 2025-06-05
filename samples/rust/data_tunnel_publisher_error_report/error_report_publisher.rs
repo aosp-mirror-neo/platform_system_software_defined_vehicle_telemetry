@@ -88,6 +88,6 @@ async fn wrapped_main() -> anyhow::Result<()> {
         }
 
         let mut rng = rand::thread_rng();
-        sleep(rng.gen_range(Duration::from_secs(1)..=Duration::from_secs(3))).await;
+        sleep(rng.random_range(Duration::from_secs(1)..=Duration::from_secs(3))).await;
     }
 }

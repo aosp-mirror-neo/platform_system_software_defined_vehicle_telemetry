@@ -16,10 +16,10 @@ impl TirePressureDataGenerator {
     pub(crate) fn new() -> Self {
         let mut rng = rand::thread_rng();
         Self {
-            front_left: rng.gen_range(1.3..4.5),
-            front_right: rng.gen_range(1.3..4.5),
-            rear_left: rng.gen_range(1.3..4.5),
-            rear_right: rng.gen_range(1.3..4.5),
+            front_left: rng.random_range(1.3..4.5),
+            front_right: rng.random_range(1.3..4.5),
+            rear_left: rng.random_range(1.3..4.5),
+            rear_right: rng.random_range(1.3..4.5),
         }
     }
 
@@ -42,6 +42,6 @@ impl TirePressureDataGenerator {
         const MIN: f64 = 0.0;
         const MAX: f64 = 5.0;
         let mut rng = rand::thread_rng();
-        *pressure = (*pressure + rng.gen_range(-0.1..=0.1)).clamp(MIN, MAX);
+        *pressure = (*pressure + rng.random_range(-0.1..=0.1)).clamp(MIN, MAX);
     }
 }

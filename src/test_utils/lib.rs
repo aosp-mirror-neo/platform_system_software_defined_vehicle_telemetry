@@ -7,7 +7,7 @@ mod msg_dyn_matcher;
 use lazy_static::lazy_static;
 use log::trace;
 use parking_lot::Mutex;
-use rand::{distributions::Alphanumeric, thread_rng, Rng};
+use rand::{distr::Alphanumeric, rng, Rng};
 use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
 use std::fmt::Debug;
 use std::future::Future;
@@ -57,11 +57,8 @@ pub fn unique_dt_topic_name() -> String {
     const SUFFIX_LEN: usize = 30;
     const _: () = assert!(PREFIX.len() + SUFFIX_LEN <= 48, "Generated data tunnel topic name must be less than or equal to Data Tunnel's maximum topic name length.");
 
-    let suffix = thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(SUFFIX_LEN)
-        .map(char::from)
-        .collect::<String>();
+    let suffix =
+        rng().sample_iter(&Alphanumeric).take(SUFFIX_LEN).map(char::from).collect::<String>();
     let name = format!("{PREFIX}{suffix}");
 
     // Print the generated topic name for easier debugging - we print it to both logs and stderr, so
