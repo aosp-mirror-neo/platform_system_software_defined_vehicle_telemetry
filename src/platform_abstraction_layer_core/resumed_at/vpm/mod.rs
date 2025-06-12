@@ -7,7 +7,7 @@ use google_sdv_vpm_aidl::aidl::google::sdv::vpm::IPowerStateClientApi::{
 };
 
 use log::debug;
-use persistent_binder::PersistentBinderConnection;
+use persistent_binder::BinderConnectionManager;
 use std::fmt::Debug;
 use std::sync::Arc;
 use tokio::{sync::watch, task::JoinError};
@@ -31,13 +31,13 @@ fn blocking_wait_for_power_state_client_api() -> binder::Strong<dyn IPowerStateC
 }
 
 pub(crate) struct VpmClient {
-    /// A reference to the handle of the task that creates the `PersistentBinderConnection`.
+    /// A reference to the handle of the task that creates the `BinderConnectionManager`.
     ///
     /// It is necessary to keep this reference to ensure the connection isn't dropped before `Self`
     /// is dropped.
     #[cfg_attr(not(test), expect(dead_code))]
     binder_connection_task_handle: AbortOnDropHandle<
-        Result<Arc<PersistentBinderConnection<dyn IPowerStateClientApi>>, JoinError>,
+        Result<Arc<dyn BinderConnectionManager<dyn IPowerStateClientApi>>, JoinError>,
     >,
 }
 
@@ -111,7 +111,7 @@ mod tests {
 
         // Explicit type hint to ensure we call `unwrap` until reaching the
         // `PersistentBinderConnection`.
-        let _connection: Arc<PersistentBinderConnection<_>> = result.unwrap().unwrap();
+        let _connection: Arc<dyn BinderConnectionManager<_>> = result.unwrap().unwrap();
     }
 
     parameterized_test!(

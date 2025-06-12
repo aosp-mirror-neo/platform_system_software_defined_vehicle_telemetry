@@ -9,7 +9,7 @@ use google_sdv_vpm_aidl::aidl::google::sdv::vpm::PowerStateReport::PowerStateRep
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
 use log::debug;
-use persistent_binder::PersistentBinderConnection;
+use persistent_binder::{BinderConnectionManager, PersistentBinderConnection};
 use sdv_telemetry_time_wrapper::get_monotonic_time_since_boot;
 use std::sync::Arc;
 use tokio::sync::watch;
@@ -68,10 +68,11 @@ impl PowerStateListener {
             + Send
             + Sync
             + 'static,
-    ) -> Arc<PersistentBinderConnection<dyn IPowerStateClientApi>> {
+    ) -> Arc<dyn BinderConnectionManager<dyn IPowerStateClientApi>> {
         let tokio_runtime_handle = tokio::runtime::Handle::current();
 
-        let binder_connection = PersistentBinderConnection::new(power_state_client_api_factory);
+        let binder_connection: Arc<dyn BinderConnectionManager<dyn IPowerStateClientApi>> =
+            PersistentBinderConnection::new(power_state_client_api_factory);
 
         let power_state_listener = Self { resumed_at_tx };
 
@@ -86,7 +87,7 @@ impl PowerStateListener {
                 log_error(format!("Failed to subscribe to power state reports: {err}"));
             }
         }
-        binder_connection.set_reconnect_listener(move |power_state_client_api| {
+        binder_connection.set_reconnect_listener(Box::new(move |power_state_client_api| {
             // This callback is called directly from Binder and run outside of a Tokio
             // runtime, hence we cannot access the current Tokio runtime handle here,
             // and instead need to re-use the handle saved in `tokio_runtime_handle`.
@@ -101,7 +102,7 @@ impl PowerStateListener {
                     log_error(format!("Failed to subscribe to power state reports: {err}"));
                 }
             }
-        });
+        }));
 
         binder_connection
     }
