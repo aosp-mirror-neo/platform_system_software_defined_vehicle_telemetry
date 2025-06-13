@@ -12,12 +12,12 @@ use std::path::Path;
 /// array.
 pub fn read(path: &Path) -> anyhow::Result<Vec<u8>> {
     match path.extension().and_then(|o| o.to_str()) {
-        Some("bin") => {
+        Some("bin") | Some("binpb") | Some("pb") => {
             // Read binary into a vector
             fs::read(path)
                 .with_context(|| format!("Failed to read binary file: {}", &path.display()))
         }
-        Some("textproto") => {
+        Some("textproto") | Some("txtpb") => {
             // Note that go/textformat-spec currently only supports the legacy text proto format.
             move || -> anyhow::Result<Vec<u8>> {
                 let textproto = fs::read_to_string(path)?;
