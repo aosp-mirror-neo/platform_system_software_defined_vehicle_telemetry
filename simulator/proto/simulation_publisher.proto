@@ -28,6 +28,9 @@ message SimulationPublisher {
   // single data generator with no configuration object set. ONLY A SINGLE DATA
   // GENERATOR WITH NO CONFIGURATION SPECIFIED CURRENTLY SUPPORTED.
   repeated DataGenerator data_generators = 4;
+
+  // The publishing strategy to use.
+  PublishingStrategy publishing_strategy = 5;
 }
 
 message DataGenerator {
@@ -61,4 +64,21 @@ message CSVFile {
 
   // Delimiter must be a single character.
   string delimiter = 2;
+}
+
+message PublishingStrategy {
+  oneof type {
+    ConfigurablePublisherRegistry configurable_publisher_registry = 1;
+    SdvCommsDataTunnel sdv_comms_data_tunnel = 2;
+    SdvCommsRpc sdv_comms_rpc = 3;
+  }
+
+  // The publisher uses Telemetry's Configurable Publisher Registry.
+  message ConfigurablePublisherRegistry {}
+
+  // The publisher uses SDV Comms Data Tunnel.
+  message SdvCommsDataTunnel {}
+
+  // The publisher uses SDV Comms RPC.
+  message SdvCommsRpc {}
 }

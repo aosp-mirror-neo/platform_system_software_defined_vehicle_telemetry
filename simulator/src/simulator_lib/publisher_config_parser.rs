@@ -7,7 +7,11 @@ use protobuf::{
 };
 use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_publisher::{
-    data_generator::Data_source, SimulationPublisher,
+    data_generator::Data_source,
+    publishing_strategy::ConfigurablePublisherRegistry as ConfigurablePublisherRegistryProto,
+    publishing_strategy::SdvCommsDataTunnel as SdvCommsDataTunnelProto,
+    publishing_strategy::SdvCommsRpc as SdvCommsRpcProto, publishing_strategy::Type as TypeProto,
+    PublishingStrategy as PublishingStrategyProto, SimulationPublisher,
 };
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
@@ -18,9 +22,27 @@ use std::{collections::HashSet, path::Path};
 use crate::{
     io::parse_csv_file,
     protobuf_parsing::{CsvToProtoMessagesParser, DELAY_FIELD_NAME},
-    publisher_config::PublisherConfig,
+    publisher_config::{PublisherConfig, PublishingStrategyType},
     simulator_errors::SimulatorError,
 };
+
+fn get_publishing_strategy(
+    publishing_strategy: Option<&PublishingStrategyProto>,
+) -> Result<PublishingStrategyType, ()> {
+    Ok(match publishing_strategy.and_then(|strategy| strategy.type_.as_ref()) {
+        None
+        | Some(TypeProto::ConfigurablePublisherRegistry(ConfigurablePublisherRegistryProto {
+            special_fields: _,
+        })) => PublishingStrategyType::ConfigurablePublisherRegistry,
+        Some(TypeProto::SdvCommsDataTunnel(SdvCommsDataTunnelProto { special_fields: _ })) => {
+            PublishingStrategyType::SdvCommsDataTunnel
+        }
+        Some(TypeProto::SdvCommsRpc(SdvCommsRpcProto { special_fields: _ })) => {
+            PublishingStrategyType::SdvCommsRpc
+        }
+        Some(_) => return Err(()),
+    })
+}
 
 pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, SimulatorError> {
     let file_name = file_path
@@ -39,6 +61,14 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
         file_name,
     )?;
 
+    let publishing_strategy = get_publishing_strategy(
+        publisher_config_proto.publishing_strategy.as_ref(),
+    )
+    .map_err(|()| SimulatorError::FailedToParseFile {
+        file_name: file_name.to_owned(),
+        error_message: "Invalid publishing strategy".to_owned(),
+    })?;
+
     // TODO(b/351183822): Allow more than one data generator.
     let [ref data_generator] = publisher_config_proto.data_generators[..] else {
         return Err(SimulatorError::FailedToParseFile {
@@ -51,9 +81,20 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
     };
 
     if !data_generator.configuration.is_none() {
-        return Err(SimulatorError::NotImplemented {
-            feature: "Custom data per configuration".to_owned(),
-        });
+        match publishing_strategy {
+            PublishingStrategyType::SdvCommsDataTunnel => {
+                return Err(SimulatorError::FailedToParseFile {
+                    file_name: file_name.to_owned(),
+                    error_message: "Specifying a publisher configuration is not allowed for SDV Comms Data Tunnel publishers.".to_owned(),
+                });
+            }
+            PublishingStrategyType::SdvCommsRpc
+            | PublishingStrategyType::ConfigurablePublisherRegistry => {
+                return Err(SimulatorError::NotImplemented {
+                    feature: "Custom data per configuration".to_owned(),
+                });
+            }
+        }
     };
 
     let default_delay = try_into_duration(&data_generator.default_delay).map_err(|_| {
@@ -90,6 +131,7 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
                 loop_data: data_generator.loop_data,
                 parsed_data,
                 message_descriptor,
+                publishing_strategy,
             })
         }
         _ => Err(SimulatorError::FailedToParseFile {
@@ -281,6 +323,95 @@ mod tests {
         binary: ("valid_publisher_config.pb", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
         invalid_path: ("invalid_path/.", err(pat!(SimulatorError::FailedToParseFile { .. }))),
         invalid_extension: ("valid_publisher_config.txt", err(pat!(SimulatorError::FailedToParseFile { .. }))),
-        invalid_textproto: ("invalid_publisher_config.textproto", err(pat!(SimulatorError::FailedToParseFile { .. })),
-    ));
+        invalid_textproto: ("invalid_publisher_config.textproto", err(pat!(SimulatorError::FailedToParseFile { .. }))),
+    );
+
+    parameterized_test!(
+        #[test]
+        parse_publishing_strategy_succeeds,
+
+        |textproto_content, publishing_strategy_type_matcher| {
+            let tmp_dir = tempdir().unwrap();
+            let config_path = tmp_dir.path().join("config.txtpb");
+            let data_path = tmp_dir.path().join("data.csv");
+
+            fs::write(&data_path, "").unwrap();
+            fs::write(
+                &config_path,
+                format!(
+                    r#"
+                    service_name: "test_service"
+                    data_format_message_name: ".google.protobuf.Empty"
+                    data_generators {{
+                        csv_file {{
+                            file_path: "{0}"
+                            delimiter: ","
+                        }}
+                    }}
+                    {textproto_content}
+                    "#,
+                    data_path.display()
+                ),
+            )
+            .unwrap();
+
+            let result = parse_publisher_config(&config_path);
+
+            assert_that!(
+                result,
+                ok(pat!(PublisherConfig {
+                    service_name: eq("test_service"),
+                    publishing_strategy: publishing_strategy_type_matcher,
+                }))
+            );
+        },
+
+        unspecified: ("", pat!(&PublishingStrategyType::ConfigurablePublisherRegistry)),
+        no_type: ("publishing_strategy {}", pat!(&PublishingStrategyType::ConfigurablePublisherRegistry)),
+        configurable_publisher_registry: ("publishing_strategy { configurable_publisher_registry {} }", pat!(&PublishingStrategyType::ConfigurablePublisherRegistry)),
+        sdv_comms_data_tunnel: ("publishing_strategy { sdv_comms_data_tunnel {} }", pat!(&PublishingStrategyType::SdvCommsDataTunnel)),
+        sdv_comms_rpc: ("publishing_strategy { sdv_comms_rpc {} }", pat!(&PublishingStrategyType::SdvCommsRpc)),
+    );
+
+    #[test]
+    fn parse_publisher_config_fails_for_data_tunnel_with_configuration() {
+        let tmp_dir = tempdir().unwrap();
+        let config_path = tmp_dir.path().join("config.txtpb");
+        let data_path = tmp_dir.path().join("data.csv");
+
+        fs::write(&data_path, "").unwrap();
+        fs::write(
+            &config_path,
+            format!(
+                r#"
+                service_name: "test_service"
+                data_format_message_name: ".google.protobuf.Empty"
+                data_generators {{
+                    configuration {{
+                        type_url: "type.googleapis.com/google.protobuf.Empty"
+                        value: ""
+                    }}
+                    csv_file {{
+                        file_path: "{0}"
+                        delimiter: ","
+                    }}
+                }}
+                publishing_strategy {{
+                    sdv_comms_data_tunnel {{}}
+                }}
+                "#,
+                data_path.display()
+            ),
+        )
+        .unwrap();
+
+        let result = parse_publisher_config(&config_path);
+
+        assert_that!(
+            result,
+            err(pat!(SimulatorError::FailedToParseFile {
+                error_message: eq("Specifying a publisher configuration is not allowed for SDV Comms Data Tunnel publishers."),
+            }))
+        );
+    }
 }

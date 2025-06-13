@@ -54,6 +54,7 @@ use crate::{
     io::create_output_directory,
     io::REPORTS_DIR_NAME,
     metrics_configs_tracker::MetricsConfigsTracker,
+    publisher_config::PublishingStrategyType,
     publisher_config_parser::parse_publisher_config,
     simulation_publisher::{SimulationPublisher, SimulationPublisherWrapper},
     simulator_errors::SimulatorError,
@@ -336,7 +337,25 @@ fn parse_simulation_publishers(
     for path in publisher_config_paths {
         let publisher_config = parse_publisher_config(path)?;
         let service_name = publisher_config.service_name.clone();
-        let simulation_publisher = SimulationPublisher::new(publisher_config);
+
+        let simulation_publisher = match publisher_config.publishing_strategy {
+            PublishingStrategyType::ConfigurablePublisherRegistry => {
+                SimulationPublisher::new(publisher_config)
+            }
+            PublishingStrategyType::SdvCommsDataTunnel => {
+                return Err(SimulatorError::NotImplemented {
+                    feature: "SDV Comms Data Tunnel publishing strategy".to_owned(),
+                }
+                .into());
+            }
+            PublishingStrategyType::SdvCommsRpc => {
+                return Err(SimulatorError::NotImplemented {
+                    feature: "SDV Comms RPC publishing strategy".to_owned(),
+                }
+                .into());
+            }
+        };
+
         publishers.try_insert_value(service_name.clone(), simulation_publisher).map_err(|_| {
             SimulatorError::Error {
                 error_message: format!(
