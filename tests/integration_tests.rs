@@ -869,6 +869,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./samples/sample_protos/sudden_tire_pressure_drop.textproto",
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto",
+            "./tests/cross_partition_test_config.textproto",
             "./tests/middleware_config.textproto",
             "./tests/same_trigger_config.textproto",
             "./tests/someip.textproto",
