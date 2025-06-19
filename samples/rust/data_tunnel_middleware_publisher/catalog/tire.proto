@@ -4,7 +4,6 @@ syntax = "proto3";
 
 package com.sdv.telemetry.sample;
 
-import "google/protobuf/empty.proto";
 import "sdv/vsidl/v1/annotations.proto";
 
 enum Location {
