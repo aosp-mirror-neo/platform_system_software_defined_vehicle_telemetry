@@ -139,6 +139,70 @@ async fn telemetry_service_simple_config_end_to_end_test() {
     info!("Successfully finished service");
 }
 
+/// A test to verify that aggregation publishers perform the aggregations before other objects
+/// with the same trigger do their own actions.
+/// For instance, if metrics report has the same trigger as some aggregation publisher which is
+/// used in this report's generation, publisher should do the aggregation first, so that the report
+/// contains up-to-date aggregated data.
+/// The Metrics Config used has a finish trigger which is used by both Aggregation Publisher and
+/// Metrics Report Generator.
+#[sdv_telemetry_test_utils::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_same_trigger_config() {
+    setup_once();
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    info!("Initializing service");
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status| {
+                info!("Received status message {:?}: {}", status.code, status.message);
+            },
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
+            },
+        )
+        .await
+        .unwrap();
+
+    let serialized_config =
+        metrics_config_reader_utils::read(Path::new("tests/same_trigger_config.textproto"))
+            .unwrap();
+    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
+
+    info!("Adding config");
+    service.add_metrics_config(&serialized_config).await.unwrap();
+
+    info!("Activating config");
+    service.activate_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Waiting for metrics report ready notification");
+    let report_info = report_ready_rx.recv().await.unwrap();
+
+    info!("Retrieving metrics report");
+    let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
+    info!("Report received: {metrics_report:?}");
+    assert_eq!(metrics_report.report_uuid, report_info.report_uuid);
+    assert_eq!(metrics_report.metrics_config_uuid, config.uuid);
+
+    let file_descriptor =
+        FileDescriptor::new_dynamic(config.descriptor_protos[0].clone(), &[]).unwrap();
+    let report_descriptor = file_descriptor.message_by_package_relative_name("report").unwrap();
+    let report_data = metrics_report.report_data.unpack_dyn(&report_descriptor).unwrap().unwrap();
+    assert_eq!(42, get_int_field_value(&*report_data, "int_field"));
+
+    info!("Removing metrics config");
+    service.remove_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Finishing service");
+    service.finish().unwrap();
+
+    info!("Successfully finished service");
+}
+
 #[sdv_telemetry_test_utils::timeout(30_000)]
 #[tokio::test]
 async fn telemetry_service_status_reporting_test() {
@@ -806,6 +870,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto",
             "./tests/middleware_config.textproto",
+            "./tests/same_trigger_config.textproto",
             "./tests/someip.textproto",
         ]
     );

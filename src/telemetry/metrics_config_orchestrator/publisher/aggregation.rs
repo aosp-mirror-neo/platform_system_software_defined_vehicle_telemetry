@@ -5,8 +5,8 @@ use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::{
-    collection_extension::HashMapExtension, operation_result::OperationResult,
-    value_holder::ValueHolder,
+    collection_extension::HashMapExtension, countdown_latch::MultiLevelCountdownLatch,
+    operation_result::OperationResult, value_holder::ValueHolder,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -100,7 +100,7 @@ impl Publisher for AggregationPublisher {
             Arc::clone(trigger)
                 .subscribe(
                     &self.trigger_subscriber,
-                    Box::new(move |context| {
+                    Box::new(move |context, compute_order, countdown_latch| {
                         // Synchronously build aggregated message and enqueue the result.
                         let self_clone = self_reference.upgrade().expect(
                             "Callback should only be called when aggregation publisher is active",
@@ -117,8 +117,8 @@ impl Publisher for AggregationPublisher {
                         let build_result =
                             Arc::clone(&self_clone.message_builder).build(&eval_context);
                         sender_clone
-                            .send((build_result, context))
-                            .expect("Callback should only receive messages when subscribed")
+                            .send((build_result, context, compute_order, countdown_latch))
+                            .expect("Callback should only receive messages when subscribed");
                     }),
                 )
                 .await;
@@ -133,22 +133,26 @@ impl Publisher for AggregationPublisher {
             AsyncEventHandler<(
                 ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>,
                 Arc<NodeEvaluationContext>,
+                u32,
+                MultiLevelCountdownLatch,
             )> for AggregationPublisherHandler
         {
             async fn handle(
                 &mut self,
-                (build_result, context): (
+                (build_result, context, compute_order, countdown_latch): (
                     ValueHolder<
                         'static,
                         (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
                     >,
                     Arc<NodeEvaluationContext>,
+                    u32,
+                    MultiLevelCountdownLatch,
                 ),
             ) {
-                let Some(aggregation_publisher) = self.aggregation_publisher.upgrade() else {
-                    return;
+                if let Some(aggregation_publisher) = self.aggregation_publisher.upgrade() {
+                    aggregation_publisher.on_new_message(build_result, context).await;
                 };
-                aggregation_publisher.on_new_message(build_result, context).await;
+                countdown_latch.count_down(compute_order).await;
             }
         }
 

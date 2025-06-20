@@ -5,6 +5,7 @@ use super::*;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
+use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -20,7 +21,7 @@ pub(crate) struct MockTrigger {
 
     name: String,
     metrics_config_uuid: String,
-    on_fired_callback: AsyncMutex<Option<TriggerCallbackFn>>,
+    on_fired_callback: AsyncMutex<Option<(TriggerSubscriber, TriggerCallbackFn)>>,
 }
 
 #[async_trait]
@@ -39,7 +40,7 @@ impl Trigger for MockTrigger {
         on_fired_callback: TriggerCallbackFn,
     ) {
         self.verify_subscriber(subscriber);
-        self.on_fired_callback.lock().await.replace(on_fired_callback);
+        self.on_fired_callback.lock().await.replace((subscriber.clone(), on_fired_callback));
 
         if let Some(callback) = &self.subscribe_callback {
             callback(&self.name);
@@ -82,7 +83,12 @@ impl MockTrigger {
     }
 
     pub(crate) async fn fire_with_context(&self, context: Arc<NodeEvaluationContext>) {
-        self.on_fired_callback.lock().await.as_mut().unwrap()(context);
+        let mut lock = self.on_fired_callback.lock().await;
+        let (subscriber, on_fired_callback) = lock.as_mut().unwrap();
+
+        let compute_order = subscriber.compute_order();
+        let countdown_latch = MultiLevelCountdownLatch::new_with_level(compute_order, 1);
+        on_fired_callback(context, compute_order, countdown_latch);
     }
 
     pub(crate) fn set_subscribe_callback(
@@ -129,7 +135,7 @@ impl<T: Send + 'static> MockCallbackListener<T> {
 
     pub(super) fn create_callback(self: &Arc<Self>) -> CallbackFn<T> {
         let self_clone = Arc::clone(self);
-        Box::new(move |data| self_clone.on_callback_fired(data))
+        Box::new(move |data, _, _| self_clone.on_callback_fired(data))
     }
 
     /// Increases fired count and triggers the notify.
@@ -167,7 +173,9 @@ impl SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>
         let mut callback_lock = self.callback.lock();
         *self.activation_id.lock() = Some(activation_id);
         if let Some(callback) = &mut *callback_lock {
-            callback(arg);
+            let compute_order = self.key.lock().as_ref().unwrap().compute_order();
+            let countdown_latch = MultiLevelCountdownLatch::new_with_level(compute_order, 1);
+            callback(arg, compute_order, countdown_latch.clone());
         }
     }
 }
@@ -189,7 +197,12 @@ impl MockSubscriptionManager {
         mut callback: CallbackFn<(ActivationId, Arc<NodeEvaluationContext>)>,
     ) {
         let activation_id = Arc::clone(&self.activation_id);
-        self.subscribe(key, Box::new(move |arg| callback((activation_id.lock().unwrap(), arg))))
-            .await;
+        self.subscribe(
+            key,
+            Box::new(move |arg, compute_order, countdown_latch| {
+                callback((activation_id.lock().unwrap(), arg), compute_order, countdown_latch)
+            }),
+        )
+        .await;
     }
 }

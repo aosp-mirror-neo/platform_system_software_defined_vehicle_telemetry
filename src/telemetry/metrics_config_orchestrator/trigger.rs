@@ -5,7 +5,7 @@ use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
-use super::subscription_manager::CallbackFn;
+use super::subscription_manager::{CallbackFn, ComputeOrder};
 
 mod base;
 mod condition_checker;
@@ -62,4 +62,17 @@ pub(crate) enum TriggerSubscriber {
     MetricsReportGenerator {
         name: String,
     },
+}
+
+impl ComputeOrder for TriggerSubscriber {
+    fn compute_order(&self) -> u32 {
+        match self {
+            Self::MetricsConfigStart => 0,
+            Self::AggregationPublisher { .. } => 0,
+            Self::ConditionalTrigger { .. } => 1,
+            Self::MetricsReportGenerator { .. } => 1,
+            Self::MetricsConfigEnd => 2,
+            Self::MetricsConfigFinish => 2,
+        }
+    }
 }

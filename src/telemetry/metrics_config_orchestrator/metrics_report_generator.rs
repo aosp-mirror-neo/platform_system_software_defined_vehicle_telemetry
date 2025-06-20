@@ -8,6 +8,7 @@ use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
 };
+use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
 use sdv_telemetry_utils::value_holder::ValueHolder;
 use std::fmt::Display;
 use std::marker::{Send, Sync};
@@ -78,8 +79,13 @@ impl MetricsReportGenerator for MetricsReportGeneratorImpl {
             Arc::clone(trigger)
                 .subscribe(
                     &self.subscriber,
-                    Box::new(move |context| {
-                        self_clone.on_trigger_fired(&trigger_name_clone, &context)
+                    Box::new(move |context, compute_order, countdown_latch| {
+                        self_clone.on_trigger_fired(
+                            &trigger_name_clone,
+                            &context,
+                            compute_order,
+                            countdown_latch,
+                        )
                     }),
                 )
                 .await;
@@ -214,12 +220,26 @@ impl MetricsReportGeneratorImpl {
         self: &Arc<Self>,
         trigger_name: &str,
         context: &Arc<NodeEvaluationContext>,
+        compute_order: u32,
+        countdown_latch: MultiLevelCountdownLatch,
     ) {
-        let res = Arc::clone(&self.message_builder).build(context);
         let self_clone = Arc::clone(self);
+        let context_clone = Arc::clone(context);
         let trigger_name_clone = trigger_name.to_owned();
         tokio::spawn(async move {
+            // Wait until other objects (such as aggregation publishers) finish their computations
+            // caused be same trigger firing
+            if compute_order == 0 {
+                panic!("compute_order of Metrics Report Generator can not be zero")
+            }
+            countdown_latch.wait(compute_order - 1).await;
+
+            // Build the message and generate the report
+            let res = Arc::clone(&self_clone.message_builder).build(&context_clone);
             self_clone.generate_report(res, ReportReason::REGULAR, Some(&trigger_name_clone)).await;
+
+            // Notify that metrics report generator finished its computation
+            countdown_latch.count_down(compute_order).await;
         });
     }
 }
@@ -377,14 +397,6 @@ mod test {
         trigger.fire().await;
         trigger.fire().await;
 
-        // Setup generator to return an error to make sure no reports can be generated past this point.
-        message_builder.set_next_error(MessageBuilderError {
-            field_name: String::default(),
-            error: MessageBuilderErrorType::ExpressionEvaluationError {
-                e: NodeEvaluationError::DivideByZero,
-            },
-        });
-
         // Wait for reports to be delivered.
         rx.recv().await.unwrap();
         let report = rx.recv().await.unwrap();
@@ -409,6 +421,9 @@ mod test {
         // as built by MockMessageBuilder
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(message.int_field, 1);
+
+        // verify no other reports were generated
+        assert_eq!(message_builder.get_num_build_calls(), 2);
     }
 
     #[sdv_telemetry_test_utils::timeout]

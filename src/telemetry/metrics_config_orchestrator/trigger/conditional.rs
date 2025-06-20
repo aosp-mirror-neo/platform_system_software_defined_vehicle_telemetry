@@ -6,6 +6,7 @@ use sdv_telemetry_expr::{
     node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
     node_value::NodeValue,
 };
+use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -109,15 +110,23 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
             Arc::clone(trigger)
                 .subscribe(
                     &self.subscriber,
-                    Box::new(move |context| {
+                    Box::new(move |context, compute_order, countdown_latch| {
                         // Synchronously evaluate selector expression and enqueue the result.
                         let self_clone = &self_reference.upgrade().expect(
                             "Callback should only be called when conditional trigger is active",
                         );
+                        // TODO: b/426508179 - it's currently not perfectly correct that conditional
+                        // triggers do not wait until aggregation publishers with the same parent
+                        // trigger perform their aggregations.
+                        // As we don't want to potentially block the execution by waiting for
+                        // countdown_latch.wait(compute_order - 1), conditional trigger computation
+                        // should be refactored to be performed in a separate task, but still
+                        // considering that AsyncEventProcessor is specifically used to avoid random
+                        // order of tokio tasks execution
                         let evaluation_result =
                             self_clone.selector_expression.evaluate(Arc::clone(&context));
                         sender_clone
-                            .send((evaluation_result, context))
+                            .send((evaluation_result, context, compute_order, countdown_latch))
                             .expect("Callback should only receive messages when subscribed")
                     }),
                 )
@@ -192,26 +201,30 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
             AsyncEventHandler<(
                 OperationResult<'static, NodeValue, NodeEvaluationError>,
                 Arc<NodeEvaluationContext>,
+                u32,
+                MultiLevelCountdownLatch,
             )> for ConditionalTriggerHandler
         {
             async fn handle(
                 &mut self,
-                (evaluation_result, context): (
+                (evaluation_result, context, compute_order, countdown_latch): (
                     OperationResult<'static, NodeValue, NodeEvaluationError>,
                     Arc<NodeEvaluationContext>,
+                    u32,
+                    MultiLevelCountdownLatch,
                 ),
             ) {
-                let Some(conditional_trigger) = self.conditional_trigger.upgrade() else {
-                    return;
+                if let Some(conditional_trigger) = self.conditional_trigger.upgrade() {
+                    conditional_trigger
+                        .on_new_message(
+                            self.activation_id,
+                            evaluation_result,
+                            context,
+                            self.condition_checker.as_mut(),
+                        )
+                        .await;
                 };
-                conditional_trigger
-                    .on_new_message(
-                        self.activation_id,
-                        evaluation_result,
-                        context,
-                        self.condition_checker.as_mut(),
-                    )
-                    .await;
+                countdown_latch.count_down(compute_order).await;
             }
         }
 
