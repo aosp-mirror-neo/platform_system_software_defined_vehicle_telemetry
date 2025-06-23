@@ -9,11 +9,13 @@
 use async_trait::async_trait;
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
+use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
 use std::sync::{Arc, Weak};
 use std::{collections::HashMap, fmt::Display, hash::Hash};
 use tokio::sync::Mutex as AsyncMutex;
 
-pub(crate) type CallbackFn<TCallbackArg> = Box<dyn FnMut(TCallbackArg) + Send + Sync>;
+pub(crate) type CallbackFn<TCallbackArg> =
+    Box<dyn FnMut(TCallbackArg, u32, MultiLevelCountdownLatch) + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ActivationId(SequenceNumberType);
@@ -58,6 +60,10 @@ pub(crate) trait Activatable<TKey: Eq + Hash, TCallbackArg>: Send + Sync {
     async fn deactivate(&self);
 }
 
+pub(crate) trait ComputeOrder: Send + Sync {
+    fn compute_order(&self) -> u32;
+}
+
 /// Manages subscriptions to a specific type of event.
 pub(crate) struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg> {
     /// Generator for the next activation ID.
@@ -73,7 +79,7 @@ pub(crate) struct SubscriptionManagerImpl<TKey: Display + Eq + Hash + Send + Syn
 }
 
 #[async_trait]
-impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg: Clone + Send>
+impl<TKey: ComputeOrder + Display + Eq + Hash + Send + Sync, TCallbackArg: Clone + Send>
     SubscriptionManager<TKey, TCallbackArg> for SubscriptionManagerImpl<TKey, TCallbackArg>
 {
     async fn subscribe(&self, key: TKey, callback: CallbackFn<TCallbackArg>) {
@@ -101,7 +107,6 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg: Clone + Send>
 
     async fn unsubscribe(&self, key: &TKey) {
         let mut maybe_callback_map_lock = self.maybe_callback_map.lock().await;
-
         let is_last_subscription = {
             // Remove the callback from the callback map.
             let (_, callback_map) = maybe_callback_map_lock
@@ -128,17 +133,31 @@ impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg: Clone + Send>
 
     async fn notify(&self, activation_id: ActivationId, arg: TCallbackArg) {
         let mut maybe_callback_map_lock = self.maybe_callback_map.lock().await;
-        if let Some((stored_activation_id, callback_map)) = maybe_callback_map_lock.as_mut() {
-            if stored_activation_id == &activation_id {
-                for callback in callback_map.values_mut() {
-                    callback(arg.clone());
-                }
-            }
+        let Some((stored_activation_id, callback_map)) = maybe_callback_map_lock.as_mut() else {
+            return;
+        };
+        if stored_activation_id != &activation_id {
+            return;
+        }
+
+        // Count the number of subscribers for each `compute_order` to initialize CountdownLatch
+        let mut count_by_level = HashMap::new();
+        for key in callback_map.keys() {
+            let level = key.compute_order();
+            *count_by_level.entry(level).or_insert(0) += 1;
+        }
+        let countdown_latch = MultiLevelCountdownLatch::new();
+        for (level, count) in count_by_level {
+            countdown_latch.init_level(level, count).await;
+        }
+
+        for (key, callback) in callback_map {
+            callback(arg.clone(), key.compute_order(), countdown_latch.clone());
         }
     }
 }
 
-impl<TKey: Display + Eq + Hash + Send + Sync, TCallbackArg>
+impl<TKey: ComputeOrder + Display + Eq + Hash + Send + Sync, TCallbackArg>
     SubscriptionManagerImpl<TKey, TCallbackArg>
 {
     /// Creates a new instance of the callback manager that activates the specified activatable
@@ -157,7 +176,7 @@ mod tests {
     use super::*;
 
     use mockall::predicate::eq;
-    use sdv_telemetry_test_utils::oneshot_callback;
+    use tokio::sync::mpsc;
 
     const KEY: &str = "test_key";
     const KEY2: &str = "test_key2";
@@ -169,6 +188,16 @@ mod tests {
         impl Activatable<String, u64> for ActivatableImpl {
             async fn activate(self: Arc<Self>, activation_id: ActivationId);
             async fn deactivate(&self);
+        }
+    }
+
+    impl ComputeOrder for String {
+        fn compute_order(&self) -> u32 {
+            if self == KEY2 {
+                1
+            } else {
+                0
+            }
         }
     }
 
@@ -186,7 +215,7 @@ mod tests {
     }
 
     fn create_empty_fn_box() -> CallbackFn<u64> {
-        Box::new(|_| {})
+        Box::new(|_, _, _| {})
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -330,17 +359,19 @@ mod tests {
         manager
             .subscribe(
                 KEY.to_owned(),
-                Box::new(|_| panic!("Callback set in previous activation should not be called.")),
+                Box::new(|_, _, _| {
+                    panic!("Callback set in previous activation should not be called.")
+                }),
             )
             .await;
         manager.unsubscribe(&KEY.to_owned()).await;
 
-        let (tx, rx) = oneshot_callback();
-        manager.subscribe(KEY.to_owned(), Box::new(tx)).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        manager.subscribe(KEY.to_owned(), Box::new(move |arg, _, _| tx.send(arg).unwrap())).await;
 
         manager.notify(ActivationId(1), 123).await;
 
-        assert_eq!(123, rx.await);
+        assert_eq!(123, rx.recv().await.unwrap());
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -349,5 +380,76 @@ mod tests {
         let (manager, _activatable) = create_subscription_manager(|_activatable| {});
 
         manager.notify(ActivationId(0), 123).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn notify_callbacks_depend_on_countdown_latch() {
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            let mut seq = mockall::Sequence::new();
+            activatable.expect_activate().once().in_sequence(&mut seq).return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+            activatable.expect_activate().once().in_sequence(&mut seq).return_const(());
+        });
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let tx_clone = tx.clone();
+        // KEY compute_order is 0. This callback notifies KEY2 callback after completion
+        let key_callback = Box::new(move |_, _, latch: MultiLevelCountdownLatch| {
+            let tx_clone = tx_clone.clone();
+            tokio::spawn(async move {
+                latch.count_down(0).await;
+                tx_clone.send(KEY).unwrap();
+            });
+        });
+
+        // KEY2 compute_order is 1. It should wait for the KEY callback
+        let key2_callback = Box::new(move |_, _, latch: MultiLevelCountdownLatch| {
+            let tx_clone = tx.clone();
+            tokio::spawn(async move {
+                latch.wait(0).await;
+                tx_clone.send(KEY2).unwrap();
+            });
+        });
+
+        manager.subscribe(KEY.to_owned(), key_callback.clone()).await;
+        manager.subscribe(KEY2.to_owned(), key2_callback.clone()).await;
+
+        manager.notify(ActivationId::new(0), 42).await;
+
+        // Verify the execution order.
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            KEY.to_owned(),
+            "KEY (compute_order=0) should be called first"
+        );
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            KEY2.to_owned(),
+            "KEY2 (compute_order=1) should be called after latch.wait"
+        );
+
+        // unsubscribe to reset manager
+        manager.unsubscribe(&KEY.to_owned()).await;
+        manager.unsubscribe(&KEY2.to_owned()).await;
+
+        // subscribe again in reversed order to make sure the order of calling is deterministic
+        manager.subscribe(KEY2.to_owned(), key2_callback).await;
+        manager.subscribe(KEY.to_owned(), key_callback).await;
+
+        manager.notify(ActivationId::new(1), 42).await;
+
+        // Verify the execution order.
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            KEY.to_owned(),
+            "KEY (compute_order=0) should be called first"
+        );
+        assert_eq!(
+            rx.recv().await.unwrap(),
+            KEY2.to_owned(),
+            "KEY2 (compute_order=1) should be called after latch.wait()"
+        );
     }
 }

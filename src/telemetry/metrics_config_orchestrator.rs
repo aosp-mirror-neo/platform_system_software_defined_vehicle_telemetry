@@ -42,6 +42,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     Publisher as PublisherProto, Trigger as TriggerProto,
 };
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
+use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
 };
@@ -159,7 +160,9 @@ pub(super) struct MetricsConfigOrchestratorImpl {
     service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
 
     /// The function that is called when finish trigger of a Metrics Config is fired.
-    finish_trigger_fired_callback: Arc<dyn Fn(String, Arc<NodeEvaluationContext>) + Send + Sync>,
+    finish_trigger_fired_callback: Arc<
+        dyn Fn(String, Arc<NodeEvaluationContext>, u32, MultiLevelCountdownLatch) + Send + Sync,
+    >,
 
     /// The function that is called when a new Metrics Report is ready.
     report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
@@ -399,10 +402,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                 Arc::clone(finish_trigger)
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigFinish,
-                        Box::new(move |context| {
+                        Box::new(move |context, compute_order, countdown_latch| {
                             if let Some((callback, uuid)) = maybe_parameters.take() {
                                 debug!("MetricsConfig {} finish trigger fired", uuid);
-                                callback(uuid, context);
+                                callback(uuid, context, compute_order, countdown_latch);
                             }
                         }),
                     )
@@ -458,7 +461,6 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
         // Change state to Finished and release the mutex.
         *config_state = MetricsConfigState::Finished;
-
         Ok(())
     }
 
@@ -556,7 +558,7 @@ impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         pal: Arc<dyn PlatformAbstractionLayer>,
-        finish_trigger_fired_callback: impl Fn(String, Arc<NodeEvaluationContext>)
+        finish_trigger_fired_callback: impl Fn(String, Arc<NodeEvaluationContext>, u32, MultiLevelCountdownLatch)
             + Send
             + Sync
             + 'static,
@@ -676,9 +678,9 @@ impl MetricsConfigOrchestratorImpl {
         Arc::clone(start_trigger)
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move |_context| {
+                Box::new(move |_context, compute_order, countdown_latch| {
                     if let Some(config) = config_clone.take() {
-                        Self::on_start_trigger_fired(config);
+                        Self::on_start_trigger_fired(config, compute_order, countdown_latch);
                     }
                 }),
             )
@@ -905,7 +907,11 @@ impl MetricsConfigOrchestratorImpl {
 
     // Lifecycle event handlers.
 
-    fn on_start_trigger_fired(config: Arc<MetricsConfig>) {
+    fn on_start_trigger_fired(
+        config: Arc<MetricsConfig>,
+        compute_order: u32,
+        countdown_latch: MultiLevelCountdownLatch,
+    ) {
         debug!("MetricsConfig {} start trigger fired", config.uuid);
 
         tokio::spawn(async move {
@@ -937,9 +943,9 @@ impl MetricsConfigOrchestratorImpl {
                 Arc::clone(end_trigger)
                     .subscribe(
                         &TriggerSubscriber::MetricsConfigEnd,
-                        Box::new(move |_context| {
+                        Box::new(move |_, compute_order, countdown_latch| {
                             if let Some(config) = config_clone.take() {
-                                Self::on_end_trigger_fired(config);
+                                Self::on_end_trigger_fired(config, compute_order, countdown_latch);
                             }
                         }),
                     )
@@ -948,13 +954,24 @@ impl MetricsConfigOrchestratorImpl {
 
             // Change state to Running and release the mutex.
             *config_state = MetricsConfigState::Running;
+            countdown_latch.count_down(compute_order).await;
         });
     }
 
-    fn on_end_trigger_fired(config: Arc<MetricsConfig>) {
+    fn on_end_trigger_fired(
+        config: Arc<MetricsConfig>,
+        compute_order: u32,
+        countdown_latch: MultiLevelCountdownLatch,
+    ) {
         debug!("MetricsConfig {} end trigger fired", config.uuid);
 
         tokio::spawn(async move {
+            // Wait until all computations on end_trigger are done before deactivating the config
+            if compute_order == 0 {
+                panic!("Compute order for End Trigger can not be zero");
+            }
+            countdown_latch.wait(compute_order - 1).await;
+
             // Lock state mutex, verify state and hold the mutex until transition is complete.
             let mut config_state = config.state.lock().await;
             match &*config_state {
@@ -1362,7 +1379,7 @@ mod tests {
                 node_factory: Box::new(MockNodeFactory::new()),
                 publisher_factory: Box::new(MockPublisherFactory::new()),
                 trigger_factory: Box::new(MockTriggerFactory::new()),
-                finish_trigger_fired_callback: Arc::new(|_, _| {}),
+                finish_trigger_fired_callback: Arc::new(|_, _, _, _| {}),
                 report_ready_callback: Arc::new(|_| {}),
                 service_publisher_manager: Arc::new(
                     MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
@@ -2558,7 +2575,8 @@ mod tests {
         ));
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let (tx, rx) = oneshot_callback();
-        orchestrator.finish_trigger_fired_callback = Arc::new(move |uuid, _context| tx(uuid));
+        orchestrator.finish_trigger_fired_callback =
+            Arc::new(move |uuid, _context, _compute_order, _countdown_latch| tx(uuid));
         orchestrator.trigger_factory().add_triggers(vec![Arc::clone(&finish_trigger_mock)]);
 
         // Setup Metrics Config.

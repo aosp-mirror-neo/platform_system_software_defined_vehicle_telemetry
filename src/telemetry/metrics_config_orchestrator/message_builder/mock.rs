@@ -17,6 +17,7 @@ pub(crate) struct MockMessageBuilder {
     next_async_result: Mutex<
         Option<BoxFuture<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>>,
     >,
+    num_build_calls: AtomicU32,
     num_reset_calls: AtomicU32,
     result_callback: Mutex<
         Option<
@@ -38,6 +39,8 @@ impl MessageBuilder for MockMessageBuilder {
         self: Arc<Self>,
         context: &Arc<NodeEvaluationContext>,
     ) -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)> {
+        self.num_build_calls.fetch_add(1, Ordering::AcqRel);
+
         if let Some(error) = self.next_error.lock().take() {
             return (None, vec![error]).into();
         }
@@ -67,6 +70,7 @@ impl MockMessageBuilder {
         Self {
             next_error: None.into(),
             next_async_result: None.into(),
+            num_build_calls: 0.into(),
             num_reset_calls: 0.into(),
             result_callback: None.into(),
         }
@@ -74,6 +78,10 @@ impl MockMessageBuilder {
 
     pub(crate) fn get_num_reset_calls(&self) -> u32 {
         self.num_reset_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn get_num_build_calls(&self) -> u32 {
+        self.num_build_calls.load(Ordering::Acquire)
     }
 
     pub(crate) fn set_next_error(&self, error: MessageBuilderError) {

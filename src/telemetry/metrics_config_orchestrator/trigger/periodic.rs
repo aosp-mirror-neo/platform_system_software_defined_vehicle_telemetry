@@ -186,7 +186,7 @@ mod tests {
             create_valid_periodic_trigger_with_mock_subscription_manager();
 
         Arc::clone(&trigger)
-            .subscribe(&TriggerSubscriber::MetricsConfigStart, Box::new(|_| {}))
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, Box::new(|_, _, _| {}))
             .await;
 
         // Verify that the key and the callback are set.
@@ -229,7 +229,7 @@ mod tests {
         subscription_manager
             .subscribe_for_test(
                 TriggerSubscriber::MetricsConfigStart,
-                Box::new(move |arg| tx.send(arg).unwrap()),
+                Box::new(move |arg, _, _| tx.send(arg).unwrap()),
             )
             .await;
 
@@ -287,7 +287,7 @@ mod tests {
         subscription_manager
             .subscribe(
                 TriggerSubscriber::MetricsConfigStart,
-                Box::new(move |_| {
+                Box::new(move |_, _, _| {
                     let trigger_clone = trigger_clone.take().unwrap();
                     let notify_clone = Arc::clone(&notify_clone);
                     tokio::spawn(async move {

@@ -1,0 +1,75 @@
+# Copyright 2025 Google LLC
+
+uuid: "300eeb2d-f7bc-4203-9d71-57beac75ee6a"
+version: 3758096386
+descriptor_protos {
+  name: "adhoc.proto"
+  package: "aaos.sdv.telemetry.adhoc"
+  message_type {
+    name: "aggregation"
+    field {
+      name: "int_field"
+      number: 1
+      type: TYPE_INT32
+    }
+  }
+  message_type {
+    name: "report"
+    field {
+      name: "int_field"
+      number: 1
+      type: TYPE_INT32
+    }
+  }
+  syntax: "proto2"
+}
+triggers {
+  name: "finish_trigger"
+  periodic_trigger {
+    interval {
+      nanos: 100000000
+    }
+  }
+}
+publishers {
+  name: "aggregation"
+  aggregation_publisher {
+    trigger_names: "finish_trigger"
+    message_builder {
+      message_type: ".aaos.sdv.telemetry.adhoc.aggregation"
+      field_assignments {
+        field_name: "int_field"
+        no_aggregation {
+          expression_node_index: 0
+        }
+      }
+    }
+  }
+}
+# Expression Node 0
+expression_nodes {
+  constant_leaf_node {
+    int32_value: 42
+  }
+}
+# Expression Node 1
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "aggregation"
+    field_names: "int_field"
+  }
+}
+metrics_report_configs {
+  name: "report"
+  trigger_names: "finish_trigger"
+  message_builder {
+    message_type: ".aaos.sdv.telemetry.adhoc.report"
+    field_assignments {
+      field_name: "int_field"
+      no_aggregation {
+        expression_node_index: 1
+      }
+    }
+  }
+}
+finish_trigger_name: "finish_trigger"
