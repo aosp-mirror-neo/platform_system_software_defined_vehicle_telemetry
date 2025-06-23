@@ -53,7 +53,7 @@ message MetricsConfig {
 
   // Optional.
   // The name of the trigger that finishes metrics configuration.
-  // A finished metrics configuration is removed from the system.
+  // A finished metrics configuration is deactivated.
   string finish_trigger_name = 11;
 }
 
