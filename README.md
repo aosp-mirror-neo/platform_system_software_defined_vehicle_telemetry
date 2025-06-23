@@ -83,7 +83,7 @@ Start SDV IVI target (if you want to run it in a second VM instance, otherwise
 you can use `cvd create`):
 
 ```bash
-cvd create -vsock_guest_cid=4 -base_instance_num=2 --extra_bootconfig_args="androidboot.sdv.instance_name=instance2 androidboot.virt.address=4"
+cvd create -base_instance_num=2 --config=sdv_ivi_instance2
 ```
 
 Start the IVI telemetry agent:
