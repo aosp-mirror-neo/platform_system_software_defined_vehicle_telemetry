@@ -679,9 +679,11 @@ impl MetricsConfigOrchestratorImpl {
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
                 Box::new(move |_context, compute_order, countdown_latch| {
-                    if let Some(config) = config_clone.take() {
-                        Self::on_start_trigger_fired(config, compute_order, countdown_latch);
-                    }
+                    Self::on_start_trigger_fired(
+                        config_clone.take(),
+                        compute_order,
+                        countdown_latch,
+                    );
                 }),
             )
             .await;
@@ -908,13 +910,17 @@ impl MetricsConfigOrchestratorImpl {
     // Lifecycle event handlers.
 
     fn on_start_trigger_fired(
-        config: Arc<MetricsConfig>,
+        maybe_config: Option<Arc<MetricsConfig>>,
         compute_order: u32,
         countdown_latch: MultiLevelCountdownLatch,
     ) {
-        debug!("MetricsConfig {} start trigger fired", config.uuid);
-
         tokio::spawn(async move {
+            let Some(config) = maybe_config else {
+                countdown_latch.count_down(compute_order).await;
+                return;
+            };
+            debug!("MetricsConfig {} start trigger fired", config.uuid);
+
             // Lock state mutex, verify state and hold the mutex until transition is complete.
             let mut config_state = config.state.lock().await;
             match &*config_state {
