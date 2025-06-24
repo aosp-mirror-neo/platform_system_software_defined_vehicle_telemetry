@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
-use sdv_telemetry_utils::file_io_utils;
+use sdv_telemetry_utils::{countdown_latch::Level, file_io_utils};
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self};
@@ -139,17 +139,14 @@ impl MetricsConfigManagerImpl {
                 let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
                     service_publisher_manager,
                     pal,
-                    move |config_uuid, _context, compute_order, countdown_latch| {
+                    move |config_uuid, _context, Level(compute_order), countdown_latch| {
                         if let Some(manager) = manager_reference_clone.upgrade() {
                             // TODO(b/308000132): Ensure to use `_context` here once we
                             // generate partial reports when a Metrics Config is finished.
                             tokio::spawn(async move {
-                                if compute_order == 0 {
-                                    panic!("compute_order of FinishTrigger can not be zero")
-                                }
                                 // Wait until aggregation publishers which depend on finish_trigger
                                 // finish their aggregations
-                                countdown_latch.wait(compute_order - 1).await;
+                                countdown_latch.wait(Level(compute_order - 1)).await;
 
                                 manager
                                     .deactivate_metrics_config(&config_uuid)

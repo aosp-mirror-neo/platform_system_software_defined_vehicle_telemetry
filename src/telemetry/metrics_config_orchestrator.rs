@@ -42,7 +42,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     Publisher as PublisherProto, Trigger as TriggerProto,
 };
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
-use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
 };
@@ -161,7 +161,7 @@ pub(super) struct MetricsConfigOrchestratorImpl {
 
     /// The function that is called when finish trigger of a Metrics Config is fired.
     finish_trigger_fired_callback: Arc<
-        dyn Fn(String, Arc<NodeEvaluationContext>, u32, MultiLevelCountdownLatch) + Send + Sync,
+        dyn Fn(String, Arc<NodeEvaluationContext>, Level, MultiLevelCountdownLatch) + Send + Sync,
     >,
 
     /// The function that is called when a new Metrics Report is ready.
@@ -558,7 +558,7 @@ impl MetricsConfigOrchestratorImpl {
     pub(super) fn new(
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         pal: Arc<dyn PlatformAbstractionLayer>,
-        finish_trigger_fired_callback: impl Fn(String, Arc<NodeEvaluationContext>, u32, MultiLevelCountdownLatch)
+        finish_trigger_fired_callback: impl Fn(String, Arc<NodeEvaluationContext>, Level, MultiLevelCountdownLatch)
             + Send
             + Sync
             + 'static,
@@ -911,7 +911,7 @@ impl MetricsConfigOrchestratorImpl {
 
     fn on_start_trigger_fired(
         maybe_config: Option<Arc<MetricsConfig>>,
-        compute_order: u32,
+        compute_order: Level,
         countdown_latch: MultiLevelCountdownLatch,
     ) {
         tokio::spawn(async move {
@@ -966,17 +966,14 @@ impl MetricsConfigOrchestratorImpl {
 
     fn on_end_trigger_fired(
         config: Arc<MetricsConfig>,
-        compute_order: u32,
+        compute_order: Level,
         countdown_latch: MultiLevelCountdownLatch,
     ) {
         debug!("MetricsConfig {} end trigger fired", config.uuid);
 
         tokio::spawn(async move {
             // Wait until all computations on end_trigger are done before deactivating the config
-            if compute_order == 0 {
-                panic!("Compute order for End Trigger can not be zero");
-            }
-            countdown_latch.wait(compute_order - 1).await;
+            countdown_latch.wait(Level(compute_order.0 - 1)).await;
 
             // Lock state mutex, verify state and hold the mutex until transition is complete.
             let mut config_state = config.state.lock().await;

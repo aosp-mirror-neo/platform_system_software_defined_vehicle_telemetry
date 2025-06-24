@@ -5,8 +5,10 @@ use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use sdv_telemetry_utils::{
-    collection_extension::HashMapExtension, countdown_latch::MultiLevelCountdownLatch,
-    operation_result::OperationResult, value_holder::ValueHolder,
+    collection_extension::HashMapExtension,
+    countdown_latch::{Level, MultiLevelCountdownLatch},
+    operation_result::OperationResult,
+    value_holder::ValueHolder,
 };
 use std::borrow::Cow;
 use std::collections::HashMap;
@@ -133,7 +135,7 @@ impl Publisher for AggregationPublisher {
             AsyncEventHandler<(
                 ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>,
                 Arc<NodeEvaluationContext>,
-                u32,
+                Level,
                 MultiLevelCountdownLatch,
             )> for AggregationPublisherHandler
         {
@@ -145,7 +147,7 @@ impl Publisher for AggregationPublisher {
                         (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
                     >,
                     Arc<NodeEvaluationContext>,
-                    u32,
+                    Level,
                     MultiLevelCountdownLatch,
                 ),
             ) {

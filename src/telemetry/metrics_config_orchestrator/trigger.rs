@@ -76,3 +76,20 @@ impl ComputeOrder for TriggerSubscriber {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::metrics_config_orchestrator::{
+        subscription_manager::ComputeOrder, TriggerSubscriber,
+    };
+
+    #[test]
+    fn ensure_non_zero_compute_orders() {
+        assert_ne!(TriggerSubscriber::MetricsConfigEnd.compute_order(), 0);
+        assert_ne!(TriggerSubscriber::MetricsConfigFinish.compute_order(), 0);
+        assert_ne!(
+            TriggerSubscriber::MetricsReportGenerator { name: "".to_owned() }.compute_order(),
+            0
+        );
+    }
+}

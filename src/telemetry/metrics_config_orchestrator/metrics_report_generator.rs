@@ -8,7 +8,7 @@ use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_proto_rust::metrics_configuration::{
     metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
 };
-use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use sdv_telemetry_utils::value_holder::ValueHolder;
 use std::fmt::Display;
 use std::marker::{Send, Sync};
@@ -220,7 +220,7 @@ impl MetricsReportGeneratorImpl {
         self: &Arc<Self>,
         trigger_name: &str,
         context: &Arc<NodeEvaluationContext>,
-        compute_order: u32,
+        compute_order: Level,
         countdown_latch: MultiLevelCountdownLatch,
     ) {
         let self_clone = Arc::clone(self);
@@ -229,10 +229,7 @@ impl MetricsReportGeneratorImpl {
         tokio::spawn(async move {
             // Wait until other objects (such as aggregation publishers) finish their computations
             // caused be same trigger firing
-            if compute_order == 0 {
-                panic!("compute_order of Metrics Report Generator can not be zero")
-            }
-            countdown_latch.wait(compute_order - 1).await;
+            countdown_latch.wait(Level(compute_order.0 - 1)).await;
 
             // Build the message and generate the report
             let res = Arc::clone(&self_clone.message_builder).build(&context_clone);

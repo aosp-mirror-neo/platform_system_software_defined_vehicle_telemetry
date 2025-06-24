@@ -6,7 +6,7 @@ use sdv_telemetry_expr::{
     node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
     node_value::NodeValue,
 };
-use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use sdv_telemetry_utils::operation_result::OperationResult;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
@@ -201,7 +201,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
             AsyncEventHandler<(
                 OperationResult<'static, NodeValue, NodeEvaluationError>,
                 Arc<NodeEvaluationContext>,
-                u32,
+                Level,
                 MultiLevelCountdownLatch,
             )> for ConditionalTriggerHandler
         {
@@ -210,7 +210,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                 (evaluation_result, context, compute_order, countdown_latch): (
                     OperationResult<'static, NodeValue, NodeEvaluationError>,
                     Arc<NodeEvaluationContext>,
-                    u32,
+                    Level,
                     MultiLevelCountdownLatch,
                 ),
             ) {

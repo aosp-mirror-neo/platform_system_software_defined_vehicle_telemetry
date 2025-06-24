@@ -9,13 +9,13 @@
 use async_trait::async_trait;
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use std::sync::{Arc, Weak};
 use std::{collections::HashMap, fmt::Display, hash::Hash};
 use tokio::sync::Mutex as AsyncMutex;
 
 pub(crate) type CallbackFn<TCallbackArg> =
-    Box<dyn FnMut(TCallbackArg, u32, MultiLevelCountdownLatch) + Send + Sync>;
+    Box<dyn FnMut(TCallbackArg, Level, MultiLevelCountdownLatch) + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct ActivationId(SequenceNumberType);
@@ -140,19 +140,21 @@ impl<TKey: ComputeOrder + Display + Eq + Hash + Send + Sync, TCallbackArg: Clone
             return;
         }
 
-        // Count the number of subscribers for each `compute_order` to initialize CountdownLatch
-        let mut count_by_level = HashMap::new();
-        for key in callback_map.keys() {
-            let level = key.compute_order();
-            *count_by_level.entry(level).or_insert(0) += 1;
-        }
-        let countdown_latch = MultiLevelCountdownLatch::new();
-        for (level, count) in count_by_level {
-            countdown_latch.init_level(level, count).await;
-        }
+        let countdown_latch = callback_map
+            .keys()
+            .map(|key| Level(key.compute_order()))
+            .fold(HashMap::new(), |mut count_by_level, level| {
+                *count_by_level.entry(level).or_default() += 1;
+                count_by_level
+            })
+            .into_iter()
+            .fold(MultiLevelCountdownLatch::builder(), |builder, (level, count)| {
+                builder.with_level(level, count)
+            })
+            .build();
 
         for (key, callback) in callback_map {
-            callback(arg.clone(), key.compute_order(), countdown_latch.clone());
+            callback(arg.clone(), Level(key.compute_order()), countdown_latch.clone());
         }
     }
 }
@@ -399,7 +401,7 @@ mod tests {
         let key_callback = Box::new(move |_, _, latch: MultiLevelCountdownLatch| {
             let tx_clone = tx_clone.clone();
             tokio::spawn(async move {
-                latch.count_down(0).await;
+                latch.count_down(Level(0)).await;
                 tx_clone.send(KEY).unwrap();
             });
         });
@@ -408,7 +410,7 @@ mod tests {
         let key2_callback = Box::new(move |_, _, latch: MultiLevelCountdownLatch| {
             let tx_clone = tx.clone();
             tokio::spawn(async move {
-                latch.wait(0).await;
+                latch.wait(Level(0)).await;
                 tx_clone.send(KEY2).unwrap();
             });
         });

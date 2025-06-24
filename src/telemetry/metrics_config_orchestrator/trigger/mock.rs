@@ -5,7 +5,7 @@ use super::*;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
-use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -86,8 +86,9 @@ impl MockTrigger {
         let mut lock = self.on_fired_callback.lock().await;
         let (subscriber, on_fired_callback) = lock.as_mut().unwrap();
 
-        let compute_order = subscriber.compute_order();
-        let countdown_latch = MultiLevelCountdownLatch::new_with_level(compute_order, 1);
+        let compute_order = Level(subscriber.compute_order());
+        let countdown_latch =
+            MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
         on_fired_callback(context, compute_order, countdown_latch);
     }
 
@@ -173,8 +174,9 @@ impl SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>
         let mut callback_lock = self.callback.lock();
         *self.activation_id.lock() = Some(activation_id);
         if let Some(callback) = &mut *callback_lock {
-            let compute_order = self.key.lock().as_ref().unwrap().compute_order();
-            let countdown_latch = MultiLevelCountdownLatch::new_with_level(compute_order, 1);
+            let compute_order = Level(self.key.lock().as_ref().unwrap().compute_order());
+            let countdown_latch =
+                MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
             callback(arg, compute_order, countdown_latch.clone());
         }
     }
