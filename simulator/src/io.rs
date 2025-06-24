@@ -43,7 +43,8 @@ pub fn read_publisher_config_from_file(
     };
     let file_name = file_name_os.to_string_lossy().into_owned().clone();
 
-    if file_path.extension().and_then(|o| o.to_str()) != Some("textproto") {
+    let extension = file_path.extension().and_then(|o| o.to_str());
+    if extension != Some("textproto") && extension != Some("txtpb") {
         return Err(SimulatorError::FailedToParseFile {
             file_name,
             error_message: "Publisher config files must have file extension .textproto".to_owned(),
