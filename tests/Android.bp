@@ -32,7 +32,7 @@ rust_test {
         "liblog_rust",
         "liblogger",
         "libprotobuf",
-        "librand-0.8",
+        "librand",
         "libsdv_comms_rs",
         "libsdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader",
         "libsdv_mw_rs_sdv_comms",

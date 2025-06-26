@@ -75,7 +75,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
         // Generate random data and send to subscribers.
         let mut rng = rand::thread_rng();
         let mut message = SampleMessage::new();
-        message.sample_data = rng.gen();
+        message.sample_data = rng.random();
 
         match dt_publisher.publish_length_delimited_proto(&message) {
             Ok(()) => info!("Message written to DT: {}", message),

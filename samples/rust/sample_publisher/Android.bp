@@ -35,7 +35,7 @@ rust_defaults {
         "liblogger",
         "libparking_lot",
         "libprotobuf",
-        "librand-0.8",
+        "librand",
         "libsample_publisher_proto",
         "libsdv_telemetry_utils",
         "libtokio",
