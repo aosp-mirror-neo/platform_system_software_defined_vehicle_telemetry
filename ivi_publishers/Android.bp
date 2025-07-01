@@ -5,15 +5,27 @@ package {
     default_applicable_licenses: ["sdv_license"],
 }
 
+filegroup {
+    name: "ivi-stats-publisher-proto-srcs",
+    srcs: [
+        "proto/*.proto",
+    ],
+}
+
 android_app {
     name: "telemetry_ivi_stats_publisher",
     platform_apis: true,
     srcs: [
         "stats_publisher/StatsPublisher.java",
+        ":ivi-stats-publisher-proto-srcs",
     ],
     manifest: "stats_publisher/AndroidManifest.xml",
 
     libs: [
+    ],
+
+    static_libs: [
+        "libprotobuf-java-lite",
     ],
 
     optimize: {
