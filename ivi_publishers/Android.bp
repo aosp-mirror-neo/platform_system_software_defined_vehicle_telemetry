@@ -1,0 +1,25 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+android_app {
+    name: "telemetry_ivi_stats_publisher",
+    platform_apis: true,
+    srcs: [
+        "stats_publisher/StatsPublisher.java",
+    ],
+    manifest: "stats_publisher/AndroidManifest.xml",
+
+    libs: [
+    ],
+
+    optimize: {
+        enabled: false,
+    },
+
+    privileged: true,
+    certificate: "platform",
+}
