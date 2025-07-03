@@ -88,9 +88,25 @@ impl DataTunnelSubscriber {
                         return;
                     }
                     Some(Some(result)) => {
-                        let (number_of_messages, buffer) = match result.with_context(|| {
-                            "Data Tunnel message stream produced an intermittent error"
-                        }) {
+                        let (number_of_messages, buffer) = match result
+                            .or_else(|err| {
+                                // This error indicates an overflow in the FMQ ring buffer. FMQ
+                                // then recovers the read pointer, so a subsequent read is likely
+                                // to  succeed.
+                                //
+                                // For Subsampling Subscribers that read less frequently than the
+                                // publisher writes, the initial read is expected to overflow.
+                                // Retrying the read is acceptable in this case, as these
+                                // subscribers only need to retain the most recent value.
+                                if sub_sampling_interval != SubSamplingInterval::ZERO {
+                                    subscriber_stream.read_all_available_messages()
+                                } else {
+                                    Err(err)
+                                }
+                            })
+                            .with_context(|| {
+                                "Data Tunnel message stream produced an intermittent error"
+                            }) {
                             Ok(result) => result,
                             Err(err) => {
                                 (new_message_callback)(Err(
