@@ -978,16 +978,16 @@ mod integration_tests {
                 write_message(&publisher, TestMessage { int_field: i, ..Default::default() });
             }
 
-            let message = rx.recv().await.unwrap();
-            let Err(ServicePublisherAccessorError::MessageRetrievalFailed(error)) = message else {
-                panic!("Unexpected message: {message:?}");
-            };
-            let Some(error) = error.root_cause().downcast_ref::<SdvStatus>() else {
-                panic!("Unexpected error: {error:?}");
-            };
-            assert_eq!(error.status_code(), SdvStatusCode::DataLoss);
-
             if sub_sampling_interval == SubSamplingInterval::ZERO {
+                let message = rx.recv().await.unwrap();
+                let Err(ServicePublisherAccessorError::MessageRetrievalFailed(error)) = message else {
+                    panic!("Unexpected message: {message:?}");
+                };
+                let Some(error) = error.root_cause().downcast_ref::<SdvStatus>() else {
+                    panic!("Unexpected error: {error:?}");
+                };
+                assert_eq!(error.status_code(), SdvStatusCode::DataLoss);
+
                 // After the overflow occurred, we should be able to read the last `n/2` (=3)
                 // messages, where `n` (=6) is the message queue size.
                 let message = rx.recv().await.unwrap();
@@ -997,7 +997,8 @@ mod integration_tests {
                 let message = rx.recv().await.unwrap();
                 assert_eq!(get_int_field_value(message.unwrap()), 30);
             } else {
-                // After the overflow occurred, we should only receive the latest message.
+                // In case of subsampling `CommsStackAccessor` contains the overflow error and
+                // retries a read.
                 let message = rx.recv().await.unwrap();
                 assert_eq!(get_int_field_value(message.unwrap()), 30);
             }
