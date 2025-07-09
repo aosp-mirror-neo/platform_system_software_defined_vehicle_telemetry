@@ -1,0 +1,39 @@
+// Copyright 2025 Google LLC
+
+// This file defines the protobuf message that will be used to configure
+// the StatsPublisher service for IVI telemetry.
+
+syntax = "proto3";
+
+package google.sdv.telemetry.java.StatsPublisher;
+
+option java_package = "google.sdv.telemetry.java.StatsPublisher";
+option java_outer_classname = "StatsPublisherConfigProto";
+
+// Enum for defining requested atoms in a metrics configuration. The enum values are
+// the values used by statsd and StatsManager in atoms.proto.
+enum StatsPublisherAtom {
+    UNKNOWN = 0; // default value, should never be set, config will be rejected.
+    ACTIVITY_FOREGROUND_STATE_CHANGED = 42;
+    APP_START_OCCURRED = 48;
+    APP_CRASH_OCCURRED = 78;
+    MEDIA_PLAYBACK_STATE_CHANGED = 322;
+}
+
+// Details the configuration for collection and filtering of an atom.
+message AtomConfig {
+    StatsPublisherAtom atom_configured = 1;
+
+    // how often polling should occur for this atom in milliseconds
+    int64 polling_interval_ms = 2;
+
+    // allows filtering by the name of the package
+    // if not specified, all packages will be included
+    // repeated field, if multiple filters are specified, they will be ignored
+    repeated string package_name_filter = 3;
+}
+
+// Configuration Message, contains a list of configurations on a per-atom-basis.
+message StatsPublisherConfiguration {
+    repeated AtomConfig config = 1;
+}
