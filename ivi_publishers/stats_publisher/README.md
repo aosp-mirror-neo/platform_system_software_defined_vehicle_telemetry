@@ -14,7 +14,8 @@ This module is not built in any lunch target by default. In order to build,
 add the following line to the `SDV_IVI_TELEMETRY_SAMPLES_PACKAGES` variable in
 `/device/google/sdv/sdv_ivi_base/sdv_samples_ivi_telemetry.mk`:
 ```mk
-telemetry_ivi_stats_publisher # line 16, also add a backslash (\) to the end of line 15.
+telemetry_ivi_stats_publisher \ # line 16, also add a backslash (\) to the end of line 15.
+privapp-permissions-ivi_stats_publisher.xml
 ```
 
 Do not push this update to the file. It is meant to be for Proof-of-concept

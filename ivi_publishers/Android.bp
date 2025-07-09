@@ -25,13 +25,23 @@ android_app {
     ],
 
     static_libs: [
+        "google.sdv.telemetry.configurable_publisher-V1-java",
         "libprotobuf-java-lite",
+        "androidx.annotation_annotation",
     ],
 
     optimize: {
         enabled: false,
     },
 
+    system_ext_specific: true,
     privileged: true,
     certificate: "platform",
+}
+
+prebuilt_etc {
+    name: "privapp-permissions-ivi_stats_publisher.xml",
+    src: "stats_publisher/privapp-permissions-stats_publisher.xml",
+    sub_dir: "permissions",
+    system_ext_specific: true,
 }
