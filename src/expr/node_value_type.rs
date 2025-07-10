@@ -438,9 +438,12 @@ impl NodeValueTypeExtension for RuntimeType {
 mod tests {
     use super::*;
 
+    use googletest::assert_that;
+    use googletest::matchers::{eq, err, none, ok, pat, some};
     use protobuf::{
         well_known_types::wrappers::FloatValue, well_known_types::wrappers::Int32Value, MessageFull,
     };
+    use sdv_telemetry_proto_rust::expression::combination_node::RoundingOperator;
     use sdv_telemetry_test_utils::parameterized_test;
 
     parameterized_test!(
@@ -602,5 +605,81 @@ mod tests {
         message_with_some_descriptor_on_none: (false, NodeValueType::Message { descriptor: Some(Int32Value::descriptor()) }, None,),
         // `ByteList` does not currently support edge processing.
         byte_list_on_none: (false, NodeValueType::ByteList, None,),
+    );
+
+    parameterized_test!(
+        #[test]
+        operator_proto_get_node_value_type,
+
+        |op: OperatorProto, left: Option<NodeValueType>, right: Option<NodeValueType>, matcher| {
+            let node_value_types = [left, right];
+            let right_index = if op.is_unary_operator() { None } else { Some (1) };
+            assert_that!(
+                op.get_node_value_type(&node_value_types, 0, right_index),
+                matcher
+            );
+        },
+
+        eq_int_int: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        eq_int_float: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
+        eq_bool_bool: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::Bool), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
+        eq_int_list_int: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        eq_bool_list_int_err: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::BoolList), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands{..}))),
+        not_eq_int_int: (OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        all_eq_deprecated: (OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::DeprecatedOperator{..}))),
+
+        gt_int_int: (OperatorProto::RelationalOperator(RelationalOperator::GT.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        gt_or_eq_int_float: (OperatorProto::RelationalOperator(RelationalOperator::GT_OR_EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
+        lt_float_float: (OperatorProto::RelationalOperator(RelationalOperator::LT.into()), Some(NodeValueType::Float), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        lt_or_eq_float_float: (OperatorProto::RelationalOperator(RelationalOperator::LT_OR_EQ.into()), Some(NodeValueType::Float), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
+        gt_int_string_err: (OperatorProto::RelationalOperator(RelationalOperator::GT.into()), Some(NodeValueType::Int), Some(NodeValueType::String), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands))),
+
+        contains_intlist_int: (OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        contains_intlist_float: (OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into()), Some(NodeValueType::IntList), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
+        contains_boollist_bool: (OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into()), Some(NodeValueType::BoolList), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
+        does_not_contain_floatlist_int: (OperatorProto::RelationalOperator(RelationalOperator::DOES_NOT_CONTAIN.into()), Some(NodeValueType::FloatList), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
+        contains_intlist_bool_err: (OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into()), Some(NodeValueType::IntList), Some(NodeValueType::Bool), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands))),
+        contains_int_intlist_err: (OperatorProto::RelationalOperator(RelationalOperator::CONTAINS.into()), Some(NodeValueType::Int), Some(NodeValueType::IntList), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands))),
+
+        and_bool_bool: (OperatorProto::LogicalOperator(LogicalOperator::AND.into()), Some(NodeValueType::Bool), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
+        or_bool_bool: (OperatorProto::LogicalOperator(LogicalOperator::OR.into()), Some(NodeValueType::Bool), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
+        xor_bool_bool: (OperatorProto::LogicalOperator(LogicalOperator::XOR.into()), Some(NodeValueType::Bool), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
+        and_bool_int_err: (OperatorProto::LogicalOperator(LogicalOperator::AND.into()), Some(NodeValueType::Bool), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands))),
+        or_int_bool_err: (OperatorProto::LogicalOperator(LogicalOperator::OR.into()), Some(NodeValueType::Int), Some(NodeValueType::Bool), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands))),
+        not_bool: (OperatorProto::LogicalOperator(LogicalOperator::NOT.into()), Some(NodeValueType::Bool), None, ok(some(eq(&NodeValueType::Bool)))),
+        not_int_err: (OperatorProto::LogicalOperator(LogicalOperator::NOT.into()), Some(NodeValueType::Int), None, err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands))),
+
+        add_int_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Int)))),
+        subtract_float_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::SUBTRACT.into()), Some(NodeValueType::Float), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Float)))),
+        multiply_int_float: (OperatorProto::ArithmeticOperator(ArithmeticOperator::MULTIPLY.into()), Some(NodeValueType::Int), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Float)))),
+        add_float_float: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into()), Some(NodeValueType::Float), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Float)))),
+        add_int_bool_err: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into()), Some(NodeValueType::Int), Some(NodeValueType::Bool), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands))),
+        add_int_none: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into()), Some(NodeValueType::Int), None, ok(eq(&None))),
+
+        divide_int_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::DIVIDE.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Float)))),
+        power_float_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into()), Some(NodeValueType::Float), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Float)))),
+        divide_int_string_err: (OperatorProto::ArithmeticOperator(ArithmeticOperator::DIVIDE.into()), Some(NodeValueType::Int), Some(NodeValueType::String), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands))),
+        power_int_string_err: (OperatorProto::ArithmeticOperator(ArithmeticOperator::POWER.into()), Some(NodeValueType::Int), Some(NodeValueType::String), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands))),
+
+        modulo_int_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULO_TRUNC.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Int)))),
+        modulo_int_float_err: (OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULO_TRUNC.into()), Some(NodeValueType::Int), Some(NodeValueType::Float), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands))),
+
+        unary_minus_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::UNARY_MINUS.into()), Some(NodeValueType::Int), None, ok(some(eq(&NodeValueType::Int)))),
+        unary_minus_float: (OperatorProto::ArithmeticOperator(ArithmeticOperator::UNARY_MINUS.into()), Some(NodeValueType::Float), None, ok(some(eq(&NodeValueType::Float)))),
+        unary_minus_none: (OperatorProto::ArithmeticOperator(ArithmeticOperator::UNARY_MINUS.into()), None, None, ok(none())),
+        unary_minus_bool_err: (OperatorProto::ArithmeticOperator(ArithmeticOperator::UNARY_MINUS.into()), Some(NodeValueType::Bool), None, err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands))),
+        absolute_int: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ABSOLUTE.into()), Some(NodeValueType::Int), None, ok(some(eq(&NodeValueType::Int)))),
+        absolute_float: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ABSOLUTE.into()), Some(NodeValueType::Float), None, ok(some(eq(&NodeValueType::Float)))),
+        absolute_minus_none: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ABSOLUTE.into()), None, None, ok(none())),
+        absolute_minus_bool_err: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ABSOLUTE.into()), Some(NodeValueType::Bool), None, err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands))),
+
+        floor_float: (OperatorProto::RoundingOperator(RoundingOperator::FLOOR.into()), Some(NodeValueType::Float), None, ok(some(eq(&NodeValueType::Int)))),
+        ceil_float: (OperatorProto::RoundingOperator(RoundingOperator::CEIL.into()), Some(NodeValueType::Float), None, ok(some(eq(&NodeValueType::Int)))),
+        round_float: (OperatorProto::RoundingOperator(RoundingOperator::ROUND.into()), Some(NodeValueType::Float), None, ok(some(eq(&NodeValueType::Int)))),
+        floor_int_err: (OperatorProto::RoundingOperator(RoundingOperator::FLOOR.into()), Some(NodeValueType::Int), None, err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands))),
+
+        add_float_none: (OperatorProto::ArithmeticOperator(ArithmeticOperator::ADD.into()), Some(NodeValueType::Float), None, ok(some(eq(&NodeValueType::Float)))),
+        gt_int_none: (OperatorProto::RelationalOperator(RelationalOperator::GT.into()), Some(NodeValueType::Int), None, ok(some(eq(&NodeValueType::Bool)))),
+        modulo_int_none: (OperatorProto::ArithmeticOperator(ArithmeticOperator::MODULO_TRUNC.into()), Some(NodeValueType::Int), None, ok(some(eq(&NodeValueType::Int))))
     );
 }

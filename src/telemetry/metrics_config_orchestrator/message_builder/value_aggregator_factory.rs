@@ -371,8 +371,10 @@ mod tests {
     const ANY_LIST_FIELD_NAME: &str = "repeated_any";
     const MESSAGE_FIELD_NAME: &str = "message_field";
     const MESSAGE_LIST_FIELD_NAME: &str = "repeated_messages";
+    const BOOL_FIELD_NAME: &str = "bool_field";
     const INT_FIELD_NAME: &str = "int_field";
     const FLOAT_FIELD_NAME: &str = "float_field";
+    const BOOL_LIST_FIELD_NAME: &str = "repeated_bools";
     const FLOAT_LIST_FIELD_NAME: &str = "repeated_doubles";
     const REPEATED_INT_FIELD_NAME: &str = "repeated_i64s";
     const STRING_FIELD_NAME: &str = "string_field";
@@ -392,6 +394,12 @@ mod tests {
     fn create_float_nodes_of_size(n: usize) -> (Vec<Arc<Node>>, Vec<Option<NodeValueType>>) {
         let node = Arc::new(Node::ConstantLeaf { value: NodeValue::Float(0.0) });
         let node_type = Some(NodeValueType::Float);
+        (vec![node; n], vec![node_type; n])
+    }
+
+    fn create_bool_nodes_of_size(n: usize) -> (Vec<Arc<Node>>, Vec<Option<NodeValueType>>) {
+        let node = Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(false) });
+        let node_type = Some(NodeValueType::Bool);
         (vec![node; n], vec![node_type; n])
     }
 
@@ -531,7 +539,18 @@ mod tests {
             AggregatedFieldValueProto::CountAggregation(CountAggregation::new()),
             Box::new(Result::is_ok),
         ),
-
+        bool_no_aggregation_ok: (
+            BOOL_FIELD_NAME,
+            &[Some(NodeValueType::Bool)],
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        bool_vector_aggregation_ok: (
+            BOOL_LIST_FIELD_NAME,
+            &[Some(NodeValueType::Bool)],
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
         node_output_is_int_but_field_is_float_ok: (
             FLOAT_FIELD_NAME,
             &[Some(NodeValueType::Int)],
@@ -737,7 +756,18 @@ mod tests {
             AggregatedFieldValueProto::CountAggregation(CountAggregation::new()),
             Box::new(Result::is_ok),
         ),
-
+        bool_no_aggregation_ok: (
+            BOOL_FIELD_NAME,
+            create_bool_nodes_of_size(1),
+            AggregatedFieldValueProto::NoAggregation(create_no_aggregation_proto(Some(0))),
+            Box::new(Result::is_ok),
+        ),
+        bool_vector_aggregation_ok: (
+            BOOL_LIST_FIELD_NAME,
+            create_bool_nodes_of_size(1),
+            AggregatedFieldValueProto::VectorAggregation(create_vector_aggregation_proto(Some(0), Some(1))),
+            Box::new(Result::is_ok),
+        ),
         node_output_is_int_but_field_is_float_ok: (
             FLOAT_FIELD_NAME,
             (vec![Arc::new(Node::ConstantLeaf { value: NodeValue::Bool(true) })], vec![Some(NodeValueType::Int)]),
