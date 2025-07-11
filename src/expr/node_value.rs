@@ -794,6 +794,32 @@ mod tests {
         );
     }
 
+    parameterized_test!(
+        #[test]
+        is_zero,
+
+        |a: NodeValue, expected| {
+            assert_that!(a.is_zero(), expected);
+        },
+
+        int32_zero: (NodeValue::Int32(0), ok(eq(&true))),
+        int64_zero: (NodeValue::Int64(0), ok(eq(&true))),
+        float_zero: (NodeValue::Float(0.0), ok(eq(&true))),
+        double_zero: (NodeValue::Double(0.0), ok(eq(&true))),
+        float_approx_zero: (NodeValue::Float(1e-7), ok(eq(&true))),
+        double_approx_zero: (NodeValue::Double(-1e-9), ok(eq(&true))),
+
+        int32_non_zero: (NodeValue::Int32(42), ok(eq(&false))),
+        int64_non_zero: (NodeValue::Int64(-42), ok(eq(&false))),
+        float_non_zero: (NodeValue::Float(42.0), ok(eq(&false))),
+        double_non_zero: (NodeValue::Double(-42.0), ok(eq(&false))),
+        float_approx_non_zero: (NodeValue::Float(0.1), ok(eq(&false))),
+        double_approx_non_zero: (NodeValue::Double(-0.0001), ok(eq(&false))),
+
+        bool_err: (NodeValue::Bool(false), err(pat!(NodeEvaluationError::InternalError { .. }))),
+        string_err: (NodeValue::String("".to_owned()), err(pat!(NodeEvaluationError::InternalError { .. }))),
+    );
+
     #[test]
     fn from_constant_leaf_node() {
         // setup
@@ -811,6 +837,8 @@ mod tests {
 
         let mut constant_leaf_node_double = ConstantLeafNode::new();
         constant_leaf_node_double.set_double_value(1.5);
+
+        let constant_leaf_node_none = ConstantLeafNode::new();
 
         // assert
         assert_eq!(
@@ -833,6 +861,10 @@ mod tests {
             NodeValue::from_constant_leaf_node(&constant_leaf_node_double).unwrap(),
             NodeValue::Double(1.5)
         );
+        assert!(matches!(
+            NodeValue::from_constant_leaf_node(&constant_leaf_node_none).unwrap_err(),
+            NodeEvaluationError::ConstantValueNotSet
+        ));
     }
 
     #[test]
@@ -1058,19 +1090,24 @@ mod tests {
         eq_none_left: (&OP_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         eq_none_right: (&OP_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
-        eq_list_1: (&OP_EQ, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_2: (&OP_EQ, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
-        eq_list_3: (&OP_EQ, NodeValue::BoolList(vec![true, false, false]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
-        eq_list_4: (&OP_EQ, NodeValue::BoolList(vec![true, false, false]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
-        eq_list_5: (&OP_EQ, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
-        eq_list_6: (&OP_EQ, NodeValue::Int64List(vec![0, 0]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_7: (&OP_EQ, NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(false))),),
-        eq_list_8: (&OP_EQ, NodeValue::FloatList(vec![0.5, 0.5]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_9: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(true))),),
-        eq_list_10: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_bool_all_eq: (&OP_EQ, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_bool_none_eq: (&OP_EQ, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_bool_some_eq_true: (&OP_EQ, NodeValue::BoolList(vec![true, false, false]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_bool_some_eq_false: (&OP_EQ, NodeValue::BoolList(vec![true, false, false]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_int32_not_eq: (&OP_EQ, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_int32_all_eq: (&OP_EQ, NodeValue::Int32List(vec![0, 0]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_int64_not_eq: (&OP_EQ, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_int64_all_eq: (&OP_EQ, NodeValue::Int64List(vec![0, 0]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_float_not_eq: (&OP_EQ, NodeValue::FloatList(vec![0.5, std::f32::consts::PI, 10.0]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_float_all_eq: (&OP_EQ, NodeValue::FloatList(vec![0.5, 0.5]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_double_not_eq: (&OP_EQ, NodeValue::DoubleList(vec![0.5, std::f64::consts::PI, 10.0]), NodeValue::Double(0.5), ok(eq(&NodeValue::Bool(false))),),
+        eq_list_double_all_eq: (&OP_EQ, NodeValue::DoubleList(vec![0.5, 0.5]), NodeValue::Float(0.5), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_msg_all_eq: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)), ok(eq(&NodeValue::Bool(true))),),
+        eq_list_msg_not_eq: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(false))),),
         eq_list_none_left: (&OP_EQ, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
         eq_list_none_right: (&OP_EQ, NodeValue::Int64List(vec![42]), NodeValue::None, ok(eq(&NodeValue::None)),),
         eq_list_incompatible_types: (&OP_EQ, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
+        eq_list_list: (&OP_EQ, NodeValue::BoolList(vec![true]), NodeValue::BoolList(vec![true]), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
 
         ne_1: (&OP_NOT_EQ, ONE, ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
         ne_2: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
@@ -1125,6 +1162,9 @@ mod tests {
         contains_int_1: (&OP_CONTAINS, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(30), ok(eq(&NodeValue::Bool(true))),),
         contains_int_2: (&OP_CONTAINS, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int64(30), ok(eq(&NodeValue::Bool(true))),),
         contains_int_3: (&OP_CONTAINS, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
+        contains_int64_1: (&OP_CONTAINS, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(30), ok(eq(&NodeValue::Bool(true))),),
+        contains_int64_2: (&OP_CONTAINS, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int64(30), ok(eq(&NodeValue::Bool(true))),),
+        contains_int64_3: (&OP_CONTAINS, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(false))),),
         contains_float_1: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(0.5), ok(eq(&NodeValue::Bool(true))),),
         contains_float_2: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Double(PIf64), ok(eq(&NodeValue::Bool(true))),),
         contains_float_3: (&OP_CONTAINS, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Int32(10), ok(eq(&NodeValue::Bool(true))),),
@@ -1137,12 +1177,16 @@ mod tests {
         contains_not_a_list: (&OP_CONTAINS, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
         contains_incompatible_types_1: (&OP_CONTAINS, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
         contains_incompatible_types_2: (&OP_CONTAINS, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        contains_incompatible_types_3: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
 
         not_contains_bool_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
         not_contains_bool_2: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
         not_contains_int_1: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(30), ok(eq(&NodeValue::Bool(false))),),
         not_contains_int_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int64(30), ok(eq(&NodeValue::Bool(false))),),
         not_contains_int_3: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
+        not_contains_int64_1: (&OP_DOES_NOT_CONTAIN, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(30), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_int64_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int64(30), ok(eq(&NodeValue::Bool(false))),),
+        not_contains_int64_3: (&OP_DOES_NOT_CONTAIN, NodeValue::Int64List(vec![3, 30, 300]), NodeValue::Int32(0), ok(eq(&NodeValue::Bool(true))),),
         not_contains_float_1: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Float(0.5), ok(eq(&NodeValue::Bool(false))),),
         not_contains_float_2: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Double(PIf64), ok(eq(&NodeValue::Bool(false))),),
         not_contains_float_3: (&OP_DOES_NOT_CONTAIN, NodeValue::FloatList(vec![0.5, PIf32, 10.0]), NodeValue::Int32(10), ok(eq(&NodeValue::Bool(false))),),
@@ -1155,6 +1199,7 @@ mod tests {
         not_contains_not_a_list: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
         not_contains_incompatible_types_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
         not_contains_incompatible_types_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        not_contains_incompatible_types_3: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
     );
 
     parameterized_test!(
