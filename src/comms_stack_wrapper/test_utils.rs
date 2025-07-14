@@ -4,10 +4,13 @@
 
 #![cfg(test)]
 
+use futures::StreamExt;
 use protobuf::Message;
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::rpc;
+use sdv_comms::sd::ServiceDiscoveryManager;
+use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::sd::{
     PublisherUnitMetadata, ServerUnitMetadata, UnitMetadata, UnitRegistrationArgs, UnitType,
 };
@@ -55,6 +58,16 @@ pub(super) fn make_unique_unit_type() -> UnitType {
         unique_dt_topic_name()
     ))
     .unwrap()
+}
+
+pub(super) async fn discover_service(
+    ctx: ContextRef,
+    unit_type: &UnitType,
+) -> ServiceUnitDefinition {
+    let sd = ServiceDiscoveryManager::new(ctx);
+    let service_units = sd.list_units_by_type(unit_type).collect::<Vec<_>>().await;
+    assert_eq!(service_units.len(), 1);
+    service_units[0].clone()
 }
 
 pub(super) async fn register_topic(

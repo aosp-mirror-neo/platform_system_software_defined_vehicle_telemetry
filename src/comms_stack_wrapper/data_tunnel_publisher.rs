@@ -106,56 +106,16 @@ impl DataTunnelPublisher {
 mod tests {
     use super::*;
 
-    use futures::stream::StreamExt;
     use protobuf::Message;
-    use sdv_comms::id::ServiceFqin;
-    use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition, UnitType};
     use sdv_status_rs::SdvStatusCode;
-    use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
     use sdv_telemetry_test_proto::test_message::TestMessage;
-    use sdv_telemetry_test_utils::unique_dt_topic_name;
-    use std::str::FromStr;
-    use tokio::sync::OnceCell;
 
-    use crate::test_utils::UNIT_NAME;
-
-    async fn make_context() -> ContextRef {
-        static CONTEXT_REF: OnceCell<ContextRef> = OnceCell::const_new();
-        *CONTEXT_REF
-            .get_or_init(|| async {
-                // Tests may run in multiple parallel processes, therefore we need to ensure that the
-                // FQINs created by the processes do not conflict with each other. This is achieved by
-                // embedding the process ID into the FQIN.
-                let fqin = ServiceFqin::from_str(&format!(
-                    "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest{}/instance",
-                    std::process::id()
-                ))
-                .unwrap();
-
-                wait_for_sdv_agents_and_create_context(fqin).await
-            })
-            .await
-    }
-
-    fn make_unique_unit_type() -> UnitType {
-        UnitType::from_str(&format!(
-            "com.google.sdv.telemetry.tests.DataTunnelPublisherTest#{}",
-            unique_dt_topic_name()
-        ))
-        .unwrap()
-    }
-
-    async fn discover_service(ctx: ContextRef, unit_type: &UnitType) -> ServiceUnitDefinition {
-        let sd = ServiceDiscoveryManager::new(ctx);
-        let service_units = sd.list_units_by_type(unit_type).collect::<Vec<_>>().await;
-        assert_eq!(service_units.len(), 1);
-        service_units[0].clone()
-    }
+    use crate::test_utils::{discover_service, make_context, make_unique_unit_type, UNIT_NAME};
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_topic_success() {
-        let ctx = make_context().await;
+        let ctx = make_context(0).await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -174,7 +134,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_bytes_success() {
-        let ctx = make_context().await;
+        let ctx = make_context(0).await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -203,7 +163,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_bytes_overflow() {
-        let ctx = make_context().await;
+        let ctx = make_context(0).await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -243,7 +203,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_length_delimited_proto_success() {
-        let ctx = make_context().await;
+        let ctx = make_context(0).await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -278,7 +238,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_length_delimited_proto_too_long_failure() {
-        let ctx = make_context().await;
+        let ctx = make_context(0).await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
