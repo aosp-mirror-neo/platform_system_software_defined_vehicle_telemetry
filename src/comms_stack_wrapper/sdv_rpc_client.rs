@@ -296,3 +296,98 @@ fn get_either_or_ensure_equal(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use protobuf::well_known_types::{
+        any::Any,
+        empty::Empty,
+        wrappers::{Int32Value, StringValue},
+    };
+    use protobuf::MessageFull;
+
+    #[test]
+    fn test_serialize_configuration_none() {
+        let descriptor = Empty::descriptor();
+        let result = SdvRpcClient::serialize_configuration(None, &descriptor).unwrap();
+        let expected = Empty::new().write_to_bytes().unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_serialize_configuration_with_any_descriptor() {
+        // The expected descriptor is `google.protobuf.Any`. The original `Any` message bytes are
+        // returned directly without unpacking.
+        let inner_message = StringValue { value: "test".to_string(), ..Default::default() };
+        let config_any = Any::pack(&inner_message).unwrap();
+        let config_bytes = config_any.write_to_bytes().unwrap();
+
+        // The descriptor is for `Any` itself.
+        let descriptor = Any::descriptor();
+        assert_eq!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
+
+        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor).unwrap();
+        assert_eq!(result, config_bytes);
+    }
+
+    #[test]
+    fn test_serialize_configuration_unpack_success() {
+        // A specific message type is expected, and the `Any` message contains that type.
+        // The function successfully unpacks the `Any` and serializes the inner message.
+        let inner_message = StringValue { value: "test".to_string(), ..Default::default() };
+        let expected_bytes = inner_message.write_to_bytes().unwrap();
+        let config_any = Any::pack(&inner_message).unwrap();
+
+        // The descriptor is for the inner message type (`StringValue`).
+        let descriptor = StringValue::descriptor();
+        assert_ne!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
+
+        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor).unwrap();
+        assert_eq!(result, expected_bytes);
+    }
+
+    #[test]
+    fn test_serialize_configuration_type_mismatch() {
+        // A specific message type is expected, but the `Any` message contains a different type.
+        // An error indicating a type mismatch should be returned.
+        let inner_message = StringValue { value: "test".to_string(), ..Default::default() };
+        let config_any = Any::pack(&inner_message).unwrap();
+
+        // An `Int32Value` is expected, but the `Any` message contains a `StringValue`.
+        let descriptor = Int32Value::descriptor();
+        assert_ne!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
+
+        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor);
+
+        assert!(result.is_err());
+        let error_str = result.unwrap_err().to_string();
+        // Check that the error is wrapped correctly and contains the expected message.
+        assert!(error_str.contains("Failed to parse metadata"));
+        assert!(error_str.contains("Type mismatch"));
+    }
+
+    #[test]
+    fn test_serialize_configuration_unpack_failure_malformed_any() {
+        // `Any` message's value bytes are corrupted or malformed.
+        // An error indicating an unpacking failure should be returned
+        let mut config_any = Any::new();
+        // Set the correct type URL for StringValue.
+        config_any.type_url =
+            format!("type.googleapis.com/{}", StringValue::descriptor().full_name());
+        // Provide invalid bytes that cannot be parsed as a StringValue.
+        config_any.value = vec![0xDE, 0xAD, 0xBE, 0xEF];
+
+        let descriptor = StringValue::descriptor();
+        assert_ne!(descriptor.full_name(), PROTO_ANY_FULL_NAME);
+
+        let result = SdvRpcClient::serialize_configuration(Some(&config_any), &descriptor);
+
+        assert!(result.is_err());
+        let error_str = result.unwrap_err().to_string();
+        // Check that the error is wrapped correctly and contains the expected message.
+        assert!(error_str.contains("Failed to parse metadata"));
+        assert!(error_str.contains("Failed unpacking"));
+    }
+}
