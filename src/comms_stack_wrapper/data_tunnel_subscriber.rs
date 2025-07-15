@@ -246,3 +246,93 @@ impl ServicePublisherSubscription for DataTunnelSubscription {
         // This drops `self` and therefore cancels the subscription via the `DropGuard`.
     }
 }
+
+#[cfg(all(test, integration_tests))]
+mod tests {
+    use super::*;
+
+    use googletest::prelude::*;
+    use protobuf::well_known_types::wrappers::Int32Value;
+    use protobuf::MessageFull;
+    use sdv_config_provider::vsidl_provider_api::{
+        MockVsidlConfigProviderV1, PublicationDescriptor, SizeMetadata,
+    };
+    use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
+
+    use crate::test_utils;
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_message_descriptor_success() {
+        // Get ServiceUnitDefinition
+        let ctx = test_utils::make_context(0).await;
+
+        let unit_type = test_utils::make_unique_unit_type();
+        let _publisher = test_utils::register_topic(
+            ctx,
+            &format!("{}|{}", unit_type, test_utils::UNIT_NAME),
+            MessageMetadata::default(),
+        )
+        .await
+        .unwrap();
+
+        let service_unit_definition = test_utils::discover_service(ctx, &unit_type).await;
+
+        // Create and set mocked VSIDL Provider
+        let mut mock_vsidl_provider = MockVsidlConfigProviderV1::new();
+        let expected_descriptor = Int32Value::descriptor();
+        let publication_descriptor = PublicationDescriptor {
+            message_descriptor: expected_descriptor.clone(),
+            size_metadata: SizeMetadata::default(),
+        };
+        mock_vsidl_provider
+            .expect_get_publication_descriptor()
+            .times(1)
+            .returning(move |_, _| Some(publication_descriptor.clone()));
+
+        // Get Message Descriptor
+        let result = DataTunnelSubscriber::get_message_descriptor(
+            &mock_vsidl_provider,
+            &service_unit_definition,
+        )
+        .await;
+
+        // Assert
+        assert_that!(result, ok(eq(&expected_descriptor)));
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_message_descriptor_failure() {
+        // Get ServiceUnitDefinition
+        let ctx = test_utils::make_context(0).await;
+        let unit_type = test_utils::make_unique_unit_type();
+        let _publisher = test_utils::register_topic(
+            ctx,
+            &format!("{}|{}", unit_type, test_utils::UNIT_NAME),
+            MessageMetadata::default(),
+        )
+        .await
+        .unwrap();
+
+        let service_unit_definition = test_utils::discover_service(ctx, &unit_type).await;
+
+        // Create and set mocked VSIDL Provider
+        let mut mock_vsidl_provider = MockVsidlConfigProviderV1::new();
+        mock_vsidl_provider.expect_get_publication_descriptor().times(1).returning(|_, _| None);
+
+        // Get Message Descriptor
+        let result = DataTunnelSubscriber::get_message_descriptor(
+            &mock_vsidl_provider,
+            &service_unit_definition,
+        )
+        .await;
+
+        assert_that!(
+            result,
+            err(displays_as(contains_substring(
+                "VSIDL provider was unable to provide publication descriptor"
+            )))
+        );
+    }
+}
