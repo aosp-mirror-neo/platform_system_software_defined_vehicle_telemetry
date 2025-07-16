@@ -1,0 +1,24 @@
+// Copyright 2025 Google LLC
+
+// This file defines the protobuf message that will be used to configure
+// the StatsPublisher service for IVI telemetry.
+
+syntax = "proto3";
+
+package google.sdv.telemetry.java.statspublisher;
+
+option java_package = "google.sdv.telemetry.java.statspublisher";
+option java_outer_classname = "StatsPublisherReportProto";
+
+import "system/software_defined_vehicle/telemetry/ivi_publishers/proto/atoms.proto";
+
+// Details the configuration for collection and filtering of an atom.
+message AtomReport {
+   // Atom data for the stats report
+   Atom data = 2;
+}
+
+// Report List Message, contains a list of reports for atoms on a per-atom-basis.
+message AtomReportList {
+   repeated AtomReport report = 1;
+}
