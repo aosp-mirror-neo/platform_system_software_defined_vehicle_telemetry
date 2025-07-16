@@ -11,7 +11,6 @@ aidl_interface {
         "google/sdv/telemetry/configurable_publisher/*.aidl",
     ],
     vendor_available: true,
-    always_use_unfrozen: true,
     stability: "vintf",
     owner: "google",
     backend: {
@@ -25,7 +24,14 @@ aidl_interface {
             enabled: true,
         },
     },
-    frozen: false,
+    frozen: true,
+    versions_with_info: [
+        {
+            version: "1",
+            imports: [],
+        },
+    ],
+
 }
 
 vintf_fragment {
