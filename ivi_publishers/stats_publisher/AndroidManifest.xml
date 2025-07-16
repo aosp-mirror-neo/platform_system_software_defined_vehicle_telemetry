@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2025 Google LLC -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="google.sdv.telemetry.java.StatsPublisher">
+    package="google.sdv.telemetry.java.statspublisher">
 
     <!-- Permission for accessing Statsd -->
     <uses-permission android:name="android.permission.DUMP" />

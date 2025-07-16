@@ -1,6 +1,6 @@
 // Copyright 2025 Google LLC
 
-package google.sdv.telemetry.java.StatsPublisher;
+package google.sdv.telemetry.java.statspublisher;
 
 import android.app.Service;
 import android.content.Intent;
@@ -14,14 +14,14 @@ import android.content.Context;
 import android.app.StatsManager;
 import android.app.StatsManager.StatsUnavailableException;
 
-import google.sdv.telemetry.java.StatsPublisher.AtomsProto.Atom;
-import google.sdv.telemetry.java.StatsPublisher.AtomsProto.AppCrashOccurred;
-import google.sdv.telemetry.java.StatsPublisher.StatsdConfigProto.StatsdConfig;
-import google.sdv.telemetry.java.StatsPublisher.StatsdConfigProto;
-import google.sdv.telemetry.java.StatsPublisher.StatsLogProto;
+import google.sdv.telemetry.java.statspublisher.AtomsProto.Atom;
+import google.sdv.telemetry.java.statspublisher.AtomsProto.AppCrashOccurred;
+import google.sdv.telemetry.java.statspublisher.StatsdConfigProto.StatsdConfig;
+import google.sdv.telemetry.java.statspublisher.StatsdConfigProto;
+import google.sdv.telemetry.java.statspublisher.StatsLogProto;
 
 
-import static google.sdv.telemetry.java.StatsPublisher.AtomsProto.Atom.APP_START_OCCURRED_FIELD_NUMBER;
+import static google.sdv.telemetry.java.statspublisher.AtomsProto.Atom.APP_START_OCCURRED_FIELD_NUMBER;
 
 
 public class StatsPublisher extends Service {

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2025 Google LLC -->
 <permissions>
-    <privapp-permissions package="google.sdv.telemetry.java.StatsPublisher">
+    <privapp-permissions package="google.sdv.telemetry.java.statspublisher">
          <permission name="android.permission.DUMP"/>
          <permission name="android.permission.PACKAGE_USAGE_STATS"/>
     </privapp-permissions>

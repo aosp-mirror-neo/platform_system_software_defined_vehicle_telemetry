@@ -1,0 +1,63 @@
+// Copyright 2025 Google LLC
+
+package google.sdv.telemetry.java.statspublisher;
+
+import android.os.RemoteException;
+import android.util.Log;
+
+import google.sdv.telemetry.configurable_publisher.ISubscriber;
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisher;
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherSubscription;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.nio.ByteBuffer;
+import java.time.Duration;
+
+public class StatsConfigurationManager extends IConfigurablePublisher.Stub {
+    private static final String TAG = "StatsPublisher";
+
+    // Subscribers must be stored by this manager so that they can be managed together during
+    // shutdown. This also allows the manager to keep a mapping of configuration to
+    private List<ISubscriber> subscribers;
+
+    public StatsConfigurationManager() {
+        super();
+        this.subscribers = Collections.synchronizedList(new ArrayList<>());
+    }
+
+    @Override
+    public String getInterfaceHash() {
+        return "google.sdv.telemetry.java.configurable_publisher";
+    }
+
+    @Override
+    public int getInterfaceVersion() {
+        return 1;
+    }
+
+    @Override
+    public byte[] getLatestMessage(byte[] config) {
+        // Unimplemented. StatsPublisher publishes messages directly to subscribers and does not
+        // support the getLatestMessage function. Enabling getLatestMessage will require additional
+        // information about the subscriber and configuration during runtime.
+        return null;
+    }
+
+    /**
+     * Creates a new publisher thread using the subscription and configuration that reads from
+     * StatsManager and publishes based on the configuration
+     */
+    @Override
+    public IConfigurablePublisherSubscription createSubscription(
+            ISubscriber subscriber, byte[] configuration) {
+        this.subscribers.add(subscriber);
+        StatsPublisherSubscription subInfo =
+                new StatsPublisherSubscription(subscriber, this.subscribers);
+
+        // TODO: create new thread for each subscriber: b/432049838
+
+        return subInfo;
+    }
+}

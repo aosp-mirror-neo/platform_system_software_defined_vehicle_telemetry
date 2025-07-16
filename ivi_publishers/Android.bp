@@ -12,11 +12,18 @@ filegroup {
     ],
 }
 
+filegroup {
+    name: "ivi-stats-publisher-java-srcs",
+    srcs: [
+        "stats_publisher/*.java",
+    ],
+}
+
 android_app {
     name: "telemetry_ivi_stats_publisher",
     platform_apis: true,
     srcs: [
-        "stats_publisher/StatsPublisher.java",
+        ":ivi-stats-publisher-java-srcs",
         ":ivi-stats-publisher-proto-srcs",
     ],
     manifest: "stats_publisher/AndroidManifest.xml",

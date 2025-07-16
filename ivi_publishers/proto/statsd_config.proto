@@ -8,9 +8,9 @@
 
 syntax = "proto2";
 
-package google.sdv.telemetry.java.StatsPublisher;
+package google.sdv.telemetry.java.statspublisher;
 
-option java_package = "google.sdv.telemetry.java.StatsPublisher";
+option java_package = "google.sdv.telemetry.java.statspublisher";
 option java_outer_classname = "StatsdConfigProto";
 
 enum TimeUnit {
