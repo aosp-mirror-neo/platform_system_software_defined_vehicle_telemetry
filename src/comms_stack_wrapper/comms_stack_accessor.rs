@@ -39,13 +39,20 @@ pub struct CommsStackAccessor {
 
     data_tunnel_subscriber: DataTunnelSubscriber,
 
-    /// Hashmap to store service names and their `MessageDescriptor`s.
-    service_message_descriptors: DashMap<ServiceName, MessageDescriptor>,
+    /// Cache for service metadata (`MessageDescriptor`s) and service unit definition.
+    cached_metadata: DashMap<ServiceName, CachedMetadata>,
 
     sdv_rpc_client: SdvRpcClient,
 
     vsidl_provider:
         future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProviderV1 + Send + Sync>>>>,
+}
+
+#[derive(Clone)]
+struct CachedMetadata {
+    service_unit_definition: ServiceUnitDefinition,
+    config_descriptor: Option<MessageDescriptor>,
+    message_descriptor: MessageDescriptor,
 }
 
 struct AvailabilityCallbackRegistrationImpl {
@@ -62,33 +69,11 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let message_descriptor = if let Some(message_descriptor) =
-            self.service_message_descriptors.view(&service_name, |_k, v| (v.clone()))
-        {
-            message_descriptor
-        } else {
-            let Some(service_unit_definition) = self.discover_service(&service_name).await else {
-                return Ok(None);
-            };
-
-            let (_, message_descriptor) = self
-                .parse_telemetry_metadata(&service_name, &service_unit_definition)
-                .await
-                .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
-
-            match self.service_message_descriptors.entry(service_name) {
-                DashMapEntry::Occupied(o) => {
-                    // Concurrent task has already added metadata for this service, use it instead.
-                    o.get().clone()
-                }
-                DashMapEntry::Vacant(v) => {
-                    v.insert(message_descriptor.clone());
-                    message_descriptor
-                }
-            }
+        let Some(metadata) = self.get_or_parse_metadata(service_name).await? else {
+            return Ok(None);
         };
 
-        Ok(Some(ServicePublisherMetadata { message_descriptor }))
+        Ok(Some(ServicePublisherMetadata { message_descriptor: metadata.message_descriptor }))
     }
 
     async fn get_message_provider(
@@ -101,25 +86,23 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         info!("Creating getter for comms stack service '{service_name}'.");
 
-        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+        let Some(metadata) = self.get_or_parse_metadata(service_name).await? else {
             return Ok(GetMessageProviderOutcome::NotRegistered);
         };
 
-        let (config_descriptor, message_descriptor) = self
-            .parse_telemetry_metadata(&service_name, &service_unit_definition)
-            .await
-            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
 
-        let unit_identifier = service_unit_definition.get_unit_identifier();
-
-        match service_unit_definition.get_unit_metadata() {
+        match metadata.service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => self
                 .data_tunnel_subscriber
-                .get_message_provider(unit_identifier, message_descriptor),
+                .get_message_provider(unit_identifier, metadata.message_descriptor),
             UnitMetadata::Server(_) => {
-                let config_descriptor = config_descriptor.unwrap_or(Any::descriptor());
                 self.sdv_rpc_client
-                    .get_message_provider(unit_identifier, config_descriptor, message_descriptor)
+                    .get_message_provider(
+                        unit_identifier,
+                        metadata.config_descriptor.unwrap_or(Any::descriptor()),
+                        metadata.message_descriptor,
+                    )
                     .await
             }
         }
@@ -145,27 +128,22 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         info!("Subscribing to comms stack service '{service_name}'.");
 
-        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+        let Some(metadata) = self.get_or_parse_metadata(service_name).await? else {
             return Ok(CreateSubscriptionOutcome::NotRegistered {
                 new_message_callback,
                 cancellation_callback,
             });
         };
 
-        let (config_descriptor, message_descriptor) = self
-            .parse_telemetry_metadata(&service_name, &service_unit_definition)
-            .await
-            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+        let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
 
-        let unit_identifier = service_unit_definition.get_unit_identifier();
-
-        match service_unit_definition.get_unit_metadata() {
+        match metadata.service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => {
                 self.data_tunnel_subscriber
                     .create_subscription(
                         unit_identifier,
                         fetch_last_message,
-                        message_descriptor,
+                        metadata.message_descriptor,
                         sub_sampling_interval,
                         new_message_callback,
                         cancellation_callback,
@@ -173,13 +151,12 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                     .await
             }
             UnitMetadata::Server(_) => {
-                let config_descriptor = config_descriptor.unwrap_or(Any::descriptor());
                 self.sdv_rpc_client
                     .create_subscription(
                         unit_identifier,
                         configuration,
-                        config_descriptor,
-                        message_descriptor,
+                        metadata.config_descriptor.unwrap_or(Any::descriptor()),
+                        metadata.message_descriptor,
                         new_message_callback,
                         cancellation_callback,
                     )
@@ -295,9 +272,46 @@ impl CommsStackAccessor {
         Self {
             ctx,
             data_tunnel_subscriber,
-            service_message_descriptors: DashMap::new(),
+            cached_metadata: DashMap::new(),
             sdv_rpc_client,
             vsidl_provider: vsidl_provider_factory().shared(),
+        }
+    }
+
+    /// Helper for retrieving metadata.
+    /// Discovers service and parses telemetry metadata, saving it to cache.
+    /// If the service is not found, returns None
+    async fn get_or_parse_metadata(
+        &self,
+        service_name: ServiceName,
+    ) -> Result<Option<CachedMetadata>, ServicePublisherAccessorError> {
+        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| (v.clone())) {
+            return Ok(Some(metadata));
+        }
+
+        let Some(service_unit_definition) = self.discover_service(&service_name).await else {
+            return Ok(None);
+        };
+
+        let (config_descriptor, message_descriptor) = self
+            .parse_telemetry_metadata(&service_name, &service_unit_definition)
+            .await
+            .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
+
+        match self.cached_metadata.entry(service_name) {
+            DashMapEntry::Occupied(o) => {
+                // Concurrent task has already added metadata for this service, use it instead
+                Ok(Some(o.get().clone()))
+            }
+            DashMapEntry::Vacant(entry) => {
+                let metadata = CachedMetadata {
+                    service_unit_definition,
+                    config_descriptor,
+                    message_descriptor,
+                };
+                entry.insert(metadata.clone());
+                Ok(Some(metadata))
+            }
         }
     }
 
