@@ -24,16 +24,20 @@ enum StatsPublisherAtom {
 message AtomConfig {
     StatsPublisherAtom atom_configured = 1;
 
-    // how often polling should occur for this atom in milliseconds
-    int64 polling_interval_ms = 2;
-
     // allows filtering by the name of the package
     // if not specified, all packages will be included
     // repeated field, if multiple filters are specified, they will be ignored
-    repeated string package_name_filter = 3;
+    repeated string package_name_filter = 2;
 }
 
 // Configuration Message, contains a list of configurations on a per-atom-basis.
 message StatsPublisherConfiguration {
-    repeated AtomConfig config = 1;
+    // Unique identifier for the configuration. This is used to identify the
+    // subscription and publisher thread
+    int64 config_id = 1;
+
+    repeated AtomConfig config = 2;
+
+    // how often polling should occur for this configuration in milliseconds
+    int64 polling_interval_ms = 3;
 }

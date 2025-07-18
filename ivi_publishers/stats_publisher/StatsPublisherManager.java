@@ -16,11 +16,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 
-import google.sdv.telemetry.configurable_publisher.*;
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
+import google.sdv.telemetry.configurable_publisher.PublisherInfo;
 
 /**
- * StatsPublisherManager is the main service class for the StatsPublisher. It is responsible for
- * managing the service's lifecycle and communicating with the Configurable Publisher Registry.
+ * Service that publishes data from Statsd to the Configurable Publisher Registry.
+ * StatsPublisherManager connects to the Configurable Publisher Registry and registers itself as a
+ * publisher.
+ *
+ * <p>Subscriptions are handled by {@link StatsConfigurationManager}
  */
 public class StatsPublisherManager extends Service {
 

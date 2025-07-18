@@ -5,18 +5,23 @@ package google.sdv.telemetry.java.statspublisher;
 import android.os.RemoteException;
 import android.util.Log;
 
+import google.sdv.telemetry.java.statspublisher.StatsPublisherSubscription;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.StatsPublisherConfiguration;
 import google.sdv.telemetry.configurable_publisher.ISubscriber;
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisher;
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription;
-import google.sdv.telemetry.java.statspublisher.StatsPublisherSubscription;
 import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 
+/**
+ * Manager for configurations for StatsPublisher. StatsConfigurationManager is responsible for
+ * handling configurations for StatsPublisher
+ */
 public class StatsConfigurationManager extends IConfigurablePublisher.Stub {
-    private static final String TAG = "StatsPublisher";
+    private static final String TAG = "StatsPublisher.StatsConfigurationManager";
 
     // Subscribers must be stored by this manager so that they can be managed together during
     // shutdown. This also allows the manager to keep a mapping of configuration to
