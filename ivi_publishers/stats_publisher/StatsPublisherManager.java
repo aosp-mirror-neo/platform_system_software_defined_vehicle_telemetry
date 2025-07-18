@@ -16,34 +16,24 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
 
-import google.sdv.telemetry.java.statspublisher.AtomsProto.Atom;
-import google.sdv.telemetry.java.statspublisher.AtomsProto.AppCrashOccurred;
-import google.sdv.telemetry.java.statspublisher.StatsdConfigProto.StatsdConfig;
-import google.sdv.telemetry.java.statspublisher.StatsdConfigProto;
-import google.sdv.telemetry.java.statspublisher.StatsLogProto;
-
 import google.sdv.telemetry.configurable_publisher.*;
 
-import static google.sdv.telemetry.java.statspublisher.AtomsProto.Atom.APP_START_OCCURRED_FIELD_NUMBER;
-
 /**
- * StatsPublisher publishes stats atoms to the configurable publisher registry
- *
- * <p>It accepts a configuration from the telemetry service and spawns a thread to publish the atoms
- * at a periodic interval defined in the configuration
+ * StatsPublisherManager is the main service class for the StatsPublisher. It is responsible for
+ * managing the service's lifecycle and communicating with the Configurable Publisher Registry.
  */
-public class StatsPublisher extends Service {
+public class StatsPublisherManager extends Service {
 
-    private final String TAG = StatsPublisher.class.getSimpleName();
+    private final String TAG = StatsPublisherManager.class.getSimpleName();
 
     private static final long PULL_INTERVAL_MS = 10000; // 10 seconds
     private static final long CONFIG_KEY = 1939293; // Arbitrary Config Key
-    private static final String DESCRIPTOR_FILENAME = "descriptor.pb";
 
     private static final String PUBLISHER_NAME = "stats_publisher";
     private static final String CONF_PUB_REGISTRY_URI =
             "google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry/default";
-    private static final String MESSAGE_DESCRIPTOR_NAME =
+    private static final String DESCRIPTOR_FILENAME = "descriptor.pb";
+    private static final String DESCRIPTOR_MESSAGE_NAME =
             ".google.sdv.telemetry.java.StatsPublisher.AtomReportList";
 
     private IConfigurablePublisherRegistry mRegistry;
@@ -80,9 +70,9 @@ public class StatsPublisher extends Service {
                 Log.i(TAG, "Error in registering publisher");
             }
         } else {
-            // Registry isn't working, exit the service
             Log.i(TAG, "Failed to connect to Publisher Registry in onCreate");
             super.stopSelf();
+            return;
         }
 
         Log.i(TAG, "Successfully Connected to Publisher Registry");
@@ -118,7 +108,7 @@ public class StatsPublisher extends Service {
             return null;
         }
 
-        pubInfo.messageTypeName = MESSAGE_DESCRIPTOR_NAME;
+        pubInfo.messageTypeName = DESCRIPTOR_MESSAGE_NAME;
         pubInfo.supportsGet = false;
         return pubInfo;
     }

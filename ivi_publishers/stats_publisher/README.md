@@ -39,7 +39,16 @@ cvd start
 
 # Change to root on device
 adb root
+```
+
+Additionally, this service is currently not whitelisted in SELinux policies because it is a
+proof of concept. We'll need to disable the SELinux policy enforcement on our simulator to
+ensure it can communicate with the telemetry service.
+
+```bash
+# Disable SELinux policy enforcement
+adb shell setenforce 0
 
 # Start publisher
-adb shell am startservice -n google.sdv.telemetry.java.StatsPublisher/.StatsPublisher
+adb shell am startservice -n google.sdv.telemetry.java.StatsPublisher/.StatsPublisherManager
 ```
