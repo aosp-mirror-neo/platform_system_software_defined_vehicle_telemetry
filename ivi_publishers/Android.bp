@@ -43,6 +43,7 @@ android_app {
 
     system_ext_specific: true,
     privileged: true,
+    asset_dirs: ["stats_publisher/assets"],
     certificate: "platform",
 }
 
