@@ -29,6 +29,7 @@ public class StatsPublisher {
     private long configId;
     private ISubscriber subscriber;
     private StatsManager mStatsManager;
+    private ScheduledExecutorService scheduler;
 
     /**
      * Private Constructor for StatsPublisher
@@ -146,10 +147,34 @@ public class StatsPublisher {
     /** Starts the periodic polling of statsd reports */
     public void start() {
         Log.i(TAG, "Starting periodic polling every " + pollingIntervalMs + " ms");
+
+        // This thread is already scheduled, should not need to do this again
+        // Ensures that this method is safe even if incorrectly called multiple times
+        if (scheduler != null && !scheduler.isShutdown()) {
+            Log.w(TAG, "Publisher is already running.");
+            return;
+        }
+
+        Log.i(TAG, "Creating scheduler and starting polling");
+
+        scheduler = Executors.newSingleThreadScheduledExecutor();
+
+        // Get a reference to the periodic method
+        final Runnable poller = this::pullReports;
+
+        // Schedule the thread to run at the specified polling interval
+        scheduler.scheduleAtFixedRate(poller, 0, pollingIntervalMs, TimeUnit.MILLISECONDS);
     }
 
-    /** Stops the periodic polling */
+    /** Stops the periodic polling. */
     public void stop() {
-        Log.i(TAG, "Stopping periodic polling");
+        if (scheduler != null && !scheduler.isShutdown()) {
+            Log.i(TAG, "Stopping publisher polling.");
+
+            // Shut down the scheduler, essentially an interrupt
+            scheduler.shutdownNow();
+        } else {
+            Log.i(TAG, "Scheduler is null or already shutdown");
+        }
     }
 }
