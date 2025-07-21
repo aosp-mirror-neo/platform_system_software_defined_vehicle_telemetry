@@ -9,18 +9,26 @@ import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.StatsP
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.StatsLogReport;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.ConfigMetricsReportList;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.ConfigMetricsReport;
+import google.sdv.telemetry.java.statspublisher.StatsdConfigProto.StatsdConfig;
+import android.app.StatsManager.StatsUnavailableException;
+import android.app.StatsManager;
+
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Publisher for Statsd data. StatsPublisher is responsible for publishing data from Statsd to the
- * Configurable Publisher Registry.
+ * Configurable Publisher Registry. Each StatsPublisher corresponds to a single configuration
+ * received from the telemetry service and may cater to multiple atoms.
  */
 public class StatsPublisher {
     private static final String TAG = StatsPublisher.class.getSimpleName();
     private long pollingIntervalMs;
     private StatsPublisherConfiguration config;
-    private Thread publisherThread;
     private long configId;
     private ISubscriber subscriber;
+    private StatsManager mStatsManager;
 
     /**
      * Private Constructor for StatsPublisher
@@ -30,11 +38,13 @@ public class StatsPublisher {
      * @param config The configuration for the StatsPublisher
      * @param subscriber The subscriber to publish data to
      */
-    private StatsPublisher(StatsPublisherConfiguration config, ISubscriber subscriber) {
+    private StatsPublisher(
+            StatsPublisherConfiguration config, ISubscriber subscriber, StatsManager statsManager) {
         this.config = config;
         this.pollingIntervalMs = config.getPollingIntervalMs();
         this.configId = config.getConfigId();
         this.subscriber = subscriber;
+        this.mStatsManager = statsManager;
 
         Log.i(TAG, this.config.toString());
         Log.i(TAG, this.pollingIntervalMs + " ms");
@@ -49,7 +59,8 @@ public class StatsPublisher {
      * @param subscriber The subscriber to publish data to
      * @return A new StatsPublisher object
      */
-    public static StatsPublisher createPublisherFromConfig(byte[] config, ISubscriber subscriber)
+    public static StatsPublisher createPublisherFromConfig(
+            byte[] config, ISubscriber subscriber, StatsManager statsManager)
             throws InvalidProtocolBufferException {
         Log.i(TAG, "createPublisherFromConfig. Creating a new StatsPublisher using raw config");
         StatsPublisherConfiguration configProto = StatsPublisherConfiguration.parseFrom(config);
@@ -57,24 +68,88 @@ public class StatsPublisher {
 
         // TODO: validate config, make sure fields are reasonable: b/432091569
 
-        return new StatsPublisher(configProto, subscriber);
+        StatsPublisher publisher = new StatsPublisher(configProto, subscriber, statsManager);
+
+        StatsdConfig statsdConfig =
+                getStatsdConfig(StatsdConfig.newBuilder().setId(publisher.configId), configProto);
+
+        Log.i(TAG, "Created a new StatsdConfig: " + statsdConfig.toString());
+        publisher.addConfigToStatsd(statsdConfig);
+
+        // Begin publishing data on a set interval
+        publisher.start();
+
+        return publisher;
     }
 
-    public ConfigMetricsReportList pullConfigMetricsReport() {
-        // TODO: pull config metrics report from Statsd: b/432091451
-        return null;
+    /**
+     * Create a StatsdConfig from a StatsPublisherConfiguration. Performs a 1:1 mapping between the
+     * proto definitions. Relies on StatsPublisherAtom
+     *
+     * @param builder The builder for the StatsdConfig with an already-set config key
+     * @param config The StatsPublisherConfiguration object
+     * @return The StatsdConfig object.
+     */
+    private static StatsdConfig getStatsdConfig(
+            StatsdConfig.Builder builder,
+            StatsPublisherConfigProto.StatsPublisherConfiguration config) {
+        // Iterate through each atom configuration and create a statsd config
+        // Does not require manually specifying atom matchers, they are automatically
+        // created from the atom configurations
+        for (StatsPublisherConfigProto.AtomConfig atomConfig : config.getConfigList()) {
+            builder.addAtomMatcher(
+                    StatsdConfigProto.AtomMatcher.newBuilder()
+                            .setId(atomConfig.getAtomConfigured().getNumber())
+                            .setSimpleAtomMatcher(
+                                    StatsdConfigProto.SimpleAtomMatcher.newBuilder()
+                                            .setAtomId(
+                                                    atomConfig.getAtomConfigured().getNumber())));
+            builder.addEventMetric(
+                    StatsdConfigProto.EventMetric.newBuilder()
+                            .setId(atomConfig.getAtomConfigured().getNumber())
+                            .setWhat(atomConfig.getAtomConfigured().getNumber()));
+        }
+
+        Log.i(TAG, "Created statsd config from metrics configuration: " + config);
+        return builder.build();
+    }
+
+    /** Adds a Statsd configuration to Statsd */
+    private void addConfigToStatsd(StatsdConfig statsdConfig) {
+        try {
+            mStatsManager.addConfig(configId, statsdConfig.toByteArray());
+            Log.i(TAG, "Successfully added metrics config to statsManager");
+        } catch (StatsUnavailableException e) {
+            Log.i(TAG, "Error occurred" + e);
+        }
     }
 
     public long getConfigId() {
         return configId;
     }
 
-    public Thread start() {
-        Log.i(TAG, "start. Starting a new StatsPublisher thread");
-        return publisherThread;
+    public void pullReports() {
+        Log.i(TAG, "Pulling reports for conig " + configId);
+
+        // TODO: complete implementation of accessing statsmanager
+        // and pulling reports. b/424625099
+        try {
+            StatsLogProto.ConfigMetricsReportList reportList =
+                    StatsLogProto.ConfigMetricsReportList.parseFrom(
+                            mStatsManager.getReports(configId));
+            Log.i(TAG, "Successfully pulled reports: " + reportList.toString());
+        } catch (Exception e) {
+            Log.i(TAG, "Error occurred while pulling reports: " + e);
+        }
     }
 
+    /** Starts the periodic polling of statsd reports */
+    public void start() {
+        Log.i(TAG, "Starting periodic polling every " + pollingIntervalMs + " ms");
+    }
+
+    /** Stops the periodic polling */
     public void stop() {
-        publisherThread.interrupt();
+        Log.i(TAG, "Stopping periodic polling");
     }
 }

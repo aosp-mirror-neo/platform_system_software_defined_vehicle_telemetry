@@ -11,6 +11,7 @@ import android.util.Log;
 import android.content.Context;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.app.StatsManager;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -42,12 +43,14 @@ public class StatsPublisherManager extends Service {
 
     private IConfigurablePublisherRegistry mRegistry;
     private StatsConfigurationManager mConfigurationManager;
+    private StatsManager mStatsManager;
 
     @Override
     public void onCreate() {
         super.onCreate();
 
-        mConfigurationManager = new StatsConfigurationManager();
+        mStatsManager = getSystemService(StatsManager.class);
+        mConfigurationManager = new StatsConfigurationManager(mStatsManager);
 
         Log.i(TAG, "onCreate of service");
 
