@@ -111,6 +111,7 @@ rust_test {
     },
     rustlibs: [
         // keep-sorted start
+        "libbinder_rs",
         "libnix",
         "librand",
         "libscopeguard",

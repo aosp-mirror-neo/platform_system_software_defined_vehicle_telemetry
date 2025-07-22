@@ -39,8 +39,12 @@ pub struct CommsStackAccessor {
 
     data_tunnel_subscriber: DataTunnelSubscriber,
 
-    /// Cache for service metadata (`MessageDescriptor`s) and service unit definition.
-    cached_metadata: DashMap<ServiceName, CachedMetadata>,
+    /// Cache to store service metadata (`MessageDescriptor`s) and service unit definition,
+    /// as well as service availability notifitications registration.
+    /// TODO: b/434121693 - update naming of AvailabilityCallbackRegistration
+    cached_metadata: Arc<
+        DashMap<ServiceName, (CachedMetadata, Option<Box<dyn AvailabilityCallbackRegistration>>)>,
+    >,
 
     sdv_rpc_client: SdvRpcClient,
 
@@ -174,74 +178,17 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
-        let mut event_stream = match service_name {
-            ServiceName::UnitTypeBased { unit_type, unit_name } => sd
-                .subscribe_service_unit_change_by_type(&unit_type)
-                .await
-                .with_context(|| {
-                    format!("Failed to subscribe to changes for unit type {unit_type}")
-                })?
-                .filter(move |event| {
-                    let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
-                        unit_name.as_ref().is_none_or(|unit_name| {
-                            service_unit.get_unit_identifier().get_unit_name() == unit_name
-                        })
-                    } else {
-                        false
-                    };
+        let registration = self
+            .register_unit_change_callback(
+                service_name,
+                Arc::clone(callback),
+                |event: &ServiceUnitChangeEvent| {
+                    matches!(event, ServiceUnitChangeEvent::Registered(_))
+                },
+            )
+            .await?;
 
-                    future::ready(res)
-                })
-                .boxed(),
-            ServiceName::FqinBased { fqin, unit_name } => {
-                let name_args = UnitNameDiscoveryArgs::new_builder()
-                    .set_sdv_package_name(fqin.get_sdv_package_name())
-                    .set_service_bundle_name(fqin.get_service_bundle_name())
-                    .set_service_unit_name(unit_name.clone())
-                    .set_sdv_vm_name(fqin.get_sdv_vm_name())
-                    .build()
-                    .with_context(|| {
-                        format!("Failed to build UnitNameDiscoveryArgs for {fqin}|{unit_name}")
-                    })?;
-                sd.subscribe_service_unit_change_by_name(&name_args)
-                    .await
-                    .with_context(|| {
-                        format!("Failed to subscribe to changes for service {fqin}|{unit_name}")
-                    })?
-                    .filter(move |event| {
-                        let res = if let ServiceUnitChangeEvent::Registered(service_unit) = event {
-                            service_unit
-                                .get_service_bundle_identity()
-                                .get_fqin()
-                                .get_service_instance_name()
-                                == fqin.get_service_instance_name()
-                        } else {
-                            false
-                        };
-
-                        future::ready(res)
-                    })
-                    .boxed()
-            }
-        };
-
-        let callback_clone = Arc::clone(callback);
-        let cancellation_token = CancellationToken::new();
-        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
-        tokio::spawn(async move {
-            while let Some(_event) = select! {
-                biased;
-                _ = cancellation_token.cancelled() => None,
-                event = event_stream.next() => event,
-            } {
-                callback_clone();
-            }
-        });
-
-        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {
-            _availability_callback_drop_guard: availability_callback_drop_guard,
-        })))
+        Ok(Some(registration))
     }
 }
 
@@ -272,7 +219,7 @@ impl CommsStackAccessor {
         Self {
             ctx,
             data_tunnel_subscriber,
-            cached_metadata: DashMap::new(),
+            cached_metadata: Arc::new(DashMap::new()),
             sdv_rpc_client,
             vsidl_provider: vsidl_provider_factory().shared(),
         }
@@ -285,7 +232,7 @@ impl CommsStackAccessor {
         &self,
         service_name: ServiceName,
     ) -> Result<Option<CachedMetadata>, ServicePublisherAccessorError> {
-        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| (v.clone())) {
+        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| (v.0.clone())) {
             return Ok(Some(metadata));
         }
 
@@ -301,15 +248,41 @@ impl CommsStackAccessor {
         match self.cached_metadata.entry(service_name) {
             DashMapEntry::Occupied(o) => {
                 // Concurrent task has already added metadata for this service, use it instead
-                Ok(Some(o.get().clone()))
+                Ok(Some(o.get().0.clone()))
             }
             DashMapEntry::Vacant(entry) => {
+                let service_name = entry.key().clone();
+
+                let cached_metadata_clone = Arc::clone(&self.cached_metadata);
+                let service_name_clone = service_name.clone();
+
+                // Callback for invalidating this cache entry when the service becomes unavailable
+                let callback: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    cached_metadata_clone.remove(&service_name_clone);
+                });
+
+                // Register the callback
+                let registration = self
+                    .register_unit_change_callback(
+                        service_name,
+                        Arc::clone(&callback),
+                        |event: &ServiceUnitChangeEvent| {
+                            matches!(
+                                event,
+                                ServiceUnitChangeEvent::Unregistered(_)
+                                    | ServiceUnitChangeEvent::Changed(_)
+                            )
+                        },
+                    )
+                    .await
+                    .ok();
+
                 let metadata = CachedMetadata {
                     service_unit_definition,
                     config_descriptor,
                     message_descriptor,
                 };
-                entry.insert(metadata.clone());
+                entry.insert((metadata.clone(), registration));
                 Ok(Some(metadata))
             }
         }
@@ -413,6 +386,89 @@ impl CommsStackAccessor {
                 (Some(config_descriptor), message_descriptor)
             }),
         }
+    }
+
+    async fn register_unit_change_callback(
+        &self,
+        service_name: ServiceName,
+        callback: Arc<dyn Fn() + Send + Sync + 'static>,
+        event_matcher: impl Fn(&ServiceUnitChangeEvent) -> bool + Send + Sync + 'static,
+    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+        let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
+
+        let mut event_stream = match service_name {
+            ServiceName::UnitTypeBased { unit_type, unit_name } => sd
+                .subscribe_service_unit_change_by_type(&unit_type)
+                .await
+                .with_context(|| {
+                    format!("Failed to subscribe to changes for unit type {unit_type}")
+                })?
+                .filter(move |event| {
+                    if !event_matcher(event) {
+                        return future::ready(false);
+                    }
+                    future::ready(match event {
+                        ServiceUnitChangeEvent::Registered(service_unit)
+                        | ServiceUnitChangeEvent::Unregistered(service_unit)
+                        | ServiceUnitChangeEvent::Changed(service_unit) => {
+                            unit_name.as_ref().is_none_or(|unit_name| {
+                                service_unit.get_unit_identifier().get_unit_name() == unit_name
+                            })
+                        }
+                    })
+                })
+                .boxed(),
+            ServiceName::FqinBased { fqin, unit_name } => {
+                let name_args = UnitNameDiscoveryArgs::new_builder()
+                    .set_sdv_package_name(fqin.get_sdv_package_name())
+                    .set_service_bundle_name(fqin.get_service_bundle_name())
+                    .set_service_unit_name(unit_name.clone())
+                    .set_sdv_vm_name(fqin.get_sdv_vm_name())
+                    .build()
+                    .with_context(|| {
+                        format!("Failed to build UnitNameDiscoveryArgs for {fqin}|{unit_name}")
+                    })?;
+                sd.subscribe_service_unit_change_by_name(&name_args)
+                    .await
+                    .with_context(|| {
+                        format!("Failed to subscribe to changes for service {fqin}|{unit_name}")
+                    })?
+                    .filter(move |event| {
+                        if !event_matcher(event) {
+                            return future::ready(false);
+                        }
+                        future::ready(match event {
+                            ServiceUnitChangeEvent::Registered(service_unit)
+                            | ServiceUnitChangeEvent::Unregistered(service_unit)
+                            | ServiceUnitChangeEvent::Changed(service_unit) => {
+                                service_unit
+                                    .get_service_bundle_identity()
+                                    .get_fqin()
+                                    .get_service_instance_name()
+                                    == fqin.get_service_instance_name()
+                            }
+                        })
+                    })
+                    .boxed()
+            }
+        };
+
+        let callback_clone = Arc::clone(&callback);
+        let cancellation_token = CancellationToken::new();
+        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
+        tokio::spawn(async move {
+            while let Some(_event) = select! {
+                biased;
+                _ = cancellation_token.cancelled() => None,
+                event = event_stream.next() => event,
+            } {
+                callback_clone();
+            }
+        });
+
+        Ok(Box::new(AvailabilityCallbackRegistrationImpl {
+            _availability_callback_drop_guard: availability_callback_drop_guard,
+        }))
     }
 }
 
@@ -692,6 +748,97 @@ mod integration_tests {
             matches!(outcome, Ok(GetMessageProviderOutcome::NotRegistered)),
             "Unexpected outcome: {outcome:?}"
         );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_metadata_uses_cache() {
+        let ctx = test_utils::make_context(0).await;
+        let service_name = test_utils::make_unique_service_name();
+
+        // Register a service
+        let _server = test_utils::register_server(
+            ctx,
+            &service_name,
+            None, // No application metadata, force VSIDL provider usage.
+            HashMap::new(),
+        )
+        .await
+        .unwrap();
+
+        // Set expectation to have descriptors to be requested by get_metadata only once.
+        // Note that RPC Client requests two descriptors within one request
+        // (one for both create_subscription and get_latest_message methods), so we do .times(2)
+        let mut vsidl_provider_mock = MockVsidlConfigProviderV1::new();
+        vsidl_provider_mock
+            .expect_get_rpc_method_descriptor()
+            .times(2)
+            .returning(|_, _, _| Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()));
+        let accessor = create_accessor_with_mock_vsidl_provider(ctx, vsidl_provider_mock);
+
+        // Call the VSIDL provider and populate the cache.
+        let metadata1 = accessor.get_metadata(&service_name).await.unwrap();
+        assert!(metadata1.is_some());
+
+        // The second call should hit the cache, and calling VSIDL provider will panic
+        let metadata2 = accessor.get_metadata(&service_name).await.unwrap();
+        assert!(metadata2.is_some());
+
+        assert_eq!(
+            metadata1.unwrap().message_descriptor.full_name(),
+            metadata2.unwrap().message_descriptor.full_name()
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn metadata_cache_is_invalidated_when_service_is_unregistered() {
+        // Start binder thread pool to receive notification from Service Discovery
+        binder::ProcessState::start_thread_pool();
+
+        let ctx = test_utils::make_context(0).await;
+        let service_name = test_utils::make_unique_service_name();
+        let accessor = create_accessor(ctx);
+        let parsed_service_name = ServiceName::parse(&service_name).unwrap();
+
+        // Get a notification when the service is unregistered
+        let (tx, rx) = oneshot_callback();
+        let _registration = accessor
+            .register_unit_change_callback(
+                parsed_service_name.clone(),
+                Arc::new(move || tx(())),
+                |event: &ServiceUnitChangeEvent| {
+                    matches!(event, ServiceUnitChangeEvent::Unregistered(_))
+                },
+            )
+            .await
+            .unwrap();
+
+        // Scope for the publisher, so that it gets dropped and unregistered.
+        {
+            let _publisher =
+                test_utils::register_topic(ctx, &service_name, MESSAGE_METADATA_INT32.clone())
+                    .await
+                    .unwrap();
+
+            // First call to populate the cache.
+            assert!(accessor.get_metadata(&service_name).await.unwrap().is_some());
+            assert!(accessor.cached_metadata.contains_key(&parsed_service_name));
+        }
+
+        // Wait for an unregistration notification
+        rx.await;
+
+        // The service is unregistered, but cache invalidation task might take some time to be
+        // executed
+        loop {
+            if !accessor.cached_metadata.contains_key(&parsed_service_name) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert!(!accessor.cached_metadata.contains_key(&parsed_service_name));
     }
 
     #[sdv_telemetry_test_utils::timeout]
