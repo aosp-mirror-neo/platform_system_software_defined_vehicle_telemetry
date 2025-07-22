@@ -16,6 +16,8 @@ import java.util.Collections;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import android.app.StatsManager;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Manager for configurations for StatsPublisher. StatsConfigurationManager is responsible for
@@ -23,16 +25,16 @@ import android.app.StatsManager;
  */
 public class StatsConfigurationManager extends IConfigurablePublisher.Stub {
     private static final String TAG = "StatsPublisher.StatsConfigurationManager";
-
-    // Subscribers must be stored by this manager so that they can be managed together during
-    // shutdown. This also allows the manager to keep a mapping of configuration to
-    private List<ISubscriber> subscribers;
     private StatsManager mStatsManager;
+
+    // Map of configId to StatsPublisher. This is synchronized to ensure that unsubscribing from a
+    // configId is thread-safe.
+    private ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap;
 
     public StatsConfigurationManager(StatsManager statsManager) {
         super();
-        this.subscribers = Collections.synchronizedList(new ArrayList<>());
         this.mStatsManager = statsManager;
+        this.configIdToPublisherMap = new ConcurrentHashMap<>();
     }
 
     @Override
@@ -60,18 +62,15 @@ public class StatsConfigurationManager extends IConfigurablePublisher.Stub {
     @Override
     public IConfigurablePublisherSubscription createSubscription(
             ISubscriber subscriber, byte[] configuration) {
-        StatsPublisherSubscription subInfo =
-                new StatsPublisherSubscription(subscriber, this.subscribers);
-        this.subscribers.add(subscriber);
-
         // TODO: create new thread for each subscriber: b/432049838
         try {
-            StatsPublisher.createPublisherFromConfig(
-                            configuration, subscriber, mStatsManager);
+            StatsPublisher publisher =
+                    StatsPublisher.createPublisherFromConfig(
+                            configuration, subscriber, mStatsManager, configIdToPublisherMap);
+            return publisher.getSubscription();
         } catch (Exception e) {
             Log.i(TAG, "Error occurred when creating publisher from config: " + e);
         }
-
-        return subInfo;
+        return null;
     }
 }

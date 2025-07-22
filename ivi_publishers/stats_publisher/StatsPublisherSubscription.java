@@ -5,18 +5,17 @@ package google.sdv.telemetry.java.statspublisher;
 import java.util.List;
 import google.sdv.telemetry.configurable_publisher.ISubscriber;
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public class StatsPublisherSubscription extends IConfigurablePublisherSubscription.Stub {
 
-    private List<ISubscriber> subscriptions;
-    private ISubscriber subscriber;
+    private StatsPublisher publisher;
 
-    public StatsPublisherSubscription(ISubscriber subscriber, List<ISubscriber> subscriptions) {
+    public StatsPublisherSubscription(StatsPublisher publisher) {
         super();
 
-        // Shallow copy, points to the list from the manager thread
-        this.subscriptions = subscriptions;
-        this.subscriber = subscriber;
+        this.publisher = publisher;
     }
 
     @Override
@@ -31,6 +30,7 @@ public class StatsPublisherSubscription extends IConfigurablePublisherSubscripti
 
     @Override
     public void unsubscribe() {
-        subscriptions.remove(subscriber);
+        // Stops the publisher thread and removes the publisher from the map
+        publisher.stop();
     }
 }

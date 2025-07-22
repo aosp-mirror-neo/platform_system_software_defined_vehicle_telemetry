@@ -16,6 +16,8 @@ import android.app.StatsManager;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * Publisher for Statsd data. StatsPublisher is responsible for publishing data from Statsd to the
@@ -29,6 +31,8 @@ public class StatsPublisher {
     private long configId;
     private ISubscriber subscriber;
     private StatsManager mStatsManager;
+    private StatsPublisherSubscription subscription;
+    private ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap;
     private ScheduledExecutorService scheduler;
 
     /**
@@ -40,12 +44,17 @@ public class StatsPublisher {
      * @param subscriber The subscriber to publish data to
      */
     private StatsPublisher(
-            StatsPublisherConfiguration config, ISubscriber subscriber, StatsManager statsManager) {
+            StatsPublisherConfiguration config,
+            ISubscriber subscriber,
+            StatsManager statsManager,
+            ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap) {
         this.config = config;
         this.pollingIntervalMs = config.getPollingIntervalMs();
         this.configId = config.getConfigId();
         this.subscriber = subscriber;
         this.mStatsManager = statsManager;
+        this.configIdToPublisherMap = configIdToPublisherMap;
+        this.subscription = new StatsPublisherSubscription(this);
 
         Log.i(TAG, this.config.toString());
         Log.i(TAG, this.pollingIntervalMs + " ms");
@@ -61,7 +70,10 @@ public class StatsPublisher {
      * @return A new StatsPublisher object
      */
     public static StatsPublisher createPublisherFromConfig(
-            byte[] config, ISubscriber subscriber, StatsManager statsManager)
+            byte[] config,
+            ISubscriber subscriber,
+            StatsManager statsManager,
+            ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap)
             throws InvalidProtocolBufferException {
         Log.i(TAG, "createPublisherFromConfig. Creating a new StatsPublisher using raw config");
         StatsPublisherConfiguration configProto = StatsPublisherConfiguration.parseFrom(config);
@@ -69,7 +81,8 @@ public class StatsPublisher {
 
         // TODO: validate config, make sure fields are reasonable: b/432091569
 
-        StatsPublisher publisher = new StatsPublisher(configProto, subscriber, statsManager);
+        StatsPublisher publisher =
+                new StatsPublisher(configProto, subscriber, statsManager, configIdToPublisherMap);
 
         StatsdConfig statsdConfig =
                 getStatsdConfig(StatsdConfig.newBuilder().setId(publisher.configId), configProto);
@@ -135,13 +148,19 @@ public class StatsPublisher {
         // TODO: complete implementation of accessing statsmanager
         // and pulling reports. b/424625099
         try {
-            StatsLogProto.ConfigMetricsReportList reportList =
+            StatsLogProto.ConfigMetricsReportList report =
                     StatsLogProto.ConfigMetricsReportList.parseFrom(
                             mStatsManager.getReports(configId));
-            Log.i(TAG, "Successfully pulled reports: " + reportList.toString());
+            Log.i(TAG, "Successfully pulled reports");
+
+            subscriber.sendData(report.toByteArray());
         } catch (Exception e) {
             Log.i(TAG, "Error occurred while pulling reports: " + e);
         }
+    }
+
+    public StatsPublisherSubscription getSubscription() {
+        return subscription;
     }
 
     /** Starts the periodic polling of statsd reports */
@@ -164,6 +183,9 @@ public class StatsPublisher {
 
         // Schedule the thread to run at the specified polling interval
         scheduler.scheduleAtFixedRate(poller, 0, pollingIntervalMs, TimeUnit.MILLISECONDS);
+
+        // Track this publisher and add a reference to it on the map
+        configIdToPublisherMap.put(configId, this);
     }
 
     /** Stops the periodic polling. */
@@ -176,5 +198,8 @@ public class StatsPublisher {
         } else {
             Log.i(TAG, "Scheduler is null or already shutdown");
         }
+
+        // Remove this publisher from the map of publishers
+        configIdToPublisherMap.remove(configId);
     }
 }
