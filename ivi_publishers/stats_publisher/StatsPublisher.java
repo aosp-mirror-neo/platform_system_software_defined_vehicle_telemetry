@@ -6,13 +6,21 @@ import android.util.Log;
 import com.google.protobuf.InvalidProtocolBufferException;
 import google.sdv.telemetry.configurable_publisher.ISubscriber;
 import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.StatsPublisherConfiguration;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.AtomConfig;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherReportProto.AtomReportList;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherReportProto.AtomReport;
+import google.sdv.telemetry.java.statspublisher.AtomsProto.Atom;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.StatsLogReport;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.ConfigMetricsReportList;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.ConfigMetricsReport;
 import google.sdv.telemetry.java.statspublisher.StatsdConfigProto.StatsdConfig;
 import android.app.StatsManager.StatsUnavailableException;
 import android.app.StatsManager;
+import google.sdv.telemetry.java.statspublisher.AtomsProto.AppStartOccurred;
+import google.sdv.telemetry.java.statspublisher.StatsLogProto.EventMetricData;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -34,6 +42,10 @@ public class StatsPublisher {
     private StatsPublisherSubscription subscription;
     private ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap;
     private ScheduledExecutorService scheduler;
+
+    // Lookup table for package name filtering
+    // If empty for a configured atom, all packages are allowed
+    private HashMap<Integer, HashSet<String>> atomPackageFilterSetMap = new HashMap<>();
 
     /**
      * Private Constructor for StatsPublisher
@@ -89,6 +101,20 @@ public class StatsPublisher {
 
         Log.i(TAG, "Created a new StatsdConfig: " + statsdConfig.toString());
         publisher.addConfigToStatsd(statsdConfig);
+
+        // Add package filters to the config
+        for (AtomConfig atomConfig : configProto.getConfigList()) {
+            if (atomConfig.getPackageNameFilterCount() > 0) {
+                HashSet<String> packageSet = new HashSet<>();
+
+                for (String packageName : atomConfig.getPackageNameFilterList()) {
+                    packageSet.add(packageName);
+                }
+
+                publisher.atomPackageFilterSetMap.put(
+                        atomConfig.getAtomConfigured().getNumber(), packageSet);
+            }
+        }
 
         // Begin publishing data on a set interval
         publisher.start();
@@ -151,11 +177,100 @@ public class StatsPublisher {
             StatsLogProto.ConfigMetricsReportList report =
                     StatsLogProto.ConfigMetricsReportList.parseFrom(
                             mStatsManager.getReports(configId));
-            Log.i(TAG, "Successfully pulled reports");
 
-            subscriber.sendData(report.toByteArray());
+            Log.i(TAG, "Pulled " + report.getReportsCount() + " reports");
+
+            // Convert the ConfigMetricsReportList to an AtomReportList and filter the atoms based
+            // on package name
+            AtomReportList atomReportList = convertToAtomReportList(report);
+
+            subscriber.sendData(atomReportList.toByteArray());
         } catch (Exception e) {
             Log.i(TAG, "Error occurred while pulling reports: " + e);
+        }
+    }
+
+    /**
+     * Converts a ConfigMetricsReportList to an AtomReportList Also performs the filtering of atoms
+     * based on package name
+     *
+     * @param reports The ConfigMetricsReportList to convert
+     * @return The AtomReportList
+     */
+    private AtomReportList convertToAtomReportList(ConfigMetricsReportList reports) {
+        AtomReportList.Builder atomReportList = AtomReportList.newBuilder();
+
+        // Get all atoms and aggregate them into a single report that can be given to the telemetry
+        // service. This nesting is necessary because the data is stored in a nested structure in
+        // Statsd. However, the metrics list is limited by the amount of atoms that are configured
+        // and only the number of atoms is variable. Most of the time, there will only be one
+        // atom or entry.
+        for (ConfigMetricsReport report : reports.getReportsList()) {
+            for (StatsLogReport metric : report.getMetricsList()) {
+                for (StatsLogProto.EventMetricData data : metric.getEventMetrics().getDataList()) {
+                    Atom currentAtom = null;
+                    // Statsd can return either an Atom or an AggregatedAtomInfo
+                    // AggregatedAtomInfo contains an Atom
+                    // StatsPublisher should handle both cases for future atom types
+                    if (data.hasAtom()) {
+                        currentAtom = data.getAtom();
+                    } else if (data.hasAggregatedAtomInfo()) {
+                        currentAtom = data.getAggregatedAtomInfo().getAtom();
+                    } else {
+                        // No atom found in the data, we can skip this iteration
+                        continue;
+                    }
+
+                    // Check if the atom is in the filter set, if not, skip it
+                    if (isAtomInFilterSet(currentAtom)) {
+                        atomReportList.addReport(
+                                AtomReport.newBuilder()
+                                        .setData(currentAtom)
+                                        .setElapsedTimestampNanos(data.getElapsedTimestampNanos())
+                                        .build());
+                    }
+                }
+            }
+        }
+
+        return atomReportList.build();
+    }
+
+    /**
+     * Helper method for finding if an atom is in the filter set.
+     *
+     * @param atom The atom to check
+     * @return True if the atom is in the filter set, false otherwise
+     */
+    private boolean isAtomInFilterSet(Atom atom) {
+        if (atomPackageFilterSetMap.containsKey(atom.getPushedCase().getNumber())) {
+            // If there is a filter defined for this atom, check if the package is in
+            // the set
+            HashSet<String> packageSet =
+                    atomPackageFilterSetMap.get(atom.getPushedCase().getNumber());
+
+            String packageName =
+                    switch (atom.getPushedCase()) {
+                        case ACTIVITY_FOREGROUND_STATE_CHANGED ->
+                                atom.getActivityForegroundStateChanged().getPkgName();
+
+                        case APP_START_OCCURRED -> atom.getAppStartOccurred().getPkgName();
+                        case APP_CRASH_OCCURRED -> atom.getAppCrashOccurred().getPackageName();
+                        // MediaPlaybackStateChanged does not have a filter
+                        default -> null;
+                    };
+
+            // Package name should be null for atoms that cannot be filtered by name
+            if (packageName == null || packageSet.isEmpty() || packageSet.contains(packageName)) {
+                Log.i(TAG, packageName + " in filter set for atom");
+                return true;
+            } else {
+                Log.i(TAG, packageName + " filtered out " + atom.getPushedCase().getNumber());
+                return false;
+            }
+        } else {
+            // No filter defined for this atom, add everything to the filtered report
+            return true;
         }
     }
 

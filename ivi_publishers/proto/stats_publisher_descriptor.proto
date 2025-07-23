@@ -16,6 +16,9 @@ import "system/software_defined_vehicle/telemetry/ivi_publishers/proto/atoms.pro
 message AtomReport {
    // Atom data for the stats report
    Atom data = 2;
+
+   // Timestamp for the report
+   int64 elapsed_timestamp_nanos = 3;
 }
 
 // Report List Message, contains a list of reports for atoms on a per-atom-basis.
