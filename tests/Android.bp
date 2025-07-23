@@ -68,3 +68,33 @@ rust_test {
     require_root: true,
     vendor: true,
 }
+
+rust_binary {
+    name: "sdv_telemetry_cross_partition_client",
+    srcs: [
+        "sdv_telemetry_cross_partition_client.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "libbinder_rs",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libprotobuf",
+        "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_rust_wrapper",
+        "libsdv_telemetry_sample_utils",
+        "libsdv_telemetry_test_utils",
+        "libtokio",
+        // keep-sorted end
+    ],
+    ld_flags: ["-Wl,--no-as-needed"],
+    product_specific: true,
+}
+
+prebuilt_etc {
+    name: "telemetry_test_config.textproto",
+    src: "cross_partition_test_config.textproto",
+    product_specific: true,
+}
