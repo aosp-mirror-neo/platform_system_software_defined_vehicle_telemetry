@@ -8,7 +8,7 @@ use sdv_comms::sd::UnitType;
 use std::fmt;
 use std::str::FromStr;
 
-#[derive(Eq, PartialEq, Hash, Debug)]
+#[derive(Clone, Eq, PartialEq, Hash, Debug)]
 pub(super) enum ServiceName {
     UnitTypeBased { unit_type: UnitType, unit_name: Option<String> },
     FqinBased { fqin: ServiceFqin, unit_name: String },
