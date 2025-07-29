@@ -191,8 +191,6 @@ public class StatsPublisher {
     public void pullReports() {
         Log.i(TAG, "Pulling reports for conig " + configId);
 
-        // TODO: complete implementation of accessing statsmanager
-        // and pulling reports. b/424625099
         try {
             StatsLogProto.ConfigMetricsReportList report =
                     StatsLogProto.ConfigMetricsReportList.parseFrom(
@@ -203,6 +201,11 @@ public class StatsPublisher {
             // Convert the ConfigMetricsReportList to an AtomReportList and filter the atoms based
             // on package name
             AtomReportList atomReportList = convertToAtomReportList(report);
+
+            if(atomReportList.getReportCount() == 0) {
+                Log.i(TAG, "No reports found for config " + configId);
+                return;
+            }
 
             AtomReportWrapper atomReportWrapper =
                     AtomReportWrapper.newBuilder().setData(atomReportList.toByteString()).build();
