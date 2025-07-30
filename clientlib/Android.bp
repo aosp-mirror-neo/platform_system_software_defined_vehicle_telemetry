@@ -181,6 +181,11 @@ rust_test {
     test_options: {
         unit_test: true,
     },
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        // keep-sorted end
+    ],
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
