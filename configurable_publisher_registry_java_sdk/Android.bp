@@ -1,0 +1,51 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+    default_team: "trendy_team_automotive",
+}
+
+// TODO: b/440415770 Change this to a java_sdk_library
+java_library {
+    name: "libsdvconfigurablepublisher-java",
+    srcs: ["src/**/*.java"],
+
+    static_libs: [
+        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "guava",
+    ],
+}
+
+android_test {
+    name: "libsdvconfigurablepublisher-javatest",
+    srcs: [
+        "tests/**/*.java",
+    ],
+
+    static_libs: [
+        "libsdvconfigurablepublisher-java",
+        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "mockito-target-inline",
+        "mockito-core",
+        "androidx.test.runner",
+        "androidx.test.ext.junit",
+    ],
+
+    manifest: "tests/AndroidManifest.xml",
+    test_config: "tests/AndroidTest.xml",
+
+    test_suites: [
+        "device-tests",
+        "automotive-sdv-tests",
+    ],
+    test_options: {
+        unit_test: true,
+    },
+
+    enabled: select(soong_config_variable("SDV", "SDV_PREBUILT"), {
+        // Don't execute these tests when we build with the binary PDK
+        // Therefore, we have the inversion below, we run with the binary PDK (variable is true) => false
+        "true": false,
+        default: true,
+    }),
+}

@@ -1,0 +1,113 @@
+// Copyright 2025 Google LLC
+package google.sdv.telemetry.configurable_publisher_sdk;
+
+import android.os.IBinder;
+import android.os.RemoteException;
+import android.os.ServiceManager;
+
+import com.google.common.annotations.VisibleForTesting;
+
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
+import google.sdv.telemetry.configurable_publisher.PublisherInfo;
+
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
+/** Client facing class that maintains the list of configurable publishers in memory */
+public class ConfigurablePublisherRegistry {
+
+    private static final String CONF_PUB_REGISTRY_URI =
+            "google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry/default";
+
+    private final IConfigurablePublisherRegistry registryService;
+    private final Set<String> registeredPublishers;
+
+    /**
+     * Factory method to create a new registry client. Connects to the remote service.
+     *
+     * @return A new instance of ConfigurablePublisherRegistry.
+     * @throws ConfigurablePublisherRegistryException if the client cannot connect to the service.
+     */
+    public static ConfigurablePublisherRegistry connect()
+            throws ConfigurablePublisherRegistryException {
+        IBinder regService = ServiceManager.waitForService(CONF_PUB_REGISTRY_URI);
+
+        // Check if the service was actually found. If not, throw an exception.
+        if (regService == null) {
+            throw ConfigurablePublisherRegistryException.createServiceFailed(
+                    "Configurable publisher registry service was not found. It may not be"
+                            + " running.");
+        }
+
+        IConfigurablePublisherRegistry serviceInterface =
+                IConfigurablePublisherRegistry.Stub.asInterface(regService);
+        if (serviceInterface == null) {
+            throw ConfigurablePublisherRegistryException.createServiceFailed(
+                    "Failed to cast binder proxy to IConfigurablePublisherRegistry interface.");
+        }
+
+        return new ConfigurablePublisherRegistry(serviceInterface);
+    }
+
+    @VisibleForTesting
+    ConfigurablePublisherRegistry(IConfigurablePublisherRegistry service) {
+        this.registryService = service;
+        this.registeredPublishers = Collections.synchronizedSet(new HashSet<>());
+    }
+
+    /**
+     * Attempts to register a ConfigurablePublisher with the telemetry service.
+     *
+     * @param publisherInfo The metadata about the publisher.
+     * @param publisher The actual publisher implementation.
+     * @throws ConfigurablePublisherRegistryException if the registration fails due to a binder
+     *     error.
+     */
+    public void registerPublisher(PublisherInfoJava publisherInfo, ConfigurablePublisher publisher)
+            throws ConfigurablePublisherRegistryException {
+
+        String serviceName = publisherInfo.getServiceName();
+        synchronized (registeredPublishers) {
+            if (registeredPublishers.contains(serviceName)) {
+                throw ConfigurablePublisherRegistryException.publisherAlreadyRegistered(
+                        serviceName);
+            }
+
+            ConfigurablePublisherAidlImpl publisherImpl =
+                    new ConfigurablePublisherAidlImpl(publisher);
+            PublisherInfo publisherInfoAidl = publisherInfo.toAidlRepresentation();
+
+            try {
+                registryService.registerPublisher(publisherInfoAidl, publisherImpl);
+            } catch (RemoteException e) {
+                throw ConfigurablePublisherRegistryException.binderError(e);
+            }
+
+            this.registeredPublishers.add(serviceName);
+        }
+    }
+
+    /**
+     * Attempts to unregister a ConfigurablePublisher from the telemetry service.
+     *
+     * @param serviceName The unique name of the service to unregister.
+     * @throws ConfigurablePublisherRegistryException if the unregistration fails due to a binder
+     *     error.
+     */
+    public void unregisterPublisher(String serviceName)
+            throws ConfigurablePublisherRegistryException {
+        synchronized (registeredPublishers) {
+            if (!registeredPublishers.contains(serviceName)) {
+                throw ConfigurablePublisherRegistryException.publisherNotFound(serviceName);
+            }
+
+            try {
+                registryService.unregisterPublisher(serviceName);
+            } catch (RemoteException e) {
+                throw ConfigurablePublisherRegistryException.binderError(e);
+            }
+            this.registeredPublishers.remove(serviceName);
+        }
+    }
+}
