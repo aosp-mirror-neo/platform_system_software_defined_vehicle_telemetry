@@ -39,7 +39,7 @@ public class StatsPublisherManager extends Service {
             "google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry/default";
     private static final String DESCRIPTOR_FILENAME = "descriptor.pb";
     private static final String DESCRIPTOR_MESSAGE_NAME =
-            ".google.sdv.telemetry.java.StatsPublisher.AtomReportList";
+            ".google.sdv.telemetry.java.statspublisher.AtomReportWrapper";
 
     private IConfigurablePublisherRegistry mRegistry;
     private StatsConfigurationManager mConfigurationManager;

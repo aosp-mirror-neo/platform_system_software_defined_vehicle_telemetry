@@ -9,7 +9,9 @@ import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.StatsP
 import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.AtomConfig;
 import google.sdv.telemetry.java.statspublisher.StatsPublisherReportProto.AtomReportList;
 import google.sdv.telemetry.java.statspublisher.StatsPublisherReportProto.AtomReport;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherReportProto.AtomReportWrapper;
 import google.sdv.telemetry.java.statspublisher.AtomsProto.Atom;
+import google.sdv.telemetry.java.statspublisher.AnyProto.Any;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.StatsLogReport;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.ConfigMetricsReportList;
 import google.sdv.telemetry.java.statspublisher.StatsLogProto.ConfigMetricsReport;
@@ -42,6 +44,10 @@ public class StatsPublisher {
     private StatsPublisherSubscription subscription;
     private ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap;
     private ScheduledExecutorService scheduler;
+
+    private static final String TYPE_URL_PREFIX = "type.googleapis.com/";
+    private static final String STATS_PUBLISHER_CONFIG_TYPE_URL =
+           TYPE_URL_PREFIX + "google.sdv.telemetry.java.statspublisher.StatsPublisherConfiguration";
 
     // Lookup table for package name filtering
     // If empty for a configured atom, all packages are allowed
@@ -88,7 +94,21 @@ public class StatsPublisher {
             ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap)
             throws InvalidProtocolBufferException {
         Log.i(TAG, "createPublisherFromConfig. Creating a new StatsPublisher using raw config");
-        StatsPublisherConfiguration configProto = StatsPublisherConfiguration.parseFrom(config);
+
+        // Parse the Any proto and get the StatsPublisherConfiguration proto
+        Any anyParsed = Any.parseFrom(config);
+
+        if (!anyParsed.getTypeUrl().equals(STATS_PUBLISHER_CONFIG_TYPE_URL)) {
+            throw new IllegalArgumentException(
+                    "Invalid type url: "
+                            + anyParsed.getTypeUrl()
+                            + " but expected: "
+                            + STATS_PUBLISHER_CONFIG_TYPE_URL);
+        }
+
+        StatsPublisherConfiguration configProto =
+                StatsPublisherConfiguration.parseFrom(anyParsed.getValue());
+
         Log.i(TAG, "Successfully parsed config");
 
         // TODO: validate config, make sure fields are reasonable: b/432091569
@@ -184,7 +204,10 @@ public class StatsPublisher {
             // on package name
             AtomReportList atomReportList = convertToAtomReportList(report);
 
-            subscriber.sendData(atomReportList.toByteArray());
+            AtomReportWrapper atomReportWrapper =
+                    AtomReportWrapper.newBuilder().setData(atomReportList.toByteString()).build();
+
+            subscriber.sendData(atomReportWrapper.toByteArray());
         } catch (Exception e) {
             Log.i(TAG, "Error occurred while pulling reports: " + e);
         }
@@ -222,10 +245,11 @@ public class StatsPublisher {
                     }
 
                     // Check if the atom is in the filter set, if not, skip it
+                    // TODO: investigate if Atom can be sent without serialization b/435444175
                     if (isAtomInFilterSet(currentAtom)) {
                         atomReportList.addReport(
                                 AtomReport.newBuilder()
-                                        .setData(currentAtom)
+                                        .setData(currentAtom.toByteString())
                                         .setElapsedTimestampNanos(data.getElapsedTimestampNanos())
                                         .build());
                     }
