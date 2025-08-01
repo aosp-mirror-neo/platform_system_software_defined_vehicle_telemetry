@@ -396,7 +396,8 @@ impl ServicePublisher {
             StatusDetails::ServicePublisherErrorDetails(
                 ServicePublisherErrorDetails {
                     metricsConfigUUID: metrics_config_uuid,
-                    publisherName: publisher_name, }));
+                    publisherName: publisher_name,
+            }));
     }
 
     fn schedule_activation_retries(self: &Arc<Self>) -> ServicePublisherState {
@@ -679,70 +680,85 @@ mod tests {
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
 
-    fn create_inactive_getter_service_publisher(
-        service_adapter: Arc<MockServiceAdapter>,
-    ) -> Arc<ServicePublisher> {
-        Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            service_adapter,
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ))
+    struct ServicePublisherBuilder {
+        name: String,
+        configuration: Option<Any>,
+        connection_type: ConnectionType,
+        fetch_last_message: bool,
+        metrics_config_uuid: String,
+        service_name: String,
+        sub_sampling_interval: SubSamplingInterval,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+        service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
+        status_reporter: Arc<dyn StatusReporter>,
+        activation_retry_interval: Option<Duration>,
     }
 
-    fn create_inactive_subscription_service_publisher(
-        service_adapter: Option<Arc<MockServiceAdapter>>,
-    ) -> Arc<ServicePublisher> {
-        Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            service_adapter.unwrap_or_else(|| Arc::new(MockServiceAdapter::new())),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ))
-    }
+    impl ServicePublisherBuilder {
+        fn new(service_adapter: Arc<MockServiceAdapter>) -> Self {
+            Self {
+                name: PUBLISHER_NAME.to_owned(),
+                configuration: None,
+                connection_type: ConnectionType::Getter,
+                fetch_last_message: false,
+                metrics_config_uuid: CONFIG_UUID.to_owned(),
+                service_name: SERVICE_NAME.to_owned(),
+                sub_sampling_interval: SubSamplingInterval::ZERO,
+                node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new(
+                    new_stub_pal(),
+                )),
+                service_adapter,
+                status_reporter: Arc::new(StatusReporterImpl::new(|err| {
+                    panic!("Unexpected error: {err:?}")
+                })),
+                activation_retry_interval: None,
+            }
+        }
 
-    async fn create_active_getter_service_publisher(
-        service_adapter: Arc<MockServiceAdapter>,
-    ) -> Arc<ServicePublisher> {
-        let publisher = create_inactive_getter_service_publisher(service_adapter);
+        fn with_connection_type(mut self, connection_type: ConnectionType) -> Self {
+            self.connection_type = connection_type;
+            self
+        }
 
-        Arc::clone(&publisher).activate().await;
-        publisher
-    }
+        fn with_status_reporter(mut self, status_reporter: Arc<dyn StatusReporter>) -> Self {
+            self.status_reporter = status_reporter;
+            self
+        }
 
-    async fn create_active_subscribed_service_publisher(
-        service_adapter: Option<Arc<MockServiceAdapter>>,
-    ) -> Arc<ServicePublisher> {
-        let service_adapter = service_adapter.unwrap_or_else(|| {
-            let service_adapter = Arc::new(MockServiceAdapter::new());
-            service_adapter.set_next_subscribe_successful();
-            service_adapter
-        });
-        let publisher = create_inactive_subscription_service_publisher(Some(service_adapter));
+        fn with_activation_retry_interval(mut self, interval: Duration) -> Self {
+            self.activation_retry_interval = Some(interval);
+            self
+        }
 
-        Arc::clone(&publisher).activate().await;
-        publisher
-    }
+        fn with_configuration(mut self, config: Any) -> Self {
+            self.configuration = Some(config);
+            self
+        }
 
-    async fn create_service_publisher_with_subscription(
-        service_adapter: Option<Arc<MockServiceAdapter>>,
-    ) -> Arc<ServicePublisher> {
-        let publisher = create_active_subscribed_service_publisher(service_adapter).await;
+        fn build(self) -> Arc<ServicePublisher> {
+            let mut publisher = ServicePublisher::new(
+                self.name,
+                self.configuration,
+                self.connection_type,
+                self.fetch_last_message,
+                self.metrics_config_uuid,
+                self.service_name,
+                self.sub_sampling_interval,
+                self.node_evaluation_context_factory,
+                self.service_adapter,
+                self.status_reporter,
+            );
+            if let Some(interval) = self.activation_retry_interval {
+                publisher.activation_retry_interval = interval;
+            }
+            Arc::new(publisher)
+        }
 
-        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
-        publisher
+        async fn build_and_activate(self) -> Arc<ServicePublisher> {
+            let publisher = self.build();
+            Arc::clone(&publisher).activate().await;
+            publisher
+        }
     }
 
     /// Creates a Box with a callback that accepts context and does nothing.
@@ -755,9 +771,8 @@ mod tests {
     async fn activate_getter_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
-        let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
-
-        Arc::clone(&publisher).activate().await;
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
         assert!(matches!(
             *publisher.state.lock().await,
@@ -776,22 +791,11 @@ mod tests {
         // activates the publisher
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
-        let mut publisher = ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|_| {})),
-        );
-        publisher.activation_retry_interval = Duration::from_millis(3);
-        let publisher = Arc::new(publisher);
-
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
@@ -825,22 +829,12 @@ mod tests {
     async fn activate_getter_on_deactivate_cancels_retries() {
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
-        let mut publisher = ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|_| {})),
-        );
-        publisher.activation_retry_interval = Duration::from_millis(3);
-        let publisher = Arc::new(publisher);
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         assert!(
             matches!(
                 *publisher.state.lock().await,
@@ -869,9 +863,8 @@ mod tests {
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_message_provider_get_not_supported());
         service_adapter.set_next_subscribe_successful();
-        let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
-
-        Arc::clone(&publisher).activate().await;
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
         let state = publisher.state.lock().await;
         assert!(
@@ -889,9 +882,8 @@ mod tests {
     #[tokio::test]
     async fn activate_getter_pending_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher = create_inactive_getter_service_publisher(Arc::clone(&service_adapter));
-
-        Arc::clone(&publisher).activate().await;
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
         let state = publisher.state.lock().await;
         assert!(
@@ -909,20 +901,11 @@ mod tests {
     #[tokio::test]
     async fn activate_subscription_no_availability_callback_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         assert!(
             matches!(*publisher.state.lock().await, ServicePublisherState::ActivationNotPossible),
             "Unexpected state: {}",
@@ -942,20 +925,9 @@ mod tests {
         // No message provided is found. Reactivating publisher after receiving availability
         // notification
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
-        Arc::clone(&publisher).activate().await;
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
 
@@ -994,22 +966,12 @@ mod tests {
                 .with_availability_callback()
                 .with_next_error(anyhow!(ERROR_MESSAGE)),
         );
-        let mut publisher = ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|_| {})),
-        );
-        publisher.activation_retry_interval = Duration::from_millis(3);
-        let publisher = Arc::new(publisher);
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
         assert!(
@@ -1042,22 +1004,11 @@ mod tests {
         // Publisher attempts registering availability callback but no registration is found.
         let service_adapter =
             Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
-        let mut publisher = ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|_| {})),
-        );
-        publisher.activation_retry_interval = Duration::from_millis(3);
-        let publisher = Arc::new(publisher);
-
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
@@ -1097,22 +1048,12 @@ mod tests {
                 .with_next_register_availability_callback_error(anyhow!(ERROR_MESSAGE)),
         );
 
-        let mut publisher = ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|_| {})),
-        );
-        publisher.activation_retry_interval = Duration::from_millis(3);
-        let publisher = Arc::new(publisher);
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         assert!(
             matches!(
                 *publisher.state.lock().await,
@@ -1139,22 +1080,11 @@ mod tests {
                 .with_next_register_availability_callback_error(anyhow!(ERROR_MESSAGE)),
         );
 
-        let mut publisher = ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|_| {})),
-        );
-        publisher.activation_retry_interval = Duration::from_millis(3);
-        let publisher = Arc::new(publisher);
-
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
@@ -1189,20 +1119,10 @@ mod tests {
     async fn activate_getter_retry_reports_errors() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
         let (tx, rx) = oneshot_callback();
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(tx)),
-        ));
-
-        Arc::clone(&publisher).activate().await;
+        let _publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(tx)))
+            .build_and_activate()
+            .await;
 
         // Fire availability callback when service is still not available.
         service_adapter.call_availability_callback();
@@ -1235,20 +1155,9 @@ mod tests {
     #[tokio::test]
     async fn activate_getter_with_retries_unsubscribes_on_deactivate() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Getter,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
-        Arc::clone(&publisher).activate().await;
         publisher.deactivate().await;
 
         // Ensure availability callback is ignored.
@@ -1268,20 +1177,11 @@ mod tests {
     async fn activate_subscription_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_subscribe_successful();
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            Some(Any::pack(Empty::default_instance()).unwrap()),
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
-
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .with_configuration(Any::pack(Empty::default_instance()).unwrap())
+            .build_and_activate()
+            .await;
 
         let state = publisher.state.lock().await;
         assert!(
@@ -1308,10 +1208,10 @@ mod tests {
     #[tokio::test]
     async fn activate_subscription_pending_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher =
-            create_inactive_subscription_service_publisher(Some(Arc::clone(&service_adapter)));
-
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         let state = publisher.state.lock().await;
         assert!(
@@ -1329,20 +1229,10 @@ mod tests {
     #[tokio::test]
     async fn activate_subscription_retries_if_not_found() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
-
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         let (tx, rx) = oneshot_callback();
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
@@ -1390,20 +1280,11 @@ mod tests {
     async fn activate_subscription_resubscribes_on_cancelled() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_subscribe_successful();
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         let rx = service_adapter.set_next_subscribe_successful();
         service_adapter.notify_cancelled();
         rx.await.unwrap();
@@ -1425,20 +1306,12 @@ mod tests {
         service_adapter.set_next_subscribe_successful();
 
         let (tx, rx) = oneshot_callback();
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(tx)),
-        ));
+        let _publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(tx)))
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         service_adapter.set_next_error(anyhow!(ERROR_MESSAGE));
         service_adapter.notify_cancelled();
 
@@ -1464,20 +1337,11 @@ mod tests {
     async fn activate_subscription_not_resubscribes_when_inactive() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_subscribe_successful();
-        let publisher = Arc::new(ServicePublisher::new(
-            PUBLISHER_NAME.to_owned(),
-            None,
-            ConnectionType::Subscription,
-            false,
-            CONFIG_UUID.to_owned(),
-            SERVICE_NAME.to_owned(),
-            SubSamplingInterval::ZERO,
-            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
-            Arc::<MockServiceAdapter>::clone(&service_adapter),
-            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
-        ));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
-        Arc::clone(&publisher).activate().await;
         publisher.deactivate().await;
         service_adapter.notify_cancelled();
         tokio::task::yield_now().await;
@@ -1492,7 +1356,12 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn activate_when_active_panics() {
-        let publisher = create_active_subscribed_service_publisher(None).await;
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         publisher.activate().await;
     }
@@ -1501,7 +1370,9 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn deactivate_when_inactive_panics() {
-        let publisher = create_inactive_subscription_service_publisher(None);
+        let publisher = ServicePublisherBuilder::new(Arc::new(MockServiceAdapter::new()))
+            .with_connection_type(ConnectionType::Subscription)
+            .build();
 
         publisher.deactivate().await;
     }
@@ -1510,7 +1381,13 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn deactivate_with_subscriptions_panics() {
-        let publisher = create_service_publisher_with_subscription(None).await;
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
         publisher.deactivate().await;
     }
@@ -1518,15 +1395,18 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn deactivate_pending_success() {
-        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher =
-            create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         publisher.deactivate().await;
 
         let state = publisher.state.lock().await;
         assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
-        assert_eq!(service_adapter.get_num_unsubscribe_calls(), 0);
+        assert_eq!(service_adapter.get_num_unsubscribe_calls(), 1);
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1534,8 +1414,10 @@ mod tests {
     async fn deactivate_subscribed_calls_unsubscribe() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_subscribe_successful();
-        let publisher =
-            create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         publisher.deactivate().await;
 
@@ -1548,7 +1430,9 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn subscribe_when_inactive_panics() {
-        let publisher = create_inactive_subscription_service_publisher(None);
+        let publisher = ServicePublisherBuilder::new(Arc::new(MockServiceAdapter::new()))
+            .with_connection_type(ConnectionType::Subscription)
+            .build();
 
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
@@ -1557,7 +1441,13 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
-        let publisher = create_service_publisher_with_subscription(None).await;
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
     }
@@ -1567,8 +1457,10 @@ mod tests {
     async fn subscribe_new_message_notifies_subscriber() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_subscribe_successful();
-        let publisher =
-            create_active_subscribed_service_publisher(Some(Arc::clone(&service_adapter))).await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         let (tx, rx) = oneshot_callback();
         let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
@@ -1604,7 +1496,7 @@ mod tests {
         message_provider.set_message_provider(move || message_clone.clone());
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_message_provider(message_provider);
-        let publisher = create_active_getter_service_publisher(service_adapter).await;
+        let publisher = ServicePublisherBuilder::new(service_adapter).build_and_activate().await;
 
         let latest_message = Arc::clone(&publisher)
             .get_latest_message()
@@ -1626,7 +1518,7 @@ mod tests {
             MockServiceMessageProvider::new().with_next_error(anyhow!(ERROR_STRING));
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_message_provider(message_provider);
-        let publisher = create_active_getter_service_publisher(service_adapter).await;
+        let publisher = ServicePublisherBuilder::new(service_adapter).build_and_activate().await;
 
         let err = publisher.get_latest_message().unwrap_async().await.unwrap_err();
 
@@ -1637,7 +1529,9 @@ mod tests {
     #[tokio::test]
     async fn get_latest_message_inactive_returns_none() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
-        let publisher = create_inactive_subscription_service_publisher(Some(service_adapter));
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build();
 
         let latest_message =
             Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
@@ -1649,9 +1543,10 @@ mod tests {
     #[tokio::test]
     async fn get_latest_message_pending_returns_none() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
-        let publisher =
-            create_inactive_subscription_service_publisher(Some(Arc::clone(&service_adapter)));
-        Arc::clone(&publisher).activate().await;
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         let latest_message =
             Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
@@ -1663,7 +1558,9 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_when_inactive_panics() {
-        let publisher = create_inactive_subscription_service_publisher(None);
+        let publisher = ServicePublisherBuilder::new(Arc::new(MockServiceAdapter::new()))
+            .with_connection_type(ConnectionType::Subscription)
+            .build();
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
@@ -1672,7 +1569,12 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn unsubscribe_not_subscribed_panics() {
-        let publisher = create_active_subscribed_service_publisher(None).await;
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
@@ -1680,7 +1582,13 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unsubscribe_success() {
-        let publisher = create_service_publisher_with_subscription(None).await;
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
