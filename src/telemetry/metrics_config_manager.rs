@@ -597,17 +597,12 @@ mod tests {
     }
 
     impl MockMetricsConfigOrchestratorImpl {
-        fn new(
-            num_initialize_config_calls: Arc<Mutex<i32>>,
-            num_finish_config_calls: Arc<Mutex<i32>>,
-            num_validate_config_calls: Arc<Mutex<i32>>,
-            num_get_active_config_calls: Arc<Mutex<i32>>,
-        ) -> Self {
+        fn new() -> Self {
             Self {
-                num_initialize_config_calls,
-                num_finish_config_calls,
-                num_validate_config_calls,
-                num_get_active_config_calls,
+                num_initialize_config_calls: Arc::new(Mutex::new(0)),
+                num_finish_config_calls: Arc::new(Mutex::new(0)),
+                num_validate_config_calls: Arc::new(Mutex::new(0)),
+                num_get_active_config_calls: Arc::new(Mutex::new(0)),
                 configs: Vec::new().into(),
                 next_error: None.into(),
             }
@@ -671,10 +666,6 @@ mod tests {
         manager: Arc<dyn MetricsConfigManager>,
         error_receiver: future::Shared<BoxFuture<'static, Arc<TelemetryServiceStatus>>>,
         metrics_config_orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
-        num_initialize_config_calls: Arc<Mutex<i32>>,
-        num_finish_config_calls: Arc<Mutex<i32>>,
-        num_validate_config_calls: Arc<Mutex<i32>>,
-        num_get_active_config_calls: Arc<Mutex<i32>>,
     }
 
     impl TestEnvironment {
@@ -684,17 +675,7 @@ mod tests {
             inactive_dir_path: &Path,
             max_persistent_config_store_size: usize,
         ) -> TestEnvironment {
-            let num_initialize_config_calls = Arc::new(Mutex::new(0));
-            let num_finish_config_calls = Arc::new(Mutex::new(0));
-            let num_validate_config_calls = Arc::new(Mutex::new(0));
-            let num_get_active_config_calls = Arc::new(Mutex::new(0));
-
-            let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new(
-                Arc::clone(&num_initialize_config_calls),
-                Arc::clone(&num_finish_config_calls),
-                Arc::clone(&num_validate_config_calls),
-                Arc::clone(&num_get_active_config_calls),
-            ));
+            let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new());
 
             // Used to initialize/create root directories
             let (tx, rx) = oneshot_callback();
@@ -728,27 +709,23 @@ mod tests {
                 manager,
                 error_receiver: rx.boxed().shared(),
                 metrics_config_orchestrator,
-                num_initialize_config_calls: Arc::clone(&num_initialize_config_calls),
-                num_finish_config_calls: Arc::clone(&num_finish_config_calls),
-                num_validate_config_calls: Arc::clone(&num_validate_config_calls),
-                num_get_active_config_calls: Arc::clone(&num_get_active_config_calls),
             }
         }
 
         pub fn get_num_initialize_config_calls(&self) -> i32 {
-            *self.num_initialize_config_calls.lock()
+            *self.metrics_config_orchestrator.num_initialize_config_calls.lock()
         }
 
         pub fn get_num_finish_config_calls(&self) -> i32 {
-            *self.num_finish_config_calls.lock()
+            *self.metrics_config_orchestrator.num_finish_config_calls.lock()
         }
 
         pub fn get_num_validate_config_calls(&self) -> i32 {
-            *self.num_validate_config_calls.lock()
+            *self.metrics_config_orchestrator.num_validate_config_calls.lock()
         }
 
         pub fn get_num_get_active_config_calls(&self) -> i32 {
-            *self.num_get_active_config_calls.lock()
+            *self.metrics_config_orchestrator.num_get_active_config_calls.lock()
         }
     }
 
