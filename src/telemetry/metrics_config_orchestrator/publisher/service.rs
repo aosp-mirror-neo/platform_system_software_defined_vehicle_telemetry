@@ -299,9 +299,9 @@ impl ServicePublisher {
 
     /// Attempts Service Publisher activation, subscribes to availability callback if activation
     /// didn't succeed and sets the new publisher status using provided state lock.
-    async fn activate_impl<'a>(
+    async fn activate_impl(
         self: &Arc<Self>,
-        mut state_lock: AsyncMutexGuard<'a, ServicePublisherState>,
+        mut state_lock: AsyncMutexGuard<'_, ServicePublisherState>,
     ) {
         let new_state = match self.try_activate().await {
             Ok(Some(state)) => state,
@@ -471,9 +471,9 @@ impl ServicePublisher {
     }
 
     /// Retries publisher activation.
-    async fn retry_activation<'a>(
+    async fn retry_activation(
         self: &Arc<Self>,
-        mut state_lock: AsyncMutexGuard<'a, ServicePublisherState>,
+        mut state_lock: AsyncMutexGuard<'_, ServicePublisherState>,
     ) {
         let warn_service_unavailable = |state| {
             warn!(
@@ -846,7 +846,7 @@ mod tests {
 
         Arc::clone(&publisher).deactivate().await;
         assert!(
-            matches!(*publisher.state.lock().await, ServicePublisherState::Inactive { .. }),
+            matches!(*publisher.state.lock().await, ServicePublisherState::Inactive),
             "Unexpected state: {}",
             *publisher.state.lock().await
         );
@@ -1024,10 +1024,7 @@ mod tests {
         // Wait until retry happens by waiting message_provider being requested for the second time
         service_adapter.wait_message_provider_returned().await;
         assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::ActivationNotPossible { .. }
-            ),
+            matches!(*publisher.state.lock().await, ServicePublisherState::ActivationNotPossible),
             "Unexpected state: {}",
             *publisher.state.lock().await
         );

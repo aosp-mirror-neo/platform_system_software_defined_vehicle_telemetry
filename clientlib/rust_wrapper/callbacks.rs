@@ -52,7 +52,7 @@ where
 /// # Safety
 ///
 /// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
-///    `call_api_with_status_callback` API call. It will not be valid after the function completes
+///   `call_api_with_status_callback` API call. It will not be valid after the function completes
 /// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
 unsafe extern "C" fn on_status_received(
     sender: *mut std::ffi::c_void,
@@ -93,8 +93,8 @@ where
 /// # Safety
 ///
 /// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
-///    `call_api_with_config_list_callback` API call. It will not be valid after the function
-///    completes.
+///   `call_api_with_config_list_callback` API call. It will not be valid after the function
+///   completes.
 /// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
 /// * `config_list` must point to valid pointer array containing C raw strings that satisfy
 ///   `CStr::from_ptr` safety requirements.
@@ -156,8 +156,8 @@ where
 /// # Safety
 ///
 /// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
-///    `call_api_with_metrics_report_callback` API call. It will not be valid after the function
-///    completes.
+///   `call_api_with_metrics_report_callback` API call. It will not be valid after the function
+///   completes.
 /// * `status_msg` must point to C raw string that satisfies `CStr::from_ptr` safety requirements.
 /// * `report` must point to valid array of length `report_size`.
 /// * `report_size` must contain the length of the byte array that can be parsed from `report`.
@@ -223,8 +223,8 @@ where
 /// # Safety
 ///
 /// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
-///    `call_api_with_ready_reports_info_callback` API call. It will not be valid after the function
-///    completes.
+///   `call_api_with_ready_reports_info_callback` API call. It will not be valid after the function
+///   completes.
 /// * `status_msg` must point to C raw string that satisfies `CStr::from_ptr` safety requirements.
 /// * `ready_reports_info` must point to a valid pointer array of MetricsReportInfo with
 ///   `config_uuid` and `report_uuid` fields as C raw strings that satisfy `CStr::from_ptr` safety

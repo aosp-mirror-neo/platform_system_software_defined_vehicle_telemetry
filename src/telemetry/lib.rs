@@ -83,7 +83,7 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
             ConfigOrchestratorError::InvalidConfigUuid { .. } => {
                 StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID
             }
-            ConfigOrchestratorError::NoStartTriggerDefined { .. } => {
+            ConfigOrchestratorError::NoStartTriggerDefined => {
                 StatusCodes::ADD_METRICS_CONFIG_FAILED
             }
             _ => StatusCodes::ADD_METRICS_CONFIG_FAILED,

@@ -624,7 +624,7 @@ mod tests {
         eq_int_float: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Float), ok(some(eq(&NodeValueType::Bool)))),
         eq_bool_bool: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::Bool), Some(NodeValueType::Bool), ok(some(eq(&NodeValueType::Bool)))),
         eq_int_list_int: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
-        eq_bool_list_int_err: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::BoolList), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands{..}))),
+        eq_bool_list_int_err: (OperatorProto::RelationalOperator(RelationalOperator::EQ.into()), Some(NodeValueType::BoolList), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands))),
         not_eq_int_int: (OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into()), Some(NodeValueType::Int), Some(NodeValueType::Int), ok(some(eq(&NodeValueType::Bool)))),
         all_eq_deprecated: (OperatorProto::RelationalOperator(RelationalOperator::ALL_EQ.into()), Some(NodeValueType::IntList), Some(NodeValueType::Int), err(pat!(NodeEvaluationError::DeprecatedOperator{..}))),
 

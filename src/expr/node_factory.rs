@@ -112,16 +112,16 @@ impl NodeFactoryImpl {
     ///   node is the first one to visit.
     /// * `proto_nodes` - The list of expression nodes in the MetricsConfig.
     /// * `visit_info` - Tracks if a node has been visited by index, together with tracking node's parent.
-    ///                  This information is used to detect and restore cyclic dependencies.
+    ///   This information is used to detect and restore cyclic dependencies.
     /// * `nodes` - If non-empty, this function will create Rust node with
-    ///             1-1 correspondence with the protobuf node, put the Rust node at
-    ///             the given `index` and return the Node. If `nodes` is empty, this
-    ///             function only validate the tree rooted at the given `index`.
+    ///   1-1 correspondence with the protobuf node, put the Rust node at
+    ///   the given `index` and return the Node. If `nodes` is empty, this
+    ///   function only validate the tree rooted at the given `index`.
     /// * `node_value_types` - Tracks the output type of the node by index. Allows
-    ///                        analysis on operator-operand compatibility as the tree
-    ///                        is built.
+    ///   analysis on operator-operand compatibility as the tree
+    ///   is built.
     /// * `context` - Provides information for AST traversal, such as getter functions
-    ///               for messages and descriptors for type-checking.
+    ///   for messages and descriptors for type-checking.
     fn visit(
         index: usize,
         parent_index: Option<usize>,
@@ -781,7 +781,7 @@ mod tests {
 
         // assert
         assert!(
-            matches!(&err, NodeError { err: NodeEvaluationError::ConstantValueNotSet { .. }, .. }),
+            matches!(&err, NodeError { err: NodeEvaluationError::ConstantValueNotSet, .. }),
             "Unexpected error: {:?}",
             err
         );

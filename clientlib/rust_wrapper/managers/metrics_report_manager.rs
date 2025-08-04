@@ -19,7 +19,7 @@ use std::ffi::{c_void, CStr, CString};
 /// # Safety
 ///
 /// * `listener` points to a valid `MetricsReportReadyListener` originally sent to the caller as
-///    part of the `set_report_ready_listener` API call.
+///   part of the `set_report_ready_listener` API call.
 ///
 /// * `metrics_report_info` points to a valid 'MetricsReportInfo' provided by ReadyReportListener
 unsafe extern "C" fn on_report_ready(

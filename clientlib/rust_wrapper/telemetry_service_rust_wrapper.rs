@@ -241,7 +241,7 @@ fn get_status_details(
 /// # Safety
 ///
 /// * `listener` points to a valid `StatusListener` originally sent to the caller as
-///    part of the `set_misc_status_listener` API call.
+///   part of the `set_misc_status_listener` API call.
 ///
 /// * `status` points to a valid `TelemetryServiceStatus` instance.
 unsafe extern "C" fn on_misc_status(

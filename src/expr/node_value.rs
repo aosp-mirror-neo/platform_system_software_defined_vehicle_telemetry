@@ -127,8 +127,8 @@ impl NodeValue {
     ///
     /// * `self` - The left operand.
     /// * `op` - The operator.
-    ///          If unary operator, then operates on self.
-    ///          If binary operator, then [self] <operator> [right].
+    ///   If unary operator, then operates on self.
+    ///   If binary operator, then [self] <operator> [right].
     /// * `get_right_operand` - The function that provides the right operand when called.
     pub fn operate_sync<'a>(
         &self,
@@ -296,8 +296,8 @@ impl NodeValue {
     ///
     /// * `self` - The left operand.
     /// * `op` - The operator.
-    ///          If unary operator, then operates on self.
-    ///          If binary operator, then [self] <operator> [right].
+    ///   If unary operator, then operates on self.
+    ///   If binary operator, then [self] <operator> [right].
     pub(super) fn operate<'a>(
         self_cow: Cow<'a, Self>,
         op: &OperatorProto,

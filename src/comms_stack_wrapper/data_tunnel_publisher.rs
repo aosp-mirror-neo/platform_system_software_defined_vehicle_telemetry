@@ -22,7 +22,7 @@ impl DataTunnelPublisher {
     /// * `topic_name` - The name of the topic of the data tunnel.
     /// * `message_count` - The size of the data tunnel queue, i.e., how many messages it can hold.
     /// * `message_size` - The size of each message in bytes. It cannot be changed during the
-    ///                    topic's lifetime.
+    ///   topic's lifetime.
     /// * `metadata` - Topic Metadata.
     pub async fn register_topic(
         ctx: ContextRef,
@@ -55,7 +55,7 @@ impl DataTunnelPublisher {
     /// # Arguments
     ///
     /// * `message_bytes` - The bytes that should be written to the data tunnel. Their length must
-    ///                     be equal to the topic's configured message size.
+    ///   be equal to the topic's configured message size.
     pub fn publish_bytes(&self, message_bytes: &[u8]) -> anyhow::Result<()> {
         let topic_message_size =
             u32_into_usize(self.dt_publisher.get_publisher_unit_metadata().get_message_size());
@@ -75,8 +75,8 @@ impl DataTunnelPublisher {
     /// # Arguments
     ///
     /// * `message` - The protobuf message that should be written to the data tunnel. It's
-    ///               serialized form, including a varint to represent its length, must fit the
-    ///               topic's configured message size, otherwise an error is returned.
+    ///   serialized form, including a varint to represent its length, must fit the
+    ///   topic's configured message size, otherwise an error is returned.
     pub fn publish_length_delimited_proto<M: protobuf::Message>(
         &self,
         message: &M,
