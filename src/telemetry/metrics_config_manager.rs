@@ -124,17 +124,6 @@ impl MetricsConfigManagerImpl {
         status_reporter: Arc<dyn StatusReporter>,
         orchestrator_factory: Box<dyn MetricsConfigOrchestratorFactory>,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
-        let handle_file_io_error = |err_code: StatusCodes, err_msg: &str, path: &Path| {
-            error!("{}", err_msg);
-            status_reporter.report(
-                err_code,
-                err_msg.to_owned(),
-                StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
-                    path: path.to_string_lossy().to_string(),
-                }),
-            );
-        };
-
         let report_ready_callback = Box::new(report_ready_callback);
 
         let config_manager =
@@ -157,138 +146,158 @@ impl MetricsConfigManagerImpl {
                 }
             });
 
-        // Activate configs that are stored in the active directory.
-        let configs_store = &config_manager.metrics_configs_store;
-        let mut num_active_configs = 0;
-        let mut num_inactive_configs = 0;
-        // Needed to get the size of all files
-        let mut total_size = 0;
+        let error_handler = |code: StatusCodes, msg: &str, path: &Path| {
+            error!("{}", msg);
 
-        if active_dir_path.is_dir() {
-            // Read the contents of each file in the directory into a byte array
-            for entry in fs::read_dir(active_dir_path).unwrap() {
-                let entry = entry.unwrap();
-                let path = entry.path();
-                if path.is_file() {
-                    let bytes = match file_io_utils::read_from_file(&path).await {
-                        Ok(data) => data,
+            let details = StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
+                path: path.to_string_lossy().to_string(),
+            });
+            status_reporter.report(code, msg.to_owned(), details);
+        };
 
-                        Err(e) => {
-                            let err = format!("Error {} in reading file {:?} from disk", e, entry);
-                            handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err, &path);
-                            continue;
-                        }
-                    };
+        let (active_count, active_size) =
+            config_manager.process_active_directory(error_handler).await;
 
-                    // bytes now contains the contents of the file
-                    let config: MetricsConfig = match protobuf::Message::parse_from_bytes(&bytes) {
-                        Ok(cfg) => cfg,
-                        Err(e) => {
-                            let err = format!(
-                                "Error {} in parsing metric config {:?} read from disk",
-                                e, entry
-                            );
-                            handle_file_io_error(
-                                StatusCodes::METRICS_CONFIG_PARSE_ERROR,
-                                &err,
-                                &path,
-                            );
-                            continue;
-                        }
-                    };
-                    let uuid = &config.uuid;
+        let (inactive_count, inactive_size) =
+            config_manager.process_inactive_directory(error_handler).await;
 
-                    // Validates and initializes metrics config
-                    match Arc::clone(&config_manager.metrics_config_orchestrator)
-                        .initialize_config(&config)
-                        .await
-                    {
-                        Ok(()) => {
-                            let mut metric_config_map = configs_store.lock();
-                            metric_config_map.insert(uuid.clone(), bytes.len());
-                            num_active_configs += 1;
-                            total_size += bytes.len();
-                        }
-                        Err(e) => {
-                            let err = format!(
-                                "Error {} in initializing metric config {:?} read from disk",
-                                e, entry
-                            );
-                            handle_file_io_error(
-                                StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED,
-                                &err,
-                                &path,
-                            );
-
-                            file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
-                                error!("An error occurred in removing corrupt config: {}", e)
-                            });
-                        }
-                    }
-                }
-            }
-        } else {
-            match file_io_utils::create_dir(&active_dir_path).await {
-                Ok(_) => {
-                    // Success, directory was created or already exists
-                    info!("active config telemetry directory created");
-                }
-                Err(e) => {
-                    let err = format!("Error {} in creating active config directory", e);
-                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err, &active_dir_path);
-                }
-            };
-        }
-
-        if inactive_dir_path.is_dir() {
-            // Needed to get the size of all files
-            for entry in fs::read_dir(inactive_dir_path).unwrap() {
-                let entry = entry.unwrap();
-                let metadata = entry.metadata().unwrap();
-
-                // Check if it's a file
-                if metadata.is_file() {
-                    let file_name = entry.file_name();
-                    let mut metric_config_map = configs_store.lock();
-                    metric_config_map
-                        .insert(file_name.into_string().unwrap(), metadata.len() as usize);
-                    total_size += metadata.len() as usize;
-                    num_inactive_configs += 1;
-                } else {
-                    handle_file_io_error(
-                        StatusCodes::METRICS_CONFIG_CORRUPTED,
-                        &format!("Non-file entry found in inactive config directory: {:?}", entry),
-                        &entry.path(),
-                    );
-
-                    // remove corrupt entry
-                    file_io_utils::remove_dir(&entry.path()).await.unwrap_or_else(|e| {
-                        error!("An error occurred in removing directory entry config: {}", e)
-                    });
-                }
-            }
-        } else {
-            match file_io_utils::create_dir(&inactive_dir_path).await {
-                Ok(_) => {
-                    // Success, directory was created or already exists
-                    info!("inactive config telemetry directory created");
-                }
-                Err(e) => {
-                    let err = format!("Error {} in creating inactive config directory", e);
-                    handle_file_io_error(StatusCodes::FILE_IO_ERROR, &err, &inactive_dir_path);
-                }
-            };
-        }
-
+        let total_size = active_size + inactive_size;
         config_manager.cur_persistent_config_store_size.store(total_size, Ordering::Release);
 
         info!(
-            "Telemetry service initialized with {:} active configs and {:} inactive configs
-            occupying {} memory",
-            num_active_configs, num_inactive_configs, total_size
+            "Telemetry service initialized with {active_count} active configs \
+            and {inactive_count} inactive configs occupying {total_size} memory",
         );
 
         Ok(config_manager)
+    }
+
+    /// Activates config stored in active directory and returns their number and total size in bytes
+    async fn process_active_directory(
+        &self,
+        error_handler: impl Fn(StatusCodes, &str, &Path),
+    ) -> (usize, usize) {
+        if !self.active_dir_path.is_dir() {
+            match file_io_utils::create_dir(&self.active_dir_path).await {
+                Ok(_) => {
+                    // Success, directory was created or already exists
+                    info!("Active config telemetry directory created");
+                }
+                Err(e) => {
+                    let err = format!("Error {} in creating active config directory", e);
+                    error_handler(StatusCodes::FILE_IO_ERROR, &err, &self.active_dir_path);
+                }
+            };
+            return (0, 0);
+        }
+
+        let mut configs_count = 0;
+        let mut configs_size = 0;
+        // Read the contents of each file in the directory into a byte array
+        for entry in fs::read_dir(&self.active_dir_path).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let bytes = match file_io_utils::read_from_file(&path).await {
+                Ok(data) => data,
+                Err(e) => {
+                    let err = format!("Error {} in reading file {:?} from disk", e, entry);
+                    error_handler(StatusCodes::FILE_IO_ERROR, &err, &path);
+                    continue;
+                }
+            };
+
+            // bytes now contains the contents of the file
+            let config: MetricsConfig = match protobuf::Message::parse_from_bytes(&bytes) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    error_handler(
+                        StatusCodes::METRICS_CONFIG_PARSE_ERROR,
+                        &format!("Error {} in parsing metric config {:?} read from disk", e, entry),
+                        &path,
+                    );
+                    continue;
+                }
+            };
+
+            // Validates and initializes metrics config
+            match self.metrics_config_orchestrator.initialize_config(&config).await {
+                Ok(()) => {
+                    let mut metric_config_map = self.metrics_configs_store.lock();
+                    metric_config_map.insert(config.uuid.clone(), bytes.len());
+                    configs_count += 1;
+                    configs_size += bytes.len();
+                }
+                Err(e) => {
+                    let err = format!(
+                        "Error {} in initializing metric config {:?} read from disk",
+                        e, entry
+                    );
+                    error_handler(StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED, &err, &path);
+
+                    file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
+                        error!("An error occurred in removing corrupt config: {}", e)
+                    });
+                }
+            }
+        }
+
+        (configs_count, configs_size)
+    }
+
+    /// Returns number of inactive configs stored and their total size in bytes
+    async fn process_inactive_directory(
+        &self,
+        error_handler: impl Fn(StatusCodes, &str, &Path),
+    ) -> (usize, usize) {
+        if !self.inactive_dir_path.is_dir() {
+            match file_io_utils::create_dir(&self.inactive_dir_path).await {
+                Ok(_) => {
+                    // Success, directory was created or already exists
+                    info!("Inactive config telemetry directory created");
+                }
+                Err(e) => {
+                    let err = format!("Error {} in creating inactive config directory", e);
+                    error_handler(StatusCodes::FILE_IO_ERROR, &err, &self.inactive_dir_path);
+                }
+            };
+            return (0, 0);
+        }
+
+        let mut configs_count = 0;
+        let mut configs_size = 0;
+        for entry in fs::read_dir(&self.inactive_dir_path).unwrap() {
+            let entry = entry.unwrap();
+            let metadata = entry.metadata().unwrap();
+
+            if !metadata.is_file() {
+                error_handler(
+                    StatusCodes::METRICS_CONFIG_CORRUPTED,
+                    &format!("Non-file entry found in inactive config directory: {:?}", entry),
+                    &entry.path(),
+                );
+
+                // remove corrupt entry
+                file_io_utils::remove_dir(&entry.path()).await.unwrap_or_else(|e| {
+                    error!("An error occurred in removing directory entry config: {}", e)
+                });
+                continue;
+            }
+
+            let file_name = entry.file_name().into_string().unwrap();
+            let size = metadata.len() as usize;
+
+            let mut metric_config_map = self.metrics_configs_store.lock();
+            metric_config_map.insert(file_name, size);
+
+            configs_size += size;
+            configs_count += 1;
+        }
+
+        (configs_count, configs_size)
     }
 }
 
