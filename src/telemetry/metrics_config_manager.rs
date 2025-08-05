@@ -255,16 +255,15 @@ impl MetricsConfigManagerImpl {
                     total_size += metadata.len() as usize;
                     num_inactive_configs += 1;
                 } else {
-                    let err = format!("Metric config corrupted {:?}", entry);
                     handle_file_io_error(
                         StatusCodes::METRICS_CONFIG_CORRUPTED,
-                        &err,
+                        &format!("Non-file entry found in inactive config directory: {:?}", entry),
                         &entry.path(),
                     );
 
-                    // remove corrupt inactive config
-                    file_io_utils::remove_file(&entry.path()).await.unwrap_or_else(|e| {
-                        error!("An error occurred in removing corrupt config: {}", e)
+                    // remove corrupt entry
+                    file_io_utils::remove_dir(&entry.path()).await.unwrap_or_else(|e| {
+                        error!("An error occurred in removing directory entry config: {}", e)
                     });
                 }
             }
@@ -671,8 +670,21 @@ mod tests {
             inactive_dir_path: &Path,
             max_persistent_config_store_size: usize,
         ) -> TestEnvironment {
-            let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new());
+            Self::new_with_orchestrator(
+                active_dir_path,
+                inactive_dir_path,
+                max_persistent_config_store_size,
+                Arc::new(MockMetricsConfigOrchestratorImpl::new()),
+            )
+            .await
+        }
 
+        async fn new_with_orchestrator(
+            active_dir_path: &Path,
+            inactive_dir_path: &Path,
+            max_persistent_config_store_size: usize,
+            metrics_config_orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
+        ) -> TestEnvironment {
             let (tx, rx) = oneshot_callback();
             let manager = MetricsConfigManagerImpl::new(
                 active_dir_path.to_path_buf(),
@@ -736,7 +748,75 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn read_corrupt_config_misc_callback_received() {
+    async fn read_active_config_from_disk_success() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&active_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating active config directory: {:?} {}",
+                active_dir_path, e
+            );
+        });
+
+        let file_path = active_dir_path.join(UUID);
+        let serialized_config = create_serialized_config(UUID);
+        file_io_utils::write_to_file(&file_path, &serialized_config).await.unwrap_or_else(|e| {
+            panic!("An error occurred in writing serialized config: {:?} {}", file_path, e)
+        });
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        assert_eq!(test_environment.get_num_initialize_config_calls(), 1);
+        assert!(file_path.exists());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn read_active_config_from_disk_initialize_config_fails() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&active_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating active config directory: {:?} {}",
+                active_dir_path, e
+            );
+        });
+
+        let file_path = active_dir_path.join(UUID);
+        let serialized_config = create_serialized_config(UUID);
+        file_io_utils::write_to_file(&file_path, &serialized_config).await.unwrap_or_else(|e| {
+            panic!("An error occurred in writing serialized config: {:?} {}", file_path, e)
+        });
+
+        let orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new());
+        orchestrator.next_error.lock().replace(ConfigOrchestratorError::CycledPublishersTriggers);
+
+        let test_environment = TestEnvironment::new_with_orchestrator(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+            orchestrator,
+        )
+        .await;
+
+        assert_eq!(test_environment.get_num_initialize_config_calls(), 1);
+
+        let status = test_environment.error_receiver.await;
+        assert_eq!(status.code, StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED);
+        // Config which can't be activated is removed
+        assert!(!file_path.exists());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn read_active_corrupt_config_from_disk_misc_callback_received() {
         let root_dir = Builder::new().tempdir().unwrap();
         let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
@@ -760,8 +840,139 @@ mod tests {
         )
         .await;
 
+        assert_eq!(test_environment.get_num_initialize_config_calls(), 0);
+
         let status = test_environment.error_receiver.await;
         assert_eq!(status.code, StatusCodes::METRICS_CONFIG_PARSE_ERROR);
+        // Corrupted config is not removed.
+        // TODO: b/436613605: Reconsider this behavior
+        assert!(file_path.exists());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn read_active_configs_from_disk_corrupted_entry_success() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating inactive config directory: {:?} {}",
+                inactive_dir_path, e
+            );
+        });
+
+        // Create a directory instead of a file to simulate a corrupted entry.
+        let corrupt_entry_path = active_dir_path.join("corrupt_config");
+        file_io_utils::create_dir(&corrupt_entry_path).await.unwrap_or_else(|e| {
+            panic!("An error occurred in creating corrupt entry: {:?} {}", corrupt_entry_path, e);
+        });
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        assert_eq!(test_environment.get_num_initialize_config_calls(), 0);
+
+        // Corrupted entry doesn't gets removed and no error is being sent
+        // TODO: b/436613605: Reconsider this behavior
+        assert!(corrupt_entry_path.exists());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn read_inactive_config_from_disk_success() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating inactive config directory: {:?} {}",
+                active_dir_path, e
+            );
+        });
+
+        let file_path = inactive_dir_path.join(UUID);
+        let serialized_config = create_serialized_config(UUID);
+        file_io_utils::write_to_file(&file_path, &serialized_config).await.unwrap_or_else(|e| {
+            panic!("An error occurred in writing serialized config: {:?} {}", file_path, e)
+        });
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        assert_eq!(test_environment.get_num_initialize_config_calls(), 0);
+        assert!(file_path.exists());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn read_inactive_corrupt_config_from_disk_success() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating inactive config directory: {:?} {}",
+                active_dir_path, e
+            );
+        });
+
+        let file_path = inactive_dir_path.join(UUID);
+        let corrupt_config = create_corrupt_config(UUID);
+        file_io_utils::write_to_file(&file_path, &corrupt_config).await.unwrap_or_else(|e| {
+            panic!("An error occurred in writing corrupt config: {:?} {}", file_path, e)
+        });
+
+        let _test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        // Even though the config is corrupted, it is not removed
+        // TODO: b/436613605: Reconsider this behavior
+        assert!(file_path.exists());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn read_inactive_configs_from_disk_corrupted_entry_removed() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
+            panic!(
+                "An error occurred in creating inactive config directory: {:?} {}",
+                inactive_dir_path, e
+            );
+        });
+
+        // Create a directory instead of a file to simulate a corrupted entry.
+        let corrupt_entry_path = inactive_dir_path.join("corrupt_config");
+        file_io_utils::create_dir(&corrupt_entry_path).await.unwrap_or_else(|e| {
+            panic!("An error occurred in creating corrupt entry: {:?} {}", corrupt_entry_path, e);
+        });
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let status = test_environment.error_receiver.await;
+        assert_eq!(status.code, StatusCodes::METRICS_CONFIG_CORRUPTED);
+        // Corrupted entry gets removed
+        assert!(!corrupt_entry_path.exists());
     }
 
     #[sdv_telemetry_test_utils::timeout(2_000)]
