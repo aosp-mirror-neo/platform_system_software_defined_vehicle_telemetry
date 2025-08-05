@@ -6,7 +6,7 @@
 
     <application>
         <service
-            android:name=".StatsPublisherManager"
+            android:name=".StatsPublisherService"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

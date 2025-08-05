@@ -2,121 +2,75 @@
 
 package google.sdv.telemetry.java.statspublisher;
 
-import android.app.Service;
-import android.content.Intent;
-import android.os.Build;
-import android.os.Bundle;
-import android.os.IBinder;
-import android.util.Log;
-import android.content.Context;
 import android.os.RemoteException;
-import android.os.ServiceManager;
+import android.util.Log;
+
+import google.sdv.telemetry.java.statspublisher.StatsPublisherSubscription;
+import google.sdv.telemetry.java.statspublisher.StatsPublisherConfigProto.StatsPublisherConfiguration;
+import google.sdv.telemetry.configurable_publisher.ISubscriber;
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisher;
+import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherSubscription;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.nio.ByteBuffer;
+import java.time.Duration;
 import android.app.StatsManager;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Arrays;
-
-import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
-import google.sdv.telemetry.configurable_publisher.PublisherInfo;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
- * Service that publishes data from Statsd to the Configurable Publisher Registry.
- * StatsPublisherManager connects to the Configurable Publisher Registry and registers itself as a
- * publisher.
- *
- * <p>Subscriptions are handled by {@link StatsConfigurationManager}
+ * Manager for configurations for StatsPublisher. StatsPublisherManager is responsible for
+ * handling configurations for StatsPublisher
  */
-public class StatsPublisherManager extends Service {
-
-    private final String TAG = StatsPublisherManager.class.getSimpleName();
-
-    private static final long PULL_INTERVAL_MS = 10000; // 10 seconds
-    private static final long CONFIG_KEY = 1939293; // Arbitrary Config Key
-
-    private static final String PUBLISHER_NAME = "stats_publisher";
-    private static final String CONF_PUB_REGISTRY_URI =
-            "google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry/default";
-    private static final String DESCRIPTOR_FILENAME = "descriptor.pb";
-    private static final String DESCRIPTOR_MESSAGE_NAME =
-            ".google.sdv.telemetry.java.statspublisher.AtomReportWrapper";
-
-    private IConfigurablePublisherRegistry mRegistry;
-    private StatsConfigurationManager mConfigurationManager;
+public class StatsPublisherManager extends IConfigurablePublisher.Stub {
+    private static final String TAG = "StatsPublisherManager";
     private StatsManager mStatsManager;
 
+    // Map of configId to StatsPublisher. This is synchronized to ensure that unsubscribing from a
+    // configId is thread-safe.
+    private ConcurrentMap<Long, StatsPublisher> configIdToPublisherMap;
+
+    public StatsPublisherManager(StatsManager statsManager) {
+        super();
+        this.mStatsManager = statsManager;
+        this.configIdToPublisherMap = new ConcurrentHashMap<>();
+    }
+
     @Override
-    public void onCreate() {
-        super.onCreate();
+    public String getInterfaceHash() {
+        return "google.sdv.telemetry.java.configurable_publisher";
+    }
 
-        mStatsManager = getSystemService(StatsManager.class);
-        mConfigurationManager = new StatsConfigurationManager(mStatsManager);
+    @Override
+    public int getInterfaceVersion() {
+        return 1;
+    }
 
-        Log.i(TAG, "onCreate of service");
+    @Override
+    public byte[] getLatestMessage(byte[] config) {
+        // Unimplemented. StatsPublisher publishes messages directly to subscribers and does not
+        // support the getLatestMessage function. Enabling getLatestMessage will require additional
+        // information about the subscriber and configuration during runtime.
+        return null;
+    }
 
-        // Get binder reference to the registry
-        IBinder regService = ServiceManager.waitForService(CONF_PUB_REGISTRY_URI);
-        mRegistry = IConfigurablePublisherRegistry.Stub.asInterface(regService);
-
-        if (mRegistry != null) {
-            Log.i(TAG, "Connecting to Publisher Registry in onCreate");
-            PublisherInfo pubInfo = createPublisherInfo();
-
-            if (pubInfo == null) {
-                Log.i(TAG, "No descriptor found, exiting service");
-
-                // Exit the service if there is no descriptor
-                super.stopSelf();
-                return;
-            }
-
-            try {
-                // Make the publisher visible to the registry
-                mRegistry.registerPublisher(pubInfo, mConfigurationManager);
-            } catch (RemoteException e) {
-                Log.i(TAG, "Error in registering publisher");
-            }
-        } else {
-            Log.i(TAG, "Failed to connect to Publisher Registry in onCreate");
-            super.stopSelf();
-            return;
+    /**
+     * Creates a new publisher thread using the subscription and configuration that reads from
+     * StatsManager and publishes based on the configuration
+     */
+    @Override
+    public IConfigurablePublisherSubscription createSubscription(
+            ISubscriber subscriber, byte[] configuration) {
+        // TODO: create new thread for each subscriber: b/432049838
+        try {
+            StatsPublisher publisher =
+                    StatsPublisher.createPublisherFromConfig(
+                            configuration, subscriber, mStatsManager, configIdToPublisherMap);
+            return publisher.getSubscription();
+        } catch (Exception e) {
+            Log.i(TAG, "Error occurred when creating publisher from config: " + e);
         }
-
-        Log.i(TAG, "Successfully Connected to Publisher Registry");
-    }
-
-    @Override
-    public IBinder onBind(final Intent intent) {
-        Log.d(TAG, "onBind: " + intent);
-        return mConfigurationManager.asBinder();
-    }
-
-    @Override
-    public void onDestroy() {
-        super.onDestroy();
-
-        Log.i(TAG, "onDestroy called.");
-    }
-
-    private PublisherInfo createPublisherInfo() {
-        PublisherInfo pubInfo = new PublisherInfo();
-        pubInfo.serviceName = PUBLISHER_NAME;
-        pubInfo.fileDescriptorProto = null;
-
-        Context context = getApplicationContext();
-
-        try (InputStream inputStream = context.getAssets().open(DESCRIPTOR_FILENAME)) {
-            byte[] fileContent = inputStream.readAllBytes();
-            pubInfo.fileDescriptorProto = fileContent;
-            Log.i(TAG, "Successfully read " + DESCRIPTOR_FILENAME);
-        } catch (IOException e) {
-            Log.e(TAG, "Failed to read " + DESCRIPTOR_FILENAME + ": " + e.getMessage(), e);
-            // Return null if there is no descriptor, gracefully exit the service
-            return null;
-        }
-
-        pubInfo.messageTypeName = DESCRIPTOR_MESSAGE_NAME;
-        pubInfo.supportsGet = false;
-        return pubInfo;
+        return null;
     }
 }
