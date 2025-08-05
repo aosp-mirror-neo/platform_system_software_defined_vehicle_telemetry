@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
-use sdv_telemetry_utils::{countdown_latch::Level, file_io_utils};
+use sdv_telemetry_utils::file_io_utils;
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self};
@@ -26,8 +26,8 @@ use uuid::Uuid;
 // Crate module dependencies.
 use crate::metrics_config_orchestrator::{
     MetricsConfigOrchestrator, MetricsConfigOrchestratorError as ConfigOrchestratorError,
-    MetricsConfigOrchestratorImpl,
 };
+use crate::metrics_config_orchestrator_factory::MetricsConfigOrchestratorFactory;
 use crate::status_reporter::StatusReporter;
 
 fn is_valid_uuid_format(uuid_str: &str) -> bool {
@@ -113,6 +113,7 @@ pub(super) struct MetricsConfigManagerImpl {
 /// Subscriber struct impl that encapsulates the data required for reading messages.
 impl MetricsConfigManagerImpl {
     /// Creates a new instance of the struct.
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         active_dir_path: PathBuf,
         inactive_dir_path: PathBuf,
@@ -121,6 +122,7 @@ impl MetricsConfigManagerImpl {
         pal: Arc<dyn PlatformAbstractionLayer>,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
         status_reporter: Arc<dyn StatusReporter>,
+        orchestrator_factory: Box<dyn MetricsConfigOrchestratorFactory>,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
         let handle_file_io_error = |err_code: StatusCodes, err_msg: &str, path: &Path| {
             error!("{}", err_msg);
@@ -133,39 +135,17 @@ impl MetricsConfigManagerImpl {
             );
         };
 
-        let config_manager = Arc::new_cyclic(
-            |manager_reference: &Weak<MetricsConfigManagerImpl>| {
-                let manager_reference_clone = Weak::clone(manager_reference);
-                let config_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
-                    service_publisher_manager,
-                    pal,
-                    move |config_uuid, _context, Level(compute_order), countdown_latch| {
-                        if let Some(manager) = manager_reference_clone.upgrade() {
-                            // TODO(b/308000132): Ensure to use `_context` here once we
-                            // generate partial reports when a Metrics Config is finished.
-                            tokio::spawn(async move {
-                                // Wait until aggregation publishers which depend on finish_trigger
-                                // finish their aggregations
-                                countdown_latch.wait(Level(compute_order - 1)).await;
+        let report_ready_callback = Box::new(report_ready_callback);
 
-                                manager
-                                    .deactivate_metrics_config(&config_uuid)
-                                    .await
-                                    .unwrap_or_else(|e| {
-                                        if let MetricsConfigManagerError::InvalidConfigUuid{..} = e  {
-                                            // In theory it's possible that by the time the task is executed
-                                            // the OEM service manually finishes the config
-                                            info!("Unable to deactivate config. Invalid Config UUID: {}", e)
-                                        } else {
-                                            error!("Unable to deactivate config. Reported error: {}", e)
-                                        }
-                                    });
-                            });
-                        }
-                    },
+        let config_manager =
+            Arc::new_cyclic(|manager_reference: &Weak<MetricsConfigManagerImpl>| {
+                let config_orchestrator = orchestrator_factory.create(
+                    Weak::clone(manager_reference) as Weak<dyn MetricsConfigManager + Send + Sync>,
+                    Arc::clone(&service_publisher_manager),
+                    pal,
                     report_ready_callback,
                     Arc::clone(&status_reporter),
-                ));
+                );
 
                 MetricsConfigManagerImpl {
                     active_dir_path: active_dir_path.clone(),
@@ -175,8 +155,7 @@ impl MetricsConfigManagerImpl {
                     metrics_config_orchestrator: config_orchestrator,
                     metrics_configs_store: Mutex::new(HashMap::new()),
                 }
-            },
-        );
+            });
 
         // Activate configs that are stored in the active directory.
         let configs_store = &config_manager.metrics_configs_store;
@@ -586,6 +565,23 @@ mod tests {
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const INVALID_UUID: &str = "../01bf0754-df95-46bb-bb35-522b6af66600";
 
+    struct MockMetricsConfigOrchestratorFactory {
+        orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
+    }
+
+    impl MetricsConfigOrchestratorFactory for MockMetricsConfigOrchestratorFactory {
+        fn create(
+            &self,
+            _manager_reference: Weak<dyn MetricsConfigManager + Send + Sync>,
+            _service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
+            _pal: Arc<dyn PlatformAbstractionLayer>,
+            _report_ready_callback: Box<dyn Fn(MetricsReport) + Send + Sync + 'static>,
+            _status_reporter: Arc<dyn StatusReporter>,
+        ) -> Arc<dyn MetricsConfigOrchestrator + Send + Sync> {
+            Arc::clone(&self.orchestrator) as Arc<dyn MetricsConfigOrchestrator + Send + Sync>
+        }
+    }
+
     struct MockMetricsConfigOrchestratorImpl {
         num_initialize_config_calls: Arc<Mutex<i32>>,
         num_finish_config_calls: Arc<Mutex<i32>>,
@@ -597,17 +593,12 @@ mod tests {
     }
 
     impl MockMetricsConfigOrchestratorImpl {
-        fn new(
-            num_initialize_config_calls: Arc<Mutex<i32>>,
-            num_finish_config_calls: Arc<Mutex<i32>>,
-            num_validate_config_calls: Arc<Mutex<i32>>,
-            num_get_active_config_calls: Arc<Mutex<i32>>,
-        ) -> Self {
+        fn new() -> Self {
             Self {
-                num_initialize_config_calls,
-                num_finish_config_calls,
-                num_validate_config_calls,
-                num_get_active_config_calls,
+                num_initialize_config_calls: Arc::new(Mutex::new(0)),
+                num_finish_config_calls: Arc::new(Mutex::new(0)),
+                num_validate_config_calls: Arc::new(Mutex::new(0)),
+                num_get_active_config_calls: Arc::new(Mutex::new(0)),
                 configs: Vec::new().into(),
                 next_error: None.into(),
             }
@@ -671,10 +662,6 @@ mod tests {
         manager: Arc<dyn MetricsConfigManager>,
         error_receiver: future::Shared<BoxFuture<'static, Arc<TelemetryServiceStatus>>>,
         metrics_config_orchestrator: Arc<MockMetricsConfigOrchestratorImpl>,
-        num_initialize_config_calls: Arc<Mutex<i32>>,
-        num_finish_config_calls: Arc<Mutex<i32>>,
-        num_validate_config_calls: Arc<Mutex<i32>>,
-        num_get_active_config_calls: Arc<Mutex<i32>>,
     }
 
     impl TestEnvironment {
@@ -684,21 +671,10 @@ mod tests {
             inactive_dir_path: &Path,
             max_persistent_config_store_size: usize,
         ) -> TestEnvironment {
-            let num_initialize_config_calls = Arc::new(Mutex::new(0));
-            let num_finish_config_calls = Arc::new(Mutex::new(0));
-            let num_validate_config_calls = Arc::new(Mutex::new(0));
-            let num_get_active_config_calls = Arc::new(Mutex::new(0));
+            let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new());
 
-            let metrics_config_orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new(
-                Arc::clone(&num_initialize_config_calls),
-                Arc::clone(&num_finish_config_calls),
-                Arc::clone(&num_validate_config_calls),
-                Arc::clone(&num_get_active_config_calls),
-            ));
-
-            // Used to initialize/create root directories
             let (tx, rx) = oneshot_callback();
-            MetricsConfigManagerImpl::new(
+            let manager = MetricsConfigManagerImpl::new(
                 active_dir_path.to_path_buf(),
                 inactive_dir_path.to_path_buf(),
                 max_persistent_config_store_size,
@@ -708,47 +684,34 @@ mod tests {
                 Arc::new(StatusReporterImpl::new(move |status| {
                     tx(status.into());
                 })),
+                Box::new(MockMetricsConfigOrchestratorFactory {
+                    orchestrator: Arc::clone(&metrics_config_orchestrator),
+                }),
             )
             .await
             .unwrap();
-
-            // Used to assign MockMetricsConfigOrchestrator
-            let manager = Arc::new(MetricsConfigManagerImpl {
-                active_dir_path: active_dir_path.to_path_buf(),
-                inactive_dir_path: inactive_dir_path.to_path_buf(),
-                cur_persistent_config_store_size: AtomicUsize::new(0),
-                max_persistent_config_store_size,
-                metrics_config_orchestrator: Arc::<MockMetricsConfigOrchestratorImpl>::clone(
-                    &metrics_config_orchestrator,
-                ),
-                metrics_configs_store: HashMap::new().into(),
-            });
 
             TestEnvironment {
                 manager,
                 error_receiver: rx.boxed().shared(),
                 metrics_config_orchestrator,
-                num_initialize_config_calls: Arc::clone(&num_initialize_config_calls),
-                num_finish_config_calls: Arc::clone(&num_finish_config_calls),
-                num_validate_config_calls: Arc::clone(&num_validate_config_calls),
-                num_get_active_config_calls: Arc::clone(&num_get_active_config_calls),
             }
         }
 
         pub fn get_num_initialize_config_calls(&self) -> i32 {
-            *self.num_initialize_config_calls.lock()
+            *self.metrics_config_orchestrator.num_initialize_config_calls.lock()
         }
 
         pub fn get_num_finish_config_calls(&self) -> i32 {
-            *self.num_finish_config_calls.lock()
+            *self.metrics_config_orchestrator.num_finish_config_calls.lock()
         }
 
         pub fn get_num_validate_config_calls(&self) -> i32 {
-            *self.num_validate_config_calls.lock()
+            *self.metrics_config_orchestrator.num_validate_config_calls.lock()
         }
 
         pub fn get_num_get_active_config_calls(&self) -> i32 {
-            *self.num_get_active_config_calls.lock()
+            *self.metrics_config_orchestrator.num_get_active_config_calls.lock()
         }
     }
 

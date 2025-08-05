@@ -4,6 +4,7 @@
 
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
+mod metrics_config_orchestrator_factory;
 mod metrics_report_listener;
 mod status_listener;
 mod status_reporter;
@@ -40,6 +41,7 @@ use metrics_config_manager::{
     MetricsConfigManager, MetricsConfigManagerError as ConfigManagerError, MetricsConfigManagerImpl,
 };
 use metrics_config_orchestrator::MetricsConfigOrchestratorError as ConfigOrchestratorError;
+use metrics_config_orchestrator_factory::MetricsConfigOrchestratorFactoryImpl;
 use metrics_report_listener::MetricsReportListener;
 use status_listener::{StatusListener, StatusListenerImpl};
 use status_reporter::StatusReporterImpl;
@@ -163,6 +165,7 @@ impl SdvTelemetryService {
             pal,
             move |report| report_listener.on_report_ready(report),
             status_reporter,
+            Box::new(MetricsConfigOrchestratorFactoryImpl),
         )
         .await;
 
