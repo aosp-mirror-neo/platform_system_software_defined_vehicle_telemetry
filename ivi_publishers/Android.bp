@@ -19,16 +19,13 @@ filegroup {
     ],
 }
 
-android_app {
-    name: "telemetry_ivi_stats_publisher",
+android_library {
+    name: "telemetry_ivi_stats_publisher_lib",
     platform_apis: true,
+    assets: ["stats_publisher/assets/*"],
     srcs: [
         ":ivi-stats-publisher-java-srcs",
         ":ivi-stats-publisher-proto-srcs",
-    ],
-    manifest: "stats_publisher/AndroidManifest.xml",
-
-    libs: [
     ],
 
     static_libs: [
@@ -37,10 +34,19 @@ android_app {
         "androidx.annotation_annotation",
     ],
 
+    manifest: "stats_publisher/LibraryAndroidManifest.xml",
+}
+
+android_app {
+    name: "telemetry_ivi_stats_publisher",
+    platform_apis: true,
+    manifest: "stats_publisher/AndroidManifest.xml",
+    static_libs: [
+        "telemetry_ivi_stats_publisher_lib",
+    ],
     optimize: {
         enabled: false,
     },
-
     system_ext_specific: true,
     privileged: true,
     asset_dirs: ["stats_publisher/assets"],

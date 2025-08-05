@@ -64,3 +64,7 @@ adb shell telemetry_stats_publisher_client /tmp/config.textproto
 The service will print to both the console and device logs. Open cuttlefish in a
 browser, start using the system, and see the data be populated in the
 console/logs.
+
+## Testing
+
+To run tests, use `atest StatsPublisherTests`.

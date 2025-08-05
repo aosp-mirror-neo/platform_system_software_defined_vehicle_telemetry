@@ -1,0 +1,15 @@
+<!-- Copyright 2025 Google LLC -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.google.sdv.telemetry.java.statspublisher.tests" >
+
+    <uses-permission android:name="android.permission.DUMP" />
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"/>
+
+    <application>
+        <uses-library android:name="android.test.runner" />
+    </application>
+
+    <instrumentation android:name="androidx.test.runner.AndroidJUnitRunner"
+                     android:targetPackage="google.sdv.telemetry.java.statspublisher"
+                     android:label="StatsPublisherTest"/>
+</manifest>

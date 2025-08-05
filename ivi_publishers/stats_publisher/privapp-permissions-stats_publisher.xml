@@ -5,4 +5,9 @@
          <permission name="android.permission.DUMP"/>
          <permission name="android.permission.PACKAGE_USAGE_STATS"/>
     </privapp-permissions>
+    <!-- Allow test framework to use StatsManager -->
+    <privapp-permissions package="google.sdv.telemetry.java.statspublisher.tests">
+         <permission name="android.permission.DUMP"/>
+         <permission name="android.permission.PACKAGE_USAGE_STATS"/>
+    </privapp-permissions>
 </permissions>
