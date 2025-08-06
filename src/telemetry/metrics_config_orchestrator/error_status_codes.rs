@@ -168,10 +168,21 @@ mod tests {
 
     parameterized_test!(
         #[test]
+        message_builder_error,
+        |error: MessageBuilderError, expected_status_code| {
+            assert_eq!(error.get_status_code(), expected_status_code);
+        },
+        bad_aggregation: (MessageBuilderError { field_name: String::default(), error: MessageBuilderErrorType::BadAggregation { e: AggregationError::NumericAggregationTypeMismatch { value: String::default() } } }, StatusCodes::METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR),
+        expression_evaluation_error: (MessageBuilderError { field_name: String::default(), error: MessageBuilderErrorType::ExpressionEvaluationError { e: NodeEvaluationError::DivideByZero } }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+    );
+
+    parameterized_test!(
+        #[test]
         aggregation_error,
         |error: AggregationError, expected_status_code| {
             assert_eq!(error.get_status_code(), expected_status_code);
         },
+        aggregation_expression_evaluation_error: (AggregationError::ExpressionEvaluationError { e: NodeEvaluationError::DivideByZero }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
         aggregation_type_mismatch: (AggregationError::NumericAggregationTypeMismatch { value: String::default() }, StatusCodes::METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR),
         aggregation_vector_initialization: (AggregationError::VectorInitializationError { value: String::default() }, StatusCodes::METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR),
         aggregation_vector_append_type_mismatch: (AggregationError::VectorAppendTypeMismatch { list: String::default(), value: String::default() }, StatusCodes::METRICS_CONFIG_RUNTIME_AGGREGATION_ERROR),
@@ -183,6 +194,10 @@ mod tests {
         |error: NodeEvaluationError, expected_status_code| {
             assert_eq!(error.get_status_code(), expected_status_code);
         },
+        node_evaluation_message_provider_error: (NodeEvaluationError::MessageProviderError { e: MessageProviderError::InvalidPublisherName.into() }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+        node_evaluation_descriptor_provider_error: (NodeEvaluationError::DescriptorProviderError { e: DescriptorProviderError::InvalidPublisherName }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+        node_evaluation_function_leaf_node_argument_error: (NodeEvaluationError::FunctionLeafNodeArgumentError { error: FunctionLeafNodeArgumentError::GetCurrentTimestampError(FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet) }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+        node_evaluation_protobuf_conversion_error: (NodeEvaluationError::ProtobufConversionError(Box::new(ProtobufConversionError { field_name: String::default(), error: NodeEvaluationError::RepeatedFieldWrongAssignment { value: String::default() } })), StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
         node_evaluation_index_out_of_bound: (NodeEvaluationError::IndexOutOfBound { n: usize::default() }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
         node_evaluation_cyclic_dependency: (NodeEvaluationError::CyclicDependency { cycle: Vec::default() }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
         node_evaluation_node_type_not_set: (NodeEvaluationError::NodeTypeNotSet, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
@@ -222,6 +237,7 @@ mod tests {
             assert_eq!(error.get_status_code(), expected_status_code);
         },
         message_provider_invalid_publisher_name: (MessageProviderError::InvalidPublisherName, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+        message_provider_message_retrieval_error: (MessageProviderError::MessageRetrievalError { e: ServicePublisherAccessorError::MessageRetrievalFailed(anyhow!("")) }, StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR),
     );
 
     parameterized_test!(
@@ -231,6 +247,15 @@ mod tests {
             assert_eq!(error.get_status_code(), expected_status_code);
         },
         descriptor_provider_invalid_publisher_name: (DescriptorProviderError::InvalidPublisherName, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+    );
+
+    parameterized_test!(
+        #[test]
+        function_leaf_node_argument_error,
+        |error: FunctionLeafNodeArgumentError, expected_status_code| {
+            assert_eq!(error.get_status_code(), expected_status_code);
+        },
+        function_leaf_node_get_current_timestamp_error: (FunctionLeafNodeArgumentError::GetCurrentTimestampError(FunctionLeafNodeGetCurrentTimestampArgumentError::TimeSourceNotSet), StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
     );
 
     parameterized_test!(
@@ -245,7 +270,16 @@ mod tests {
 
     parameterized_test!(
         #[test]
-        service_publsher_accessor_error,
+        protobuf_conversion_error,
+        |error: ProtobufConversionError, expected_status_code| {
+            assert_eq!(error.get_status_code(), expected_status_code);
+        },
+        protobuf_conversion_error: (ProtobufConversionError { field_name: String::default(), error: NodeEvaluationError::NodeTypeNotSet }, StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR),
+    );
+
+    parameterized_test!(
+        #[test]
+        service_publisher_accessor_error,
         |error: ServicePublisherAccessorError, expected_status_code| {
             assert_eq!(error.get_status_code(), expected_status_code);
         },
