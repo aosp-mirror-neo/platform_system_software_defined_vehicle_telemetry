@@ -404,7 +404,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                         &TriggerSubscriber::MetricsConfigFinish,
                         Box::new(move |context, compute_order, countdown_latch| {
                             if let Some((callback, uuid)) = maybe_parameters.take() {
-                                debug!("MetricsConfig {} finish trigger fired", uuid);
+                                debug!("MetricsConfig {uuid} finish trigger fired");
                                 callback(uuid, context, compute_order, countdown_latch);
                             }
                         }),
@@ -448,8 +448,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             }
             state => {
                 panic!(
-                    "Attempted to finish Metrics Configuration with unexpected state: {:?}",
-                    state
+                    "Attempted to finish Metrics Configuration with unexpected state: {state:?}"
                 );
             }
         };
@@ -927,8 +926,7 @@ impl MetricsConfigOrchestratorImpl {
                 MetricsConfigState::NotStarted => {} // Proceed with transition
                 MetricsConfigState::Finished => return, // No need to handle trigger fire when finished.
                 state => panic!(
-                    "Start trigger fired handler called for config in unexpected state: {:?}",
-                    state
+                    "Start trigger fired handler called for config in unexpected state: {state:?}"
                 ),
             }
 
@@ -981,8 +979,7 @@ impl MetricsConfigOrchestratorImpl {
                 MetricsConfigState::Running => {}       // Proceed with transition
                 MetricsConfigState::Finished => return, // No need to handle trigger fire when finished.
                 state => panic!(
-                    "End trigger fired handler called for config in unexpected state: {:?}",
-                    state
+                    "End trigger fired handler called for config in unexpected state: {state:?}"
                 ),
             }
 
@@ -1913,8 +1910,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -1929,8 +1925,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -1945,8 +1940,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -1961,8 +1955,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -1977,8 +1970,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -1993,8 +1985,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2009,8 +2000,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2025,8 +2015,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2042,8 +2031,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
@@ -2061,8 +2049,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2080,8 +2067,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2100,8 +2086,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -2124,13 +2109,12 @@ mod tests {
             factory_error,
         } = err
         else {
-            panic!("Unexpected error: {:?}", err);
+            panic!("Unexpected error: {err:?}");
         };
         assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
         assert!(
             matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            factory_error
+            "Unexpected error: {factory_error:?}"
         );
     }
 
@@ -2210,8 +2194,7 @@ mod tests {
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::Running),
-            "Unexpected config state: {:?}",
-            config_state
+            "Unexpected config state: {config_state:?}"
         );
     }
 
@@ -2228,8 +2211,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -2246,8 +2228,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -2264,8 +2245,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -2280,8 +2260,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -2419,8 +2398,7 @@ mod tests {
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::NotStarted),
-            "Unexpected config state: {:?}",
-            config_state
+            "Unexpected config state: {config_state:?}"
         );
     }
 
@@ -2460,8 +2438,7 @@ mod tests {
         let config_state = config.state.lock().await;
         assert!(
             matches!(&*config_state, MetricsConfigState::Running),
-            "Unexpected config state: {:?}",
-            config_state
+            "Unexpected config state: {config_state:?}"
         );
     }
 
@@ -2779,8 +2756,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } if uuid == UUID),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         )
     }
 
@@ -3171,8 +3147,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -3186,8 +3161,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3202,8 +3176,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3218,8 +3191,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateTriggerDefinition { trigger_name } if trigger_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3234,8 +3206,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3250,8 +3221,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3266,8 +3236,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3282,8 +3251,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3298,8 +3266,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsReportConfigName { name } if name == METRICS_REPORT_CONFIG_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3315,8 +3282,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::DuplicateMetricsConfigUuid { uuid } if uuid == UUID),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 1);
     }
@@ -3334,8 +3300,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidExpressionNodes { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3353,8 +3318,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3372,8 +3336,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidTriggerDefinition { factory_error: TriggerFactoryError::UnknownTriggerType, trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
     }
@@ -3396,13 +3359,12 @@ mod tests {
             factory_error,
         } = err
         else {
-            panic!("Unexpected error: {:?}", err);
+            panic!("Unexpected error: {err:?}");
         };
         assert_eq!(report_config_name, METRICS_REPORT_CONFIG_NAME);
         assert!(
             matches!(&factory_error, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == SOME_TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            factory_error
+            "Unexpected error: {factory_error:?}"
         );
     }
 
@@ -3457,8 +3419,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -3475,8 +3436,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -3493,8 +3453,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == SOME_TRIGGER_NAME && dependency_type == TRIGGER),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -3509,8 +3468,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsConfigOrchestratorError::NoStartTriggerDefined),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 }

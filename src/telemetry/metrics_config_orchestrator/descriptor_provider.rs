@@ -60,8 +60,7 @@ mod tests {
 
         assert!(
             matches!(&err, DescriptorProviderError::InvalidPublisherName),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 }

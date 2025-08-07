@@ -172,7 +172,7 @@ impl SdvTelemetryService {
         let config_manager = match config_manager_res {
             Ok(config_manager) => config_manager,
             Err(e) => {
-                error!("Error in initializing config manager: {:?}", e);
+                error!("Error in initializing config manager: {e:?}");
                 return None;
             }
         };
@@ -346,7 +346,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 "",
                 &config_list,
             ) {
-                warn!("Unable to send config list to the client: {:?}", e);
+                warn!("Unable to send config list to the client: {e:?}");
             }
         });
 
@@ -370,7 +370,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 "",
                 &config_list,
             ) {
-                warn!("Unable to send config list to the client: {:?}", e);
+                warn!("Unable to send config list to the client: {e:?}");
             }
         });
 
@@ -472,16 +472,16 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                         &report_uuid,
                         serialized_report,
                     ) {
-                        warn!("Unable to send report to the client: {:?}", e);
+                        warn!("Unable to send report to the client: {e:?}");
                     }
                 }
                 Err(e) => {
                     if let Err(e) = report_listener.deref().onReport(
                         StatusCodes::GET_FINISHED_REPORT_FAILED,
-                        &format!("Unable to retrieve report: {:?}", e),
+                        &format!("Unable to retrieve report: {e:?}"),
                         &[],
                     ) {
-                        warn!("Unable to send report retrieval error to the client: {:?}", e);
+                        warn!("Unable to send report retrieval error to the client: {e:?}");
                     }
                 }
             }
@@ -508,7 +508,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                 format!("Number of ready reports: {}", ready_reports_info.len()).as_str(),
                 &ready_reports_info,
             ) {
-                warn!("Unable to send info of ready reports to the client: {:?}", e);
+                warn!("Unable to send info of ready reports to the client: {e:?}");
             }
         });
 

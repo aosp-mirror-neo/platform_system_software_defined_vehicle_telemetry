@@ -101,7 +101,7 @@ impl Node {
                     .err_into()
                     .and_then_sync(move |maybe_msg| {
                         let Node::FieldLeaf { fields, .. } = self_clone.as_ref() else {
-                            panic!("Captured node is not a field leaf node: {:?}", self_clone);
+                            panic!("Captured node is not a field leaf node: {self_clone:?}");
                         };
 
                         maybe_msg
@@ -125,7 +125,7 @@ impl Node {
                     .evaluate_with_state(state)
                     .and_then(move |(left_value, state)| {
                         let Node::Combination { operator, right, .. } = self_clone.as_ref() else {
-                            panic!("Captured node is not a combination node: {:?}", self_clone);
+                            panic!("Captured node is not a combination node: {self_clone:?}");
                         };
 
                         // If unary operator, then operate on self.
@@ -201,16 +201,15 @@ impl fmt::Debug for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self {
             Node::ConstantLeaf { value } => {
-                write!(f, "Constant Leaf Node {{ value: {:?} }}", value)
+                write!(f, "Constant Leaf Node {{ value: {value:?} }}")
             }
             Node::FieldLeaf { publisher_name, fields, .. } => write!(
                 f,
-                "Field Leaf Node {{ publisher_name: {}, fields: {:?} }}",
-                publisher_name, fields
+                "Field Leaf Node {{ publisher_name: {publisher_name}, fields: {fields:?} }}"
             ),
             Node::Combination { operator, left, right } => {
                 let format_node = |node: Option<&Arc<Node>>| {
-                    node.as_ref().map_or_else(|| EMPTY.to_owned(), |node| format!("{:#?}", node))
+                    node.as_ref().map_or_else(|| EMPTY.to_owned(), |node| format!("{node:#?}"))
                 };
                 write!(
                     f,
@@ -225,7 +224,7 @@ impl fmt::Debug for Node {
                 "Function Leaf Node {{ function: {} }}",
                 match function {
                     FunctionType::GetCurrentTimestamp { time_source } =>
-                        format!("GetCurrentTimestamp {{ time_source: {:?} }}", time_source),
+                        format!("GetCurrentTimestamp {{ time_source: {time_source:?} }}"),
                 }
             ),
         }
@@ -567,8 +566,7 @@ mod tests {
         // 0 cannot be less than True
         assert!(
             matches!(&err, NodeEvaluationError::ComparisonOperatorIncomptaibleOperands),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -585,8 +583,7 @@ mod tests {
 
         assert!(
             matches!(&err, NodeEvaluationError::MessageProviderError { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -647,7 +644,7 @@ mod tests {
         });
 
         let res = node3.evaluate(Arc::new(create_node_evaluation_context())).unwrap_sync().unwrap();
-        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
+        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {res:?}");
     }
 
     #[tokio::test]
@@ -677,7 +674,7 @@ mod tests {
             .unwrap_async()
             .await
             .unwrap();
-        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {:?}", res);
+        assert!(matches!(&res, NodeValue::Bool(value) if *value), "Unexpected result: {res:?}");
     }
 
     #[test]
@@ -706,7 +703,7 @@ mod tests {
         let result = timestamp_node.evaluate(context).unwrap_sync();
 
         let Ok(NodeValue::Int64(actual_timestamp)) = result else {
-            panic!("Unexpected result: {:?}", result);
+            panic!("Unexpected result: {result:?}");
         };
         assert!((expected_timestamp - actual_timestamp).abs() < 100_000);
     }
@@ -763,8 +760,7 @@ mod tests {
 
         assert!(
             matches!(&err, NodeEvaluationError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -792,8 +788,7 @@ mod tests {
 
         assert!(
             matches!(&err, NodeEvaluationError::MessageProviderError { e } if matches!(e.as_ref(), MessageProviderError::InvalidPublisherName)),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

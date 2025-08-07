@@ -732,8 +732,7 @@ mod tests {
                 ),
             }
             if message.contains("failed to evaluate condition") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && triggerName == TRIGGER_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 }

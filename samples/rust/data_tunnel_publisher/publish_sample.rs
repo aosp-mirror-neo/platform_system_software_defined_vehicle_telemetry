@@ -78,8 +78,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
         message.sample_data = rng.random();
 
         match dt_publisher.publish_length_delimited_proto(&message) {
-            Ok(()) => info!("Message written to DT: {}", message),
-            Err(err) => error!("Failed to write message to DT: {:?}", err),
+            Ok(()) => info!("Message written to DT: {message}"),
+            Err(err) => error!("Failed to write message to DT: {err:?}"),
         }
 
         sleep(std::time::Duration::from_secs(3)).await;

@@ -37,7 +37,7 @@ pub fn parse_message_descriptors(
     )
     .map_err(|error| SimulatorError::FailedToParseFile {
         file_name: metrics_config_file_name.clone(),
-        error_message: format!("Failed to parse descriptor_protos: {}", error),
+        error_message: format!("Failed to parse descriptor_protos: {error}"),
     })?;
     for file_descriptor in &file_descriptors {
         for message in file_descriptor.messages() {

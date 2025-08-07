@@ -114,8 +114,7 @@ impl<TKey: ComputeOrder + Display + Eq + Hash + Send + Sync, TCallbackArg: Clone
                 .expect("Unsubscribe shouldn't be called when there are no subscriptions.");
             assert!(
                 callback_map.remove(key).is_some(),
-                "Key {} isn't present in the callback map.",
-                key
+                "Key {key} isn't present in the callback map."
             );
             callback_map.is_empty()
         };

@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn simple_into_hash_map() {
         let vec = vec![1, 2, 3, 4];
-        let map = vec.into_hash_map(|val| format!("key-{}", val));
+        let map = vec.into_hash_map(|val| format!("key-{val}"));
         assert_eq!(map.len(), 4);
         assert_eq!(map.get("key-1"), Some(&1));
         assert_eq!(map.get("key-2"), Some(&2));

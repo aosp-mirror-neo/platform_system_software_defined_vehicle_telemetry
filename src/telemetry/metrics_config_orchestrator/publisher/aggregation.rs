@@ -712,8 +712,7 @@ mod tests {
                 ),
             }
             if message.contains("failed to build message") && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME && fieldName == FIELD_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 }

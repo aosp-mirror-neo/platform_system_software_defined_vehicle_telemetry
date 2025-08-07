@@ -28,7 +28,7 @@ pub async fn register_services(
     // Default size 1 MB
     let configured_size: usize = value.and_then(|value| value.parse().ok()).unwrap_or(1);
 
-    info!("Creating telemetry service with {}MBs metric store size", configured_size);
+    info!("Creating telemetry service with {configured_size}MBs metric store size");
 
     let Some(telemetry_service) = SdvTelemetryService::new(
         ROOT_DIR,

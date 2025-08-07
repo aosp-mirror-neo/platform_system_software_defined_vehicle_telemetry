@@ -80,7 +80,7 @@ impl StdDevAggregator {
         let get_double = |node_value: &NodeValue| -> Result<f64, AggregationError> {
             node_value.get_double().ok_or_else(|| {
                 AggregationError::NumericAggregationTypeMismatch {
-                    value: format!("{:?}", node_value),
+                    value: format!("{node_value:?}"),
                 }
             })
         };

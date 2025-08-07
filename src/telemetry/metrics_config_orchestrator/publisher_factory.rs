@@ -239,7 +239,7 @@ impl PublisherFactoryImpl {
         context: &PublisherFactoryCreateContext,
     ) -> Result<Box<dyn Publisher>, PublisherFactoryError> {
         let message_builder = self.message_builder_factory.create(
-            format!("Aggregation Publisher {}", publisher_name),
+            format!("Aggregation Publisher {publisher_name}"),
             &aggregation_publisher_proto.message_builder,
             &MessageBuilderFactoryCreateContext {
                 file_descriptors: context.file_descriptors,
@@ -555,7 +555,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&PublisherProto::default()).err().unwrap();
 
-        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -567,8 +567,7 @@ mod tests {
 
         assert!(
             matches!(&err, PublisherFactoryError::InvalidConnectionType { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -593,8 +592,7 @@ mod tests {
 
             assert!(
                 matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. }),
-                "Unexpected error: {:?}",
-                err
+                "Unexpected error: {err:?}"
             );
         },
 
@@ -666,7 +664,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&PublisherProto::default()).unwrap_err();
 
-        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+        assert!(matches!(&err, PublisherFactoryError::NameNotSet), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -678,8 +676,7 @@ mod tests {
 
         assert!(
             matches!(&err, PublisherFactoryError::InvalidConnectionType { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -701,8 +698,7 @@ mod tests {
 
             assert!(
                 matches!(&err, PublisherFactoryError::InvalidSubSamplingInterval { .. }),
-                "Unexpected error: {:?}",
-                err
+                "Unexpected error: {err:?}"
             );
         },
 

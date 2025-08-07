@@ -659,7 +659,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&TriggerProto::default()).err().unwrap();
 
-        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -705,8 +705,7 @@ mod tests {
 
         assert!(
             matches!(&err, TriggerFactoryError::UnableToListenToGetterPublisher { publisher_name } if publisher_name == PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -809,11 +808,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
 
-        assert!(
-            matches!(err, TriggerFactoryError::NoParentTriggers),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(matches!(err, TriggerFactoryError::NoParentTriggers), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -823,11 +818,7 @@ mod tests {
 
         let err = factory.create_using_default_context(&trigger).err().unwrap();
 
-        assert!(
-            matches!(err, TriggerFactoryError::MissingNodeIndex),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(matches!(err, TriggerFactoryError::MissingNodeIndex), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -839,8 +830,7 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -862,8 +852,7 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1179,7 +1168,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&TriggerProto::default()).unwrap_err();
 
-        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {:?}", err);
+        assert!(matches!(&err, TriggerFactoryError::NameNotSet), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -1214,8 +1203,7 @@ mod tests {
 
         assert!(
             matches!(&err, TriggerFactoryError::UnableToListenToGetterPublisher { publisher_name } if publisher_name == PUBLISHER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1300,11 +1288,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
-        assert!(
-            matches!(err, TriggerFactoryError::NoParentTriggers),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(matches!(err, TriggerFactoryError::NoParentTriggers), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -1314,11 +1298,7 @@ mod tests {
 
         let err = factory.validate_using_default_context(&trigger).unwrap_err();
 
-        assert!(
-            matches!(err, TriggerFactoryError::MissingNodeIndex),
-            "Unexpected error: {:?}",
-            err
-        );
+        assert!(matches!(err, TriggerFactoryError::MissingNodeIndex), "Unexpected error: {err:?}");
     }
 
     #[test]
@@ -1330,8 +1310,7 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::IncorrectNodeIndex { node_index: NODE_INDEX }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1344,8 +1323,7 @@ mod tests {
 
         assert!(
             matches!(err, TriggerFactoryError::UnspecifiedConditionTypeProto),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

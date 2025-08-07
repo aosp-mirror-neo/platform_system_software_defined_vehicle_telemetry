@@ -118,7 +118,7 @@ unsafe extern "C" fn on_config_list_received(
     let status_msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
     if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        error!("Error in receiving config list: {}", status_msg);
+        error!("Error in receiving config list: {status_msg}");
         sender.send(Err(TelemetryError { status: status_code, message: status_msg })).unwrap();
         return;
     }
@@ -179,7 +179,7 @@ unsafe extern "C" fn on_report_received(
     let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
     if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        error!("Error in receiving metrics report: {}", msg);
+        error!("Error in receiving metrics report: {msg}");
         sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
         return;
     }
@@ -195,7 +195,7 @@ unsafe extern "C" fn on_report_received(
             sender
                 .send(Err(TelemetryError {
                     status: status_code,
-                    message: format!("Error in parsing report {}", e),
+                    message: format!("Error in parsing report {e}"),
                 }))
                 .unwrap();
             return;
@@ -249,7 +249,7 @@ unsafe extern "C" fn on_ready_reports_info_received(
     let msg = unsafe { CStr::from_ptr(status_msg) }.to_str().unwrap().to_owned();
 
     if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
-        error!("Error in receiving metrics report: {}", msg);
+        error!("Error in receiving metrics report: {msg}");
         sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
         return;
     }

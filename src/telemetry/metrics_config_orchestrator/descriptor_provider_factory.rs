@@ -174,8 +174,7 @@ mod tests {
 
         assert!(
             matches!(&err, DescriptorProviderFactoryError::ServicePublisherManagerError { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -197,8 +196,7 @@ mod tests {
 
         assert!(
             matches!(&err, DescriptorProviderFactoryError::InvalidAggregationPublisher { pub_name } if pub_name == PUBLISHER_1),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -215,8 +213,7 @@ mod tests {
 
         assert!(
             matches!(&err, DescriptorProviderError::InvalidPublisherName),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 

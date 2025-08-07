@@ -38,7 +38,7 @@ impl NodeValueExtension for NodeValue {
             NodeValue::Message(val) => NodeValue::MessageList(vec![Arc::clone(val)]),
             _ => {
                 return Err(AggregationError::VectorInitializationError {
-                    value: format!("{:?}", self),
+                    value: format!("{self:?}"),
                 })
             }
         })
@@ -51,8 +51,8 @@ impl NodeValueExtension for NodeValue {
             value: &'a NodeValue,
         ) -> Box<dyn FnOnce() -> AggregationError + 'a> {
             let err_provider = move || AggregationError::VectorAppendTypeMismatch {
-                list: format!("{:?}", v),
-                value: format!("{:?}", value),
+                list: format!("{v:?}"),
+                value: format!("{value:?}"),
             };
             Box::new(err_provider)
         }
@@ -82,7 +82,7 @@ impl NodeValueExtension for NodeValue {
                 v.push(Arc::clone(value.get_message().ok_or_else(create_err_provider(v, value))?));
                 pop_front_to_size_n(v, max_length);
             }
-            _ => panic!("push() should never be called on non-list: {:?}", self),
+            _ => panic!("push() should never be called on non-list: {self:?}"),
         }
         Ok(())
     }
@@ -108,7 +108,7 @@ impl NodeValueExtension for NodeValue {
         };
 
         let new_sample = new_value.get_double().ok_or_else(|| {
-            AggregationError::NumericAggregationTypeMismatch { value: format!("{:?}", new_value) }
+            AggregationError::NumericAggregationTypeMismatch { value: format!("{new_value:?}") }
         })?;
 
         let n = f64::from(n);
@@ -131,9 +131,8 @@ fn pop_front_to_size_n<T: std::fmt::Debug>(vec: &mut Vec<T>, n: Option<u32>) {
             panic!(
                 "Everytime the vector exceeds max length of n, it should remove the oldest \
                 element to keep the vector at size n. But either a previous aggregation \
-                or a current aggregation caused the vector {:?} to exceed max length of {} \
-                by more than 1",
-                vec, max_len
+                or a current aggregation caused the vector {vec:?} to exceed max length of {max_len} \
+                by more than 1"
             );
         }
     }

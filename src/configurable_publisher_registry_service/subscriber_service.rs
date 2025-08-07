@@ -21,7 +21,7 @@ impl ISubscriberAsyncServer for SubscriberService {
     async fn sendData(&self, data: &[u8]) -> binder::Result<()> {
         self.message_descriptor.parse_from_bytes(data).map_or_else(
             |err| {
-                let binder_msg = format!("Unable to parse message bytes: {:?}", err);
+                let binder_msg = format!("Unable to parse message bytes: {err:?}");
                 (self.new_message_callback.lock())(Err(
                     ServicePublisherAccessorError::MessageParsingFailed(err.into()),
                 ));

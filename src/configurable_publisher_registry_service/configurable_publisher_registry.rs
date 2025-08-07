@@ -274,8 +274,7 @@ impl ConfigurablePublisherRegistry {
     pub(crate) async fn unregister_publisher(&self, service_name: &str) -> binder::Result<()> {
         if !self.try_unregister_publisher(service_name) {
             info!(
-                "Unable to unregister service {}. It might have been unregistered already.",
-                service_name
+                "Unable to unregister service {service_name}. It might have been unregistered already."
             );
         }
         Ok(())

@@ -249,7 +249,7 @@ impl NodeValue {
             NodeValue::Double(val) => approximately_equal(*val, 0.0),
             _ => {
                 return Err(NodeEvaluationError::InternalError {
-                    msg: format!("is_zero() invoked on non-numeric NodeValue: {:?}", self),
+                    msg: format!("is_zero() invoked on non-numeric NodeValue: {self:?}"),
                 })
             }
         })
@@ -313,7 +313,7 @@ impl NodeValue {
                     Ok(value) => value,
                     Err(i) => {
                         return Err(NodeEvaluationError::UnknownOperator {
-                            op: format!("Arithmetic operator with enum value {}", i),
+                            op: format!("Arithmetic operator with enum value {i}"),
                         })
                     }
                 };
@@ -325,7 +325,7 @@ impl NodeValue {
                     Ok(value) => value,
                     Err(i) => {
                         return Err(NodeEvaluationError::UnknownOperator {
-                            op: format!("Logical operator with enum value {}", i),
+                            op: format!("Logical operator with enum value {i}"),
                         })
                     }
                 };
@@ -337,7 +337,7 @@ impl NodeValue {
                     Ok(value) => value,
                     Err(i) => {
                         return Err(NodeEvaluationError::UnknownOperator {
-                            op: format!("Relational operator with enum value {}", i),
+                            op: format!("Relational operator with enum value {i}"),
                         })
                     }
                 };
@@ -349,14 +349,14 @@ impl NodeValue {
                     Ok(value) => value,
                     Err(i) => {
                         return Err(NodeEvaluationError::UnknownOperator {
-                            op: format!("Rounding operator with enum value {}", i),
+                            op: format!("Rounding operator with enum value {i}"),
                         })
                     }
                 };
 
                 value.handle_rounding(&op)
             }),
-            _ => Err(NodeEvaluationError::UnknownOperator { op: format!("{:?}", op) }),
+            _ => Err(NodeEvaluationError::UnknownOperator { op: format!("{op:?}") }),
         }
     }
 
@@ -382,7 +382,7 @@ impl NodeValue {
             val @ NodeValue::None => Ok(val),
             node_value => Err(NodeEvaluationError::WrongNestedFieldType {
                 field_name: field_name.clone(),
-                e: format!("Unable to get nested fields from node value {:?}", node_value),
+                e: format!("Unable to get nested fields from node value {node_value:?}"),
             }),
         }
     }

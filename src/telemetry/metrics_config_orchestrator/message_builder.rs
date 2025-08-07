@@ -508,8 +508,7 @@ mod tests {
                     e: NodeEvaluationError::DivideByZero,
                 }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -536,8 +535,7 @@ mod tests {
         let err = &errors[0].error;
         assert!(
             matches!(err, MessageBuilderErrorType::BadAggregation { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -575,8 +573,7 @@ mod tests {
         let err = &errors[0].error;
         assert!(
             matches!(err, MessageBuilderErrorType::ExpressionEvaluationError { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

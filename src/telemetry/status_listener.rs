@@ -65,8 +65,7 @@ impl StatusListener for StatusListenerImpl {
         if let Some((listener_ref, _)) = self.api_status_listener.lock().as_ref() {
             if let Err(e) = listener_ref.sendStatus(api_call_id, status_code, status_message) {
                 warn!(
-                    "Error when sending status code {:?} for API call {} to the client: {:?}",
-                    status_code, api_call_id, e
+                    "Error when sending status code {status_code:?} for API call {api_call_id} to the client: {e:?}"
                 );
             }
         }
@@ -354,10 +353,8 @@ mod tests {
     fn send_misc_status_overflow() {
         let status_listener = StatusListenerImpl::new();
         for i in 0..MAX_MISC_ERROR_STORE_SIZE + 1 {
-            let status = create_status(
-                StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR,
-                &format!("Error {}", i),
-            );
+            let status =
+                create_status(StatusCodes::TELEMETRY_SERVICE_UNKNOWN_ERROR, &format!("Error {i}"));
             status_listener.send_misc_status(status);
         }
         let misc_errors = status_listener.misc_error_store.lock();

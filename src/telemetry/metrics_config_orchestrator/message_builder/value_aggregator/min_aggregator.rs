@@ -27,7 +27,7 @@ impl ValueAggregator for MinAggregator {
 
         if !node_value.is_numeric() {
             return Err(AggregationError::NumericAggregationTypeMismatch {
-                value: format!("{:?}", node_value),
+                value: format!("{node_value:?}"),
             });
         }
 
@@ -100,8 +100,7 @@ mod tests {
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

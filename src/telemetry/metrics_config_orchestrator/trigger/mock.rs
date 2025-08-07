@@ -114,7 +114,7 @@ impl MockTrigger {
             TriggerSubscriber::MetricsConfigEnd => matches!(other, TriggerSubscriber::MetricsConfigEnd),
             TriggerSubscriber::MetricsConfigFinish => matches!(other, TriggerSubscriber::MetricsConfigFinish),
             TriggerSubscriber::MetricsReportGenerator { name } => matches!(other, TriggerSubscriber::MetricsReportGenerator { name: other_name } if name == other_name),
-        }), "Subscriber {} wasn't expected", subscriber);
+        }), "Subscriber {subscriber} wasn't expected");
     }
 }
 

@@ -525,7 +525,7 @@ pub(super) mod tests {
 
         let err = service_adapter.get_message_provider(SERVICE_NAME).await.err().unwrap();
 
-        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {err:?}");
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
@@ -557,7 +557,7 @@ pub(super) mod tests {
         accessor.set_next_error(anyhow!(ERROR_MESSAGE));
         let err = provider.get_latest_message(None).await.err().unwrap();
 
-        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {err:?}");
         assert_eq!(accessor.get_num_get_message_provider_calls(), 1);
     }
 
@@ -604,7 +604,7 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {err:?}");
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -681,7 +681,7 @@ pub(super) mod tests {
             .err()
             .unwrap();
 
-        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {:?}", err);
+        assert!(err.to_string().contains(ERROR_MESSAGE), "Unexpected error: {err:?}");
         assert_eq!(accessor.get_num_subscribe_calls(), 1);
     }
 
@@ -1164,8 +1164,7 @@ pub(super) mod tests {
                 details: StatusDetails::ServiceErrorDetails(ServiceErrorDetails { serviceName } ),
             }
             if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 
@@ -1212,8 +1211,7 @@ pub(super) mod tests {
                 ),
             }
             if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 }

@@ -158,16 +158,16 @@ async fn wrapped_main() -> anyhow::Result<()> {
         };
         let metrics_report = service.get_metrics_report(&report_info.report_uuid).await?;
 
-        info!("Report is {:?}", metrics_report);
+        info!("Report is {metrics_report:?}");
 
         // Parse the report and print it to the console
         let mut metrics_report_data = metrics_report.report_data;
-        info!("Metrics report parsed: {:?}", metrics_report_data);
+        info!("Metrics report parsed: {metrics_report_data:?}");
 
         let atom_report_wrapper: Option<AtomReportWrapper> =
             metrics_report_data.take().and_then(parse_any_to_type_protobuf);
 
-        info!("Atom Report Wrapper: {:?}", atom_report_wrapper);
+        info!("Atom Report Wrapper: {atom_report_wrapper:?}");
 
         match AtomReportList::parse_from_bytes(&atom_report_wrapper.unwrap().data) {
             Ok(list) => {
@@ -184,20 +184,20 @@ async fn wrapped_main() -> anyhow::Result<()> {
                         match Atom::parse_from_bytes(&item_view.data) {
                             // Print the atom to logcat and console for demo purposes
                             Ok(atom) => {
-                                println!("Successfully got the atom {}", atom);
-                                info!("{}", atom);
+                                println!("Successfully got the atom {atom}");
+                                info!("{atom}");
                             }
 
                             Err(e) => {
-                                eprintln!("Failed to parse Atom from bytes: {:?}", e);
-                                info!("Failed to parse Atom from bytes: {:?}", e)
+                                eprintln!("Failed to parse Atom from bytes: {e:?}");
+                                info!("Failed to parse Atom from bytes: {e:?}")
                             }
                         }
                     }
                 }
             }
             Err(e) => {
-                eprintln!("Failed to parse AtomReportList from bytes: {:?}", e);
+                eprintln!("Failed to parse AtomReportList from bytes: {e:?}");
             }
         }
     }
@@ -216,7 +216,7 @@ fn parse_any_to_type_protobuf(any_msg: Any) -> Option<AtomReportWrapper> {
     match any_msg.unpack::<AtomReportWrapper>() {
         Ok(optional_message) => optional_message,
         Err(e) => {
-            eprintln!("Failed to unpack Any to AtomReportWrapper: {:?}", e);
+            eprintln!("Failed to unpack Any to AtomReportWrapper: {e:?}");
             None
         }
     }

@@ -147,7 +147,7 @@ impl MetricsConfigManagerImpl {
             });
 
         let error_handler = |code: StatusCodes, msg: &str, path: &Path| {
-            error!("{}", msg);
+            error!("{msg}");
 
             let details = StatusDetails::FileIOErrorDetails(FileIOErrorDetails {
                 path: path.to_string_lossy().to_string(),
@@ -184,7 +184,7 @@ impl MetricsConfigManagerImpl {
                     info!("Active config telemetry directory created");
                 }
                 Err(e) => {
-                    let err = format!("Error {} in creating active config directory", e);
+                    let err = format!("Error {e} in creating active config directory");
                     error_handler(StatusCodes::FILE_IO_ERROR, &err, &self.active_dir_path);
                 }
             };
@@ -204,7 +204,7 @@ impl MetricsConfigManagerImpl {
             let bytes = match file_io_utils::read_from_file(&path).await {
                 Ok(data) => data,
                 Err(e) => {
-                    let err = format!("Error {} in reading file {:?} from disk", e, entry);
+                    let err = format!("Error {e} in reading file {entry:?} from disk");
                     error_handler(StatusCodes::FILE_IO_ERROR, &err, &path);
                     continue;
                 }
@@ -216,7 +216,7 @@ impl MetricsConfigManagerImpl {
                 Err(e) => {
                     error_handler(
                         StatusCodes::METRICS_CONFIG_PARSE_ERROR,
-                        &format!("Error {} in parsing metric config {:?} read from disk", e, entry),
+                        &format!("Error {e} in parsing metric config {entry:?} read from disk"),
                         &path,
                     );
                     continue;
@@ -232,14 +232,12 @@ impl MetricsConfigManagerImpl {
                     configs_size += bytes.len();
                 }
                 Err(e) => {
-                    let err = format!(
-                        "Error {} in initializing metric config {:?} read from disk",
-                        e, entry
-                    );
+                    let err =
+                        format!("Error {e} in initializing metric config {entry:?} read from disk");
                     error_handler(StatusCodes::ACTIVATE_METRICS_CONFIG_FAILED, &err, &path);
 
                     file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
-                        error!("An error occurred in removing corrupt config: {}", e)
+                        error!("An error occurred in removing corrupt config: {e}")
                     });
                 }
             }
@@ -260,7 +258,7 @@ impl MetricsConfigManagerImpl {
                     info!("Inactive config telemetry directory created");
                 }
                 Err(e) => {
-                    let err = format!("Error {} in creating inactive config directory", e);
+                    let err = format!("Error {e} in creating inactive config directory");
                     error_handler(StatusCodes::FILE_IO_ERROR, &err, &self.inactive_dir_path);
                 }
             };
@@ -276,13 +274,13 @@ impl MetricsConfigManagerImpl {
             if !metadata.is_file() {
                 error_handler(
                     StatusCodes::METRICS_CONFIG_CORRUPTED,
-                    &format!("Non-file entry found in inactive config directory: {:?}", entry),
+                    &format!("Non-file entry found in inactive config directory: {entry:?}"),
                     &entry.path(),
                 );
 
                 // remove corrupt entry
                 file_io_utils::remove_dir(&entry.path()).await.unwrap_or_else(|e| {
-                    error!("An error occurred in removing directory entry config: {}", e)
+                    error!("An error occurred in removing directory entry config: {e}")
                 });
                 continue;
             }
@@ -342,10 +340,10 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         }
 
         if let Err(e) = file_io_utils::write_to_file(&path, metrics_config).await {
-            error!("An error occurred while writing to file: {}", e);
+            error!("An error occurred while writing to file: {e}");
             if path.is_file() {
                 file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
-                    error!("An error occurred in removing corrupt config: {}", e)
+                    error!("An error occurred in removing corrupt config: {e}")
                 });
             }
             self.metrics_configs_store.lock().remove(&config.uuid);
@@ -379,11 +377,11 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             let config: MetricsConfig = protobuf::Message::parse_from_bytes(&bytes)
                 .map_err(|_| MetricsConfigManagerError::ConfigParseError)?;
             let uuid = &config.uuid;
-            info!("initializing {} Config", uuid);
+            info!("initializing {uuid} Config");
             // Initializes metrics config
             match Arc::clone(&self.metrics_config_orchestrator).initialize_config(&config).await {
                 Ok(()) => {
-                    info!("Metrics config orchestrator successfully initialized {} config", uuid);
+                    info!("Metrics config orchestrator successfully initialized {uuid} config");
                     let new_path = self.active_dir_path.join(uuid);
                     file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
                         error!(
@@ -394,9 +392,9 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
                     });
                 }
                 Err(e) => {
-                    error!("Error {} in initializing {} Config", e, uuid);
+                    error!("Error {e} in initializing {uuid} Config");
                     file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
-                        error!("An error occurred in removing corrupt config: {}", e)
+                        error!("An error occurred in removing corrupt config: {e}")
                     });
                     return Err(MetricsConfigManagerError::ConfigOrchestratorError { error: e });
                 }
@@ -432,7 +430,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         // TODO: b/299329266: Handle file io errors gracefully
         file_io_utils::rename_file(&old_path, &new_path)
             .await
-            .unwrap_or_else(|e| error!("An error occurred in renaming config: {}", e));
+            .unwrap_or_else(|e| error!("An error occurred in renaming config: {e}"));
 
         Ok(())
     }
@@ -460,7 +458,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid).await;
             if let Err(err) = res {
                 if let ConfigOrchestratorError::InvalidConfigUuid { .. } = err {
-                    info!("UUID {} doesn't exist or is inactive", uuid);
+                    info!("UUID {uuid} doesn't exist or is inactive");
                     false
                 } else {
                     return Err(MetricsConfigManagerError::ConfigOrchestratorError { error: err });
@@ -498,14 +496,14 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         for entry in fs::read_dir(self.active_dir_path.clone()).unwrap() {
             file_io_utils::remove_file(&entry.unwrap().path())
                 .await
-                .unwrap_or_else(|e| error!("An error occurred in removing active config: {}", e));
+                .unwrap_or_else(|e| error!("An error occurred in removing active config: {e}"));
         }
 
         // remove all configs from inactive directory
         for entry in fs::read_dir(self.inactive_dir_path.clone()).unwrap() {
             file_io_utils::remove_file(&entry.unwrap().path())
                 .await
-                .unwrap_or_else(|e| error!("An error occurred in removing inactive config: {}", e));
+                .unwrap_or_else(|e| error!("An error occurred in removing inactive config: {e}"));
         }
 
         {
@@ -514,9 +512,9 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
                 let res = self.metrics_config_orchestrator.finish_config(uuid).await;
                 if let Err(err) = res {
                     if let ConfigOrchestratorError::InvalidConfigUuid { .. } = err {
-                        info!("UUID {} doesn't exist or is not active", uuid);
+                        info!("UUID {uuid} doesn't exist or is not active");
                     } else {
-                        error!("Error in finishing Metric Config {:?}", err);
+                        error!("Error in finishing Metric Config {err:?}");
                     }
                 }
             }
@@ -763,15 +761,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&active_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating active config directory: {:?} {}",
-                active_dir_path, e
+                "An error occurred in creating active config directory: {active_dir_path:?} {e}"
             );
         });
 
         let file_path = active_dir_path.join(UUID);
         let serialized_config = create_serialized_config(UUID);
         file_io_utils::write_to_file(&file_path, &serialized_config).await.unwrap_or_else(|e| {
-            panic!("An error occurred in writing serialized config: {:?} {}", file_path, e)
+            panic!("An error occurred in writing serialized config: {file_path:?} {e}")
         });
 
         let test_environment = TestEnvironment::new(
@@ -793,15 +790,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&active_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating active config directory: {:?} {}",
-                active_dir_path, e
+                "An error occurred in creating active config directory: {active_dir_path:?} {e}"
             );
         });
 
         let file_path = active_dir_path.join(UUID);
         let serialized_config = create_serialized_config(UUID);
         file_io_utils::write_to_file(&file_path, &serialized_config).await.unwrap_or_else(|e| {
-            panic!("An error occurred in writing serialized config: {:?} {}", file_path, e)
+            panic!("An error occurred in writing serialized config: {file_path:?} {e}")
         });
 
         let orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new());
@@ -831,15 +827,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&active_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating active config directory: {:?} {}",
-                active_dir_path, e
+                "An error occurred in creating active config directory: {active_dir_path:?} {e}"
             );
         });
 
         let file_path = active_dir_path.join(UUID);
         let corrupt_config = create_corrupt_config(UUID);
         file_io_utils::write_to_file(&file_path, &corrupt_config).await.unwrap_or_else(|e| {
-            panic!("An error occurred in writing corrupt config: {:?} {}", file_path, e)
+            panic!("An error occurred in writing corrupt config: {file_path:?} {e}")
         });
 
         let test_environment = TestEnvironment::new(
@@ -866,15 +861,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating inactive config directory: {:?} {}",
-                inactive_dir_path, e
+                "An error occurred in creating inactive config directory: {inactive_dir_path:?} {e}"
             );
         });
 
         // Create a directory instead of a file to simulate a corrupted entry.
         let corrupt_entry_path = active_dir_path.join("corrupt_config");
         file_io_utils::create_dir(&corrupt_entry_path).await.unwrap_or_else(|e| {
-            panic!("An error occurred in creating corrupt entry: {:?} {}", corrupt_entry_path, e);
+            panic!("An error occurred in creating corrupt entry: {corrupt_entry_path:?} {e}");
         });
 
         let test_environment = TestEnvironment::new(
@@ -899,15 +893,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating inactive config directory: {:?} {}",
-                active_dir_path, e
+                "An error occurred in creating inactive config directory: {active_dir_path:?} {e}"
             );
         });
 
         let file_path = inactive_dir_path.join(UUID);
         let serialized_config = create_serialized_config(UUID);
         file_io_utils::write_to_file(&file_path, &serialized_config).await.unwrap_or_else(|e| {
-            panic!("An error occurred in writing serialized config: {:?} {}", file_path, e)
+            panic!("An error occurred in writing serialized config: {file_path:?} {e}")
         });
 
         let test_environment = TestEnvironment::new(
@@ -929,15 +922,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating inactive config directory: {:?} {}",
-                active_dir_path, e
+                "An error occurred in creating inactive config directory: {active_dir_path:?} {e}"
             );
         });
 
         let file_path = inactive_dir_path.join(UUID);
         let corrupt_config = create_corrupt_config(UUID);
         file_io_utils::write_to_file(&file_path, &corrupt_config).await.unwrap_or_else(|e| {
-            panic!("An error occurred in writing corrupt config: {:?} {}", file_path, e)
+            panic!("An error occurred in writing corrupt config: {file_path:?} {e}")
         });
 
         let _test_environment = TestEnvironment::new(
@@ -960,15 +952,14 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         file_io_utils::create_dir(&inactive_dir_path).await.unwrap_or_else(|e| {
             panic!(
-                "An error occurred in creating inactive config directory: {:?} {}",
-                inactive_dir_path, e
+                "An error occurred in creating inactive config directory: {inactive_dir_path:?} {e}"
             );
         });
 
         // Create a directory instead of a file to simulate a corrupted entry.
         let corrupt_entry_path = inactive_dir_path.join("corrupt_config");
         file_io_utils::create_dir(&corrupt_entry_path).await.unwrap_or_else(|e| {
-            panic!("An error occurred in creating corrupt entry: {:?} {}", corrupt_entry_path, e);
+            panic!("An error occurred in creating corrupt entry: {corrupt_entry_path:?} {e}");
         });
 
         let test_environment = TestEnvironment::new(
@@ -1072,8 +1063,7 @@ mod tests {
         assert!(file_path.is_file());
         assert!(
             matches!(&err, MetricsConfigManagerError::DuplicateMetricsConfigUuid { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(2, test_environment.get_num_validate_config_calls());
     }
@@ -1102,8 +1092,7 @@ mod tests {
         assert!(!file_path.is_file());
         assert!(
             matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(0, test_environment.get_num_validate_config_calls());
     }
@@ -1132,8 +1121,7 @@ mod tests {
             test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(1, test_environment.get_num_validate_config_calls());
     }
@@ -1154,8 +1142,7 @@ mod tests {
             test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::PersistentStorageLimitExceeded),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(0, test_environment.get_num_validate_config_calls());
     }
@@ -1215,8 +1202,7 @@ mod tests {
         let err = test_environment.manager.activate_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::ConfigOrchestratorError { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
     }
@@ -1285,8 +1271,7 @@ mod tests {
         let err = test_environment.manager.deactivate_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
 
         assert!(new_file_path.is_file());
@@ -1341,8 +1326,7 @@ mod tests {
         let err = test_environment.manager.remove_metrics_config(UUID).await.unwrap_err();
         assert!(
             matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { uuid } if uuid == UUID),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1425,7 +1409,7 @@ mod tests {
         let active_configs = test_environment.manager.get_active_metrics_config_uuids().await;
         assert!(file_path.is_file());
         assert_eq!(1, test_environment.get_num_get_active_config_calls());
-        assert_eq!(active_configs, vec![UUID.to_string()], "active configs: {:?}", active_configs);
+        assert_eq!(active_configs, vec![UUID.to_string()], "active configs: {active_configs:?}");
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1462,8 +1446,7 @@ mod tests {
         assert_eq!(
             inactive_configs,
             vec![UUID.to_string()],
-            "inactive configs: {:?}",
-            inactive_configs
+            "inactive configs: {inactive_configs:?}"
         );
     }
 }

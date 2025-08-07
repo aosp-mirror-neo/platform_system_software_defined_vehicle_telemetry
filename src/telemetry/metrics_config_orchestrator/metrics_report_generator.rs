@@ -458,8 +458,7 @@ mod test {
                 ),
             }
             if message.contains("failed due to message builder error") && metricsConfigUUID == CONFIG_UUID && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 

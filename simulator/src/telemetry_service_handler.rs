@@ -55,7 +55,7 @@ pub async fn get_telemetry_service_listeners(
     )
     .await?
     .map_err(|error| SimulatorError::Error {
-        error_message: format!("Failed to initiate telemetry service: \"{}\"", error),
+        error_message: format!("Failed to initiate telemetry service: \"{error}\""),
     })?;
 
     Ok((report_ready_rx, misc_status_rx))

@@ -30,7 +30,7 @@ pub fn find_message_by_full_name(
     let full_name = if full_name.starts_with('.') {
         Cow::from(full_name)
     } else {
-        Cow::from(format!(".{}", full_name))
+        Cow::from(format!(".{full_name}"))
     };
 
     // iterate through all file_descriptors, find MessageDescriptor for the given message_type

@@ -90,7 +90,7 @@ impl MetricsReportListener {
             let report_info =
                 MetricsReportInfo { configUuid: config_uuid, reportUuid: report_uuid };
             if let Err(e) = listener.deref().onReady(&report_info) {
-                warn!("Error when trying to notify client about a new report: {:?}", e);
+                warn!("Error when trying to notify client about a new report: {e:?}");
             }
         }
     }
@@ -261,7 +261,7 @@ pub(crate) mod tests {
 
         for i in 0..MAX_METRICS_REPORT_STORE_SIZE + 1 {
             let metrics_report = MetricsReport {
-                report_uuid: format!("report-{}", i),
+                report_uuid: format!("report-{i}"),
                 metrics_config_uuid: Uuid::new_v4().to_string(),
                 ..Default::default()
             };
@@ -292,7 +292,7 @@ pub(crate) mod tests {
 
         for i in 0..MAX_METRICS_REPORT_STORE_SIZE {
             let metrics_report = MetricsReport {
-                report_uuid: format!("report-{}", i),
+                report_uuid: format!("report-{i}"),
                 metrics_config_uuid: Uuid::new_v4().to_string(),
                 ..Default::default()
             };

@@ -114,7 +114,7 @@ impl ValueAggregatorFactory for ValueAggregatorFactoryImpl {
                 Ok((Box::new(CountAggregator::new()), None))
             }
             _ => Err(ValueAggregatorFactoryError::UnknownAggregationType {
-                msg: format!("{:?}", aggregated_field_value),
+                msg: format!("{aggregated_field_value:?}"),
             }),
         }
     }
@@ -157,8 +157,8 @@ impl ValueAggregatorFactoryImpl {
             Ok(())
         } else {
             Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment {
-                field_type: format!("{:?}", field_type),
-                aggregated_type: format!("{:?}", value_type),
+                field_type: format!("{field_type:?}"),
+                aggregated_type: format!("{value_type:?}"),
             })
         }
     }
@@ -238,9 +238,8 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                         _ => {
                             return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                                 msg: format!(
-                                    "Cannot apply vector aggregation on node output type {:?}",
-                                    node_type
-                                ),
+                                "Cannot apply vector aggregation on node output type {node_type:?}"
+                            ),
                             })
                         }
                     };
@@ -257,8 +256,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                         msg: format!(
-                            "Cannot apply max aggregation on node output type {:?}",
-                            node_type
+                            "Cannot apply max aggregation on node output type {node_type:?}"
                         ),
                     });
                 }
@@ -270,8 +268,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                         msg: format!(
-                            "Cannot apply min aggregation on node output type {:?}",
-                            node_type
+                            "Cannot apply min aggregation on node output type {node_type:?}"
                         ),
                     });
                 }
@@ -283,8 +280,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                         msg: format!(
-                            "Cannot apply avg aggregation on node output type {:?}",
-                            node_type
+                            "Cannot apply avg aggregation on node output type {node_type:?}"
                         ),
                     });
                 }
@@ -296,8 +292,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                         msg: format!(
-                            "Cannot apply sum aggregation on node output type {:?}",
-                            node_type
+                            "Cannot apply sum aggregation on node output type {node_type:?}"
                         ),
                     });
                 }
@@ -309,8 +304,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                         msg: format!(
-                            "Cannot apply standard deviation aggregation on node output type {:?}",
-                            node_type
+                            "Cannot apply standard deviation aggregation on node output type {node_type:?}"
                         ),
                     });
                 }
@@ -322,8 +316,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
                 } else {
                     return Err(ValueAggregatorFactoryError::IncompatibleAggregation {
                         msg: format!(
-                            "Cannot apply delta aggregation on node output type {:?}",
-                            node_type
+                            "Cannot apply delta aggregation on node output type {node_type:?}"
                         ),
                     });
                 }
@@ -331,7 +324,7 @@ impl AggregatedFieldValueExtension for AggregatedFieldValueProto {
             AggregatedFieldValueProto::CountAggregation(_) => Some(NodeValueType::Int),
             _ => {
                 return Err(ValueAggregatorFactoryError::UnknownAggregationType {
-                    msg: format!("{:?}", self),
+                    msg: format!("{self:?}"),
                 })
             }
         };

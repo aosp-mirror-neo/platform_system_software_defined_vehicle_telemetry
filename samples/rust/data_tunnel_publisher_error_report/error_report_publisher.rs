@@ -84,7 +84,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
         let message = data_generator.generate();
         match dt_publisher.publish_length_delimited_proto(&message) {
             Ok(()) => trace!("Error report with title {} written to DT", message.error_info.title),
-            Err(err) => error!("Failed to write message to DT: {:?}", err),
+            Err(err) => error!("Failed to write message to DT: {err:?}"),
         }
 
         let mut rng = rand::thread_rng();

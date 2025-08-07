@@ -484,7 +484,7 @@ impl ServicePublisher {
             );
         };
         let report_activation_error = |err, state| {
-            let message = format!("failed to retry activation from {} state", state);
+            let message = format!("failed to retry activation from {state} state");
             self.report_activation_error(err, &message);
         };
 
@@ -1143,8 +1143,7 @@ mod tests {
                 ),
             }
             if message.contains("failed to retry activation") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 
@@ -1324,8 +1323,7 @@ mod tests {
                 ),
             }
             if message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME),
-            "Unexpected status: {:?}",
-            status
+            "Unexpected status: {status:?}"
         );
     }
 
@@ -1519,7 +1517,7 @@ mod tests {
 
         let err = publisher.get_latest_message().unwrap_async().await.unwrap_err();
 
-        assert!(err.to_string().contains(ERROR_STRING), "Unexpected error: {:?}", err);
+        assert!(err.to_string().contains(ERROR_STRING), "Unexpected error: {err:?}");
     }
 
     #[sdv_telemetry_test_utils::timeout]

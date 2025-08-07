@@ -140,7 +140,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
             )
             .is_err()
         {
-            panic!("Callback is already set for service name {}", service_name);
+            panic!("Callback is already set for service name {service_name}");
         }
 
         data.cancellation_callback.replace(cancellation_callback);

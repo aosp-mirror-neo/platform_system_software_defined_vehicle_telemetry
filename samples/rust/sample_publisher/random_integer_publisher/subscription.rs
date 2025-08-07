@@ -66,7 +66,7 @@ impl RandomIntegerPublisherSubscription {
                 )
                 .await
             {
-                error!("Error while sending message to subscriber: {:?}", err);
+                error!("Error while sending message to subscriber: {err:?}");
             }
 
             tokio::time::sleep(Duration::from_secs(1)).await;

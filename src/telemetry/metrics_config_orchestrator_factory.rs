@@ -53,9 +53,9 @@ impl MetricsConfigOrchestratorFactory for MetricsConfigOrchestratorFactoryImpl {
                         if let MetricsConfigManagerError::InvalidConfigUuid { .. } = e {
                             // In theory it's possible that by the time the task is executed
                             // the OEM service manually finishes the config
-                            info!("Unable to deactivate config. Invalid Config UUID: {}", e)
+                            info!("Unable to deactivate config. Invalid Config UUID: {e}")
                         } else {
-                            error!("Unable to deactivate config. Reported error: {}", e)
+                            error!("Unable to deactivate config. Reported error: {e}")
                         }
                     });
                 });

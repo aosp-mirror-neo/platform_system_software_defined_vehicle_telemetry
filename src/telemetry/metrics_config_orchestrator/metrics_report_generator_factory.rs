@@ -345,8 +345,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -359,8 +358,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -373,8 +371,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -412,8 +409,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -457,8 +453,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::NameNotSet),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -471,8 +466,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::ProtoMessageBuilderNotSet),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -485,8 +479,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidTriggerName { trigger_name } if trigger_name == TRIGGER_NAME),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -510,8 +503,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::InvalidProtoMessageBuilder { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -523,8 +515,7 @@ mod tests {
 
         assert!(
             matches!(&err, MetricsReportGeneratorFactoryError::TriggerNameRequired),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

@@ -80,8 +80,8 @@ async fn wrapped_main() -> anyhow::Result<()> {
     loop {
         let message = data_generator.generate();
         match dt_publisher.publish_length_delimited_proto(&message) {
-            Ok(()) => trace!("Message written to DT: {}", message),
-            Err(err) => error!("Failed to write message to DT: {:?}", err),
+            Ok(()) => trace!("Message written to DT: {message}"),
+            Err(err) => error!("Failed to write message to DT: {err:?}"),
         }
 
         sleep(Duration::from_millis(5)).await;

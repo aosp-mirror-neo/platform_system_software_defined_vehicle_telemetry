@@ -46,7 +46,7 @@ impl ReflectRepeatedMutExt for ReflectRepeatedMut<'_> {
                     .collect::<Result<Vec<_>, _>>()?,
             ),
             _ => Err(NodeEvaluationError::RepeatedFieldWrongAssignment {
-                value: format!("{:?}", node_value),
+                value: format!("{node_value:?}"),
             }),
         }
     }
@@ -109,8 +109,8 @@ impl ToReflectValueBox for bool {
             return Ok(ReflectValueBox::Bool(*self));
         }
         Err(NodeEvaluationError::ValueToProtoConversionError {
-            value: format!("{:?}", self),
-            refl_type: format!("{:?}", protobuf_type),
+            value: format!("{self:?}"),
+            refl_type: format!("{protobuf_type:?}"),
         })
     }
 }
@@ -143,8 +143,8 @@ impl ToReflectValueBox for i64 {
     ) -> Result<ReflectValueBox, NodeEvaluationError> {
         let err_provider = |_| {
             Err(NodeEvaluationError::ValueToProtoConversionError {
-                value: format!("{:?}", self),
-                refl_type: format!("{:?}", protobuf_type),
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
             })
         };
         match protobuf_type {
@@ -168,8 +168,8 @@ impl ToReflectValueBox for i64 {
             | ProtobufRuntimeType::Message(_)
             | ProtobufRuntimeType::String
             | ProtobufRuntimeType::VecU8 => Err(NodeEvaluationError::ValueToProtoConversionError {
-                value: format!("{:?}", self),
-                refl_type: format!("{:?}", protobuf_type),
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
             }),
         }
     }
@@ -201,8 +201,8 @@ impl ToReflectValueBox for f64 {
             ProtobufRuntimeType::F32 => Ok(ReflectValueBox::F32(*self as f32)),
             ProtobufRuntimeType::F64 => Ok(ReflectValueBox::F64(*self)),
             _ => Err(NodeEvaluationError::ValueToProtoConversionError {
-                value: format!("{:?}", self),
-                refl_type: format!("{:?}", protobuf_type),
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
             }),
         }
     }
@@ -222,8 +222,8 @@ impl ToReflectValueBox for Arc<dyn MessageDyn> {
                 Ok(ReflectValueBox::Message(self.as_ref().clone_box()))
             }
             _ => Err(NodeEvaluationError::ValueToProtoConversionError {
-                value: format!("{:?}", self),
-                refl_type: format!("{:?}", protobuf_type),
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
             }),
         }
     }
@@ -238,8 +238,8 @@ impl ToReflectValueBox for &str {
         match protobuf_type {
             ProtobufRuntimeType::String => Ok(ReflectValueBox::String(self.to_string())),
             _ => Err(NodeEvaluationError::ValueToProtoConversionError {
-                value: format!("{:?}", self),
-                refl_type: format!("{:?}", protobuf_type),
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
             }),
         }
     }
@@ -254,8 +254,8 @@ impl ToReflectValueBox for &[u8] {
         match protobuf_type {
             ProtobufRuntimeType::VecU8 => Ok(ReflectValueBox::Bytes(self.to_vec())),
             _ => Err(NodeEvaluationError::ValueToProtoConversionError {
-                value: format!("{:?}", self),
-                refl_type: format!("{:?}", protobuf_type),
+                value: format!("{self:?}"),
+                refl_type: format!("{protobuf_type:?}"),
             }),
         }
     }

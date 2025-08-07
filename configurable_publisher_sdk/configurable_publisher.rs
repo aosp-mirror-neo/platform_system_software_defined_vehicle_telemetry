@@ -45,8 +45,7 @@ fn to_binder_error(error: ConfigurablePublisherError) -> Status {
 
     let c_string_message = CString::new(error_message_str.as_str()).unwrap_or_else(|_| {
         panic!(
-            "Original message ('{}') contained null bytes. This is unrecoverable.",
-            error_message_str
+            "Original message ('{error_message_str}') contained null bytes. This is unrecoverable."
         )
     });
 

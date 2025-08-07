@@ -33,7 +33,7 @@ fn to_binder_result<T>(
     result: Result<T, ConfigurablePublisherRegistryRegisterError>,
 ) -> binder::Result<T> {
     result.map_err(|e| {
-        let message = format!("{:?}", e);
+        let message = format!("{e:?}");
         info!("Returning binder error: {}", &message);
 
         match e {

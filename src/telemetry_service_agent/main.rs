@@ -77,7 +77,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let res = register_services(service_publisher_manager_impl, pal).await;
 
     if res.is_err() {
-        error!("Error {:?} in initialization telemetry service", res);
+        error!("Error {res:?} in initialization telemetry service");
     }
 
     let configurable_publisher_registry_descriptor = format!(

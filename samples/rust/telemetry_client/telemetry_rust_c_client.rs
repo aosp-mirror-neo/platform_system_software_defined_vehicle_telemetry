@@ -173,10 +173,10 @@ async fn wrapped_main() -> anyhow::Result<()> {
                 let report_file_path =
                     report_directory.join(format!("{time_marker}_{report_name}.pb"));
                 match fs::File::create(report_file_path) {
-                    Err(error) => error!("Error creating report file: {}", error),
+                    Err(error) => error!("Error creating report file: {error}"),
                     Ok(mut file) => {
                         if let Err(e) = metrics_report.write_to_writer(&mut file) {
-                            error!("Error while writing report file: {}", e);
+                            error!("Error while writing report file: {e}");
                         };
                     }
                 };

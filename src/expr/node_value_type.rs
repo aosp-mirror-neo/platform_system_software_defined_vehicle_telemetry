@@ -235,7 +235,7 @@ impl OperatorProtoExtension for OperatorProto {
             // relational operator output type = boolean
             OperatorProto::RelationalOperator(op) => {
                 match op.enum_value().map_err(|i| NodeEvaluationError::UnknownOperator {
-                    op: format!("Relational operator with enum value {}", i),
+                    op: format!("Relational operator with enum value {i}"),
                 })? {
                     RelationalOperator::EQ if left.as_ref().is_none_or(|l| l.is_list()) => {
                         if left.as_ref().is_none_or(|l| l.can_apply_list_operator(get_right())) {
@@ -274,7 +274,7 @@ impl OperatorProtoExtension for OperatorProto {
             // logical operator output type = boolean
             OperatorProto::LogicalOperator(op) => {
                 match op.enum_value().map_err(|i| NodeEvaluationError::UnknownOperator {
-                    op: format!("Logical operator with enum value {}", i),
+                    op: format!("Logical operator with enum value {i}"),
                 })? {
                     LogicalOperator::AND | LogicalOperator::OR | LogicalOperator::XOR => {
                         if left.as_ref().is_none_or(|l| l.is_bool())
@@ -297,7 +297,7 @@ impl OperatorProtoExtension for OperatorProto {
             // arithmetic operator output type = number
             OperatorProto::ArithmeticOperator(op) => {
                 match op.enum_value().map_err(|i| NodeEvaluationError::UnknownOperator {
-                    op: format!("Arithmetic operator with enum value {}", i),
+                    op: format!("Arithmetic operator with enum value {i}"),
                 })? {
                     ArithmeticOperator::ADD
                     | ArithmeticOperator::SUBTRACT
@@ -387,7 +387,7 @@ impl OperatorProtoExtension for OperatorProto {
                     Err(NodeEvaluationError::RoundingOperatorIncompatibleOperands)
                 }
             }
-            _ => Err(NodeEvaluationError::UnknownOperator { op: format!("{:?}", self) }),
+            _ => Err(NodeEvaluationError::UnknownOperator { op: format!("{self:?}") }),
         }
     }
 }

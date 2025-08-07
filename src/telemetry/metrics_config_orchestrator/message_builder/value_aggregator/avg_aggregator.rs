@@ -90,8 +90,7 @@ mod tests {
 
         assert!(
             matches!(&err, AggregationError::NumericAggregationTypeMismatch { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

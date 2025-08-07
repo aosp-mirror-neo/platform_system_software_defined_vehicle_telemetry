@@ -26,7 +26,7 @@ impl RandomIntegerPublisherSubscription {
         publisher: Weak<RandomIntegerPublisher>,
         subscription_id: SequenceNumberType,
     ) -> Self {
-        info!("Creating subscription {}", subscription_id);
+        info!("Creating subscription {subscription_id}");
         Self { publisher, subscription_id }
     }
 }

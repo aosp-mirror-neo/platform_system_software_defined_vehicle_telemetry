@@ -192,8 +192,7 @@ mod tests {
 
         assert!(
             matches!(&err, AggregationError::VectorInitializationError { .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

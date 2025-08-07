@@ -577,8 +577,7 @@ mod tests {
                     } else {
                         panic!(
                             "Input Nodes contain only boolean constants, \
-                                    output Node {:?} is a non-boolean constant",
-                            value
+                                    output Node {value:?} is a non-boolean constant"
                         );
                     }
                 }
@@ -622,8 +621,7 @@ mod tests {
                 &err,
                 NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -686,8 +684,7 @@ mod tests {
                 &err,
                 NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -714,8 +711,7 @@ mod tests {
                 &err,
                 NodeError { index: 10, err: NodeEvaluationError::IndexOutOfBound { .. } }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -746,8 +742,7 @@ mod tests {
                     ..
                 }
                 if cycle == &vec![1, 0, 1]),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -763,8 +758,7 @@ mod tests {
         // assert
         assert!(
             matches!(&err, NodeError { index: 0, err: NodeEvaluationError::NodeTypeNotSet }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -782,8 +776,7 @@ mod tests {
         // assert
         assert!(
             matches!(&err, NodeError { err: NodeEvaluationError::ConstantValueNotSet, .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -801,8 +794,7 @@ mod tests {
         // assert
         assert!(
             matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -840,8 +832,7 @@ mod tests {
                     index: 0,
                 }
                 if r_op.enum_value().unwrap() == RelationalOperator::ALL_EQ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -886,8 +877,7 @@ mod tests {
                     err: NodeEvaluationError::CyclicDependency{cycle}, ..
                 }
                 if cycle == &vec![0, 0]),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -917,8 +907,7 @@ mod tests {
                     err: NodeEvaluationError::CyclicDependency{cycle}, ..
                 }
                 if cycle == &vec![1, 0, 1]),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -943,8 +932,7 @@ mod tests {
                 &err,
                 NodeError { index: 42, err: NodeEvaluationError::IndexOutOfBound { .. } }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -962,8 +950,7 @@ mod tests {
         // assert
         assert!(
             matches!(&err, NodeError { err: NodeEvaluationError::OperatorNotSet, .. }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -984,8 +971,7 @@ mod tests {
         // assert
         assert!(
             matches!(&err, NodeError { index: 0, err: NodeEvaluationError::LeftChildNotSet }),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1015,8 +1001,7 @@ mod tests {
                 &err,
                 NodeError { index: 1, err: NodeEvaluationError::BinaryOperatorIncorrectChildren }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1036,8 +1021,7 @@ mod tests {
                 &err,
                 NodeError { err: NodeEvaluationError::UnaryOperatorIncorrectChildren, .. }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1131,8 +1115,7 @@ mod tests {
                     err: NodeEvaluationError::ArithmeticOperatorIncompatibleOperands
                 }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1150,8 +1133,7 @@ mod tests {
                 &err,
                 NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1169,8 +1151,7 @@ mod tests {
                 &err,
                 NodeError { err: NodeEvaluationError::ContainsOperatorIncompatibleOperands, .. }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1214,8 +1195,7 @@ mod tests {
                     err: NodeEvaluationError::LogicalOperatorIncompatibleOperands
                 }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1248,8 +1228,7 @@ mod tests {
                     err: NodeEvaluationError::RoundingOperatorIncompatibleOperands
                 }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1280,8 +1259,7 @@ mod tests {
                 &err,
                 NodeError { index: 1, err: NodeEvaluationError::UnaryOperatorIncorrectChildren }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 
@@ -1359,8 +1337,7 @@ mod tests {
                 &err,
                 NodeError { index: 0, err: NodeEvaluationError::DescriptorProviderError { .. } }
             ),
-            "Unexpected error: {:?}",
-            err
+            "Unexpected error: {err:?}"
         );
     }
 

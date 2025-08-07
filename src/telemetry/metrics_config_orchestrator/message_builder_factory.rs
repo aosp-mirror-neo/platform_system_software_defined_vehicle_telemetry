@@ -314,8 +314,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -334,8 +333,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -357,8 +355,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -380,8 +377,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::FieldNotFound { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -403,8 +399,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -454,8 +449,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::AggregatedFieldValueNotSet { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -475,8 +469,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::MessageNotFound { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -499,8 +492,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::DuplicateFieldAssignment { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -523,8 +515,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::FieldNotFound { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 
@@ -547,8 +538,7 @@ mod tests {
 
         assert!(
             matches!(err, MessageBuilderFactoryError::InvalidAssignment { .. }),
-            "Unexpected error: {}",
-            err
+            "Unexpected error: {err}"
         );
     }
 }

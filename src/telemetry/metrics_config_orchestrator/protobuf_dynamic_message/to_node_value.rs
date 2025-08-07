@@ -57,7 +57,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                     // closure that unwraps an i32 value from a value reflection
                     |val: ReflectValueRef<'_>| {
                         val.to_i32().ok_or(NodeEvaluationError::TypeMismatch {
-                            msg: format!("Repeated field {:?} type expected to be i32", self),
+                            msg: format!("Repeated field {self:?} type expected to be i32"),
                         })
                     },
                 )?)
@@ -67,7 +67,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                     // unwraps an i64 value from a value reflection or error
                     |val: ReflectValueRef<'_>| {
                         val.to_i64().ok_or(NodeEvaluationError::TypeMismatch {
-                            msg: format!("Repeated field {:?} type expected to be i64", self),
+                            msg: format!("Repeated field {self:?} type expected to be i64"),
                         })
                     },
                 )?)
@@ -76,7 +76,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::Int64List(self.to_vec(|val: ReflectValueRef<'_>| {
                     // map Option<u32> into Option<i64> and convert it to a Result
                     val.to_u32().map(i64::from).ok_or(NodeEvaluationError::TypeMismatch {
-                        msg: format!("Repeated field {:?} type expected to be u32", self),
+                        msg: format!("Repeated field {self:?} type expected to be u32"),
                     })
                 })?)
             }
@@ -84,7 +84,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 NodeValue::Int64List(self.to_vec(|val: ReflectValueRef<'_>| {
                     // map Option<u64> into Option<i64> and convert it to a Result
                     val.to_u64().map(|x| x as i64).ok_or(NodeEvaluationError::TypeMismatch {
-                        msg: format!("Repeated field {:?} type expected to be u64", self),
+                        msg: format!("Repeated field {self:?} type expected to be u64"),
                     })
                 })?)
             }
@@ -93,7 +93,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                     // closure that unwraps f32 value from a single value reflection
                     |val: ReflectValueRef<'_>| {
                         val.to_f32().ok_or(NodeEvaluationError::TypeMismatch {
-                            msg: format!("Repeated field {:?} type expected to be f32", self),
+                            msg: format!("Repeated field {self:?} type expected to be f32"),
                         })
                     },
                 )?)
@@ -103,7 +103,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                     // unwraps a f64 value from a value reflection or error
                     |val: ReflectValueRef<'_>| {
                         val.to_f64().ok_or(NodeEvaluationError::TypeMismatch {
-                            msg: format!("Repeated field {:?} type expected to be f64", self),
+                            msg: format!("Repeated field {self:?} type expected to be f64"),
                         })
                     },
                 )?)
@@ -113,7 +113,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                     // unwraps a bool value from a value reflection or error
                     |val: ReflectValueRef<'_>| {
                         val.to_bool().ok_or(NodeEvaluationError::TypeMismatch {
-                            msg: format!("Repeated field {:?} type expected to be bool", self),
+                            msg: format!("Repeated field {self:?} type expected to be bool"),
                         })
                     },
                 )?)
@@ -122,7 +122,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                 // unwraps an enum as i32 from a value reflection or error
                 |val: ReflectValueRef<'_>| {
                     val.to_enum_value().ok_or(NodeEvaluationError::TypeMismatch {
-                        msg: format!("Repeated field {:?} type expected to be enum", self),
+                        msg: format!("Repeated field {self:?} type expected to be enum"),
                     })
                 },
             )?),
@@ -133,8 +133,7 @@ impl ToNodeValue for ReflectRepeatedRef<'_> {
                         val.to_message()
                             .ok_or(NodeEvaluationError::TypeMismatch {
                                 msg: format!(
-                                    "Repeated field {:?} type expected to be protobuf message",
-                                    self
+                                    "Repeated field {self:?} type expected to be protobuf message"
                                 ),
                             })?
                             .clone_box()

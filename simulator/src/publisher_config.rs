@@ -53,7 +53,7 @@ impl fmt::Display for PublisherConfig {
             write!(f, ", showing the first {max_displayed_messages}")?;
         }
         for parsed_data_entry in self.parsed_data.iter().take(max_displayed_messages) {
-            writeln!(f, "{}", parsed_data_entry)?;
+            writeln!(f, "{parsed_data_entry}")?;
         }
         Ok(())
     }
