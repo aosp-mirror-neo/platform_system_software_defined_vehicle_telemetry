@@ -366,43 +366,36 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
         &self,
         metrics_config_uuid: &str,
     ) -> Result<(), MetricsConfigManagerError> {
-        info!("activate_metrics_config: {:?} \n", metrics_config_uuid);
+        info!("activate_metrics_config: {}", metrics_config_uuid);
         let path = self.inactive_dir_path.join(metrics_config_uuid);
-        if path.is_file() {
-            let bytes = file_io_utils::read_from_file(&path)
-                .await
-                .map_err(|e| MetricsConfigManagerError::ConfigReadError { error: e })?;
-
-            // bytes now contains the contents of the file
-            let config: MetricsConfig = protobuf::Message::parse_from_bytes(&bytes)
-                .map_err(|_| MetricsConfigManagerError::ConfigParseError)?;
-            let uuid = &config.uuid;
-            info!("initializing {uuid} Config");
-            // Initializes metrics config
-            match Arc::clone(&self.metrics_config_orchestrator).initialize_config(&config).await {
-                Ok(()) => {
-                    info!("Metrics config orchestrator successfully initialized {uuid} config");
-                    let new_path = self.active_dir_path.join(uuid);
-                    file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
-                        error!(
-                            "An error occurred in renaming config to {}: {}",
-                            new_path.display(),
-                            e
-                        )
-                    });
-                }
-                Err(e) => {
-                    error!("Error {e} in initializing {uuid} Config");
-                    file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
-                        error!("An error occurred in removing corrupt config: {e}")
-                    });
-                    return Err(MetricsConfigManagerError::ConfigOrchestratorError { error: e });
-                }
-            }
-        } else {
+        if !path.is_file() {
             return Err(MetricsConfigManagerError::InvalidConfigUuid {
-                uuid: metrics_config_uuid.to_string(),
+                uuid: metrics_config_uuid.to_owned(),
             });
+        }
+
+        let bytes = file_io_utils::read_from_file(&path)
+            .await
+            .map_err(|e| MetricsConfigManagerError::ConfigReadError { error: e })?;
+
+        let config: MetricsConfig = protobuf::Message::parse_from_bytes(&bytes)
+            .map_err(|_| MetricsConfigManagerError::ConfigParseError)?;
+
+        match Arc::clone(&self.metrics_config_orchestrator).initialize_config(&config).await {
+            Ok(()) => {
+                info!("Successfully initialized config {metrics_config_uuid}");
+                let new_path = self.active_dir_path.join(metrics_config_uuid);
+                file_io_utils::rename_file(&path, &new_path).await.unwrap_or_else(|e| {
+                    error!("An error occurred in renaming config to {}: {e}", new_path.display())
+                });
+            }
+            Err(e) => {
+                error!("Error {e} in initializing config {metrics_config_uuid}");
+                file_io_utils::remove_file(&path).await.unwrap_or_else(|e| {
+                    error!("An error occurred in removing corrupt config: {e}")
+                });
+                return Err(MetricsConfigManagerError::ConfigOrchestratorError { error: e });
+            }
         }
 
         Ok(())
@@ -454,25 +447,14 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             })?
         };
 
-        let active_config = {
-            let res = self.metrics_config_orchestrator.finish_config(metrics_config_uuid).await;
-            if let Err(err) = res {
-                if let ConfigOrchestratorError::InvalidConfigUuid { .. } = err {
-                    info!("UUID {uuid} doesn't exist or is inactive");
-                    false
-                } else {
-                    return Err(MetricsConfigManagerError::ConfigOrchestratorError { error: err });
-                }
-            } else {
-                true
-            }
-        };
-
-        let path = {
-            if active_config {
-                self.active_dir_path.join(&uuid)
-            } else {
+        let path = match self.metrics_config_orchestrator.finish_config(metrics_config_uuid).await {
+            Ok(()) => self.active_dir_path.join(&uuid),
+            Err(ConfigOrchestratorError::InvalidConfigUuid { .. }) => {
+                info!("UUID {uuid} doesn't exist or is inactive");
                 self.inactive_dir_path.join(&uuid)
+            }
+            Err(err) => {
+                return Err(MetricsConfigManagerError::ConfigOrchestratorError { error: err });
             }
         };
 
