@@ -266,10 +266,10 @@ mod tests {
     use super::*;
 
     use googletest::assert_that;
-    use googletest::matchers::{eq, err, matches_pattern, ok};
+    use googletest::matchers::{eq, err, ok, pat};
     use protobuf::well_known_types::{any::Any, empty::Empty, wrappers::Int32Value};
-    use protobuf::{Enum, EnumFull, Message};
-    use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage};
+    use protobuf::{Enum, EnumFull, Message, MessageFull};
+    use sdv_telemetry_test_proto::test_message::{TestEnum, TestMessage, TestNestedMessage};
     use sdv_telemetry_test_utils::parameterized_test;
 
     use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
@@ -293,44 +293,75 @@ mod tests {
         },
 
         bool_to_bool: (&true, ProtobufRuntimeType::Bool, ok(eq(&ReflectValueBox::Bool(true)))),
-        bool_to_i32: (&true, ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        bool_to_i32: (&true, ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        bool_node_value_to_bool: (&NodeValue::Bool(true), ProtobufRuntimeType::Bool, ok(eq(&ReflectValueBox::Bool(true)))),
+        i32_to_i32: (&42i32, ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(42)))),
+        i32_to_i64: (&42i32, ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
+        i32_to_u32: (&42i32, ProtobufRuntimeType::U32, ok(eq(&ReflectValueBox::U32(42)))),
+        i32_to_u64: (&42i32, ProtobufRuntimeType::U64, ok(eq(&ReflectValueBox::U64(42)))),
+        i32_to_f32: (&42i32, ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+        i32_to_f64: (&42i32, ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        i32_to_enum: (&1i32, ProtobufRuntimeType::Enum(TestEnum::enum_descriptor()), ok(eq(&ReflectValueBox::Enum(TestEnum::enum_descriptor(), TestEnum::SOME.value())))),
+        i32_to_bool: (&42i32, ProtobufRuntimeType::Bool, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i32_to_message: (&42i32, ProtobufRuntimeType::Message(Empty::descriptor()), err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i32_to_string: (&42i32, ProtobufRuntimeType::String, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i32_to_vecu8: (&42i32, ProtobufRuntimeType::VecU8, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        i32_to_i32: (&42, ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(42)))),
-        i32_to_bool: (&42, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_i32_success: (&i64::from(i32::MAX), ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(i32::MAX)))),
+        i64_to_i32_fail: (&(i64::from(i32::MAX) + 1), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_i64: (&42i64, ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
+        i64_to_u32_success: (&i64::from(u32::MAX), ProtobufRuntimeType::U32, ok(eq(&ReflectValueBox::U32(u32::MAX)))),
+        i64_to_u32_fail_too_big: (&(i64::from(u32::MAX) + 1), ProtobufRuntimeType::U32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_u32_fail_negative: (&-1i64, ProtobufRuntimeType::U32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_u64_success: (&i64::MAX, ProtobufRuntimeType::U64, ok(eq(&ReflectValueBox::U64(i64::MAX as u64)))),
+        i64_to_u64_fail_negative: (&-1i64, ProtobufRuntimeType::U64, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_f32: (&42i64, ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+        i64_to_f64: (&42i64, ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        i64_to_enum_success: (&1i64, ProtobufRuntimeType::Enum(TestEnum::enum_descriptor()), ok(eq(&ReflectValueBox::Enum(TestEnum::enum_descriptor(), TestEnum::SOME.value())))),
+        i64_to_enum_fail: (&(i64::from(i32::MAX) + 1), ProtobufRuntimeType::Enum(TestEnum::enum_descriptor()), err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_bool: (&42i64, ProtobufRuntimeType::Bool, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_message: (&42i64, ProtobufRuntimeType::Message(Empty::descriptor()), err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_string: (&42i64, ProtobufRuntimeType::String, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_to_vecu8: (&42i64, ProtobufRuntimeType::VecU8, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        i32_node_value_to_i32: (&NodeValue::Int32(42), ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(42)))),
+        f32_to_f32: (&42.0f32, ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+        f32_to_f64: (&42.0f32, ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        f32_to_i32: (&42.0f32, ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        f32_to_bool: (&42.0f32, ProtobufRuntimeType::Bool, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
-        i64_to_i64: (&42, ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
-        i64_to_bool: (&42, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
-
-        i64_node_value_to_i64: (&NodeValue::Int64(42), ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
-
-        f32_to_f32: (&42.0, ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
-        f32_to_bool: (&42.0, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
-
-        f32_node_value_to_f32: (&NodeValue::Float(42.0), ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
-
-        f64_to_f64: (&42.0, ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
-        f64_to_bool: (&42.0, ProtobufRuntimeType::Bool, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
-
-        f64_node_value_to_f64: (&NodeValue::Double(42.0), ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        f64_to_f32: (&42.0f64, ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+        f64_to_f64: (&42.0f64, ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        f64_to_i32: (&42.0f64, ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        f64_to_bool: (&42.0f64, ProtobufRuntimeType::Bool, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
         msg_to_msg: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
         msg_to_any: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
-        msg_to_i32: (&create_int32_value_arc(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
-
-        msg_node_value_to_msg: (&NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(create_int32_value_arc()))), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
-        msg_node_value_to_any: (&NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(create_int32_value_arc()))), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
+        msg_to_different_msg: (&create_int32_value_arc(), ProtobufRuntimeType::Message(Empty::descriptor()), err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        msg_to_i32: (&create_int32_value_arc(), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
         string_to_string: (&"kukkula", ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
-        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
-
-        string_node_value_to_string: (&NodeValue::String("kukkula".to_owned()), ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
+        string_to_i32: (&"kukkula", ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
 
         vec_to_vec: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2, 3])))),
-        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(matches_pattern!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        vec_to_i32: (&[1, 2, 3].as_slice(), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+
+        bool_node_value_to_bool: (&NodeValue::Bool(true), ProtobufRuntimeType::Bool, ok(eq(&ReflectValueBox::Bool(true)))),
+        none_node_value_to_i32: (&NodeValue::None, ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        bool_list_node_value_to_i32: (&NodeValue::BoolList(vec![]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i32_list_node_value_to_i32: (&NodeValue::Int32List(vec![]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i64_list_node_value_to_i32: (&NodeValue::Int64List(vec![]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        float_list_node_value_to_i32: (&NodeValue::FloatList(vec![]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        double_list_node_value_to_i32: (&NodeValue::DoubleList(vec![]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        message_list_node_value_to_i32: (&NodeValue::MessageList(vec![]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        byte_list_node_value_to_bytes: (&NodeValue::ByteList(vec![1, 2]), ProtobufRuntimeType::VecU8, ok(eq(&ReflectValueBox::Bytes(vec![1, 2])))),
+        byte_list_node_value_to_i32: (&NodeValue::ByteList(vec![1, 2]), ProtobufRuntimeType::I32, err(pat!(NodeEvaluationError::ValueToProtoConversionError { .. }))),
+        i32_node_value_to_i32: (&NodeValue::Int32(42), ProtobufRuntimeType::I32, ok(eq(&ReflectValueBox::I32(42)))),
+        i64_node_value_to_i64: (&NodeValue::Int64(42), ProtobufRuntimeType::I64, ok(eq(&ReflectValueBox::I64(42)))),
+        f32_node_value_to_f32: (&NodeValue::Float(42.0), ProtobufRuntimeType::F32, ok(eq(&ReflectValueBox::F32(42.0)))),
+        f64_node_value_to_f64: (&NodeValue::Double(42.0), ProtobufRuntimeType::F64, ok(eq(&ReflectValueBox::F64(42.0)))),
+        msg_node_value_to_msg: (&NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(create_int32_value_arc()))), ProtobufRuntimeType::Message(Int32Value::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(create_int32_value()))))),
+        msg_node_value_to_any: (&NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(create_int32_value_arc()))), ProtobufRuntimeType::Message(Any::descriptor()), ok(eq(&ReflectValueBox::Message(Box::new(Any::pack_dyn(&create_int32_value()).unwrap()))))),
+        string_node_value_to_string: (&NodeValue::String("kukkula".to_owned()), ProtobufRuntimeType::String, ok(eq(&ReflectValueBox::String("kukkula".to_owned())))),
     );
 
     parameterized_test!(
@@ -374,7 +405,37 @@ mod tests {
         double_list_to_float_list: ("repeated_floats", &NodeValue::DoubleList(vec![1.0, 2.0]), vec![ReflectValueBox::F32(1.0), ReflectValueBox::F32(2.0)]),
         double_list_to_double_list: ("repeated_doubles", &NodeValue::DoubleList(vec![1.0, 2.0]), vec![ReflectValueBox::F64(1.0), ReflectValueBox::F64(2.0)]),
 
+        message_list_to_nested_message_list: ("repeated_messages", &NodeValue::MessageList(vec![Arc::new(ProtobufDynamicMessage::new(Arc::new(TestNestedMessage::default()))),]), vec![ReflectValueBox::Message(TestNestedMessage::descriptor().new_instance())]),
         message_list_to_message_list: ("repeated_empty", &NodeValue::MessageList(vec![Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default())))]), vec![ReflectValueBox::Message(Empty::descriptor().new_instance())]),
         message_list_to_any_list: ("repeated_any", &NodeValue::MessageList(vec![Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default())))]), vec![ReflectValueBox::Message(Box::new(Any::pack(Empty::default_instance()).unwrap()))]),
+    );
+
+    parameterized_test!(
+        #[test]
+        push_node_value_content_error,
+
+        |field_name: &str, node_value: &NodeValue| {
+            let message_descriptor = TestMessage::descriptor();
+            let mut message = message_descriptor.new_instance();
+
+            let field_descriptor = message_descriptor.field_by_name(field_name).unwrap();
+            assert!(field_descriptor.is_repeated());
+            let result = field_descriptor
+                .mut_repeated(message.as_mut())
+                .push_node_value_content(node_value);
+
+            assert_that!(result, err(pat!(NodeEvaluationError::RepeatedFieldWrongAssignment { .. })));
+        },
+
+        bool_to_repeated_bool: ("repeated_bools", &NodeValue::Bool(true)),
+        none_to_repeated_i32: ("repeated_i32s", &NodeValue::None),
+        i32_to_repeated_i32: ("repeated_i32s", &NodeValue::Int32(42)),
+        i64_to_repeated_i64: ("repeated_i64s", &NodeValue::Int64(42)),
+        float_to_repeated_float: ("repeated_floats", &NodeValue::Float(42.0)),
+        double_to_repeated_double: ("repeated_doubles", &NodeValue::Double(42.0)),
+        int32_to_repeated_enum: ("repeated_enums", &NodeValue::Int32(TestEnum::NONE.value())),
+        message_to_repeated_messages: ("repeated_messages", &NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(TestNestedMessage::default()))))),
+        message_to_repeated_empty: ("repeated_empty", &NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default()))))),
+        message_to_repeated_any: ("repeated_any", &NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default()))))),
     );
 }
