@@ -11,13 +11,14 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::Publisher;
 use crate::metrics_config_orchestrator::publisher::CallbackFn;
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 pub(crate) struct MockPublisher {
     pub expected_trigger_names: HashSet<String>,
     pub latest_message: Option<Arc<dyn DynamicMessage>>,
 
     name: String,
-    metrics_config_uuid: String,
+    metrics_config_uuid: MetricsConfigUuid,
     activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     deactivate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     latest_message_error: Mutex<Option<ServicePublisherAccessorError>>,
@@ -31,7 +32,7 @@ impl Publisher for MockPublisher {
         &self.name
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         &self.metrics_config_uuid
     }
 
@@ -77,7 +78,7 @@ impl Publisher for MockPublisher {
 }
 
 impl MockPublisher {
-    pub(crate) fn new(name: String, metrics_config_uuid: String) -> Self {
+    pub(crate) fn new(name: String, metrics_config_uuid: MetricsConfigUuid) -> Self {
         Self {
             expected_trigger_names: HashSet::new(),
             latest_message: None,

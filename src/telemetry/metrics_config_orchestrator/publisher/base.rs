@@ -7,15 +7,16 @@ use sdv_telemetry_expr::{
 use std::{collections::HashMap, sync::Arc};
 
 use super::CallbackFn;
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 pub(super) struct BasePublisher {
     name: String,
-    metrics_config_uuid: String,
+    metrics_config_uuid: MetricsConfigUuid,
     latest_message: Mutex<Option<Arc<dyn DynamicMessage>>>,
 }
 
 impl BasePublisher {
-    pub(super) fn new(name: String, metrics_config_uuid: String) -> Self {
+    pub(super) fn new(name: String, metrics_config_uuid: MetricsConfigUuid) -> Self {
         Self { name, metrics_config_uuid, latest_message: None.into() }
     }
 
@@ -23,7 +24,7 @@ impl BasePublisher {
         &self.name
     }
 
-    pub(super) fn get_metrics_config_uuid(&self) -> &str {
+    pub(super) fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         &self.metrics_config_uuid
     }
 

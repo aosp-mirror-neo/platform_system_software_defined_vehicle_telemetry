@@ -8,6 +8,8 @@ use sdv_telemetry_utils::operation_result::OperationResult;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
 
+use crate::metrics_config_uuid::MetricsConfigUuid;
+
 mod base;
 
 pub(crate) mod aggregation;
@@ -24,7 +26,7 @@ type CallbackFn = Box<dyn FnMut(Arc<NodeEvaluationContext>) + Send + Sync>;
 pub(crate) trait Publisher: Send + Sync {
     fn get_name(&self) -> &str;
 
-    fn get_metrics_config_uuid(&self) -> &str;
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid;
 
     fn is_subscribable(&self) -> bool;
 

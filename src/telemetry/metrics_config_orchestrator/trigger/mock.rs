@@ -12,6 +12,7 @@ use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::metrics_config_orchestrator::subscription_manager::{ActivationId, SubscriptionManager};
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 /// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {
@@ -20,7 +21,7 @@ pub(crate) struct MockTrigger {
     pub unsubscribe_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
 
     name: String,
-    metrics_config_uuid: String,
+    metrics_config_uuid: MetricsConfigUuid,
     on_fired_callback: AsyncMutex<Option<(TriggerSubscriber, TriggerCallbackFn)>>,
 }
 
@@ -30,7 +31,7 @@ impl Trigger for MockTrigger {
         &self.name
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         &self.metrics_config_uuid
     }
 
@@ -57,7 +58,7 @@ impl Trigger for MockTrigger {
 }
 
 impl MockTrigger {
-    pub(crate) fn new(name: String, metrics_config_uuid: String) -> Self {
+    pub(crate) fn new(name: String, metrics_config_uuid: MetricsConfigUuid) -> Self {
         Self {
             name,
             metrics_config_uuid,
@@ -70,7 +71,7 @@ impl MockTrigger {
 
     pub(crate) fn new_for_subscriber(
         name: String,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         expected_subscriber: TriggerSubscriber,
     ) -> Self {
         let mut trigger = Self::new(name, metrics_config_uuid);

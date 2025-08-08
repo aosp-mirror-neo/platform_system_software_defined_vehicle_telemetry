@@ -17,6 +17,7 @@ use crate::metrics_config_orchestrator::subscription_manager::{Activatable, Acti
 use crate::metrics_config_orchestrator::trigger::{
     base::TriggerState, TriggerCallbackFn, TriggerSubscriber,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 pub(crate) struct PeriodicTrigger {
     base: BaseTrigger,
@@ -27,7 +28,7 @@ pub(crate) struct PeriodicTrigger {
 impl PeriodicTrigger {
     pub(crate) fn new(
         name: String,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         interval: Duration,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     ) -> Arc<Self> {
@@ -49,7 +50,7 @@ impl Trigger for PeriodicTrigger {
         self.base.get_name()
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         self.base.get_metrics_config_uuid()
     }
 
@@ -144,6 +145,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for PeriodicTrig
 mod tests {
     use super::*;
 
+    use lazy_static::lazy_static;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use std::time::Duration;
     use tokio::sync::{mpsc, Notify};
@@ -156,7 +158,11 @@ mod tests {
         MockCallbackListener, MockSubscriptionManager,
     };
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const TRIGGER_NAME: &str = "trigger";
     const INTERVAL: Duration = Duration::from_millis(300);
     const ACTIVATION_ID: ActivationId = ActivationId::new(3);
@@ -164,7 +170,7 @@ mod tests {
     fn create_valid_periodic_trigger() -> Arc<PeriodicTrigger> {
         PeriodicTrigger::new(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             INTERVAL,
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
         )

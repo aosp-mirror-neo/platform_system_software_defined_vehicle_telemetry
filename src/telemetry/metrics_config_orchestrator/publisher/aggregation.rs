@@ -24,6 +24,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::error_status_codes::ErrorStatusCodes;
 use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
 use crate::metrics_config_orchestrator::trigger::{Trigger, TriggerSubscriber};
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -64,7 +65,7 @@ impl Publisher for AggregationPublisher {
         self.base.get_name()
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         self.base.get_metrics_config_uuid()
     }
 
@@ -257,7 +258,7 @@ impl AggregationPublisher {
     pub(crate) fn new(
         name: String,
         message_builder: Arc<dyn MessageBuilder>,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         reset_on_get: bool,
         triggers: Vec<Arc<dyn Trigger>>,
 
@@ -287,7 +288,7 @@ impl AggregationPublisher {
             format!("Metrics config {metrics_config_uuid} aggregation publisher {publisher_name} failed to build message: {err}"),
             StatusDetails::AggregationPublisherErrorDetails(
                 AggregationPublisherErrorDetails {
-                    metricsConfigUUID: metrics_config_uuid.to_owned(),
+                    metricsConfigUUID: metrics_config_uuid.to_string(),
                     publisherName: publisher_name.to_owned(),
                     fieldName: field_name_provider(err),
                 },
@@ -335,6 +336,7 @@ mod tests {
         TelemetryServiceStatus::TelemetryServiceStatus,
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
+    use lazy_static::lazy_static;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageDyn;
     use sdv_telemetry_expr::dynamic_message::DynamicMessage;
@@ -349,7 +351,11 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::mock::MockTrigger;
     use crate::StatusReporterImpl;
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const PUBLISHER_NAME: &str = "publisher";
     const PUBLISHER_NAME_2: &str = "publisher2";
@@ -363,7 +369,7 @@ mod tests {
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
             Arc::<MockMessageBuilder>::clone(&message_builder),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             false,
             triggers,
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
@@ -401,14 +407,14 @@ mod tests {
     async fn get_latest_message_resets() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let message_builder = Arc::new(MockMessageBuilder::new());
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
             Arc::<MockMessageBuilder>::clone(&message_builder),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             true,
             vec![Arc::<MockTrigger>::clone(&trigger)],
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
@@ -480,7 +486,7 @@ mod tests {
     async fn subscribe_notifies_subscriber_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let (publisher, _) =
@@ -522,7 +528,7 @@ mod tests {
     async fn subscribe_passes_latest_message_to_builder_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let message_builder = Arc::new(MockMessageBuilder::new());
@@ -536,7 +542,7 @@ mod tests {
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
             Arc::<MockMessageBuilder>::clone(&message_builder),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             false,
             vec![Arc::<MockTrigger>::clone(&trigger)],
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
@@ -568,7 +574,7 @@ mod tests {
     async fn subscribe_passes_trigger_context_when_triggered() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let (publisher, _) =
@@ -602,7 +608,7 @@ mod tests {
     async fn subscribe_handles_async_expression_result() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
         let (publisher, message_builder) =
@@ -674,7 +680,7 @@ mod tests {
     async fn on_new_message_reports_builder_error() {
         let trigger = Arc::new(MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
         ));
 
@@ -690,7 +696,7 @@ mod tests {
         let publisher = Arc::new(AggregationPublisher::new(
             PUBLISHER_NAME.to_owned(),
             Arc::clone(&message_builder) as Arc<dyn MessageBuilder>,
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             false,
             vec![Arc::<MockTrigger>::clone(&trigger)],
             Arc::new(StatusReporterImpl::new(tx)),
@@ -711,7 +717,7 @@ mod tests {
                     AggregationPublisherErrorDetails { metricsConfigUUID, publisherName, fieldName }
                 ),
             }
-            if message.contains("failed to build message") && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME && fieldName == FIELD_NAME),
+            if message.contains("failed to build message") && *metricsConfigUUID == CONFIG_UUID.to_string() && publisherName == PUBLISHER_NAME && fieldName == FIELD_NAME),
             "Unexpected status: {status:?}"
         );
     }

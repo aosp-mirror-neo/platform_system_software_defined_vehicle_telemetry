@@ -46,6 +46,7 @@ mod tests {
     use super::*;
 
     use anyhow::anyhow;
+    use lazy_static::lazy_static;
     use protobuf::well_known_types::wrappers::Int32Value;
     use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
     use std::collections::HashMap;
@@ -53,10 +54,15 @@ mod tests {
     use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::{MetricsConfigState, OrderedPublisherNames};
+    use crate::metrics_config_uuid::MetricsConfigUuid;
 
     const ERROR_MESSAGE: &str = "error message";
     const PUBLISHER_NAME: &str = "publisher";
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
 
     fn create_message_provider(metrics_config: MetricsConfig) -> MessageProviderImpl {
         MessageProviderImpl { metrics_config: Arc::new(metrics_config).into() }
@@ -64,7 +70,7 @@ mod tests {
 
     fn create_metrics_config() -> MetricsConfig {
         MetricsConfig {
-            uuid: String::default(),
+            uuid: *CONFIG_UUID,
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: vec![],
             ordered_publisher_names: OrderedPublisherNames {
@@ -84,7 +90,7 @@ mod tests {
             value: 42,
             ..Default::default()
         }))) as Arc<dyn DynamicMessage>;
-        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
+        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
         publisher.latest_message.replace(Arc::clone(&msg));
         let mut metrics_config = create_metrics_config();
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
@@ -97,7 +103,7 @@ mod tests {
 
     #[test]
     fn get_message_publisher_returns_none() {
-        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
+        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
         let mut metrics_config = create_metrics_config();
         metrics_config.publishers.insert(PUBLISHER_NAME.to_owned(), Arc::new(publisher));
         let message_provider = create_message_provider(metrics_config);
@@ -120,7 +126,7 @@ mod tests {
 
     #[test]
     fn get_message_propagates_publisher_error() {
-        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
+        let publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
         publisher.set_latest_message_error(ServicePublisherAccessorError::MessageParsingFailed(
             anyhow!(ERROR_MESSAGE),
         ));

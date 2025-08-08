@@ -23,6 +23,7 @@ use crate::metrics_config_orchestrator::{
     node_evaluation_context_factory::NodeEvaluationContextFactory, trigger::TriggerSubscriber,
     Trigger,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -42,7 +43,7 @@ downcast_rs::impl_downcast!(sync MetricsReportGenerator);
 
 pub(crate) struct MetricsReportGeneratorImpl {
     config_activation_timestamp: Timestamp,
-    config_uuid: String,
+    config_uuid: MetricsConfigUuid,
     config_version: u32,
     is_active: AsyncMutex<bool>,
     message_builder: Arc<dyn MessageBuilder>,
@@ -118,7 +119,7 @@ impl MetricsReportGeneratorImpl {
     pub(super) fn new(
         metrics_report_config: &MetricsReportConfig,
         config_activation_timestamp: Timestamp,
-        config_uuid: String,
+        config_uuid: MetricsConfigUuid,
         config_version: u32,
         message_builder: Arc<dyn MessageBuilder>,
         triggers: Vec<Arc<dyn Trigger>>,
@@ -177,7 +178,7 @@ impl MetricsReportGeneratorImpl {
         let mut report = MetricsReport::new();
         report.config_activation_timestamp = Some(self.config_activation_timestamp.clone()).into();
         report.error_ids = error_ids;
-        report.metrics_config_uuid.clone_from(&self.config_uuid);
+        report.metrics_config_uuid = self.config_uuid.to_string();
         report.metrics_config_version = self.config_version;
         report.report_config_name.clone_from(&self.name);
         report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
@@ -209,7 +210,7 @@ impl MetricsReportGeneratorImpl {
             format!("Metrics config {} metrics report generation for '{}' failed due to message builder error: {}", self.config_uuid, self.name, err),
             StatusDetails::MetricsReportGeneratorErrorDetails(
                 MetricsReportGeneratorErrorDetails {
-                    metricsConfigUUID: self.config_uuid.clone(),
+                    metricsConfigUUID: self.config_uuid.to_string(),
                     metricsReportName: self.name.clone(),
                     fieldName: field_name_provider(err),
                 },
@@ -250,6 +251,7 @@ mod test {
         TelemetryServiceStatus::TelemetryServiceStatus,
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
+    use lazy_static::lazy_static;
     use sdv_telemetry_expr::node_error::NodeEvaluationError;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_test_proto::test_message::TestMessage;
@@ -266,7 +268,11 @@ mod test {
     };
     use crate::StatusReporterImpl;
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const CONFIG_VERSION: u32 = 42;
     const REPORT_CONFIG_NAME: &str = "name";
     const FIELD_NAME: &str = "field_name";
@@ -290,7 +296,7 @@ mod test {
         MetricsReportGeneratorImpl::new(
             &create_report_config_proto(report_initial),
             Timestamp::now(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             CONFIG_VERSION,
             message_builder,
             vec![],
@@ -305,7 +311,7 @@ mod test {
     fn create_trigger() -> MockTrigger {
         MockTrigger::new_for_subscriber(
             String::default(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::MetricsReportGenerator { name: REPORT_CONFIG_NAME.to_owned() },
         )
     }
@@ -359,7 +365,7 @@ mod test {
             generator.config_activation_timestamp
         );
         assert!(report.error_ids.is_empty(), "Unexpected error ids: {:?}", report.error_ids);
-        assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
+        assert_eq!(report.metrics_config_uuid, CONFIG_UUID.to_string());
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
         assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
         assert_eq!(report.report_number, 1);
@@ -404,7 +410,7 @@ mod test {
             generator.config_activation_timestamp
         );
         assert!(report.error_ids.is_empty(), "Unexpected error ids: {:?}", report.error_ids);
-        assert_eq!(report.metrics_config_uuid, CONFIG_UUID);
+        assert_eq!(report.metrics_config_uuid, CONFIG_UUID.to_string());
         assert_eq!(report.metrics_config_version, CONFIG_VERSION);
         assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
         assert_eq!(report.report_number, 2);
@@ -457,7 +463,7 @@ mod test {
                     MetricsReportGeneratorErrorDetails { metricsConfigUUID, metricsReportName, fieldName }
                 ),
             }
-            if message.contains("failed due to message builder error") && metricsConfigUUID == CONFIG_UUID && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME),
+            if message.contains("failed due to message builder error") && *metricsConfigUUID == CONFIG_UUID.to_string() && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME),
             "Unexpected status: {status:?}"
         );
     }

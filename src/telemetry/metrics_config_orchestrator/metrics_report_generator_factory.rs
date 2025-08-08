@@ -15,6 +15,7 @@ use crate::metrics_config_orchestrator::{
     node_evaluation_context_factory::NodeEvaluationContextFactory, MetricsReportGenerator,
     MetricsReportGeneratorImpl, Trigger,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast))]
@@ -41,7 +42,7 @@ downcast_rs::impl_downcast!(MetricsReportGeneratorFactory);
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
     pub config_activation_timestamp: &'a Timestamp,
-    pub config_uuid: &'a str,
+    pub config_uuid: &'a MetricsConfigUuid,
     pub config_version: u32,
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
@@ -206,6 +207,7 @@ impl MetricsReportGeneratorFactoryImpl {
 mod tests {
     use super::*;
 
+    use lazy_static::lazy_static;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::{
         MetricsConfig as MetricsConfigProto, ProtoMessageBuilder,
@@ -221,11 +223,16 @@ mod tests {
     use crate::metrics_config_orchestrator::trigger::{
         mock::MockTrigger, periodic::PeriodicTrigger, TriggerSubscriber,
     };
+    use crate::metrics_config_uuid::MetricsConfigUuid;
     use crate::StatusReporterImpl;
+
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
 
     const METRICS_REPORT_CONFIG_NAME: &str = "mrc";
     const TRIGGER_NAME: &str = "trigger";
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const VERSION: u32 = 42;
 
     impl MetricsReportGeneratorFactoryImpl {
@@ -257,7 +264,7 @@ mod tests {
             });
             let context = MetricsReportGeneratorFactoryCreateContext {
                 config_activation_timestamp: &Timestamp::now(),
-                config_uuid: &metrics_config_proto.uuid,
+                config_uuid: &metrics_config_proto.uuid.parse().unwrap(),
                 config_version: metrics_config_proto.version,
                 file_descriptors: get_test_file_descriptors(),
                 nodes: get_test_nodes(),
@@ -397,7 +404,7 @@ mod tests {
         let config = create_valid_config();
         let trigger = PeriodicTrigger::new(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             Duration::ZERO,
             node_evaluation_context_factory,
         );
@@ -423,13 +430,13 @@ mod tests {
         let factory = create_factory();
         let report_config = create_valid_config();
         let metrics_config = MetricsConfigProto {
-            uuid: CONFIG_UUID.to_owned(),
+            uuid: CONFIG_UUID.to_string(),
             version: VERSION,
             ..Default::default()
         };
         let mut trigger = MockTrigger::new_for_subscriber(
             TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::MetricsReportGenerator { name: report_config.name.clone() },
         );
         let (tx, rx) = oneshot_callback();

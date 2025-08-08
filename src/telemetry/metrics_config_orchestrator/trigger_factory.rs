@@ -22,6 +22,7 @@ use super::trigger::periodic::PeriodicTrigger;
 use crate::metrics_config_orchestrator::{
     node_evaluation_context_factory::NodeEvaluationContextFactory, Publisher, Trigger,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast))]
@@ -29,7 +30,7 @@ pub(crate) trait TriggerFactory: Send + Sync {
     /// Returns a new trigger encapsulated object based on the protobuf message.
     fn create(
         &self,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<dyn Trigger>, TriggerFactoryError>;
@@ -92,7 +93,7 @@ pub(crate) struct TriggerFactoryImpl {
         dyn Fn(
                 String,
                 ConditionType,
-                String,
+                MetricsConfigUuid,
                 Arc<Node>,
                 Vec<Arc<dyn Trigger>>,
                 Arc<dyn NodeEvaluationContextFactory>,
@@ -101,11 +102,17 @@ pub(crate) struct TriggerFactoryImpl {
             + Send
             + Sync,
     >,
-    data_trigger_new_func:
-        Box<dyn Fn(String, String, Arc<dyn Publisher>) -> Arc<dyn Trigger> + Send + Sync>,
+    data_trigger_new_func: Box<
+        dyn Fn(String, MetricsConfigUuid, Arc<dyn Publisher>) -> Arc<dyn Trigger> + Send + Sync,
+    >,
     node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     periodic_trigger_new_func: Box<
-        dyn Fn(String, String, Duration, Arc<dyn NodeEvaluationContextFactory>) -> Arc<dyn Trigger>
+        dyn Fn(
+                String,
+                MetricsConfigUuid,
+                Duration,
+                Arc<dyn NodeEvaluationContextFactory>,
+            ) -> Arc<dyn Trigger>
             + Send
             + Sync,
     >,
@@ -115,7 +122,7 @@ pub(crate) struct TriggerFactoryImpl {
 impl TriggerFactory for TriggerFactoryImpl {
     fn create(
         &self,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         trigger_proto: &TriggerProto,
         context: &TriggerFactoryCreateContext,
     ) -> Result<Arc<dyn Trigger>, TriggerFactoryError> {
@@ -423,6 +430,7 @@ mod tests {
         contains_substring, eq, err, matches_pattern, ok, result_of_ref, some,
     };
     use googletest::{assert_that, expect_that};
+    use lazy_static::lazy_static;
     use protobuf::MessageField;
     use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
@@ -447,9 +455,13 @@ mod tests {
     };
     use crate::StatusReporterImpl;
 
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const INTERVAL: Duration = Duration::from_secs(u32::MAX as u64);
     const NODE_INDEX: u32 = 42;
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service_name";
@@ -522,7 +534,7 @@ mod tests {
 
         let parent_trigger = PeriodicTrigger::new(
             PARENT_TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             INTERVAL,
             node_evaluation_context_factory,
         );
@@ -626,7 +638,7 @@ mod tests {
                 publishers: &publishers,
                 triggers: &triggers,
             };
-            self.create(CONFIG_UUID.to_owned(), trigger_proto, &context)
+            self.create(*CONFIG_UUID, trigger_proto, &context)
         }
 
         fn validate_using_default_context(
@@ -684,7 +696,7 @@ mod tests {
             None,
             ConnectionType::Getter,
             false,
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             SERVICE_NAME.to_owned(),
             SubSamplingInterval::ZERO,
             Arc::clone(&factory.node_evaluation_context_factory),
@@ -719,7 +731,7 @@ mod tests {
             None,
             ConnectionType::Subscription,
             false,
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             SERVICE_NAME.to_owned(),
             SubSamplingInterval::ZERO,
             Arc::clone(&factory.node_evaluation_context_factory),
@@ -738,7 +750,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
-        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
+        assert_eq!(res.get_metrics_config_uuid(), &*CONFIG_UUID);
         let data_holder_value = data_holder.get().unwrap();
         assert!(Arc::ptr_eq(&data_holder_value.publisher, &(publisher as Arc<dyn Publisher>)));
     }
@@ -752,7 +764,7 @@ mod tests {
         let res = factory.create_using_default_context(&trigger).unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
-        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
+        assert_eq!(res.get_metrics_config_uuid(), &*CONFIG_UUID);
         let data_holder_value = data_holder.get().unwrap();
         assert_eq!(data_holder_value.interval, INTERVAL);
     }
@@ -954,7 +966,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), TRIGGER_NAME);
-        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
+        assert_eq!(res.get_metrics_config_uuid(), &*CONFIG_UUID);
         let data_holder_value = data_holder.get().unwrap();
         assert_eq!(data_holder_value.condition_type, ConditionType::AllChanges);
         // selector_expression should match the node at index 0
