@@ -536,6 +536,8 @@ mod tests {
 
     use futures::future::{self, BoxFuture, FutureExt};
     use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
+    use googletest::assert_that;
+    use googletest::matchers::{container_eq, empty, eq, err, pat};
     use protobuf::Message;
     use rand::prelude::SliceRandom;
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
@@ -575,7 +577,7 @@ mod tests {
         num_finish_config_calls: Arc<Mutex<i32>>,
         num_validate_config_calls: Arc<Mutex<i32>>,
         num_get_active_config_calls: Arc<Mutex<i32>>,
-        configs: Mutex<Vec<String>>,
+        active_configs: Mutex<HashSet<String>>,
         /// When set, the error will be returned on the next api call
         pub next_error: Mutex<Option<ConfigOrchestratorError>>,
     }
@@ -587,13 +589,9 @@ mod tests {
                 num_finish_config_calls: Arc::new(Mutex::new(0)),
                 num_validate_config_calls: Arc::new(Mutex::new(0)),
                 num_get_active_config_calls: Arc::new(Mutex::new(0)),
-                configs: Vec::new().into(),
+                active_configs: HashSet::new().into(),
                 next_error: None.into(),
             }
-        }
-
-        pub(crate) fn populate_active_configs(&self, config_uuids: Vec<String>) {
-            *self.configs.lock() = config_uuids;
         }
     }
 
@@ -601,35 +599,37 @@ mod tests {
     impl MetricsConfigOrchestrator for MockMetricsConfigOrchestratorImpl {
         async fn initialize_config(
             &self,
-            _: &MetricsConfigProto,
+            config: &MetricsConfigProto,
         ) -> Result<(), ConfigOrchestratorError> {
-            let mut num_calls = self.num_initialize_config_calls.lock();
-            *num_calls += 1;
+            *self.num_initialize_config_calls.lock() += 1;
 
             if let Some(err) = self.next_error.lock().take() {
                 return Err(err);
             }
 
+            self.active_configs.lock().insert(config.uuid.to_string());
             Ok(())
         }
 
-        async fn finish_config(&self, _: &str) -> Result<(), ConfigOrchestratorError> {
-            let mut num_calls = self.num_finish_config_calls.lock();
-            *num_calls += 1;
+        async fn finish_config(&self, uuid: &str) -> Result<(), ConfigOrchestratorError> {
+            *self.num_finish_config_calls.lock() += 1;
 
             if let Some(err) = self.next_error.lock().take() {
                 return Err(err);
             }
 
-            Ok(())
+            if self.active_configs.lock().remove(uuid) {
+                Ok(())
+            } else {
+                Err(ConfigOrchestratorError::InvalidConfigUuid { uuid: uuid.to_owned() })
+            }
         }
 
         async fn validate_config(
             &self,
             _: &MetricsConfigProto,
         ) -> Result<(), ConfigOrchestratorError> {
-            let mut num_calls = self.num_validate_config_calls.lock();
-            *num_calls += 1;
+            *self.num_validate_config_calls.lock() += 1;
 
             if let Some(err) = self.next_error.lock().take() {
                 return Err(err);
@@ -641,8 +641,7 @@ mod tests {
         fn get_active_metrics_config_uuids(&self) -> Vec<String> {
             *self.num_get_active_config_calls.lock() += 1;
 
-            let active_configs = self.configs.lock().clone().into_iter().collect();
-            active_configs
+            self.active_configs.lock().clone().into_iter().collect()
         }
     }
 
@@ -862,7 +861,7 @@ mod tests {
 
         assert_eq!(test_environment.get_num_initialize_config_calls(), 0);
 
-        // Corrupted entry doesn't gets removed and no error is being sent
+        // Corrupted entry doesn't get removed and no error is being sent
         // TODO: b/436613605: Reconsider this behavior
         assert!(corrupt_entry_path.exists());
     }
@@ -1129,6 +1128,34 @@ mod tests {
         assert_eq!(0, test_environment.get_num_validate_config_calls());
     }
 
+    #[sdv_telemetry_test_utils::timeout(2_000)]
+    #[tokio::test]
+    async fn add_metrics_config_write_to_file_fails() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let config_path = inactive_dir_path.join(UUID);
+        // Create a directory on a path corresponding to the config file
+        file_io_utils::create_dir(&config_path).await.unwrap_or_else(|e| {
+            panic!("An error occurred in creating a directory over {:?}: {}", config_path, e);
+        });
+
+        let serialized_config = create_serialized_config(UUID);
+        let result = test_environment.manager.add_metrics_config(&serialized_config).await;
+
+        assert_that!(result, err(pat!(MetricsConfigManagerError::ConfigWriteError { .. })));
+        // TODO: b/436613605: Reconsider this behavior
+        assert!(config_path.exists());
+    }
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_metrics_config_initialize_configs_calls_received() {
@@ -1187,6 +1214,27 @@ mod tests {
             "Unexpected error: {err:?}"
         );
         assert_eq!(1, test_environment.get_num_initialize_config_calls());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_metrics_config_no_file_fail() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let result = test_environment.manager.activate_metrics_config(UUID).await;
+        assert_that!(
+            result,
+            err(pat!(MetricsConfigManagerError::InvalidConfigUuid { uuid: eq(UUID) }))
+        );
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1262,7 +1310,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn remove_metrics_config_success() {
+    async fn remove_active_metrics_config_success() {
         let root_dir = Builder::new().tempdir().unwrap();
         let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
@@ -1292,6 +1340,55 @@ mod tests {
         assert!(!new_file_path.is_file());
     }
 
+    #[sdv_telemetry_test_utils::timeout(2_000)]
+    #[tokio::test]
+    async fn remove_inactive_metrics_config_success() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+        let file_path = inactive_dir_path.join(UUID);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let serialized_config = create_serialized_config(UUID);
+        test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
+        assert!(file_path.is_file());
+        assert_eq!(test_environment.get_num_validate_config_calls(), 1);
+
+        test_environment.manager.remove_metrics_config(UUID).await.unwrap();
+        assert!(!file_path.is_file());
+        assert_eq!(test_environment.get_num_finish_config_calls(), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout(2_000)]
+    #[tokio::test]
+    async fn remove_inactive_metrics_config_twice_fails() {
+        let root_dir = Builder::new().tempdir().unwrap();
+        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
+        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
+
+        let test_environment = TestEnvironment::new(
+            &active_dir_path,
+            &inactive_dir_path,
+            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+        )
+        .await;
+
+        let serialized_config = create_serialized_config(UUID);
+        test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
+        assert_eq!(test_environment.get_num_validate_config_calls(), 1);
+
+        test_environment.manager.remove_metrics_config(UUID).await.unwrap();
+        let result = test_environment.manager.remove_metrics_config(UUID).await;
+
+        assert_that!(result, err(pat!(MetricsConfigManagerError::InvalidConfigUuid { .. })));
+    }
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_metrics_config_invalid_uuid_fail() {
@@ -1315,15 +1412,14 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn remove_all_metrics_configs() {
-        const UUID1: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
         const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
 
         let root_dir = Builder::new().tempdir().unwrap();
         let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
 
-        let old_file_path1 = inactive_dir_path.join(UUID1);
-        let new_file_path1 = active_dir_path.join(UUID1);
+        let old_file_path1 = inactive_dir_path.join(UUID);
+        let new_file_path1 = active_dir_path.join(UUID);
         let old_file_path2 = inactive_dir_path.join(UUID2);
         let new_file_path2 = active_dir_path.join(UUID2);
 
@@ -1334,7 +1430,7 @@ mod tests {
         )
         .await;
 
-        let serialized_config1 = create_serialized_config(UUID1);
+        let serialized_config1 = create_serialized_config(UUID);
         let serialized_config2 = create_serialized_config(UUID2);
 
         // Add configs
@@ -1344,12 +1440,11 @@ mod tests {
         assert!(old_file_path2.is_file());
         assert_eq!(2, test_environment.get_num_validate_config_calls());
 
-        // Activate configs
-        test_environment.manager.activate_metrics_config(UUID1).await.unwrap();
-        test_environment.manager.activate_metrics_config(UUID2).await.unwrap();
+        // Activate one of the configs
+        test_environment.manager.activate_metrics_config(UUID).await.unwrap();
         assert!(new_file_path1.is_file());
-        assert!(new_file_path2.is_file());
-        assert_eq!(2, test_environment.get_num_initialize_config_calls());
+        assert!(!new_file_path2.is_file());
+        assert_eq!(1, test_environment.get_num_initialize_config_calls());
 
         // Remove all configs
         let res = test_environment.manager.remove_all_metrics_configs().await;
@@ -1361,14 +1456,10 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_active_metrics_configs_success() {
-        const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-
+    async fn get_active_inactive_metrics_configs_success() {
         let root_dir = Builder::new().tempdir().unwrap();
         let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
-
-        let file_path = active_dir_path.join(UUID);
 
         let test_environment = TestEnvironment::new(
             &active_dir_path,
@@ -1377,58 +1468,22 @@ mod tests {
         )
         .await;
 
-        info!("Serializing metric config");
         let serialized_config = create_serialized_config(UUID);
-        let serialized_config2 = create_serialized_config(UUID2);
 
         test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
-        test_environment.manager.activate_metrics_config(UUID).await.unwrap();
-        test_environment.manager.add_metrics_config(&serialized_config2).await.unwrap();
-
-        test_environment
-            .metrics_config_orchestrator
-            .populate_active_configs(vec![UUID.to_string()]);
         let active_configs = test_environment.manager.get_active_metrics_config_uuids().await;
-        assert!(file_path.is_file());
-        assert_eq!(1, test_environment.get_num_get_active_config_calls());
-        assert_eq!(active_configs, vec![UUID.to_string()], "active configs: {active_configs:?}");
-    }
-
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn get_inactive_metrics_configs_success() {
-        const UUID2: &str = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
-
-        let root_dir = Builder::new().tempdir().unwrap();
-        let active_dir_path = root_dir.path().join(ACTIVE_CONFIGS_DATA_DIR);
-        let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
-        let file_path = inactive_dir_path.join(UUID);
-
-        let test_environment = TestEnvironment::new(
-            &active_dir_path,
-            &inactive_dir_path,
-            MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
-        )
-        .await;
-
-        info!("Serializing metric config");
-        let serialized_config = create_serialized_config(UUID);
-        let serialized_config2 = create_serialized_config(UUID2);
-
-        test_environment.manager.add_metrics_config(&serialized_config).await.unwrap();
-        test_environment.manager.add_metrics_config(&serialized_config2).await.unwrap();
-        test_environment
-            .metrics_config_orchestrator
-            .populate_active_configs(vec![UUID2.to_string()]);
-
         let inactive_configs = test_environment.manager.get_inactive_metrics_config_uuids().await;
 
-        assert!(file_path.is_file());
-        assert_eq!(1, test_environment.get_num_get_active_config_calls());
-        assert_eq!(
-            inactive_configs,
-            vec![UUID.to_string()],
-            "inactive configs: {inactive_configs:?}"
-        );
+        assert_that!(inactive_configs, container_eq([UUID.to_owned()]));
+        assert_that!(active_configs, empty());
+        assert_eq!(test_environment.get_num_get_active_config_calls(), 2);
+
+        test_environment.manager.activate_metrics_config(UUID).await.unwrap();
+        let active_configs = test_environment.manager.get_active_metrics_config_uuids().await;
+        let inactive_configs = test_environment.manager.get_inactive_metrics_config_uuids().await;
+
+        assert_that!(inactive_configs, empty());
+        assert_that!(active_configs, container_eq([UUID.to_owned()]));
+        assert_eq!(test_environment.get_num_get_active_config_calls(), 4);
     }
 }
