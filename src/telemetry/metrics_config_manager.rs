@@ -1145,7 +1145,7 @@ mod tests {
         let config_path = inactive_dir_path.join(UUID);
         // Create a directory on a path corresponding to the config file
         file_io_utils::create_dir(&config_path).await.unwrap_or_else(|e| {
-            panic!("An error occurred in creating a directory over {:?}: {}", config_path, e);
+            panic!("An error occurred in creating a directory over {config_path:?}: {e}");
         });
 
         let serialized_config = create_serialized_config(UUID);
