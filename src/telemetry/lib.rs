@@ -67,7 +67,8 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
             | ConfigOrchestratorError::InvalidPublisherAndDescriptorCombination { .. } => {
                 StatusCodes::ADD_METRICS_CONFIG_FAILED
             }
-            ConfigOrchestratorError::InvalidConfigUuid { .. } => {
+            ConfigOrchestratorError::InvalidMetricsConfigUuid { .. }
+            | ConfigOrchestratorError::MetricsConfigNotFound { .. } => {
                 StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID
             }
         },

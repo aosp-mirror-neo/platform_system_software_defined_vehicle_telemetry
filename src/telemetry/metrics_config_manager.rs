@@ -21,7 +21,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::time::SystemTime;
 use tokio::io;
-use uuid::Uuid;
 
 // Crate module dependencies.
 use crate::metrics_config_orchestrator::{
@@ -29,10 +28,6 @@ use crate::metrics_config_orchestrator::{
 };
 use crate::metrics_config_orchestrator_factory::MetricsConfigOrchestratorFactory;
 use crate::status_reporter::StatusReporter;
-
-fn is_valid_uuid_format(uuid_str: &str) -> bool {
-    Uuid::try_parse(uuid_str).is_ok()
-}
 
 /// Interface of a service that manages Metrics Configurations.
 #[async_trait]
@@ -319,10 +314,6 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             return Err(MetricsConfigManagerError::PersistentStorageLimitExceeded);
         }
 
-        if !is_valid_uuid_format(&config.uuid) {
-            return Err(MetricsConfigManagerError::InvalidConfigUuid { uuid: config.uuid.clone() });
-        }
-
         // Validate the metrics config and report any errors to client
         self.metrics_config_orchestrator.validate_config(&config).await?;
 
@@ -449,7 +440,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
 
         let path = match self.metrics_config_orchestrator.finish_config(metrics_config_uuid).await {
             Ok(()) => self.active_dir_path.join(&uuid),
-            Err(ConfigOrchestratorError::InvalidConfigUuid { .. }) => {
+            Err(ConfigOrchestratorError::MetricsConfigNotFound { .. }) => {
                 info!("UUID {uuid} doesn't exist or is inactive");
                 self.inactive_dir_path.join(&uuid)
             }
@@ -493,7 +484,7 @@ impl MetricsConfigManager for MetricsConfigManagerImpl {
             for uuid in metric_config_map.keys() {
                 let res = self.metrics_config_orchestrator.finish_config(uuid).await;
                 if let Err(err) = res {
-                    if let ConfigOrchestratorError::InvalidConfigUuid { .. } = err {
+                    if let ConfigOrchestratorError::MetricsConfigNotFound { .. } = err {
                         info!("UUID {uuid} doesn't exist or is not active");
                     } else {
                         error!("Error in finishing Metric Config {err:?}");
@@ -546,8 +537,9 @@ mod tests {
     use std::path::Path;
     use tempfile::Builder;
 
+    use crate::metrics_config_orchestrator::MetricsConfigOrchestratorError;
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
-    use crate::StatusReporterImpl;
+    use crate::{MetricsConfigOrchestratorFactoryImpl, StatusReporterImpl};
 
     static ACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/active_configs";
     static INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
@@ -621,7 +613,7 @@ mod tests {
             if self.active_configs.lock().remove(uuid) {
                 Ok(())
             } else {
-                Err(ConfigOrchestratorError::InvalidConfigUuid { uuid: uuid.to_owned() })
+                Err(ConfigOrchestratorError::MetricsConfigNotFound { uuid: uuid.to_owned() })
             }
         }
 
@@ -1057,25 +1049,33 @@ mod tests {
         let inactive_dir_path = root_dir.path().join(INACTIVE_CONFIGS_DATA_DIR);
         let file_path = inactive_dir_path.join(INVALID_UUID);
 
-        let test_environment = TestEnvironment::new(
-            &active_dir_path,
-            &inactive_dir_path,
+        let manager = MetricsConfigManagerImpl::new(
+            active_dir_path.to_path_buf(),
+            inactive_dir_path.to_path_buf(),
             MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
+            Arc::new(MockServicePublisherAccessor::new()),
+            new_stub_pal(),
+            |_| {},
+            Arc::new(StatusReporterImpl::new(move |_| {})),
+            Box::new(MetricsConfigOrchestratorFactoryImpl {}),
         )
-        .await;
+        .await
+        .unwrap();
 
         info!("Serializing metric config");
         let serialized_config = create_serialized_config(INVALID_UUID);
 
-        let err =
-            test_environment.manager.add_metrics_config(&serialized_config).await.unwrap_err();
+        let result = manager.add_metrics_config(&serialized_config).await;
 
-        assert!(!file_path.is_file());
-        assert!(
-            matches!(&err, MetricsConfigManagerError::InvalidConfigUuid { .. }),
-            "Unexpected error: {err:?}"
+        assert_that!(
+            result,
+            err(pat!(MetricsConfigManagerError::ConfigOrchestratorError {
+                error: pat!(MetricsConfigOrchestratorError::InvalidMetricsConfigUuid {
+                    uuid: eq(INVALID_UUID)
+                })
+            })),
         );
-        assert_eq!(0, test_environment.get_num_validate_config_calls());
+        assert!(!file_path.is_file());
     }
 
     #[sdv_telemetry_test_utils::timeout]
