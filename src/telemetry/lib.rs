@@ -52,58 +52,37 @@ const INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
 fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) {
     let err_code = match err {
         ConfigManagerError::ConfigOrchestratorError { ref error } => match error {
-            ConfigOrchestratorError::DuplicatePublisherDefinition { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::DuplicateTriggerDefinition { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::DuplicateMetricsReportConfigName { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::CycledPublishersTriggers => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::InvalidDependency { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::DuplicateMetricsConfigUuid { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::InvalidMetricsReportConfig { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::InvalidPublisherDefinition { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::InvalidTriggerDefinition { .. } => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            ConfigOrchestratorError::InvalidDescriptorProtos { .. } => {
+            ConfigOrchestratorError::DuplicatePublisherDefinition { .. }
+            | ConfigOrchestratorError::DuplicateTriggerDefinition { .. }
+            | ConfigOrchestratorError::DuplicateMetricsReportConfigName { .. }
+            | ConfigOrchestratorError::CycledPublishersTriggers
+            | ConfigOrchestratorError::InvalidDependency { .. }
+            | ConfigOrchestratorError::DuplicateMetricsConfigUuid { .. }
+            | ConfigOrchestratorError::InvalidMetricsReportConfig { .. }
+            | ConfigOrchestratorError::InvalidPublisherDefinition { .. }
+            | ConfigOrchestratorError::InvalidTriggerDefinition { .. }
+            | ConfigOrchestratorError::InvalidDescriptorProtos { .. }
+            | ConfigOrchestratorError::NoStartTriggerDefined
+            | ConfigOrchestratorError::InvalidExpressionNodes { .. }
+            | ConfigOrchestratorError::InvalidPublisherAndDescriptorCombination { .. } => {
                 StatusCodes::ADD_METRICS_CONFIG_FAILED
             }
             ConfigOrchestratorError::InvalidConfigUuid { .. } => {
                 StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID
             }
-            ConfigOrchestratorError::NoStartTriggerDefined => {
-                StatusCodes::ADD_METRICS_CONFIG_FAILED
-            }
-            _ => StatusCodes::ADD_METRICS_CONFIG_FAILED,
         },
         ConfigManagerError::InvalidConfigUuid { .. } => {
             StatusCodes::METRICS_CONFIG_INVALID_CONFIG_UUID
         }
-        ConfigManagerError::DuplicateMetricsConfigUuid { .. } => {
+        ConfigManagerError::DuplicateMetricsConfigUuid { .. }
+        | ConfigManagerError::ConfigWriteError { .. }
+        | ConfigManagerError::PersistentStorageLimitExceeded => {
             StatusCodes::ADD_METRICS_CONFIG_FAILED
         }
         ConfigManagerError::ConfigReadError { .. } => StatusCodes::METRICS_CONFIG_CORRUPTED,
         ConfigManagerError::ConfigRemoveError { .. } => StatusCodes::REMOVE_METRICS_CONFIG_FAILED,
         ConfigManagerError::ConfigParseError => StatusCodes::METRICS_CONFIG_PARSE_ERROR,
-        ConfigManagerError::ConfigWriteError { .. } => StatusCodes::ADD_METRICS_CONFIG_FAILED,
         ConfigManagerError::FileIOError { .. } => StatusCodes::FILE_IO_ERROR,
-        ConfigManagerError::PersistentStorageLimitExceeded => {
-            StatusCodes::ADD_METRICS_CONFIG_FAILED
-        }
     };
 
     (err_code, err.to_string())
@@ -340,11 +319,11 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let data_reference = Arc::downgrade(&self.data);
         tokio::spawn(async move {
             let Some(data) = data_reference.upgrade() else { return };
-            let config_list = data.metrics_config_manager.get_active_metrics_config_uuids().await;
+            let uuids = data.metrics_config_manager.get_active_metrics_config_uuids().await;
             if let Err(e) = config_list_listener.deref().sendConfigList(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                 "",
-                &config_list,
+                &uuids,
             ) {
                 warn!("Unable to send config list to the client: {e:?}");
             }
@@ -364,11 +343,11 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
         let data_reference = Arc::downgrade(&self.data);
         tokio::spawn(async move {
             let Some(data) = data_reference.upgrade() else { return };
-            let config_list = data.metrics_config_manager.get_inactive_metrics_config_uuids().await;
+            let uuids = data.metrics_config_manager.get_inactive_metrics_config_uuids().await;
             if let Err(e) = config_list_listener.deref().sendConfigList(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                 "",
-                &config_list,
+                &uuids,
             ) {
                 warn!("Unable to send config list to the client: {e:?}");
             }

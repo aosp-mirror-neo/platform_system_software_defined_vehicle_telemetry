@@ -227,7 +227,7 @@ impl MetricsConfigManagerImpl {
             match self.metrics_config_orchestrator.initialize_config(&config).await {
                 Ok(()) => {
                     let mut metric_config_map = self.metrics_configs_store.lock();
-                    metric_config_map.insert(config.uuid.clone(), bytes.len());
+                    metric_config_map.insert(config.uuid, bytes.len());
                     configs_count += 1;
                     configs_size += bytes.len();
                 }

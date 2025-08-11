@@ -290,7 +290,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         // Create metrics report generators.
         let context = MetricsReportGeneratorFactoryCreateContext {
             config_activation_timestamp: &activation_timestamp,
-            config_proto,
+            config_uuid: &config_proto.uuid,
+            config_version: config_proto.version,
             file_descriptors: &file_descriptors,
             nodes: &expression_nodes,
             node_types: &node_types,
