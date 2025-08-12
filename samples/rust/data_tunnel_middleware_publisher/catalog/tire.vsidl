@@ -4,23 +4,23 @@
 
 package: "com.sdv.telemetry.sample"
 
-sdv_service_bundle {
+service_bundle {
     name: "TireSensorsReader"
 
     publisher {
-      type: "TirePressure"
-      instance: "FRONT_LEFT"
-      instance: "FRONT_RIGHT"
-      instance: "REAR_LEFT"
-      instance: "REAR_RIGHT"
+      message: "TirePressure"
+      channel: "FRONT_LEFT"
+      channel: "FRONT_RIGHT"
+      channel: "REAR_LEFT"
+      channel: "REAR_RIGHT"
     }
 
     publisher {
-      type: "TireTemperature"
+      message: "TireTemperature"
     }
 
     publisher {
-      type: "VehicleSpeed"
+      message: "VehicleSpeed"
     }
 
     unit_type {
