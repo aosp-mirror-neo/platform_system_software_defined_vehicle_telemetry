@@ -50,6 +50,7 @@ use std::collections::{HashMap, HashSet};
 use std::marker::Sync;
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
+use uuid::Uuid;
 
 // Crate dependencies.
 use crate::status_reporter::StatusReporter;
@@ -84,6 +85,10 @@ use trigger_factory::{
 const PUBLISHER: &str = "publisher";
 const TRIGGER: &str = "trigger";
 
+fn is_valid_uuid_format(uuid_str: &str) -> bool {
+    Uuid::try_parse(uuid_str).is_ok()
+}
+
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
 #[async_trait]
 pub trait MetricsConfigOrchestrator {
@@ -114,12 +119,10 @@ pub(crate) enum MetricsConfigOrchestratorError {
     DuplicatePublisherDefinition { publisher_name: String },
     #[error("Duplicate definition of trigger {trigger_name}")]
     DuplicateTriggerDefinition { trigger_name: String },
-    #[error("Duplicate metrics config identifier: {uuid}")]
+    #[error("Duplicate Metrics Config UUID: {uuid}")]
     DuplicateMetricsConfigUuid { uuid: String },
     #[error("Duplicate definition of metrics report config {name}")]
     DuplicateMetricsReportConfigName { name: String },
-    #[error("Metric Config with UUID {uuid} doesn't exist")]
-    InvalidConfigUuid { uuid: String },
     #[error("Invalid expression nodes. Reason: {e}")]
     InvalidExpressionNodes { e: NodeError },
     #[error("Invalid dependency: {dependency_name} doesn't exist")]
@@ -129,6 +132,8 @@ pub(crate) enum MetricsConfigOrchestratorError {
         #[from]
         error: protobuf::Error,
     },
+    #[error("Invalid Metrics Config UUID format: {uuid}")]
+    InvalidMetricsConfigUuid { uuid: String },
     #[error("Invalid definition for metrics report config {report_config_name}: {factory_error}")]
     InvalidMetricsReportConfig {
         report_config_name: String,
@@ -143,6 +148,8 @@ pub(crate) enum MetricsConfigOrchestratorError {
     InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
     #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
+    #[error("Metrics Config with UUID {uuid} not found")]
+    MetricsConfigNotFound { uuid: String },
     #[error("End trigger cannot be set if start trigger is not set")]
     NoStartTriggerDefined,
 }
@@ -219,6 +226,12 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
     ) -> Result<(), MetricsConfigOrchestratorError> {
         let activation_timestamp = Timestamp::now();
 
+        if !is_valid_uuid_format(&config_proto.uuid) {
+            return Err(MetricsConfigOrchestratorError::InvalidMetricsConfigUuid {
+                uuid: config_proto.uuid.to_owned(),
+            });
+        }
+
         // Build the provided proto file descriptors
         let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
         let mut file_descriptors = FileDescriptor::new_dynamic_fds(
@@ -290,7 +303,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         // Create metrics report generators.
         let context = MetricsReportGeneratorFactoryCreateContext {
             config_activation_timestamp: &activation_timestamp,
-            config_proto,
+            config_uuid: &config_proto.uuid,
+            config_version: config_proto.version,
             file_descriptors: &file_descriptors,
             nodes: &expression_nodes,
             node_types: &node_types,
@@ -419,7 +433,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
 
     async fn finish_config(&self, config_uuid: &str) -> Result<(), MetricsConfigOrchestratorError> {
         let config = self.configs.lock().remove(config_uuid).ok_or_else(|| {
-            MetricsConfigOrchestratorError::InvalidConfigUuid { uuid: config_uuid.to_owned() }
+            MetricsConfigOrchestratorError::MetricsConfigNotFound { uuid: config_uuid.to_owned() }
         })?;
 
         // Lock state mutex and hold it mutex until transition is complete.
@@ -467,6 +481,12 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         &self,
         config_proto: &MetricsConfigProto,
     ) -> Result<(), MetricsConfigOrchestratorError> {
+        if !is_valid_uuid_format(&config_proto.uuid) {
+            return Err(MetricsConfigOrchestratorError::InvalidMetricsConfigUuid {
+                uuid: config_proto.uuid.to_owned(),
+            });
+        }
+
         {
             let configs = self.configs.lock();
             if configs.contains_key(&config_proto.uuid) {
@@ -1014,6 +1034,7 @@ mod tests {
     use super::*;
 
     use googletest::assert_that;
+    use googletest::matchers::{eq, err, pat};
     use parking_lot::Mutex;
     use protobuf::descriptor::{
         field_descriptor_proto, DescriptorProto, FieldDescriptorProto, FileDescriptorProto,
@@ -1070,6 +1091,7 @@ mod tests {
     const TEST_MESSAGE_TYPE_NAME: &str = ".google.sdv.telemetry.test.TestMessage";
     const FIELD_NAME: &str = "field_name";
     const UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    const INVALID_UUID: &str = "../01bf0754-df95-46bb-bb35-522b6af66600";
 
     struct MockMetricsReportGenerator {
         name: String,
@@ -1439,6 +1461,7 @@ mod tests {
         METRICS_REPORT_CONFIG_NAME.clone_into(&mut report_config.name);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.metrics_report_configs.push(report_config);
         config
     }
@@ -1453,6 +1476,7 @@ mod tests {
         publisher2.mut_aggregation_publisher();
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.publishers.push(publisher1);
         config.publishers.push(publisher2);
         config
@@ -1468,6 +1492,7 @@ mod tests {
         trigger2.set_periodic_trigger(PeriodicTriggerProto::new());
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.triggers.push(trigger1);
         config.triggers.push(trigger2);
         config
@@ -1483,6 +1508,7 @@ mod tests {
         trigger.set_periodic_trigger(PeriodicTriggerProto::new());
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.publishers.push(publisher);
         config.triggers.push(trigger);
         config
@@ -1513,6 +1539,7 @@ mod tests {
         publisher.set_aggregation_publisher(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.descriptor_protos = create_test_file_descriptor_protos();
         config.publishers.push(publisher);
         config.triggers.push(trigger1);
@@ -1532,6 +1559,7 @@ mod tests {
         publisher.set_aggregation_publisher(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.descriptor_protos = create_test_file_descriptor_protos();
         config.publishers.push(publisher);
         config
@@ -1546,6 +1574,7 @@ mod tests {
         trigger.set_data_trigger(data_trigger);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.triggers.push(trigger);
         config
     }
@@ -1559,6 +1588,7 @@ mod tests {
         trigger.set_conditional_trigger(conditional_trigger);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.triggers.push(trigger);
         config
     }
@@ -1571,6 +1601,7 @@ mod tests {
         METRICS_REPORT_CONFIG_NAME.clone_into(&mut metrics_report2.name);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.metrics_report_configs.push(metrics_report1);
         config.metrics_report_configs.push(metrics_report2);
         config
@@ -1581,6 +1612,7 @@ mod tests {
         SOME_TRIGGER_NAME.clone_into(&mut trigger.name);
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.end_trigger_name.clone_from(&trigger.name);
         config.triggers.push(trigger);
         config
@@ -1902,6 +1934,23 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn initialize_config_with_invalid_uuid_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        let config = MetricsConfigProto { uuid: INVALID_UUID.to_owned(), ..Default::default() };
+
+        let result = orchestrator.initialize_config(&config).await;
+
+        assert_that!(
+            result,
+            err(pat!(MetricsConfigOrchestratorError::InvalidMetricsConfigUuid {
+                uuid: eq(INVALID_UUID)
+            }))
+        );
+        assert_eq!(orchestrator.configs.lock().len(), 0);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     async fn initialize_config_duplicate_publisher_name_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         let config = create_config_with_duplicate_publisher_name();
@@ -2043,6 +2092,7 @@ mod tests {
         orchestrator.node_factory().fail_create_nodes();
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.expression_nodes.push(NodeProto::new());
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
@@ -2749,13 +2799,13 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn finish_config_invalid_config_uuid_fails() {
+    async fn finish_config_non_existing_uuid_fails() {
         let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
 
         let err = orchestrator.finish_config(UUID).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidConfigUuid { uuid } if uuid == UUID),
+            matches!(&err, MetricsConfigOrchestratorError::MetricsConfigNotFound { uuid } if uuid == UUID),
             "Unexpected error: {err:?}"
         )
     }
@@ -3138,6 +3188,22 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn validate_config_with_invalid_uuid_fails() {
+        let orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
+        let config = MetricsConfigProto { uuid: INVALID_UUID.to_owned(), ..Default::default() };
+
+        let result = orchestrator.validate_config(&config).await;
+
+        assert_that!(
+            result,
+            err(pat!(MetricsConfigOrchestratorError::InvalidMetricsConfigUuid {
+                uuid: eq(INVALID_UUID)
+            }))
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     async fn validate_config_with_invalid_expression_nodes_fails() {
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
         orchestrator.node_factory().fail_validate();
@@ -3294,6 +3360,7 @@ mod tests {
         orchestrator.node_factory().fail_validate();
 
         let mut config = MetricsConfigProto::new();
+        UUID.clone_into(&mut config.uuid);
         config.expression_nodes.push(NodeProto::new());
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();

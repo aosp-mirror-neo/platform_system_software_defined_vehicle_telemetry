@@ -3,9 +3,7 @@
 use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
 use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
-use sdv_telemetry_proto_rust::metrics_configuration::{
-    MetricsConfig as MetricsConfigProto, MetricsReport, MetricsReportConfig,
-};
+use sdv_telemetry_proto_rust::metrics_configuration::{MetricsReport, MetricsReportConfig};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -43,7 +41,8 @@ downcast_rs::impl_downcast!(MetricsReportGeneratorFactory);
 
 pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
     pub config_activation_timestamp: &'a Timestamp,
-    pub config_proto: &'a MetricsConfigProto,
+    pub config_uuid: &'a str,
+    pub config_version: u32,
     pub file_descriptors: &'a [FileDescriptor],
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
@@ -135,8 +134,8 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
         Ok(Arc::new(MetricsReportGeneratorImpl::new(
             metrics_report_config,
             context.config_activation_timestamp.to_owned(),
-            context.config_proto.uuid.clone(),
-            context.config_proto.version,
+            context.config_uuid.to_owned(),
+            context.config_version,
             message_builder.into(),
             triggers,
             Arc::clone(&self.node_evaluation_context_factory),
@@ -208,7 +207,9 @@ mod tests {
     use super::*;
 
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
-    use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
+    use sdv_telemetry_proto_rust::metrics_configuration::{
+        MetricsConfig as MetricsConfigProto, ProtoMessageBuilder,
+    };
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_utils::collection_extension::VecExtension;
     use std::time::Duration;
@@ -246,14 +247,18 @@ mod tests {
             report_ready_callback: Option<Arc<dyn Fn(MetricsReport) + Send + Sync>>,
             triggers: Option<Vec<Arc<dyn Trigger>>>,
         ) -> Result<Arc<MetricsReportGeneratorImpl>, MetricsReportGeneratorFactoryError> {
-            let metrics_config_proto = metrics_config_proto.unwrap_or_default();
+            let metrics_config_proto = metrics_config_proto.unwrap_or_else(|| MetricsConfigProto {
+                uuid: CONFIG_UUID.to_string(),
+                ..Default::default()
+            });
             let report_ready_callback = report_ready_callback.unwrap_or_else(|| Arc::new(|_| {}));
             let triggers = triggers.map_or(HashMap::new(), |triggers| {
                 triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
             });
             let context = MetricsReportGeneratorFactoryCreateContext {
                 config_activation_timestamp: &Timestamp::now(),
-                config_proto: &metrics_config_proto,
+                config_uuid: &metrics_config_proto.uuid,
+                config_version: metrics_config_proto.version,
                 file_descriptors: get_test_file_descriptors(),
                 nodes: get_test_nodes(),
                 node_types: get_test_node_types(),
