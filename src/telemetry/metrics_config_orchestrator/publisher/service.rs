@@ -921,7 +921,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn activate_getter_retries_if_not_found() {
+    async fn activate_getter_activates_on_receiving_availabilty_notification() {
         // No message provided is found. Reactivating publisher after receiving availability
         // notification
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
@@ -1104,6 +1104,38 @@ mod tests {
             "Unexpected state: {}",
             *publisher.state.lock().await
         );
+
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
+        assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 0);
+        assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_getter_activation_fails_twice() {
+        // Retrieving message provider fails twice and causes retries on the first failure,
+        // reporting errors to StatusReporter.
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(Box::new(move |status| {
+                tx.send(status).unwrap();
+            }))))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
+
+        // Receive first error status
+        rx.recv().await.unwrap();
+
+        // Set error to fail activation retry attempt
+        service_adapter.set_next_error(anyhow!(ERROR_MESSAGE));
+
+        // Receive second error status
+        rx.recv().await.unwrap();
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -1374,6 +1406,64 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn deactivate_activation_not_possible_success() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
+
+        publisher.deactivate().await;
+
+        let state = publisher.state.lock().await;
+        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn deactivate_pending_activation_success() {
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .build_and_activate()
+            .await;
+
+        publisher.deactivate().await;
+
+        let state = publisher.state.lock().await;
+        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn deactivate_pending_service_success() {
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        publisher.deactivate().await;
+
+        let state = publisher.state.lock().await;
+        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn deactivate_getter_success() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
+        let publisher =
+            ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
+
+        publisher.deactivate().await;
+
+        let state = publisher.state.lock().await;
+        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     #[should_panic]
     async fn deactivate_with_subscriptions_panics() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -1389,7 +1479,7 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn deactivate_pending_success() {
+    async fn deactivate_subscribed_success() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
         service_adapter.set_next_subscribe_successful();
         let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
@@ -1434,6 +1524,36 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
+    async fn subscribe_activation_not_possible_noop() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+
+        let state = publisher.state.lock().await;
+        assert!(
+            matches!(*state, ServicePublisherState::ActivationNotPossible),
+            "Unexpected state: {}",
+            *state
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn subscribe_active_getter_panics() {
+        let publisher = ServicePublisherBuilder::new(Arc::new(MockServiceAdapter::new()))
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
     #[should_panic]
     async fn subscribe_already_subscribed_panics() {
         let service_adapter = Arc::new(MockServiceAdapter::new());
@@ -1470,6 +1590,50 @@ mod tests {
                 }),
             )
             .await;
+        service_adapter.publish_new_message(&msg).await;
+
+        let received_message = rx.await.to_protobuf().unwrap();
+        let latest_message =
+            publisher.get_latest_message().unwrap_sync().unwrap().unwrap().to_protobuf().unwrap();
+        assert!(
+            Arc::ptr_eq(&received_message, &msg),
+            "Expected {received_message:?} to equal {msg:?}"
+        );
+        assert!(Arc::ptr_eq(&latest_message, &msg), "Expected {latest_message:?} to equal {msg:?}");
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_pending_activation_retries_and_notifier_subscriber() {
+        // Publisher attempts activation and receives an error, leading to the retry attempts
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
+
+        let (tx, rx) = oneshot_callback();
+        let msg = Arc::new(Int32Value { value: 42, ..Default::default() }) as Arc<dyn MessageDyn>;
+        publisher
+            .subscribe(
+                DATA_TRIGGER_NAME,
+                Box::new(move |context| {
+                    let msg = context
+                        .get_message(PUBLISHER_NAME)
+                        .expect("Publisher message should be present in the context");
+                    tx(Arc::clone(msg));
+                }),
+            )
+            .await;
+
+        // Make the second activation attempt successful
+        let subscribe_receiver = service_adapter.set_next_subscribe_successful();
+        // Wait for the attempt to happen
+        subscribe_receiver.await.unwrap();
+
         service_adapter.publish_new_message(&msg).await;
 
         let received_message = rx.await.to_protobuf().unwrap();
@@ -1536,8 +1700,58 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn get_latest_message_pending_returns_none() {
+    async fn get_latest_message_activation_not_possible_returns_none() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        let latest_message =
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+
+        assert!(latest_message.is_none());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_latest_message_pending_service_returns_none() {
         let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        let latest_message =
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+
+        assert!(latest_message.is_none());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_latest_message_pending_activation_returns_none() {
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .build_and_activate()
+            .await;
+
+        let latest_message =
+            Arc::clone(&publisher).get_latest_message().unwrap_async().await.unwrap();
+
+        assert!(latest_message.is_none());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_latest_message_subscribed_no_messages_returns_none() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+
         let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
             .with_connection_type(ConnectionType::Subscription)
             .build_and_activate()
@@ -1556,6 +1770,82 @@ mod tests {
         let publisher = ServicePublisherBuilder::new(Arc::new(MockServiceAdapter::new()))
             .with_connection_type(ConnectionType::Subscription)
             .build();
+
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn unsubscribe_activation_not_possible_noop() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        let publisher = ServicePublisherBuilder::new(service_adapter)
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+
+        let state = publisher.state.lock().await;
+        assert!(
+            matches!(*state, ServicePublisherState::ActivationNotPossible),
+            "Unexpected state: {}",
+            *state
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn unsubscribe_pending_activation_success() {
+        let service_adapter =
+            Arc::new(MockServiceAdapter::new().with_next_error(anyhow!(ERROR_MESSAGE)));
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+
+        let state = publisher.state.lock().await;
+        assert!(
+            matches!(*state, ServicePublisherState::PendingActivation { ref callback_map, .. }
+                if callback_map.is_empty()),
+            "Unexpected state: {}",
+            *state
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn unsubscribe_pending_service_success() {
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+        publisher.unsubscribe(DATA_TRIGGER_NAME).await;
+
+        let state = publisher.state.lock().await;
+        assert!(
+            matches!(*state, ServicePublisherState::PendingService { ref callback_map, .. }
+                if callback_map.is_empty()),
+            "Unexpected state: {}",
+            *state
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn unsubscribe_active_getter_panics() {
+        let publisher = ServicePublisherBuilder::new(Arc::new(MockServiceAdapter::new()))
+            .build_and_activate()
+            .await;
 
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
     }
