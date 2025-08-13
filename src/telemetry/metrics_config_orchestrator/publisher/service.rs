@@ -19,7 +19,7 @@ use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard as AsyncMutexGuard};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tokio_util::sync::CancellationToken;
+use tokio_util::sync::{CancellationToken, DropGuard};
 
 use super::{base::BasePublisher, CallbackFn, Publisher};
 use crate::metrics_config_orchestrator::async_event_processor::{
@@ -74,8 +74,8 @@ enum ServicePublisherState {
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
 
-        // Cancellation token that is flagged to cancel pending activation.
-        cancellation_token: CancellationToken,
+        // Cancellation token drop guard that is flagged to cancel retries of pending activation.
+        _cancellation_drop_guard: DropGuard,
     },
     /// The publisher attempted activation, but service wasn't available.
     /// It will retry activation after receiving availability notification.
@@ -172,10 +172,8 @@ impl Publisher for ServicePublisher {
             ServicePublisherState::Inactive => {
                 panic!("Unable to deactivate publisher {}: it's inactive", self.get_name())
             }
-            ServicePublisherState::ActivationNotPossible => {}
-            ServicePublisherState::PendingActivation { cancellation_token, .. } => {
-                cancellation_token.cancel();
-            }
+            ServicePublisherState::ActivationNotPossible
+            | ServicePublisherState::PendingActivation { .. } => {}
             ServicePublisherState::PendingService { availability_registration, .. } => {
                 let registration = availability_registration
                     .lock()
@@ -405,7 +403,7 @@ impl ServicePublisher {
         let cancellation_token_clone = cancellation_token.clone();
         let new_state = ServicePublisherState::PendingActivation {
             callback_map: HashMap::new(),
-            cancellation_token,
+            _cancellation_drop_guard: cancellation_token.drop_guard(),
         };
 
         let self_clone = Arc::clone(self);
@@ -421,8 +419,6 @@ impl ServicePublisher {
                 };
                 if matches!(*state_lock, ServicePublisherState::PendingActivation { .. }) {
                     self_clone.retry_activation(state_lock).await;
-                } else {
-                    break;
                 }
             }
         });
