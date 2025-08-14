@@ -106,6 +106,33 @@ enum ServicePublisherState {
     },
 }
 
+impl std::fmt::Debug for ServicePublisherState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Inactive => write!(f, "Inactive"),
+            Self::ActivationNotPossible => write!(f, "ActivationNotPossible"),
+            Self::PendingActivation { callback_map, _cancellation_drop_guard } => f
+                .debug_struct("PendingActivation")
+                .field("callback_map.keys()", &callback_map.keys())
+                .field("_cancellation_drop_guard", _cancellation_drop_guard)
+                .finish(),
+            Self::PendingService { availability_registration, callback_map } => f
+                .debug_struct("PendingService")
+                .field(
+                    "availability_registration",
+                    &if availability_registration.lock().is_some() { "Some(...)" } else { "None" },
+                )
+                .field("callback_map.keys()", &callback_map.keys())
+                .finish(),
+            Self::ActiveGetter { .. } => f.debug_struct("ActiveGetter").finish_non_exhaustive(),
+            Self::ActiveSubscribed { callback_map, .. } => f
+                .debug_struct("ActiveSubscribed")
+                .field("callback_map.keys()", &callback_map.keys())
+                .finish_non_exhaustive(),
+        }
+    }
+}
+
 #[async_trait]
 impl Publisher for ServicePublisher {
     fn get_name(&self) -> &str {
@@ -155,9 +182,8 @@ impl Publisher for ServicePublisher {
         let state_lock = self.state.lock().await;
         assert!(
             matches!(*state_lock, ServicePublisherState::Inactive),
-            "Unable to activate publisher {}: it's in {} state",
+            "Unable to activate publisher {}: it's in {state_lock:?} state",
             self.get_name(),
-            state_lock
         );
 
         self.activate_impl(state_lock).await
@@ -461,7 +487,7 @@ impl ServicePublisher {
                 ServicePublisherState::ActiveSubscribed { callback_map, .. },
             ) => mem::swap(callback_map, pending_callback_map),
             (state, new_state) => {
-                panic!("Unexpected state change from {state} to {new_state}")
+                panic!("Unexpected state change from {state:?} to {new_state:?}")
             }
         }
     }
@@ -473,14 +499,13 @@ impl ServicePublisher {
     ) {
         let warn_service_unavailable = |state| {
             warn!(
-                "Publisher {} was able to retry activation from {} state \
+                "Publisher {} was able to retry activation from {state:?} state \
                 but wasn't able to discover the service",
                 self.get_name(),
-                state,
             );
         };
         let report_activation_error = |err, state| {
-            let message = format!("failed to retry activation from {state} state");
+            let message = format!("failed to retry activation from {state:?} state");
             self.report_activation_error(err, &message);
         };
 
@@ -490,7 +515,7 @@ impl ServicePublisher {
             | ServicePublisherState::ActiveGetter { .. }
             | ServicePublisherState::ActiveSubscribed { .. } => {
                 panic!(
-                    "Publisher {} state is {}, but activation retry is expected from a pending state",
+                    "Publisher {} state is {:?}, but activation retry is expected from a pending state",
                     self.get_name(),
                     *state_lock,
                 );
