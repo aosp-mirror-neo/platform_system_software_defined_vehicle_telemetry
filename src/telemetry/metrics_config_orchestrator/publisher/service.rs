@@ -59,8 +59,6 @@ pub(crate) struct ServicePublisher {
     activation_retry_interval: Duration,
 }
 
-#[derive(strum_macros::Display)]
-#[strum(serialize_all = "title_case")]
 enum ServicePublisherState {
     /// The publisher is not subscribed to the underlying data source
     /// and doesn't provide the latest message.
@@ -682,6 +680,7 @@ mod tests {
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
     use googletest::assert_that;
+    use googletest::matchers::pat;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
@@ -795,10 +794,10 @@ mod tests {
         let publisher =
             ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
-        assert!(matches!(
+        assert_that!(
             *publisher.state.lock().await,
-            ServicePublisherState::ActiveGetter { .. }
-        ));
+            pat!(ServicePublisherState::ActiveGetter { .. })
+        );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 0);
@@ -820,23 +819,19 @@ mod tests {
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         // Set message provider
         service_adapter.set_next_message_provider(MockServiceMessageProvider::new());
         // Wait until retry happens by waiting for the next request of message_provider
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(*publisher.state.lock().await, ServicePublisherState::ActiveGetter { .. }),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActiveGetter { .. })
         );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
@@ -856,21 +851,13 @@ mod tests {
             .build_and_activate()
             .await;
 
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         Arc::clone(&publisher).deactivate().await;
-        assert!(
-            matches!(*publisher.state.lock().await, ServicePublisherState::Inactive),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
-        );
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -887,11 +874,9 @@ mod tests {
         let publisher =
             ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActiveSubscribed { .. })
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
@@ -906,11 +891,9 @@ mod tests {
         let publisher =
             ServicePublisherBuilder::new(Arc::clone(&service_adapter)).build_and_activate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::PendingService { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingService { .. })
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -927,14 +910,13 @@ mod tests {
             .build_and_activate()
             .await;
 
-        assert!(
-            matches!(*publisher.state.lock().await, ServicePublisherState::ActivationNotPossible),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActivationNotPossible)
         );
 
         Arc::clone(&publisher).deactivate().await;
-        assert!(matches!(*publisher.state.lock().await, ServicePublisherState::Inactive));
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
 
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
         assert_eq!(service_adapter.get_num_unregister_availability_callback_calls(), 0);
@@ -965,11 +947,9 @@ mod tests {
         // Wait until publisher state is updated by waiting for the next request of message_provider
         service_adapter.wait_message_provider_returned().await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActiveGetter { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActiveGetter { .. })
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 3);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
@@ -995,21 +975,16 @@ mod tests {
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         // Wait until retry happens by waiting for the next request of message_provider
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(*publisher.state.lock().await, ServicePublisherState::PendingService { .. }),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingService { .. })
         );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
@@ -1033,21 +1008,16 @@ mod tests {
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         // Wait until retry happens by waiting message_provider being requested for the second time
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(*publisher.state.lock().await, ServicePublisherState::ActivationNotPossible),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActivationNotPossible)
         );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
@@ -1072,13 +1042,9 @@ mod tests {
             .build_and_activate()
             .await;
 
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
@@ -1106,24 +1072,16 @@ mod tests {
 
         // First request of message_provider happens immediately
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         // Wait until retry happens by waiting for the next request of message_provider
         service_adapter.wait_message_provider_returned().await;
-        assert!(
-            matches!(
-                *publisher.state.lock().await,
-                ServicePublisherState::PendingActivation { .. }
-            ),
-            "Unexpected state: {}",
-            *publisher.state.lock().await
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { .. })
         );
 
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 2);
@@ -1213,8 +1171,7 @@ mod tests {
         service_adapter.call_availability_callback();
         tokio::task::yield_now().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 1);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 0);
         assert_eq!(service_adapter.get_num_register_availability_callback_calls(), 1);
@@ -1232,12 +1189,11 @@ mod tests {
             .build_and_activate()
             .await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActiveSubscribed { .. })
         );
+
         let latest_configuration = service_adapter
             .latest_configuration
             .lock()
@@ -1262,11 +1218,9 @@ mod tests {
             .build_and_activate()
             .await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::PendingService { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingService { .. })
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
@@ -1308,11 +1262,9 @@ mod tests {
             Arc::ptr_eq(&received_message, &msg),
             "Expected {received_message:?} to equal {msg:?}"
         );
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActiveSubscribed { .. })
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert!(
@@ -1338,11 +1290,9 @@ mod tests {
         service_adapter.notify_cancelled();
         rx.await.unwrap();
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActiveSubscribed { .. }),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActiveSubscribed { .. })
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
@@ -1394,8 +1344,7 @@ mod tests {
         service_adapter.notify_cancelled();
         tokio::task::yield_now().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 1);
     }
@@ -1434,8 +1383,7 @@ mod tests {
 
         publisher.deactivate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1450,8 +1398,7 @@ mod tests {
 
         publisher.deactivate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1465,8 +1412,7 @@ mod tests {
 
         publisher.deactivate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1479,8 +1425,7 @@ mod tests {
 
         publisher.deactivate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -1510,8 +1455,7 @@ mod tests {
 
         publisher.deactivate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
         assert_eq!(service_adapter.get_num_unsubscribe_calls(), 1);
     }
 
@@ -1527,8 +1471,7 @@ mod tests {
 
         publisher.deactivate().await;
 
-        let state = publisher.state.lock().await;
-        assert!(matches!(*state, ServicePublisherState::Inactive), "Unexpected state: {}", *state);
+        assert_that!(*publisher.state.lock().await, pat!(ServicePublisherState::Inactive));
         assert_eq!(service_adapter.get_num_unsubscribe_calls(), 1);
     }
 
@@ -1554,11 +1497,9 @@ mod tests {
 
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActivationNotPossible),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActivationNotPossible)
         );
     }
 
@@ -1807,11 +1748,9 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::ActivationNotPossible),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::ActivationNotPossible)
         );
     }
 
@@ -1830,12 +1769,10 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::PendingActivation { ref callback_map, .. }
-                if callback_map.is_empty()),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingActivation { callback_map, .. }
+                if callback_map.is_empty())
         );
     }
 
@@ -1851,12 +1788,10 @@ mod tests {
         publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
         publisher.unsubscribe(DATA_TRIGGER_NAME).await;
 
-        let state = publisher.state.lock().await;
-        assert!(
-            matches!(*state, ServicePublisherState::PendingService { ref callback_map, .. }
-                if callback_map.is_empty()),
-            "Unexpected state: {}",
-            *state
+        assert_that!(
+            *publisher.state.lock().await,
+            pat!(ServicePublisherState::PendingService { callback_map, .. }
+                if callback_map.is_empty())
         );
     }
 
