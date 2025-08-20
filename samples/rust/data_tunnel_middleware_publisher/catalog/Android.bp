@@ -26,17 +26,17 @@ rust_protobuf {
 }
 
 filegroup {
-    name: "telemetry_catalog_protos",
-    srcs: [
-        "**/*.proto",
-        "**/*.vsidl",
-    ],
-}
-
-filegroup {
     name: "telemetry_catalog_protos_with_bp_file",
     srcs: [
         ":telemetry_catalog_protos",
         "Android.bp",
+    ],
+}
+
+filegroup {
+    name: "telemetry_catalog_protos",
+    srcs: [
+        "**/*.proto",
+        "**/*.vsidl",
     ],
 }
