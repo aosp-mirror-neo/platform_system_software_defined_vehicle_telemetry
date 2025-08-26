@@ -31,7 +31,7 @@ pub(crate) trait MessageBuilderFactory: Send + Sync {
         owner_name: String,
         proto_message_builder: &ProtoMessageBuilder,
         context: &MessageBuilderFactoryCreateContext,
-    ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError>;
+    ) -> Result<Arc<dyn MessageBuilder>, MessageBuilderFactoryError>;
 }
 
 pub(crate) struct MessageBuilderFactoryCreateContext<'a> {
@@ -127,7 +127,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
         owner_name: String,
         proto_message_builder: &ProtoMessageBuilder,
         context: &MessageBuilderFactoryCreateContext,
-    ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError> {
+    ) -> Result<Arc<dyn MessageBuilder>, MessageBuilderFactoryError> {
         let message_descriptor = Self::get_message_descriptor(
             context.file_descriptors,
             &proto_message_builder.message_type,
@@ -160,7 +160,7 @@ impl MessageBuilderFactory for MessageBuilderFactoryImpl {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        Ok(Box::new(MessageBuilderImpl::new(
+        Ok(Arc::new(MessageBuilderImpl::new(
             owner_name,
             message_descriptor,
             field_assignments,

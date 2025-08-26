@@ -37,6 +37,9 @@ pub(crate) trait Publisher: Send + Sync {
     async fn activate(self: Arc<Self>);
     async fn deactivate(&self);
 
+    async fn start_data_collection(&self);
+    async fn stop_data_collection(&self);
+
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn);
     async fn unsubscribe(&self, data_trigger_name: &str);
 }

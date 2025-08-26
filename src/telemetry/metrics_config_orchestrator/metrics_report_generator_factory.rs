@@ -137,7 +137,7 @@ impl MetricsReportGeneratorFactory for MetricsReportGeneratorFactoryImpl {
             context.config_activation_timestamp.to_owned(),
             context.config_uuid.to_owned(),
             context.config_version,
-            message_builder.into(),
+            message_builder,
             triggers,
             Arc::clone(&self.node_evaluation_context_factory),
             Arc::clone(&self.status_reporter),

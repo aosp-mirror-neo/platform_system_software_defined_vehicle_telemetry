@@ -74,8 +74,8 @@ mod tests {
             state: MetricsConfigState::NotStarted.into(),
             metrics_report_generators: vec![],
             ordered_publisher_names: OrderedPublisherNames {
-                on_config_initialization: vec![],
-                on_start_trigger_fired: vec![],
+                start_collection_on_init: vec![],
+                start_collection_on_start_trigger: vec![],
             },
             publishers: HashMap::new(),
             start_trigger: None,

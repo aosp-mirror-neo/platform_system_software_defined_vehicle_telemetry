@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use lazy_static::lazy_static;
+use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_expr::{node::Node, node_value::NodeValue, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
@@ -29,11 +30,12 @@ lazy_static! {
 pub(crate) struct MockMessageBuilderFactory {
     fail_validate: bool,
     fail_create: bool,
+    next_builder: Mutex<Option<Arc<MockMessageBuilder>>>,
 }
 
 impl MockMessageBuilderFactory {
     pub(crate) fn new() -> Self {
-        Self { fail_validate: false, fail_create: false }
+        Self { fail_validate: false, fail_create: false, next_builder: Mutex::new(None) }
     }
 
     /// Intercepts the mock factory's validate() call and make it return an error.
@@ -44,6 +46,11 @@ impl MockMessageBuilderFactory {
     /// Intercepts the mock factory's create() call and make it return an error.
     pub(crate) fn fail_create(&mut self) {
         self.fail_create = true;
+    }
+
+    /// Sets the next builder to be returned by `create`.
+    pub(crate) fn set_next_builder(&self, builder: Arc<MockMessageBuilder>) {
+        self.next_builder.lock().replace(builder);
     }
 }
 
@@ -66,13 +73,16 @@ impl MessageBuilderFactory for MockMessageBuilderFactory {
         _owner_name: String,
         _proto_message_builder: &ProtoMessageBuilder,
         _context: &MessageBuilderFactoryCreateContext,
-    ) -> Result<Box<dyn MessageBuilder>, MessageBuilderFactoryError> {
+    ) -> Result<Arc<dyn MessageBuilder>, MessageBuilderFactoryError> {
         if self.fail_create {
             return Err(MessageBuilderFactoryError::MessageNotFound {
                 message_type: "Simulated failure".to_string(),
             });
         }
-        Ok(Box::new(MockMessageBuilder::new()))
+        if let Some(builder) = self.next_builder.lock().take() {
+            return Ok(builder);
+        }
+        Ok(Arc::new(MockMessageBuilder::new()))
     }
 }
 

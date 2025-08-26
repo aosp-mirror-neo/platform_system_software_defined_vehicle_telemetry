@@ -48,9 +48,13 @@ enum AggregationPublisherState {
     /// The publisher is not subscribed to the underlying data source
     /// and doesn't provide the latest message.
     Inactive,
-    /// The publisher is subscribed to the underlying data source
-    /// and maintains the latest message.
+    // The publisher is subscribed to the underlying data source
+    // and performs aggregation over collected data once the collection is started
     Active {
+        // Flag indicating whether data collection has been started. Aggregations should not be
+        // performed if false
+        data_collection_started: bool,
+
         // Map of unique data trigger names to the subscribed callbacks.
         callback_map: HashMap<String, CallbackFn>,
 
@@ -152,6 +156,7 @@ impl Publisher for AggregationPublisher {
                     MultiLevelCountdownLatch,
                 ),
             ) {
+                countdown_latch.wait(Level(compute_order.0 - 1)).await;
                 if let Some(aggregation_publisher) = self.aggregation_publisher.upgrade() {
                     aggregation_publisher.on_new_message(build_result, context).await;
                 };
@@ -166,6 +171,7 @@ impl Publisher for AggregationPublisher {
 
         // Set the new state and release the mutex.
         *state_lock = AggregationPublisherState::Active {
+            data_collection_started: false,
             callback_map: HashMap::new(),
             _event_processor: event_processor,
         };
@@ -208,6 +214,38 @@ impl Publisher for AggregationPublisher {
 
         // Change state to Inactive and release the mutex.
         *state_lock = AggregationPublisherState::Inactive;
+    }
+
+    async fn start_data_collection(&self) {
+        // Lock state mutex and hold it until operation is complete.
+        let mut state_lock = self.state.lock().await;
+        match &mut *state_lock {
+            AggregationPublisherState::Active { data_collection_started, .. } => {
+                assert!(!*data_collection_started, "Data collection has already been started");
+                *data_collection_started = true;
+            }
+            AggregationPublisherState::Inactive => {
+                panic!(
+                    "Unable to start data collection for publisher {}: it's inactive",
+                    self.get_name()
+                )
+            }
+        }
+    }
+    async fn stop_data_collection(&self) {
+        let mut state_lock = self.state.lock().await;
+        match &mut *state_lock {
+            AggregationPublisherState::Active { data_collection_started, .. } => {
+                assert!(*data_collection_started, "Data collection has not been started");
+                *data_collection_started = false;
+            }
+            AggregationPublisherState::Inactive => {
+                panic!(
+                    "Unable to start data collection for publisher {}: it's inactive",
+                    self.get_name()
+                )
+            }
+        }
     }
 
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn) {
@@ -306,9 +344,15 @@ impl AggregationPublisher {
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
         let mut state_lock = self.state.lock().await;
 
-        let AggregationPublisherState::Active { callback_map, .. } = &mut *state_lock else {
+        let AggregationPublisherState::Active { callback_map, data_collection_started, .. } =
+            &mut *state_lock
+        else {
             return;
         };
+
+        if !*data_collection_started {
+            return;
+        }
 
         let (message, builder_errors) = build_result.into_future().await;
         if !builder_errors.is_empty() {
@@ -336,6 +380,8 @@ mod tests {
         TelemetryServiceStatus::TelemetryServiceStatus,
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
+    use googletest::assert_that;
+    use googletest::matchers::{none, ok};
     use lazy_static::lazy_static;
     use protobuf::well_known_types::wrappers::Int32Value;
     use protobuf::MessageDyn;
@@ -504,6 +550,8 @@ mod tests {
                 }),
             )
             .await;
+        publisher.start_data_collection().await;
+
         trigger.fire().await;
 
         let messages = [
@@ -521,6 +569,37 @@ mod tests {
                 <dyn MessageDyn>::downcast_ref::<TestMessage>(message.as_ref()).unwrap();
             assert_eq!(test_message.int_field, 1);
         }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_does_not_notify_subscriber_when_data_collection_not_started() {
+        let trigger = Arc::new(MockTrigger::new_for_subscriber(
+            TRIGGER_NAME.to_owned(),
+            *CONFIG_UUID,
+            TriggerSubscriber::AggregationPublisher { name: PUBLISHER_NAME.to_owned() },
+        ));
+        let (publisher, message_builder) =
+            create_active_aggregation_publisher(vec![Arc::<MockTrigger>::clone(&trigger)]).await;
+
+        publisher
+            .subscribe(
+                DATA_TRIGGER_NAME,
+                Box::new(move |_| panic!("Subscriber should not be notified")),
+            )
+            .await;
+
+        // Do not start data collection.
+
+        // Fire trigger. This should has no effect
+        trigger.fire().await;
+
+        // Yield to allow the trigger to be processed.
+        tokio::task::yield_now().await;
+
+        // Even though the message is discarded, it has to be built anyway
+        assert_eq!(message_builder.get_num_build_calls(), 1);
+        assert_that!(publisher.get_latest_message().unwrap_sync(), ok(none()));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -586,6 +665,7 @@ mod tests {
 
         let (tx, rx) = oneshot_callback();
         publisher.subscribe(DATA_TRIGGER_NAME, Box::new(tx)).await;
+        publisher.start_data_collection().await;
 
         let trigger_context = Arc::new(NodeEvaluationContext::with_publisher_message(
             None,
@@ -625,6 +705,7 @@ mod tests {
                 }),
             )
             .await;
+        publisher.start_data_collection().await;
 
         message_builder.set_next_async_result(
             future::ready((
@@ -703,6 +784,7 @@ mod tests {
         ));
 
         Arc::clone(&publisher).activate().await;
+        publisher.start_data_collection().await;
 
         trigger.fire().await;
 

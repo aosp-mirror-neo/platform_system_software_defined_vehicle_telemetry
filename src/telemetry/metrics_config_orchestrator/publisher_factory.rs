@@ -255,7 +255,7 @@ impl PublisherFactoryImpl {
             .collect();
         let publisher = (self.aggregation_publisher_new_func)(
             publisher_name,
-            message_builder.into(),
+            message_builder,
             metrics_config_uuid,
             aggregation_publisher_proto.reset_on_get,
             triggers,

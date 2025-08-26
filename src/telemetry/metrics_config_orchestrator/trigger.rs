@@ -69,11 +69,11 @@ impl ComputeOrder for TriggerSubscriber {
     fn compute_order(&self) -> u32 {
         match self {
             Self::MetricsConfigStart => 0,
-            Self::AggregationPublisher { .. } => 0,
-            Self::ConditionalTrigger { .. } => 1,
-            Self::MetricsReportGenerator { .. } => 1,
-            Self::MetricsConfigEnd => 2,
-            Self::MetricsConfigFinish => 2,
+            Self::AggregationPublisher { .. } => 1,
+            Self::ConditionalTrigger { .. } => 2,
+            Self::MetricsReportGenerator { .. } => 2,
+            Self::MetricsConfigEnd => 3,
+            Self::MetricsConfigFinish => 3,
         }
     }
 }
