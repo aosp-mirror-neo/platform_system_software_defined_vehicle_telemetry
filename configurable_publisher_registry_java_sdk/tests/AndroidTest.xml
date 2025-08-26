@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright 2025 Google LLC -->
+<configuration description="Runs tests for ConfigurablePublisherRegistrySdkTest.">
+    <target_preparer class="com.android.tradefed.targetprep.suite.SuiteApkInstaller">
+        <option name="test-file-name" value="libsdvconfigurablepublisher-javatest.apk"/>
+    </target_preparer>
+    <target_preparer class="com.android.tradefed.targetprep.RootTargetPreparer" />
+    <device_requirements class="com.android.tradefed.device.DeviceSelectionOptions"/>
+    <device_options class="com.android.tradefed.device.TestDeviceOptions"/>
+    <test class="com.android.tradefed.testtype.AndroidJUnitTest">
+        <option name="rerun" value="false"/>
+        <option name="package" value="google.sdv.telemetry.configurable_publisher_sdk"/>
+        <option name="runner" value="androidx.test.runner.AndroidJUnitRunner"/>
+        <option name="use-test-storage" value="false"/>
+    </test>
+</configuration>
