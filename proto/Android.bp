@@ -53,3 +53,21 @@ rust_protobuf {
     system_ext_specific: true,
     visibility: ["//visibility:public"],
 }
+
+java_library {
+    name: "libsdv_telemetry_proto_java",
+    sdk_version: "system_current",
+    srcs: [
+        ":sdv_telemetry_proto_srcs",
+        ":libprotobuf-internal-protos",
+        ":libprotobuf-internal-any-proto",
+    ],
+    proto: {
+        type: "lite",
+        include_dirs: ["external/protobuf/src"],
+    },
+    static_libs: [
+        "libprotobuf-java-lite",
+    ],
+    visibility: ["//visibility:public"],
+}
