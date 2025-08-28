@@ -1033,7 +1033,7 @@ impl MetricsConfigOrchestratorImpl {
 
         tokio::spawn(async move {
             // Wait until all computations on end_trigger are done before deactivating the config
-            countdown_latch.wait(Level(compute_order.0 - 1)).await;
+            countdown_latch.wait(compute_order).await;
 
             // Lock state mutex, verify state and hold the mutex until transition is complete.
             let mut config_state = config.state.lock().await;

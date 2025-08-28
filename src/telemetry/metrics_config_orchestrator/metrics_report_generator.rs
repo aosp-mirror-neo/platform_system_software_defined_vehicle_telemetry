@@ -230,7 +230,7 @@ impl MetricsReportGeneratorImpl {
         tokio::spawn(async move {
             // Wait until other objects (such as aggregation publishers) finish their computations
             // caused be same trigger firing
-            countdown_latch.wait(Level(compute_order.0 - 1)).await;
+            countdown_latch.wait(compute_order).await;
 
             // Build the message and generate the report
             let res = Arc::clone(&self_clone.message_builder).build(&context_clone);

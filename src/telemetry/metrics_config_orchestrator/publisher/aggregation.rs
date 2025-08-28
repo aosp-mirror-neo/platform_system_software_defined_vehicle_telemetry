@@ -156,7 +156,7 @@ impl Publisher for AggregationPublisher {
                     MultiLevelCountdownLatch,
                 ),
             ) {
-                countdown_latch.wait(Level(compute_order.0 - 1)).await;
+                countdown_latch.wait(compute_order).await;
                 if let Some(aggregation_publisher) = self.aggregation_publisher.upgrade() {
                     aggregation_publisher.on_new_message(build_result, context).await;
                 };

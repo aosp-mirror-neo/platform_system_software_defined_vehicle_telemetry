@@ -120,7 +120,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                         // triggers do not wait until aggregation publishers with the same parent
                         // trigger perform their aggregations.
                         // As we don't want to potentially block the execution by waiting for
-                        // countdown_latch.wait(compute_order - 1), conditional trigger computation
+                        // countdown_latch.wait(compute_order), conditional trigger computation
                         // should be refactored to be performed in a separate task, but still
                         // considering that AsyncEventProcessor is specifically used to avoid random
                         // order of tokio tasks execution

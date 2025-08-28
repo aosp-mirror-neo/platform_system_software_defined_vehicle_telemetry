@@ -400,7 +400,7 @@ mod tests {
         let key_callback = Box::new(move |_, _, latch: MultiLevelCountdownLatch| {
             let tx_clone = tx_clone.clone();
             tokio::spawn(async move {
-                latch.count_down(Level(0)).await;
+                latch.count_down(Level(KEY.to_owned().compute_order())).await;
                 tx_clone.send(KEY).unwrap();
             });
         });
@@ -409,7 +409,7 @@ mod tests {
         let key2_callback = Box::new(move |_, _, latch: MultiLevelCountdownLatch| {
             let tx_clone = tx.clone();
             tokio::spawn(async move {
-                latch.wait(Level(0)).await;
+                latch.wait(Level(KEY2.to_owned().compute_order())).await;
                 tx_clone.send(KEY2).unwrap();
             });
         });
