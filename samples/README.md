@@ -40,7 +40,7 @@ cvd create
 adb root
 ```
 
-If on IVI, explicitely start telemetry service agent:
+If on IVI, explicitly start telemetry service agent:
 
 ```bash
 adb root

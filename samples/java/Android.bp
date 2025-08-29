@@ -66,3 +66,27 @@ android_app {
     use_embedded_native_libs: true,
     jni_uses_platform_apis: true,
 }
+
+android_app {
+    name: "telemetry_java_sdk_sample_ivi_publisher",
+    platform_apis: true,
+    srcs: [
+        "sample_ivi_sdk_publisher/*.java",
+        ":sdv_telemetry_error_report_publisher_proto",
+    ],
+    manifest: "sample_ivi_sdk_publisher/AndroidManifest.xml",
+    static_libs: [
+        "libsdvconfigurablepublisher-java",
+        "libprotobuf-java-lite",
+    ],
+    proto: {
+        type: "lite",
+        local_include_dirs: [
+            ":sdv_telemetry_error_report_publisher_proto",
+        ],
+    },
+    optimize: {
+        enabled: false,
+    },
+    privileged: true,
+}
