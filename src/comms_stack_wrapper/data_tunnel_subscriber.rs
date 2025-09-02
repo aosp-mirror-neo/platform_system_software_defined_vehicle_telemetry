@@ -19,10 +19,12 @@ use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
 };
-use sdv_telemetry_utils::conversions::u32_into_usize;
 use std::iter::Iterator;
+use std::pin::pin;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
+
+use crate::data_tunnel_message_stream::create_message_stream;
 
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
 pub struct DataTunnelSubscriber {
@@ -52,11 +54,11 @@ impl DataTunnelSubscriber {
         >,
         cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
-        let mut subscriber_stream = dt::SubscriberStream::create(
+        let message_stream = create_message_stream(
             self.ctx.clone().await,
-            &unit_identifier,
-            sub_sampling_interval.as_duration(),
-            dt::SubscriberOptions { fetch_last_message },
+            unit_identifier.clone(),
+            sub_sampling_interval.to_owned(),
+            fetch_last_message,
         )
         .await
         .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
@@ -65,9 +67,7 @@ impl DataTunnelSubscriber {
         let subscription_drop_guard = cancellation_token.clone().drop_guard();
         let sub_sampling_interval = sub_sampling_interval.to_owned();
         tokio::spawn(async move {
-            let publisher_unit_metadata = subscriber_stream.get_publisher_unit_metadata();
-            let message_size = publisher_unit_metadata.get_message_size();
-
+            let mut message_stream = pin!(message_stream);
             // This loop runs infinitely until the cancellation token fires. In case of an error
             // while message parsing, the data is lost, as data was retrieved successfully from the
             // data tunnel. In case of data tunnel errors, data is not lost, and can be fetched in
@@ -76,7 +76,7 @@ impl DataTunnelSubscriber {
                 match select! {
                     biased;
                     _ = cancellation_token.cancelled() => None,
-                    result = subscriber_stream.next() => Some(result),
+                    result = message_stream.next() => Some(result),
                 } {
                     None => {
                         // Subscription is cancelled on the Telemetry Service side.
@@ -88,25 +88,7 @@ impl DataTunnelSubscriber {
                         return;
                     }
                     Some(Some(result)) => {
-                        let (number_of_messages, buffer) = match result
-                            .or_else(|err| {
-                                // This error indicates an overflow in the FMQ ring buffer. FMQ
-                                // then recovers the read pointer, so a subsequent read is likely
-                                // to  succeed.
-                                //
-                                // For Subsampling Subscribers that read less frequently than the
-                                // publisher writes, the initial read is expected to overflow.
-                                // Retrying the read is acceptable in this case, as these
-                                // subscribers only need to retain the most recent value.
-                                if sub_sampling_interval != SubSamplingInterval::ZERO {
-                                    subscriber_stream.read_all_available_messages()
-                                } else {
-                                    Err(err)
-                                }
-                            })
-                            .with_context(|| {
-                                "Data Tunnel message stream produced an intermittent error"
-                            }) {
+                        let messages = match result {
                             Ok(result) => result,
                             Err(err) => {
                                 (new_message_callback)(Err(
@@ -116,22 +98,21 @@ impl DataTunnelSubscriber {
                             }
                         };
 
+                        info!(
+                            "Received {} messages from service unit '{}'.",
+                            messages.iter().len(),
+                            Self::to_debug_string(&unit_identifier)
+                        );
+
                         let messages: Box<dyn Iterator<Item = _>> = {
-                            let all_messages = buffer
-                                .chunks(u32_into_usize(message_size))
-                                .take(u32_into_usize(number_of_messages));
                             if sub_sampling_interval == SubSamplingInterval::ZERO {
-                                Box::new(all_messages)
+                                Box::new(messages.iter())
                             } else {
                                 // Only process the last (=newest) message.
-                                Box::new(all_messages.rev().take(1))
+                                Box::new(messages.iter().rev().take(1))
                             }
                         };
 
-                        info!(
-                            "Received {number_of_messages} messages from service unit '{}'.",
-                            Self::to_debug_string(&unit_identifier)
-                        );
                         for message_bytes in messages {
                             let message = Self::read_length_delimited_proto(
                                 message_bytes,
