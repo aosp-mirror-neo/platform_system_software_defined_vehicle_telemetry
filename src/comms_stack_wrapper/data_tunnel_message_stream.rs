@@ -1,7 +1,10 @@
 // Copyright 2025 Google LLC
 
 use async_stream::stream;
-use futures::{Stream, StreamExt, TryStreamExt};
+use futures::{
+    stream::empty as stream_empty, stream::once as stream_once, Stream, StreamExt, TryFutureExt,
+    TryStreamExt,
+};
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
@@ -25,6 +28,11 @@ impl Messages {
 
 /// Creates a new `Stream` that produces `Messages` for each set of messages received from the
 /// provided `unit_identifier`.
+///
+/// If `fetch_last_message` is `true`, we fetch the last message using `dt::InstantReader` before
+/// subscribing to new messages. We cannot use the `fetch_last_message` field of
+/// `dt::SubscriberOptions`, because that option only works for same-VM messages (see
+/// b/425992794#comment15, b/427624375, b/441473091, b/441498744).
 pub(crate) async fn create_message_stream(
     ctx: ContextRef,
     unit_identifier: UnitIdentifier,
@@ -35,12 +43,35 @@ pub(crate) async fn create_message_stream(
         ctx,
         &unit_identifier,
         sub_sampling_interval.as_duration(),
-        dt::SubscriberOptions { fetch_last_message },
+        dt::SubscriberOptions {
+            // IMPORTANT: This MUST be set to `false`, even if `fetch_last_message` is `true`!
+            fetch_last_message: false,
+        },
     )
     .await?;
 
     let message_size =
         u32_into_usize(subscriber_stream.get_publisher_unit_metadata().get_message_size());
+
+    let last_message_stream = if fetch_last_message {
+        let unit_identifier = unit_identifier.clone();
+        stream_once(async move {
+            dt::InstantReader::get_last_message(ctx, &unit_identifier)
+                .map_ok(|buffer| Messages {
+                    message_count: if buffer.is_empty() { 0 } else { 1 },
+                    message_size,
+                    buffer,
+                })
+                .map_err(|err| {
+                    anyhow::Error::from(err)
+                        .context("Failed to fetch initial message from Data Tunnel message stream")
+                })
+                .await
+        })
+        .boxed()
+    } else {
+        stream_empty().boxed()
+    };
 
     let subscriber_stream = stream! {
         while let Some(result) = subscriber_stream.next().await {
@@ -70,5 +101,5 @@ pub(crate) async fn create_message_stream(
             .context("Data Tunnel message stream produced an intermittent error")
     });
 
-    Ok(subscriber_stream)
+    Ok(last_message_stream.chain(subscriber_stream))
 }
