@@ -6,7 +6,9 @@ use protobuf::{
     reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor, RuntimeType},
 };
 use sdv_telemetry_simulator_proto::simulation_publisher::data_generator::Data_source;
-use sdv_telemetry_utils::duration_utils::try_into_duration;
+use sdv_telemetry_utils::{
+    descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
+};
 use std::{collections::HashSet, path::Path};
 
 use crate::{
@@ -162,13 +164,16 @@ fn get_message_descriptor(
     message_name: &str,
     file_name: &str,
 ) -> Result<MessageDescriptor, SimulatorError> {
-    let file_descriptors = FileDescriptor::new_dynamic_fds(file_descriptor_protos.to_vec(), &[])
-        .map_err(|error| SimulatorError::FailedToParseFile {
-            file_name: file_name.to_owned(),
-            error_message: error.to_string(),
-        })?;
+    let file_descriptors = FileDescriptor::new_dynamic_fds(
+        file_descriptor_protos.to_vec(),
+        &WELL_KNOWN_FILE_DESCRIPTORS,
+    )
+    .map_err(|error| SimulatorError::FailedToParseFile {
+        file_name: file_name.to_owned(),
+        error_message: error.to_string(),
+    })?;
 
-    for file_descriptor in &file_descriptors {
+    for file_descriptor in file_descriptors.iter().chain(WELL_KNOWN_FILE_DESCRIPTORS.iter()) {
         if let Some(message_descriptor) = file_descriptor.message_by_full_name(message_name) {
             return Ok(message_descriptor);
         }
@@ -177,4 +182,73 @@ fn get_message_descriptor(
         file_name: file_name.to_owned(),
         message_name: message_name.to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::assert_that;
+    use googletest::matchers::{eq, ok, pat, result_of_ref};
+    use protobuf::well_known_types::empty::Empty;
+    use protobuf::{text_format, MessageFull};
+    use sdv_telemetry_simulator_proto::simulation_publisher::{
+        CSVFile, DataGenerator, SimulationPublisher,
+    };
+    use sdv_telemetry_simulator_test_proto::test::{TestMessage, TestMessageWithWellKnownType};
+    use sdv_telemetry_test_utils::parameterized_test;
+    use std::fs;
+    use tempfile::tempdir;
+
+    parameterized_test!(
+        #[test]
+        parse_publisher_data_format_protos_succeeds,
+
+        |message_name: &str, data_format_protos: &[&FileDescriptorProto], expected_message_descriptor: MessageDescriptor| {
+            let tmp_dir = tempdir().unwrap();
+            let config_path = tmp_dir.path().join("config.txtpb");
+            let data_path = tmp_dir.path().join("data.csv");
+
+            let simulation_publisher = SimulationPublisher {
+                service_name: "test_service".to_owned(),
+                data_format_message_name: message_name.to_owned(),
+                data_format_protos: data_format_protos.iter().copied().cloned().collect(),
+                data_generators: vec![
+                    DataGenerator {
+                        data_source: Some(Data_source::CsvFile (CSVFile {
+                            file_path: data_path.to_str().unwrap().to_owned(),
+                            delimiter: ",".to_owned(),
+                            ..Default::default()
+                        })),
+                        ..Default::default()
+                    }
+                ],
+                ..Default::default()
+            };
+
+            fs::write(&data_path, "").unwrap();
+            fs::write(
+                &config_path,
+                text_format::print_to_string_pretty(&simulation_publisher)
+            ).unwrap();
+
+            let result = parse_publisher_config(&config_path);
+
+            assert_that!(
+                result,
+                ok(pat!(PublisherConfig {
+                    service_name: eq("test_service"),
+                    message_descriptor: result_of_ref!(
+                        |message_descriptor: &MessageDescriptor| message_descriptor.proto().to_owned(),
+                        eq(expected_message_descriptor.proto())
+                    ),
+                }))
+            );
+        },
+
+        message: (".TestMessage", &[TestMessage::descriptor().file_descriptor_proto()], TestMessage::descriptor()),
+        well_known_type: (".google.protobuf.Empty", &[], Empty::descriptor()),
+        message_with_well_known_type: (".TestMessageWithWellKnownType", &[TestMessageWithWellKnownType::descriptor().file_descriptor_proto()], TestMessageWithWellKnownType::descriptor()),
+
+    );
 }

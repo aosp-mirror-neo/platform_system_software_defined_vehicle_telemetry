@@ -1,0 +1,19 @@
+// Copyright 2024 Google LLC
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+enum TestEnum {
+  ZERO = 0;
+  ONE = 1;
+  TWO = 2;
+}
+
+message TestMessage {
+  int32 int32 = 1;
+}
+
+message TestMessageWithWellKnownType {
+  .google.protobuf.Timestamp timestamp = 1;
+}
