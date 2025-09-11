@@ -2,8 +2,10 @@
 
 use async_stream::stream;
 use futures::{
-    stream::empty as stream_empty, stream::once as stream_once, Stream, StreamExt, TryFutureExt,
-    TryStreamExt,
+    future::{self, OptionFuture},
+    stream::empty as stream_empty,
+    stream::once as stream_once,
+    Stream, StreamExt, TryStreamExt,
 };
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
@@ -39,6 +41,13 @@ pub(crate) async fn create_message_stream(
     sub_sampling_interval: SubSamplingInterval,
     fetch_last_message: bool,
 ) -> SdvResult<impl Stream<Item = anyhow::Result<Messages>>> {
+    // Important: Fetch **and await** the last message _before_ creating the `SubscriberStream`
+    // (otherwise the `SubscriberStream` might return the last message as well!).
+    let maybe_last_message = OptionFuture::from(
+        fetch_last_message.then(|| dt::InstantReader::get_last_message(ctx, &unit_identifier)),
+    )
+    .await;
+
     let mut subscriber_stream = dt::SubscriberStream::create(
         ctx,
         &unit_identifier,
@@ -53,25 +62,25 @@ pub(crate) async fn create_message_stream(
     let message_size =
         u32_into_usize(subscriber_stream.get_publisher_unit_metadata().get_message_size());
 
-    let last_message_stream = if fetch_last_message {
-        let unit_identifier = unit_identifier.clone();
-        stream_once(async move {
-            dt::InstantReader::get_last_message(ctx, &unit_identifier)
-                .map_ok(|buffer| Messages {
-                    message_count: if buffer.is_empty() { 0 } else { 1 },
-                    message_size,
-                    buffer,
-                })
-                .map_err(|err| {
-                    anyhow::Error::from(err)
-                        .context("Failed to fetch initial message from Data Tunnel message stream")
-                })
-                .await
-        })
-        .boxed()
-    } else {
-        stream_empty().boxed()
-    };
+    let maybe_last_message = maybe_last_message.and_then(|result| {
+        result.map_or_else(
+            |err| {
+                Some(Err(anyhow::Error::from(err)
+                    .context("Failed to fetch initial message from Data Tunnel message stream")))
+            },
+            |buffer| {
+                if buffer.is_empty() {
+                    None
+                } else {
+                    Some(Ok(Messages { message_count: 1, message_size, buffer }))
+                }
+            },
+        )
+    });
+    let last_message_stream = maybe_last_message.map_or_else(
+        || stream_empty().boxed(),
+        |result| stream_once(future::ready(result)).boxed(),
+    );
 
     let subscriber_stream = stream! {
         while let Some(result) = subscriber_stream.next().await {
@@ -102,4 +111,111 @@ pub(crate) async fn create_message_stream(
     });
 
     Ok(last_message_stream.chain(subscriber_stream))
+}
+
+#[cfg(all(test, integration_tests))]
+mod integration_tests {
+    use super::*;
+
+    use protobuf::well_known_types::wrappers::Int64Value;
+    use protobuf::{Message, MessageFull};
+    use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
+    use std::pin::pin;
+    use std::thread;
+    use tokio::time::{timeout_at, Duration, Instant};
+
+    use crate::data_tunnel_publisher::DataTunnelPublisher;
+    use crate::data_tunnel_subscriber::DataTunnelSubscriber;
+    use crate::test_utils;
+
+    #[sdv_telemetry_test_utils::timeout(10_000)]
+    #[tokio::test]
+    async fn no_duplicate_message_for_frequent_publisher_with_fetch_last_message_set_to_true() {
+        const DURATION: Duration = Duration::from_secs(3);
+
+        let ctx = test_utils::make_context(0).await;
+        let unit_type = test_utils::make_unique_unit_type();
+
+        let publisher = DataTunnelPublisher::register_topic(
+            ctx,
+            &unit_type,
+            test_utils::UNIT_NAME,
+            1000000,
+            10,
+            MessageMetadata {
+                file_descriptors: vec![Int64Value::descriptor().file_descriptor_proto().to_owned()],
+                message_full_name: format!(".{}", Int64Value::descriptor().full_name()),
+                ..Default::default()
+            }
+            .write_to_bytes()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let unit_identifier =
+            test_utils::discover_service(ctx, &unit_type).await.get_unit_identifier();
+
+        let start = Instant::now();
+        thread::spawn(move || {
+            let mut value = 0;
+            while start.elapsed() < DURATION {
+                publisher
+                    .publish_length_delimited_proto(&Int64Value { value, ..Default::default() })
+                    .unwrap();
+                value += 1;
+            }
+        });
+
+        let message_stream = create_message_stream(
+            ctx,
+            unit_identifier,
+            SubSamplingInterval::ZERO,
+            // Important: Set fetch_last_message to `true`.
+            true,
+        )
+        .await
+        .unwrap();
+        let mut message_stream = pin!(message_stream);
+
+        let mut i = 0;
+        let mut last_value = None;
+        while let Ok(Some(messages)) = timeout_at(start + DURATION, message_stream.next()).await {
+            for message_bytes in messages.unwrap().iter() {
+                let value = DataTunnelSubscriber::read_length_delimited_proto(
+                    message_bytes,
+                    &Int64Value::descriptor(),
+                )
+                .unwrap()
+                .downcast_ref::<Int64Value>()
+                .unwrap()
+                .value;
+                i += 1;
+
+                if i == 1 {
+                    // Nothing to do for the first received value (this value is received via
+                    // `dt::InstantReader`).
+                } else if i == 2 {
+                    // The second value must be bigger than the first value. There can be a gap,
+                    // because some time passes between the first value being received via
+                    // `dt::InstantReader` and the second value being received via
+                    // `dt::SubscriberStream`.
+                    assert!(
+                        value > last_value.unwrap(),
+                        "Unexpected value received: last_value = {last_value:?}, value = {value}"
+                    );
+                } else {
+                    // All other values must be consecutive (i.e., increase by exactly 1).
+                    assert!(
+                        value == last_value.unwrap() + 1,
+                        "Unexpected value received: last_value = {last_value:?}, value = {value}"
+                    );
+                }
+                last_value = Some(value);
+            }
+        }
+
+        // Check that the test actually did something :)
+        assert!(i > 1000, "Too few messages were processed, got: {i:?}")
+    }
 }

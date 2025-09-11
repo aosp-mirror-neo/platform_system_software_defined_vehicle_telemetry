@@ -198,7 +198,7 @@ impl DataTunnelSubscriber {
         Ok(descriptor.message_descriptor)
     }
 
-    fn read_length_delimited_proto(
+    pub(crate) fn read_length_delimited_proto(
         bytes: &[u8],
         message_descriptor: &MessageDescriptor,
     ) -> anyhow::Result<Box<dyn MessageDyn>> {
