@@ -24,11 +24,6 @@ cc_library {
 
 python_library_host {
     name: "libsdv_telemetry_proto_python",
-    version: {
-        py3: {
-            enabled: true,
-        },
-    },
     srcs: [":sdv_telemetry_proto_srcs"],
     proto: {
         canonical_path_from_root: true,
