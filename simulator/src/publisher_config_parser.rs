@@ -5,7 +5,7 @@ use protobuf::{
     descriptor::FileDescriptorProto,
     reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor, RuntimeType},
 };
-use sdv_telemetry_proto_simulation_publisher::simulation_publisher::data_generator::Data_source;
+use sdv_telemetry_simulator_proto::simulation_publisher::data_generator::Data_source;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashSet, path::Path};
 

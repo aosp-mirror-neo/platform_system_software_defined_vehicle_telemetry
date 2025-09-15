@@ -11,19 +11,19 @@ filegroup {
 }
 
 rust_protobuf {
-    name: "libsdv_telemetry_proto_simulation_publisher",
-    crate_name: "sdv_telemetry_proto_simulation_publisher",
+    name: "libsdv_telemetry_simulator_proto",
+    crate_name: "sdv_telemetry_simulator_proto",
     proto_flags: [
         "-I external/protobuf/src",
         "-I .",
     ],
     protos: [":sdv_telemetry_simulator_proto_srcs"],
-    source_stem: "sdv_telemetry_proto_simulation_publisher_source",
+    source_stem: "sdv_telemetry_simulator_proto_source",
     vendor_available: true,
 }
 
 python_library_host {
-    name: "libsdv_telemetry_proto_simulation_publisher_python",
+    name: "libsdv_telemetry_simulator_proto_python",
     srcs: [":sdv_telemetry_simulator_proto_srcs"],
     proto: {
         canonical_path_from_root: true,

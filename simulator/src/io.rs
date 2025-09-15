@@ -3,8 +3,8 @@
 use csv::{Reader, Trim};
 use protobuf::{text_format::parse_from_str, Message};
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_proto_simulation_publisher::simulation_publisher::SimulationPublisher as PublisherConfigProto;
 use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_simulator_proto::simulation_publisher::SimulationPublisher as PublisherConfigProto;
 use std::{
     collections::HashSet,
     fs,
