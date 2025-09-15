@@ -21,19 +21,33 @@ use anyhow::Error;
 use binder::BinderFeatures;
 use clap::Parser;
 use futures::{StreamExt, TryStreamExt};
-use protobuf::Message;
+use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::{
+    configurable_publisher::IConfigurablePublisher::BnConfigurablePublisher,
+    configurable_publisher::IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry,
+    configurable_publisher::IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
+    configurable_publisher::PublisherInfo::PublisherInfo,
+};
 use log::{error, info};
-use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceStatus};
-use sdv_telemetry_utils::{collection_extension::HashMapExtension, logging::validated_log_tag};
+use protobuf::{well_known_types::duration::Duration as DurationProto, Message};
+use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatus};
+use sdv_telemetry_simulator_proto::simulation_actions::{
+    metrics_config_action::ActionType as MetricsConfigActionTypeProto,
+    simulation_action::Action as SimulationActionTypeProto,
+    MetricsConfigAction as MetricsConfigActionProto, SimulationAction as SimulationActionProto,
+    SimulationActions as SimulationActionsProto,
+};
+use sdv_telemetry_utils::{
+    collection_extension::HashMapExtension, duration_utils::try_into_duration,
+    logging::validated_log_tag,
+};
 use std::{
     collections::HashMap, collections::HashSet, ops::Deref, path::Path, path::PathBuf, pin::pin,
     sync::Arc, time::Duration,
 };
-use tokio::{sync::mpsc::UnboundedReceiver, task};
+use tokio::sync::{mpsc::UnboundedReceiver, Mutex as AsyncMutex};
+use tokio::task;
 use tokio::time::{interval, sleep, sleep_until, Instant, MissedTickBehavior};
 use tokio_stream::wrappers::IntervalStream;
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
-    IConfigurablePublisher::BnConfigurablePublisher, PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::{IConfigurablePublisherRegistry, BpConfigurablePublisherRegistry}};
 
 use crate::{
     cli::Commands,
@@ -44,7 +58,7 @@ use crate::{
     simulation_publisher::{SimulationPublisher, SimulationPublisherWrapper},
     simulator_errors::SimulatorError,
     telemetry_service_handler::{
-        get_report, get_telemetry_service_instance, get_telemetry_service_listeners,
+        get_report, get_telemetry_service_instance, init_telemetry_service,
     },
 };
 
@@ -114,22 +128,24 @@ async fn run_telemetry_client(
         output_directory,
         (!no_binary_reports).then_some(reports_directory.as_path()),
     )?;
+
     let mut metrics_configs_tracker =
         MetricsConfigsTracker::new(!no_binary_reports, output_directory.to_owned());
-
     for path in metrics_config_paths {
         metrics_configs_tracker.parse_metrics_config(path)?;
     }
 
     let telemetry_service = get_telemetry_service_instance()?;
-    let (mut report_ready_rx, misc_status_rx) =
-        get_telemetry_service_listeners(&telemetry_service).await?;
-    handle_telemetry_service_status_updates(misc_status_rx);
-    let metrics_config_uuids = metrics_configs_tracker.get_metrics_config_uuids();
+    let (mut report_ready_rx, misc_status_rx) = init_telemetry_service(&telemetry_service).await?;
+    handle_status_updates(misc_status_rx);
 
-    for uuid in &metrics_config_uuids {
-        metrics_configs_tracker.activate_metrics_config(&telemetry_service, uuid).await?;
-    }
+    let telemetry_service = Arc::new(telemetry_service);
+    let metrics_configs_tracker = Arc::new(AsyncMutex::new(metrics_configs_tracker));
+    let actions_task_handle = perform_simulator_actions(
+        Arc::clone(&telemetry_service),
+        Arc::clone(&metrics_configs_tracker),
+    )
+    .await;
 
     // Publishers will unregister when dropped.
     let _publishers = if let Some(paths) = publisher_config_paths {
@@ -142,7 +158,8 @@ async fn run_telemetry_client(
     //
     // 1. The configured maximum number of reports is reached.
     // 2. The configured deadline is reached.
-    // 3. All activated metrics configs have finished execution.
+    // 3. All simulator actions have been performed and all associated metrics configs have
+    //    finished execution.
 
     let mut num_reports = 0;
     let deadline = Instant::now() + max_simulation_time;
@@ -164,6 +181,7 @@ async fn run_telemetry_client(
             .map_ok(HashSet::from_iter)
     });
 
+    let metrics_config_uuids = metrics_configs_tracker.lock().await.get_metrics_config_uuids();
     loop {
         // This check is at the start of the loop, as opposed to after receiving a report, to catch
         // the edge case where `max_report_count` is `Some(0)`.
@@ -179,7 +197,9 @@ async fn run_telemetry_client(
                 break;
             },
             Some(active_config_uuids) = active_config_uuids_changed.next() => {
-                if active_config_uuids?.is_disjoint(&metrics_config_uuids) {
+                if actions_task_handle.is_finished()
+                    && active_config_uuids?.is_disjoint(&metrics_config_uuids)
+                {
                     info!("Simulation stopped because all started metrics configs finished.");
                     break;
                 }
@@ -189,12 +209,103 @@ async fn run_telemetry_client(
         };
 
         let report = get_report(&telemetry_service, &report_info.report_uuid).await?;
-        metrics_configs_tracker.process_new_report(report)?;
+        metrics_configs_tracker.lock().await.process_new_report(report)?;
         num_reports += 1;
     }
 
     telemetry_service.remove_all_metrics_configs().await?;
     Ok(())
+}
+
+async fn perform_simulator_actions(
+    service: Arc<TelemetryServiceHolder>,
+    tracker: Arc<AsyncMutex<MetricsConfigsTracker>>,
+) -> task::JoinHandle<()> {
+    let simulator_actions = get_simulator_actions(Arc::clone(&tracker)).await;
+    tokio::spawn(async move {
+        for simulator_action in &simulator_actions.actions {
+            let Ok(delay) = try_into_duration(&simulator_action.delay) else {
+                error!("Invalid delay in simulator action {simulator_action}");
+                continue;
+            };
+
+            tokio::time::sleep(delay).await;
+
+            let action_result = match simulator_action.action {
+                Some(SimulationActionTypeProto::MetricsConfigAction(ref config_action_proto)) => {
+                    let uuid = &config_action_proto.config_uuid;
+
+                    match config_action_proto.action_type.unwrap() {
+                        MetricsConfigActionTypeProto::ADD => {
+                            tracker.lock().await.add_metrics_config(&service, uuid).await
+                        }
+                        MetricsConfigActionTypeProto::ACTIVATE => {
+                            tracker.lock().await.activate_metrics_config(&service, uuid).await
+                        }
+                        MetricsConfigActionTypeProto::DEACTIVATE => {
+                            tracker.lock().await.deactivate_metrics_config(&service, uuid).await
+                        }
+                        MetricsConfigActionTypeProto::REMOVE => {
+                            tracker.lock().await.remove_metrics_config(&service, uuid).await
+                        }
+                        _ => Err(SimulatorError::Error {
+                            error_message: "Metrics config action type is unspecified".to_owned(),
+                        }),
+                    }
+                }
+                Some(SimulationActionTypeProto::RemoveAllMetricsConfigsAction(_)) => {
+                    tracker.lock().await.remove_all_metrics_configs(&service).await
+                }
+                _ => Err(SimulatorError::Error {
+                    error_message: "Unknown simulator action".to_owned(),
+                }),
+            };
+
+            if let Err(err) = action_result {
+                error!("Failed to process simulator action {simulator_action}: {err:?}");
+            }
+        }
+    })
+}
+
+async fn get_simulator_actions(
+    tracker: Arc<AsyncMutex<MetricsConfigsTracker>>,
+) -> SimulationActionsProto {
+    // Default simulator actions: add and activate all metrics configs on simulator start
+    let actions = tracker
+        .lock()
+        .await
+        .get_metrics_config_uuids()
+        .into_iter()
+        .flat_map(|config_uuid| {
+            [
+                SimulationActionProto {
+                    delay: Some(DurationProto { seconds: 0, ..Default::default() }).into(),
+                    action: Some(SimulationActionTypeProto::MetricsConfigAction(
+                        MetricsConfigActionProto {
+                            config_uuid: config_uuid.clone(),
+                            action_type: MetricsConfigActionTypeProto::ADD.into(),
+                            ..Default::default()
+                        },
+                    )),
+                    ..Default::default()
+                },
+                SimulationActionProto {
+                    delay: Some(DurationProto { seconds: 0, ..Default::default() }).into(),
+                    action: Some(SimulationActionTypeProto::MetricsConfigAction(
+                        MetricsConfigActionProto {
+                            config_uuid: config_uuid.clone(),
+                            action_type: MetricsConfigActionTypeProto::ACTIVATE.into(),
+                            ..Default::default()
+                        },
+                    )),
+                    ..Default::default()
+                },
+            ]
+        })
+        .collect::<Vec<_>>();
+
+    SimulationActionsProto { actions, ..Default::default() }
 }
 
 /// Parses, registers, and starts the simulation publishers as configured in the provided config
@@ -300,9 +411,7 @@ fn start_simulation_publishers<'a>(
 }
 
 /// Logs miscellaneous telemetry service status updates with info level.
-fn handle_telemetry_service_status_updates(
-    mut misc_status_rx: UnboundedReceiver<TelemetryServiceStatus>,
-) {
+fn handle_status_updates(mut misc_status_rx: UnboundedReceiver<TelemetryServiceStatus>) {
     task::spawn(async move {
         while let Some(status) = misc_status_rx.recv().await {
             info!("Telemetry service sent status update: {}", status.message);

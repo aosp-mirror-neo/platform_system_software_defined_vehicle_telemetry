@@ -17,6 +17,8 @@ pub enum MetricsConfigStatus {
     New,
     Added,
     Activated,
+    Deactivated,
+    Removed,
 }
 
 pub struct ReportConfigStatus {

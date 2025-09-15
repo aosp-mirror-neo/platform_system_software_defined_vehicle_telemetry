@@ -16,7 +16,6 @@ use crate::{
     metrics_config_info::{MetricsConfigInfo, MetricsConfigStatus, ReportConfigStatus},
     output_strings::report_log_entry,
     protobuf_parsing::{decode_report, parse_message_descriptors},
-    telemetry_service_handler::{activate_metrics_config, add_metrics_config},
     SimulatorError,
 };
 
@@ -94,28 +93,100 @@ impl MetricsConfigsTracker {
         self.metrics_configs.keys().cloned().collect()
     }
 
-    /// Uses telemetry service to add and activate the specified metric config.
-    /// Returns an error if any step fails.
+    pub async fn add_metrics_config(
+        &mut self,
+        telemetry_service: &TelemetryServiceHolder,
+        uuid: &str,
+    ) -> Result<(), SimulatorError> {
+        let config_info = self.get_metrics_config_info(uuid)?;
+
+        let returned_uuid = telemetry_service
+            .add_metrics_config(&config_info.serialized_config)
+            .await
+            .map_err(|error| SimulatorError::TelemetryServiceError {
+                file_name: Some(config_info.file_name.clone()),
+                error,
+            })?;
+
+        if uuid != returned_uuid {
+            return Err(SimulatorError::Error {
+                error_message: format!(
+                    "Telemetry service returned different UUID from serialized metrics config than\
+                    expected. Expected: \"{uuid}\", Received: \"{returned_uuid}\""
+                ),
+            });
+        }
+
+        config_info.status = MetricsConfigStatus::Added;
+        Ok(())
+    }
+
     pub async fn activate_metrics_config(
         &mut self,
         telemetry_service: &TelemetryServiceHolder,
         uuid: &str,
     ) -> Result<(), SimulatorError> {
-        let config_info =
-            self.metrics_configs.get_mut(uuid).ok_or_else(|| SimulatorError::ProgrammingError {
-                error_message: "Tried to get config info for non-existent metrics config"
-                    .to_owned(),
-            })?;
-        add_metrics_config(
-            telemetry_service,
-            uuid,
-            &config_info.serialized_config,
-            config_info.file_name.clone(),
-        )
-        .await?;
-        config_info.status = MetricsConfigStatus::Added;
-        activate_metrics_config(telemetry_service, uuid, &config_info.file_name).await?;
+        let config_info = self.get_metrics_config_info(uuid)?;
+
+        telemetry_service.activate_metrics_config(uuid).await.map_err(|error| {
+            SimulatorError::TelemetryServiceError {
+                file_name: Some(config_info.file_name.clone()),
+                error,
+            }
+        })?;
+
         config_info.status = MetricsConfigStatus::Activated;
+        Ok(())
+    }
+
+    pub async fn deactivate_metrics_config(
+        &mut self,
+        telemetry_service: &TelemetryServiceHolder,
+        uuid: &str,
+    ) -> Result<(), SimulatorError> {
+        let config_info = self.get_metrics_config_info(uuid)?;
+
+        telemetry_service.deactivate_metrics_config(uuid).await.map_err(|error| {
+            SimulatorError::TelemetryServiceError {
+                file_name: Some(config_info.file_name.clone()),
+                error,
+            }
+        })?;
+
+        config_info.status = MetricsConfigStatus::Deactivated;
+        Ok(())
+    }
+
+    pub async fn remove_metrics_config(
+        &mut self,
+        telemetry_service: &TelemetryServiceHolder,
+        uuid: &str,
+    ) -> Result<(), SimulatorError> {
+        let config_info = self.get_metrics_config_info(uuid)?;
+
+        telemetry_service.remove_metrics_config(uuid).await.map_err(|error| {
+            SimulatorError::TelemetryServiceError {
+                file_name: Some(config_info.file_name.clone()),
+                error,
+            }
+        })?;
+
+        config_info.status = MetricsConfigStatus::Removed;
+        Ok(())
+    }
+
+    pub async fn remove_all_metrics_configs(
+        &mut self,
+        telemetry_service: &TelemetryServiceHolder,
+    ) -> Result<(), SimulatorError> {
+        telemetry_service
+            .remove_all_metrics_configs()
+            .await
+            .map_err(|error| SimulatorError::TelemetryServiceError { file_name: None, error })?;
+
+        for config_info in self.metrics_configs.values_mut() {
+            config_info.status = MetricsConfigStatus::Removed;
+        }
         Ok(())
     }
 
@@ -123,16 +194,11 @@ impl MetricsConfigsTracker {
     /// config uuid, returns an error if the UUID is not found.
     pub fn get_metrics_config_info(
         &mut self,
-        report: &MetricsReport,
+        uuid: &str,
     ) -> Result<&mut MetricsConfigInfo, SimulatorError> {
-        self.metrics_configs.get_mut(&report.metrics_config_uuid).ok_or_else(|| {
-            SimulatorError::OrphanReport {
-                config_uuid: report.metrics_config_uuid.clone(),
-                report_uuid: report.report_uuid.clone(),
-                report_name: report.report_config_name.clone(),
-                message: "Failed to retrieve simulator's metrics_configs".to_owned(),
-            }
-        })
+        self.metrics_configs
+            .get_mut(uuid)
+            .ok_or_else(|| SimulatorError::MetricsConfigNotFound { config_uuid: uuid.to_owned() })
     }
 
     /// Appends the report number, timestamp and content to the report log
@@ -141,7 +207,15 @@ impl MetricsConfigsTracker {
     pub fn process_new_report(&mut self, report: MetricsReport) -> Result<(), SimulatorError> {
         let reports_directory = self.output_directory.join(io::REPORTS_DIR_NAME);
 
-        let metrics_config = self.get_metrics_config_info(&report)?;
+        let metrics_config =
+            self.get_metrics_config_info(&report.metrics_config_uuid).map_err(|err| {
+                SimulatorError::OrphanReport {
+                    config_uuid: report.metrics_config_uuid.clone(),
+                    report_uuid: report.report_uuid.clone(),
+                    report_name: report.report_config_name.clone(),
+                    message: err.to_string(),
+                }
+            })?;
         let (report_config, message_descriptor) = metrics_config.get_report_config_info(&report)?;
 
         if let Some(report_file_names) = &mut report_config.report_file_names {

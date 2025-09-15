@@ -16,14 +16,10 @@ pub enum SimulatorError {
     DuplicateMetricsConfigUuid { file_name: String, duplicate_file_name: String },
 
     #[error(
-        "Metrics config \"{file_name}\" could not be activated by telemetry service:\n\"{error}\""
+        "Telemetry Service produced an error{}:\n\"{error}\"",
+        .file_name.as_ref().map(|f| format!(" (metrics config filename: {f})")).unwrap_or_default()
     )]
-    FailedToActivateMetricsConfig { file_name: String, error: TelemetryError },
-
-    #[error(
-        "Metrics config \"{file_name}\" could not be parsed by telemetry service:\n\"{error}\""
-    )]
-    FailedToParseMetricsConfig { file_name: String, error: TelemetryError },
+    TelemetryServiceError { file_name: Option<String>, error: TelemetryError },
 
     #[error("Received a report for report config \"{report_config_name}\" but failed to decode its data: \"{error}\"")]
     FailedToDecodeReport { report_config_name: String, error: protobuf::Error },
@@ -60,6 +56,9 @@ pub enum SimulatorError {
 
     #[error("{file_name}\" is missing the descriptor proto message \"{message_name}\"")]
     MissingDescriptorProto { file_name: String, message_name: String },
+
+    #[error("Metrics config UUID not found: {config_uuid}")]
+    MetricsConfigNotFound { config_uuid: String },
 
     #[error(
         "Received a report for an unknown metrics configuration, config UUID: {config_uuid}, \
