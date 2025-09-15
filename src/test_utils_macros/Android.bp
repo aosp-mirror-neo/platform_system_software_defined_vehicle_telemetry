@@ -40,6 +40,7 @@ rust_test_host {
         // keep-sorted start
         "automotive-sdv-tests",
         "general-tests",
+        "sdv-host-unit-tests",
         // keep-sorted end
     ],
     test_options: {
