@@ -1,6 +1,7 @@
 // Copyright 2024 Google LLC
 
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyType;
 use std::{
     fmt,
     hash::{Hash, Hasher},
@@ -8,13 +9,6 @@ use std::{
 };
 
 use crate::util::printable_small_duration;
-
-#[derive(Debug)]
-pub(crate) enum PublishingStrategyType {
-    ConfigurablePublisherRegistry,
-    SdvCommsDataTunnel,
-    SdvCommsRpc,
-}
 
 #[cfg_attr(test, derive(Debug))]
 pub struct PublisherConfig {

@@ -1,0 +1,32 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_simulator_publishing_strategy_defaults",
+    defaults: ["sdv_telemetry_simulator@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "libdowncast_rs",
+        "libprotobuf",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_simulator_publishing_strategy",
+    defaults: ["libsdv_telemetry_simulator_publishing_strategy_defaults"],
+    crate_name: "sdv_telemetry_simulator_publishing_strategy",
+}

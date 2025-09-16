@@ -13,6 +13,7 @@ use sdv_telemetry_simulator_proto::simulation_publisher::{
     publishing_strategy::SdvCommsRpc as SdvCommsRpcProto, publishing_strategy::Type as TypeProto,
     PublishingStrategy as PublishingStrategyProto, SimulationPublisher,
 };
+use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyType;
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
 };
@@ -22,7 +23,7 @@ use std::{collections::HashSet, path::Path};
 use crate::{
     io::parse_csv_file,
     protobuf_parsing::{CsvToProtoMessagesParser, DELAY_FIELD_NAME},
-    publisher_config::{PublisherConfig, PublishingStrategyType},
+    publisher_config::PublisherConfig,
     simulator_errors::SimulatorError,
 };
 

@@ -12,22 +12,14 @@ mod protobuf_parsing;
 mod publisher_config;
 mod publisher_config_parser;
 mod simulation_publisher;
-mod simulation_publisher_subscription;
 mod simulator_errors;
 mod telemetry_service_handler;
 mod util;
 
-use anyhow::Error;
-use binder::BinderFeatures;
-use futures::{StreamExt, TryStreamExt};
-use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::{
-    configurable_publisher::IConfigurablePublisher::BnConfigurablePublisher,
-    configurable_publisher::IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry,
-    configurable_publisher::IConfigurablePublisherRegistry::IConfigurablePublisherRegistry,
-    configurable_publisher::PublisherInfo::PublisherInfo,
-};
+use anyhow::{Context, Error};
+use futures::{future, stream, StreamExt, TryStreamExt};
 use log::{error, info};
-use protobuf::{well_known_types::duration::Duration as DurationProto, Message};
+use protobuf::well_known_types::duration::Duration as DurationProto;
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatus};
 use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_actions::{
@@ -36,26 +28,26 @@ use sdv_telemetry_simulator_proto::simulation_actions::{
     MetricsConfigAction as MetricsConfigActionProto, SimulationAction as SimulationActionProto,
     SimulationActions as SimulationActionsProto,
 };
+use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyFactory;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, duration_utils::try_into_duration,
 };
 use std::{
-    collections::HashMap, collections::HashSet, ops::Deref, path::Path, path::PathBuf, pin::pin,
+    collections::HashMap, collections::HashSet, ops::DerefMut, path::Path, path::PathBuf, pin::pin,
     sync::Arc, time::Duration,
 };
-use tokio::sync::{mpsc::UnboundedReceiver, Mutex as AsyncMutex};
-use tokio::task;
-use tokio::time::{interval, sleep, sleep_until, Instant, MissedTickBehavior};
+use tokio::time::{error::Elapsed, interval, sleep_until, timeout, Instant, MissedTickBehavior};
+use tokio::{sync::mpsc::UnboundedReceiver, sync::Mutex as AsyncMutex, task};
 use tokio_stream::wrappers::IntervalStream;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     cli::Commands,
     io::create_output_directory,
     io::REPORTS_DIR_NAME,
     metrics_configs_tracker::MetricsConfigsTracker,
-    publisher_config::PublishingStrategyType,
     publisher_config_parser::parse_publisher_config,
-    simulation_publisher::{SimulationPublisher, SimulationPublisherWrapper},
+    simulation_publisher::SimulationPublisher,
     simulator_errors::SimulatorError,
     telemetry_service_handler::{
         get_report, get_telemetry_service_instance, init_telemetry_service,
@@ -65,7 +57,10 @@ use crate::{
 pub use cli::CliArgs;
 
 /// run is the main entrypoint of the simulator.
-pub async fn run(cli_args: CliArgs) -> anyhow::Result<()> {
+pub async fn run(
+    cli_args: CliArgs,
+    publishing_strategy_factories: &mut [Box<dyn PublishingStrategyFactory>],
+) -> anyhow::Result<()> {
     info!("Running simulator with args:\n{cli_args}");
 
     binder::ProcessState::start_thread_pool();
@@ -80,15 +75,24 @@ pub async fn run(cli_args: CliArgs) -> anyhow::Result<()> {
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
                 &telemetry_client_args.output_directory,
+                publishing_strategy_factories,
             )
             .await?;
         }
         Commands::SimulationPublishers { simulation_publisher_args } => {
             // Publishers will unregister when dropped.
-            let _registered_publishers = parse_register_and_start_simulation_publishers(
+            let mut publishers = parse_and_register_simulation_publishers(
                 &simulation_publisher_args.publisher_config_paths,
-            )?;
-            sleep(cli_args.max_simulation_time).await;
+                publishing_strategy_factories,
+            )
+            .await?;
+
+            // Ignore a timeout error.
+            let _: Result<(), Elapsed> = timeout(
+                cli_args.max_simulation_time,
+                run_simulation_publishers(publishers.iter_mut().map(DerefMut::deref_mut)),
+            )
+            .await;
         }
         Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
             run_telemetry_client(
@@ -99,6 +103,7 @@ pub async fn run(cli_args: CliArgs) -> anyhow::Result<()> {
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
                 &telemetry_client_args.output_directory,
+                publishing_strategy_factories,
             )
             .await?;
         }
@@ -107,6 +112,7 @@ pub async fn run(cli_args: CliArgs) -> anyhow::Result<()> {
     Ok(())
 }
 
+#[expect(clippy::too_many_arguments, reason = "This just needs a lot of arguments.")]
 async fn run_telemetry_client(
     publisher_config_paths: Option<Vec<PathBuf>>,
     metrics_config_paths: &Vec<PathBuf>,
@@ -115,6 +121,7 @@ async fn run_telemetry_client(
     max_report_count: Option<u64>,
     max_simulation_time: Duration,
     output_directory: &Path,
+    publishing_strategy_factories: &mut [Box<dyn PublishingStrategyFactory>],
 ) -> anyhow::Result<()> {
     let reports_directory = output_directory.join(REPORTS_DIR_NAME);
     create_output_directory(
@@ -144,11 +151,30 @@ async fn run_telemetry_client(
     .await;
 
     // Publishers will unregister when dropped.
-    let _publishers = if let Some(paths) = publisher_config_paths {
-        parse_register_and_start_simulation_publishers(&paths)?
+    let mut publishers = if let Some(paths) = publisher_config_paths {
+        parse_and_register_simulation_publishers(&paths, publishing_strategy_factories).await?
     } else {
         Vec::new()
     };
+
+    let cancellation_token = CancellationToken::new();
+    let run_publishers_cancellation_drop_guard = cancellation_token.clone().drop_guard();
+    tokio::spawn(async move {
+        // Run publishers until the cancellation token is cancelled OR until they have no more data
+        // to publish (this can only happen if none of them have `loop_data: true`).
+        let _: Option<()> = cancellation_token
+            .run_until_cancelled(run_simulation_publishers(
+                publishers.iter_mut().map(DerefMut::deref_mut),
+            ))
+            .await;
+
+        // If publishers finish executing before the cancellation token is cancelled, wait for the
+        // cancellation token (i.e. the end of the simulation) before unregistering the publishers.
+        cancellation_token.cancelled().await;
+
+        // Unregister (by dropping) the publishers.
+        drop(publishers);
+    });
 
     // There are three conditions that stop the simulation, if any one of them is true:
     //
@@ -209,7 +235,13 @@ async fn run_telemetry_client(
         num_reports += 1;
     }
 
-    telemetry_service.remove_all_metrics_configs().await?;
+    telemetry_service.remove_all_metrics_configs().await.with_context(|| {
+        "Failed to remove all Metrics Configurations after simulation finished."
+    })?;
+
+    // Stop and unregister publishers.
+    drop(run_publishers_cancellation_drop_guard);
+
     Ok(())
 }
 
@@ -316,45 +348,49 @@ async fn get_simulation_actions(
     Ok(SimulationActionsProto { actions, ..Default::default() })
 }
 
-/// Parses, registers, and starts the simulation publishers as configured in the provided config
-/// paths. Returns a vector of `SimulationPublisher`s wrapped in `scopeguard::ScopeGuard`, which
-/// ensures that the returned publishers will automatically be unregistered when dropped.
-fn parse_register_and_start_simulation_publishers(
+/// Parses and registers the simulation publishers as configured in the provided config paths.
+/// Returns a vector of `SimulationPublisher`s wrapped in `scopeguard::ScopeGuard`, which ensures
+/// that the returned publishers will automatically be unregistered when dropped.
+async fn parse_and_register_simulation_publishers(
     publisher_config_paths: &Vec<PathBuf>,
+    publishing_strategy_factories: &mut [Box<dyn PublishingStrategyFactory>],
 ) -> anyhow::Result<
-    Vec<scopeguard::ScopeGuard<Arc<SimulationPublisher>, impl FnOnce(Arc<SimulationPublisher>)>>,
+    Vec<scopeguard::ScopeGuard<SimulationPublisher, impl FnOnce(SimulationPublisher)>>,
 > {
-    let publishers = parse_simulation_publishers(publisher_config_paths)?;
-    let registered_publishers = register_simulation_publishers(publishers.into_values())?;
-    start_simulation_publishers(registered_publishers.iter().map(Deref::deref));
-    Ok(registered_publishers)
+    let publishers =
+        parse_simulation_publishers(publisher_config_paths, publishing_strategy_factories).await?;
+    register_simulation_publishers(publishers.into_values()).await
 }
 
-fn parse_simulation_publishers(
+async fn parse_simulation_publishers(
     publisher_config_paths: &Vec<PathBuf>,
+    publishing_strategy_factories: &mut [Box<dyn PublishingStrategyFactory>],
 ) -> Result<HashMap<String, SimulationPublisher>, Error> {
     let mut publishers = HashMap::new();
     for path in publisher_config_paths {
         let publisher_config = parse_publisher_config(path)?;
         let service_name = publisher_config.service_name.clone();
 
-        let simulation_publisher = match publisher_config.publishing_strategy {
-            PublishingStrategyType::ConfigurablePublisherRegistry => {
-                SimulationPublisher::new(publisher_config)
-            }
-            PublishingStrategyType::SdvCommsDataTunnel => {
-                return Err(SimulatorError::NotImplemented {
-                    feature: "SDV Comms Data Tunnel publishing strategy".to_owned(),
+        let publishing_strategy = {
+            let mut found_publishing_strategy = None;
+            for publishing_strategy_factory in &mut *publishing_strategy_factories {
+                if let Some(publishing_strategy) =
+                    publishing_strategy_factory.create(&publisher_config.publishing_strategy).await
+                {
+                    found_publishing_strategy = Some(publishing_strategy);
+                    break;
                 }
-                .into());
             }
-            PublishingStrategyType::SdvCommsRpc => {
-                return Err(SimulatorError::NotImplemented {
-                    feature: "SDV Comms RPC publishing strategy".to_owned(),
-                }
-                .into());
-            }
-        };
+            found_publishing_strategy
+        }
+        .ok_or_else(|| SimulatorError::Error {
+            error_message: format!(
+                "Publishing strategy {:?} not supported.",
+                publisher_config.publishing_strategy
+            ),
+        })??;
+
+        let simulation_publisher = SimulationPublisher::new(publisher_config, publishing_strategy);
 
         publishers.try_insert_value(service_name.clone(), simulation_publisher).map_err(|_| {
             SimulatorError::Error {
@@ -370,70 +406,17 @@ fn parse_simulation_publishers(
 /// Registers the provided simulation publishers with the configurable publisher registry. Returns a
 /// vector of `SimulationPublisher`s wrapped in `scopeguard::ScopeGuard`, which ensures that the
 /// returned publishers will automatically be unregistered when dropped.
-fn register_simulation_publishers(
+async fn register_simulation_publishers(
     publishers: impl IntoIterator<Item = SimulationPublisher>,
-) -> Result<
-    Vec<scopeguard::ScopeGuard<Arc<SimulationPublisher>, impl FnOnce(Arc<SimulationPublisher>)>>,
-    Error,
-> {
-    let configurable_publisher_registry_descriptor = format!(
-        "{}/default",
-        <BpConfigurablePublisherRegistry as IConfigurablePublisherRegistry>::get_descriptor()
-    );
-    let configurable_publisher_registry = binder::get_interface::<
-        dyn IConfigurablePublisherRegistry,
-    >(&configurable_publisher_registry_descriptor)?;
-
-    let mut registered_publishers = vec![];
-    for simulation_publisher in publishers {
-        let simulation_publisher = Arc::new(simulation_publisher);
-
-        let simulation_publisher_wrapper =
-            SimulationPublisherWrapper { publisher: Arc::clone(&simulation_publisher) };
-
-        let binder_publisher = BnConfigurablePublisher::new_binder(
-            simulation_publisher_wrapper,
-            BinderFeatures::default(),
-        );
-
-        let publisher_info = PublisherInfo {
-            serviceName: simulation_publisher.config.service_name.clone(),
-            fileDescriptorProto: simulation_publisher
-                .config
-                .message_descriptor
-                .file_descriptor_proto()
-                .write_to_bytes()
-                .map_err(|error| SimulatorError::Error {
-                    error_message: format!(
-                        "Failed to write file descriptor proto for publisher \"{}\" to bytes: {error}",
-                        simulation_publisher.config.service_name
-                    ),
-                })?,
-            messageTypeName: format!(
-                ".{}",
-                simulation_publisher.config.message_descriptor.full_name()
-            ),
-            supportsGet: true,
-        };
-
-        configurable_publisher_registry.registerPublisher(&publisher_info, &binder_publisher)?;
-        let configurable_publisher_registry_clone = configurable_publisher_registry.clone();
-        registered_publishers.push(scopeguard::guard(simulation_publisher, move |simulation_publisher| {
-            if let Err(err) = configurable_publisher_registry_clone.unregisterPublisher(&simulation_publisher.config.service_name) {
-                error!("Failed to unregister publisher {} from configurable publisher registry: {err:?}", simulation_publisher.config.service_name);
-            }
-        }));
-    }
-
-    Ok(registered_publishers)
+) -> Result<Vec<scopeguard::ScopeGuard<SimulationPublisher, impl FnOnce(SimulationPublisher)>>, Error>
+{
+    stream::iter(publishers.into_iter()).then(|publisher| publisher.register()).try_collect().await
 }
 
-fn start_simulation_publishers<'a>(
-    publishers: impl IntoIterator<Item = &'a Arc<SimulationPublisher>>,
+async fn run_simulation_publishers<'a>(
+    publishers: impl IntoIterator<Item = &'a mut SimulationPublisher>,
 ) {
-    for publisher in publishers {
-        publisher.start_publishing();
-    }
+    future::join_all(publishers.into_iter().map(|publisher| publisher.publish_data())).await;
 }
 
 /// Logs miscellaneous telemetry service status updates with info level.

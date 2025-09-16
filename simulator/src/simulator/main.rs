@@ -6,18 +6,25 @@
 use clap::Parser;
 use log::error;
 use sdv_telemetry_simulator_lib::{run, CliArgs};
+use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyFactory;
+use sdv_telemetry_simulator_publishing_strategy_configurable_publisher_registry::PublishingStrategyFactoryImpl as ConfigurablePublisherRegistryPublishingStrategyFactory;
 use sdv_telemetry_utils::logging::validated_log_tag;
 
 mod test_support;
 
 const LOG_TAG: &str = validated_log_tag("SdvTelemetrySimulator");
 
+fn get_publishing_strategy_factories() -> [Box<dyn PublishingStrategyFactory>; 1] {
+    [Box::new(ConfigurablePublisherRegistryPublishingStrategyFactory::new())
+        as Box<dyn PublishingStrategyFactory>]
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     sdv_log::init_logger(LOG_TAG)?;
     sdv_tracing::init_tracing();
 
-    run(CliArgs::parse()).await.inspect_err(|error| {
+    run(CliArgs::parse(), &mut get_publishing_strategy_factories()).await.inspect_err(|error| {
         error!("Simulator failed with error: {error:?}");
     })
 }
@@ -182,7 +189,7 @@ mod tests {
             "--output-directory",
             output_path.to_str().unwrap(),
         ]);
-        run(args).await.unwrap();
+        run(args, &mut get_publishing_strategy_factories()).await.unwrap();
 
         let reports = fs::read_dir(output_path.join("reports"))
             .unwrap()

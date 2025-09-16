@@ -18,6 +18,8 @@ rust_defaults {
         "liblog_rust",
         "libsdv_log_rust",
         "libsdv_telemetry_simulator_lib",
+        "libsdv_telemetry_simulator_publishing_strategy",
+        "libsdv_telemetry_simulator_publishing_strategy_configurable_publisher_registry",
         "libsdv_telemetry_utils",
         "libtokio",
         // keep-sorted end
