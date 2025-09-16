@@ -10,7 +10,6 @@ android_app {
     vendor: true,
     sdk_version: "system_current",
     srcs: [
-        "sample_ivi_publisher/BinderServiceAccessor.java",
         "sample_ivi_publisher/IPublisherImpl.java",
         "sample_ivi_publisher/IPublisherSubscriptionImpl.java",
         "sample_ivi_publisher/JavaSampleIviPublisher.java",
@@ -20,6 +19,7 @@ android_app {
     static_libs: [
         "google.sdv.telemetry.configurable_publisher-V1-java",
         "libprotobuf-java-lite",
+        "telemetry_binder_accessor",
     ],
     proto: {
         type: "lite",
@@ -41,7 +41,6 @@ android_app {
     product_specific: true,
     sdk_version: "system_current",
     srcs: [
-        "sample_ivi_publisher/BinderServiceAccessor.java",
         "sample_ivi_publisher/IPublisherImpl.java",
         "sample_ivi_publisher/IPublisherSubscriptionImpl.java",
         "sample_ivi_publisher/JavaSampleIviPublisherProd.java",
@@ -51,6 +50,7 @@ android_app {
     static_libs: [
         "google.sdv.telemetry.configurable_publisher-V1-java",
         "libprotobuf-java-lite",
+        "telemetry_binder_accessor",
     ],
     proto: {
         type: "lite",
@@ -89,4 +89,12 @@ android_app {
         enabled: false,
     },
     privileged: true,
+}
+
+java_library {
+    name: "telemetry_binder_accessor",
+    srcs: [
+        "binder_accessor_lib/BinderServiceAccessor.java",
+    ],
+    sdk_version: "system_current",
 }

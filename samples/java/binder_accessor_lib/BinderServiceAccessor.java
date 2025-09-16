@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-package google.sdv.telemetry.java.JavaSampleIviPublisher;
+package google.sdv.telemetry.java.Binder;
 
 import android.os.IBinder;
 

@@ -14,6 +14,7 @@ import android.content.Context;
 import android.content.ComponentName;
 import android.os.RemoteException;
 
+import google.sdv.telemetry.java.Binder.BinderServiceAccessor;
 import com.google.sdv.telemetry.samples.ErrorReportPublisher;
 
 import java.io.File;

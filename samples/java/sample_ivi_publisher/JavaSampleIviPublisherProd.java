@@ -3,7 +3,6 @@
 package google.sdv.telemetry.java.JavaSampleIviPublisherProd;
 
 import google.sdv.telemetry.java.JavaSampleIviPublisher.IPublisherImpl;
-import google.sdv.telemetry.java.JavaSampleIviPublisher.BinderServiceAccessor;
 import google.sdv.telemetry.configurable_publisher.*;
 import android.os.Bundle;
 import android.util.Log;
@@ -16,6 +15,7 @@ import android.content.Context;
 import android.content.ComponentName;
 import android.os.RemoteException;
 
+import google.sdv.telemetry.java.Binder.BinderServiceAccessor;
 import com.google.sdv.telemetry.samples.ErrorReportPublisher;
 
 import java.io.File;
