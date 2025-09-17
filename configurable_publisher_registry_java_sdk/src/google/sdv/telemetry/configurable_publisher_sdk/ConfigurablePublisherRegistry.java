@@ -3,13 +3,10 @@ package google.sdv.telemetry.configurable_publisher_sdk;
 
 import android.os.IBinder;
 import android.os.RemoteException;
-import android.os.ServiceManager;
-
 import com.google.common.annotations.VisibleForTesting;
-
 import google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry;
 import google.sdv.telemetry.configurable_publisher.PublisherInfo;
-
+import google.sdv.telemetry.java.Binder.BinderServiceAccessor;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
@@ -20,7 +17,7 @@ public class ConfigurablePublisherRegistry {
     private static final String CONF_PUB_REGISTRY_URI =
             "google.sdv.telemetry.configurable_publisher.IConfigurablePublisherRegistry/default";
 
-    private final IConfigurablePublisherRegistry registryService;
+    private static IConfigurablePublisherRegistry registryService;
     private final Set<String> registeredPublishers;
 
     /**
@@ -31,14 +28,16 @@ public class ConfigurablePublisherRegistry {
      */
     public static ConfigurablePublisherRegistry connect()
             throws ConfigurablePublisherRegistryException {
-        IBinder regService = ServiceManager.waitForService(CONF_PUB_REGISTRY_URI);
+      System.loadLibrary("binder_accessor");
+      IBinder regService = BinderServiceAccessor.getService(CONF_PUB_REGISTRY_URI);
+      registryService = IConfigurablePublisherRegistry.Stub.asInterface(regService);
 
-        // Check if the service was actually found. If not, throw an exception.
-        if (regService == null) {
-            throw ConfigurablePublisherRegistryException.createServiceFailed(
-                    "Configurable publisher registry service was not found. It may not be"
-                            + " running.");
-        }
+      // Check if the service was actually found. If not, throw an exception.
+      if (regService == null) {
+        throw ConfigurablePublisherRegistryException.createServiceFailed(
+            "Configurable publisher registry service was not found. It may not be"
+            + " running.");
+      }
 
         IConfigurablePublisherRegistry serviceInterface =
                 IConfigurablePublisherRegistry.Stub.asInterface(regService);

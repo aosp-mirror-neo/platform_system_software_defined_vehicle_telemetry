@@ -69,7 +69,7 @@ android_app {
 
 android_app {
     name: "telemetry_java_sdk_sample_ivi_publisher",
-    platform_apis: true,
+    sdk_version: "system_current",
     srcs: [
         "sample_ivi_sdk_publisher/*.java",
         ":sdv_telemetry_error_report_publisher_proto",
@@ -89,6 +89,10 @@ android_app {
         enabled: false,
     },
     privileged: true,
+    vendor: true,
+    jni_libs: ["libbinder_accessor"],
+    use_embedded_native_libs: true,
+    jni_uses_platform_apis: true,
 }
 
 java_library {
