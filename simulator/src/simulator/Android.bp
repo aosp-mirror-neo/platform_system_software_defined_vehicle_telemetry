@@ -27,9 +27,24 @@ rust_defaults {
     vendor: true,
 }
 
+rust_defaults {
+    name: "sdv_telemetry_simulator_with_comms_stack_defaults",
+    defaults: ["sdv_telemetry_simulator_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_comms_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_simulator_publishing_strategy_sdv_comms",
+        // keep-sorted end
+    ],
+    features: [
+        "comms_stack",
+    ],
+}
+
 rust_binary {
     name: "sdv_telemetry_simulator",
-    defaults: ["sdv_telemetry_simulator_defaults"],
+    defaults: ["sdv_telemetry_simulator_with_comms_stack_defaults"],
 }
 
 rust_binary {
@@ -39,7 +54,7 @@ rust_binary {
 
 rust_test {
     name: "sdv_mt_telemetry_integration_simulator_test",
-    defaults: ["sdv_telemetry_simulator_defaults"],
+    defaults: ["sdv_telemetry_simulator_with_comms_stack_defaults"],
     test_config_template: ":sdv_telemetry_integration_test_config_template",
     test_options: {
         unit_test: false,
@@ -57,6 +72,7 @@ rust_test {
         "libtempfile",
         // keep-sorted end
     ],
+    ld_flags: ["-Wl,--no-as-needed"],
     flags: [
         // keep-sorted start
         "-A clippy::panic",

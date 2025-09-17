@@ -35,9 +35,14 @@ fn get_publishing_strategy(
         | Some(TypeProto::ConfigurablePublisherRegistry(ConfigurablePublisherRegistryProto {
             special_fields: _,
         })) => PublishingStrategyType::ConfigurablePublisherRegistry,
-        Some(TypeProto::SdvCommsDataTunnel(SdvCommsDataTunnelProto { special_fields: _ })) => {
-            PublishingStrategyType::SdvCommsDataTunnel
-        }
+        Some(TypeProto::SdvCommsDataTunnel(SdvCommsDataTunnelProto {
+            message_count,
+            message_size,
+            special_fields: _,
+        })) => PublishingStrategyType::SdvCommsDataTunnel {
+            message_count: *message_count,
+            message_size: *message_size,
+        },
         Some(TypeProto::SdvCommsRpc(SdvCommsRpcProto { special_fields: _ })) => {
             PublishingStrategyType::SdvCommsRpc
         }
@@ -83,7 +88,7 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
 
     if !data_generator.configuration.is_none() {
         match publishing_strategy {
-            PublishingStrategyType::SdvCommsDataTunnel => {
+            PublishingStrategyType::SdvCommsDataTunnel { .. } => {
                 return Err(SimulatorError::FailedToParseFile {
                     file_name: file_name.to_owned(),
                     error_message: "Specifying a publisher configuration is not allowed for SDV Comms Data Tunnel publishers.".to_owned(),
@@ -360,18 +365,33 @@ mod tests {
 
             assert_that!(
                 result,
-                ok(pat!(PublisherConfig {
-                    service_name: eq("test_service"),
-                    publishing_strategy: publishing_strategy_type_matcher,
+                ok(pat!(&PublisherConfig {
+                    service_name: ref eq("test_service"),
+                    publishing_strategy: ref publishing_strategy_type_matcher,
                 }))
             );
         },
 
-        unspecified: ("", pat!(&PublishingStrategyType::ConfigurablePublisherRegistry)),
-        no_type: ("publishing_strategy {}", pat!(&PublishingStrategyType::ConfigurablePublisherRegistry)),
-        configurable_publisher_registry: ("publishing_strategy { configurable_publisher_registry {} }", pat!(&PublishingStrategyType::ConfigurablePublisherRegistry)),
-        sdv_comms_data_tunnel: ("publishing_strategy { sdv_comms_data_tunnel {} }", pat!(&PublishingStrategyType::SdvCommsDataTunnel)),
-        sdv_comms_rpc: ("publishing_strategy { sdv_comms_rpc {} }", pat!(&PublishingStrategyType::SdvCommsRpc)),
+        unspecified: (
+            "",
+            pat!(PublishingStrategyType::ConfigurablePublisherRegistry)
+        ),
+        no_type: (
+            "publishing_strategy {}",
+            pat!(PublishingStrategyType::ConfigurablePublisherRegistry)
+        ),
+        configurable_publisher_registry: (
+            "publishing_strategy { configurable_publisher_registry {} }",
+            pat!(PublishingStrategyType::ConfigurablePublisherRegistry)
+        ),
+        sdv_comms_data_tunnel: (
+            "publishing_strategy { sdv_comms_data_tunnel {message_count: 3 message_size: 5} }",
+            pat!(PublishingStrategyType::SdvCommsDataTunnel { message_count: &3, message_size: &5 })
+        ),
+        sdv_comms_rpc: (
+            "publishing_strategy { sdv_comms_rpc {} }",
+            pat!(PublishingStrategyType::SdvCommsRpc)
+        ),
     );
 
     #[test]

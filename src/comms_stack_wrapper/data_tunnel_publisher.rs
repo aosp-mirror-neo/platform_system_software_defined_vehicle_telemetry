@@ -3,6 +3,7 @@
 //! Telemetry publishing logic for data tunnels.
 
 use anyhow::{anyhow, Context};
+use protobuf::CodedOutputStream;
 use sdv_comms::dt;
 use sdv_comms::sd::{PublisherUnitMetadata, UnitMetadata, UnitRegistrationArgs, UnitType};
 use sdv_comms::ContextRef;
@@ -74,22 +75,42 @@ impl DataTunnelPublisher {
     ///
     /// # Arguments
     ///
-    /// * `message` - The protobuf message that should be written to the data tunnel. It's
-    ///   serialized form, including a varint to represent its length, must fit the
-    ///   topic's configured message size, otherwise an error is returned.
+    /// * `message` - The protobuf message that should be written to the data tunnel. Its serialized
+    ///   form, including a varint to represent its length, must fit the topic's configured message
+    ///   size, otherwise an error is returned.
     pub fn publish_length_delimited_proto<M: protobuf::Message>(
         &self,
         message: &M,
     ) -> anyhow::Result<()> {
+        self.publish_length_delimited_message(
+            &message.write_to_bytes().with_context(|| "Failed to serialize protobuf message.")?,
+        )
+    }
+
+    /// Publish an already serialized protobuf message to the data tunnel.
+    ///
+    /// # Arguments
+    ///
+    /// * `message` - The serialized protobuf message that should be written to the data tunnel. It,
+    ///   including a varint to represent its length, must fit the topic's configured message size,
+    ///   otherwise an error is returned.
+    pub fn publish_length_delimited_message(&self, message: &[u8]) -> anyhow::Result<()> {
         let max_message_size =
             u32_into_usize(self.dt_publisher.get_publisher_unit_metadata().get_message_size());
-
         let mut raw_message = Vec::<u8>::with_capacity(max_message_size);
-        // Prepend the message length to the serialized message, so that the reader knows how many
-        // bytes to read.
-        message
-            .write_length_delimited_to_vec(&mut raw_message)
-            .with_context(|| "Failed to serialize protobuf message.")?;
+
+        {
+            let mut os = CodedOutputStream::vec(&mut raw_message);
+            os.write_raw_varint32(
+                message
+                    .len()
+                    .try_into()
+                    .map_err(|_| anyhow!("Encoded message size {} is too large", message.len()))?,
+            )?;
+            os.write_raw_bytes(message)?;
+            os.flush()?;
+        }
+
         if raw_message.len() > max_message_size {
             return Err(anyhow!(
                 "Message is too long: {} bytes (max: {} bytes)",

@@ -14,9 +14,40 @@ mod test_support;
 
 const LOG_TAG: &str = validated_log_tag("SdvTelemetrySimulator");
 
-fn get_publishing_strategy_factories() -> [Box<dyn PublishingStrategyFactory>; 1] {
-    [Box::new(ConfigurablePublisherRegistryPublishingStrategyFactory::new())
-        as Box<dyn PublishingStrategyFactory>]
+fn get_publishing_strategy_factories(
+) -> [Box<dyn PublishingStrategyFactory>; 1 + if cfg!(feature = "comms_stack") { 1 } else { 0 }] {
+    [
+        Box::new(ConfigurablePublisherRegistryPublishingStrategyFactory::new())
+            as Box<dyn PublishingStrategyFactory>,
+        #[cfg(feature = "comms_stack")]
+        create_comms_publishing_strategy_factory(),
+    ]
+}
+
+#[cfg(feature = "comms_stack")]
+fn create_comms_publishing_strategy_factory() -> Box<dyn PublishingStrategyFactory> {
+    use sdv_comms::{id::ServiceFqin, ContextRef};
+    use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
+    use sdv_telemetry_simulator_publishing_strategy_sdv_comms::PublishingStrategyFactoryImpl as SdvCommsPublishingStrategyFactory;
+    use std::str::FromStr;
+    use tokio::sync::OnceCell;
+
+    let ctx_factory = async move || {
+        static CTX: OnceCell<ContextRef> = OnceCell::const_new();
+        *CTX.get_or_init(async || {
+            // WARNING: The VM name is automatically updated in the created `ContextRef` to match
+            // the actual VM name. Do not use this string anywhere else, always retrieve the actual
+            // FQIN using `ContextRef::get_self_fqin`!
+            const SERVICE_FQIN: &str = "vm:com.google.sdv.telemetry.Simulator/default";
+            let fqin = ServiceFqin::from_str(SERVICE_FQIN)
+                .expect("Service FQIN should be parsed successfully");
+
+            wait_for_sdv_agents_and_create_context(fqin).await
+        })
+        .await
+    };
+
+    Box::new(SdvCommsPublishingStrategyFactory::new(ctx_factory))
 }
 
 #[tokio::main]
@@ -48,11 +79,15 @@ mod tests {
         ProtoMessageBuilder, Publisher, ServicePublisher, Trigger,
     };
     use sdv_telemetry_simulator_proto::simulation_publisher::{
-        data_generator::Data_source, CSVFile, DataGenerator, SimulationPublisher,
+        data_generator::Data_source, publishing_strategy, CSVFile, DataGenerator,
+        PublishingStrategy, SimulationPublisher,
     };
+    use sdv_telemetry_test_utils::parameterized_test;
     use std::{fs, path::Path, time::Duration};
     use tempfile::tempdir;
     use test_support::{into_csv_bytes, CsvRow};
+
+    const SERVICE_NAME: &str = "com.google.sdv.telemetry.tests.simulator.SomeService|unit-name";
 
     fn make_metrics_config() -> MetricsConfig {
         MetricsConfig {
@@ -70,7 +105,7 @@ mod tests {
             publishers: vec![Publisher {
                 name: "publisher".to_owned(),
                 publisher_type: Some(Publisher_type::ServicePublisher(ServicePublisher {
-                    service_name: "ServiceName".to_owned(),
+                    service_name: SERVICE_NAME.to_owned(),
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -116,12 +151,16 @@ mod tests {
         }
     }
 
-    fn make_publisher_config(data_generator: DataGenerator) -> SimulationPublisher {
+    fn make_publisher_config(
+        data_generator: DataGenerator,
+        publishing_strategy: Option<PublishingStrategy>,
+    ) -> SimulationPublisher {
         SimulationPublisher {
-            service_name: "ServiceName".to_owned(),
+            service_name: SERVICE_NAME.to_owned(),
             data_format_message_name: ".google.protobuf.Int32Value".to_owned(),
             data_format_protos: vec![],
             data_generators: vec![data_generator],
+            publishing_strategy: publishing_strategy.into(),
             ..Default::default()
         }
     }
@@ -146,10 +185,7 @@ mod tests {
         }
     }
 
-    #[googletest::test]
-    #[tokio::test]
-    #[sdv_telemetry_test_utils::timeout]
-    async fn test_run() {
+    async fn test_run(publishing_strategy: Option<PublishingStrategy>) {
         env_logger::builder().is_test(true).filter_level(log::LevelFilter::max()).init();
 
         let temp_dir = tempdir().unwrap();
@@ -161,16 +197,19 @@ mod tests {
         fs::write(&metrics_config_path, make_metrics_config().write_to_bytes().unwrap()).unwrap();
         fs::write(
             &simulation_publisher_path,
-            make_publisher_config(make_data_generator(
-                &[
-                    CsvRow::no_delay(Int32Value { value: 1, ..Default::default() }),
-                    CsvRow::no_delay(Int32Value { value: 2, ..Default::default() }),
-                    CsvRow::no_delay(Int32Value { value: 3, ..Default::default() }),
-                ],
-                false,
-                Some(&Duration::from_millis(20)),
-                &csv_file_path,
-            ))
+            make_publisher_config(
+                make_data_generator(
+                    &[
+                        CsvRow::no_delay(Int32Value { value: 1, ..Default::default() }),
+                        CsvRow::no_delay(Int32Value { value: 2, ..Default::default() }),
+                        CsvRow::no_delay(Int32Value { value: 3, ..Default::default() }),
+                    ],
+                    false,
+                    Some(&Duration::from_millis(20)),
+                    &csv_file_path,
+                ),
+                publishing_strategy,
+            )
             .write_to_bytes()
             .unwrap(),
         )
@@ -251,4 +290,33 @@ mod tests {
             ]
         );
     }
+
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        run_with_publishing_strategy,
+
+        |publishing_strategy| async move {
+            test_run(publishing_strategy).await;
+        },
+
+        default: (None),
+        configurable_publisher_registry: (Some(PublishingStrategy {
+            type_: Some(publishing_strategy::Type::ConfigurablePublisherRegistry(
+                publishing_strategy::ConfigurablePublisherRegistry { ..Default::default() },
+            )),
+            ..Default::default()
+        })),
+        sdv_comms_data_tunnel: (Some(PublishingStrategy {
+            type_: Some(publishing_strategy::Type::SdvCommsDataTunnel(
+                publishing_strategy::SdvCommsDataTunnel {
+                    message_count: 100,
+                    message_size: 100,
+                    ..Default::default()
+                },
+            )),
+            ..Default::default()
+        })),
+    );
 }

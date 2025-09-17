@@ -77,7 +77,10 @@ message PublishingStrategy {
   message ConfigurablePublisherRegistry {}
 
   // The publisher uses SDV Comms Data Tunnel.
-  message SdvCommsDataTunnel {}
+  message SdvCommsDataTunnel {
+    uint32 message_count = 1;
+    uint32 message_size = 2;
+  }
 
   // The publisher uses SDV Comms RPC.
   message SdvCommsRpc {}

@@ -11,7 +11,12 @@ pub enum PublishingStrategyType {
     /// Publishing strategy via Telemetry's Configurable Publisher Registry
     ConfigurablePublisherRegistry,
     /// Publishing strategy via SDV Comms Data Tunnel
-    SdvCommsDataTunnel,
+    SdvCommsDataTunnel {
+        /// Maximum buffered message count
+        message_count: u32,
+        /// Maximum serialized message size
+        message_size: u32,
+    },
     /// Publishing strategy via SDV Comms RPC
     SdvCommsRpc,
 }
