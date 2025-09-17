@@ -3,6 +3,7 @@
 //! This crate contains a `PublishingStrategyFactory` implementation for SDV Comms.
 
 mod data_tunnel;
+mod rpc;
 
 use anyhow::bail;
 use protobuf::descriptor::FileDescriptorProto;
@@ -16,6 +17,7 @@ use sdv_telemetry_simulator_publishing_strategy::{
 use std::future::Future;
 
 use crate::data_tunnel::PublishingStrategyImpl as DataTunnelPublishingStrategy;
+use crate::rpc::PublishingStrategyImpl as RpcPublishingStrategy;
 
 /// Implements `PublishingStrategyFactory` for publishers using SDV Comms Data Tunnel
 pub struct PublishingStrategyFactoryImpl<T: Fn() -> F + Send, F: Future<Output = ContextRef> + Send>
@@ -38,7 +40,11 @@ impl<T: Fn() -> F + Send, F: Future<Output = ContextRef> + Send> PublishingStrat
                 Box::new(DataTunnelPublishingStrategy::new(ctx, *message_count, *message_size))
                     as Box<dyn PublishingStrategy>
             }
-            PublishingStrategyType::SdvCommsRpc => return None,
+            PublishingStrategyType::SdvCommsRpc => {
+                let ctx = (self.ctx_factory)().await;
+
+                Box::new(RpcPublishingStrategy::new(ctx)) as Box<dyn PublishingStrategy>
+            }
             PublishingStrategyType::ConfigurablePublisherRegistry => return None,
         }))
     }
@@ -83,6 +89,7 @@ fn random_unit_name(rng: &mut (impl Rng + ?Sized)) -> String {
 mod tests {
     use super::*;
 
+    use futures::{future, StreamExt};
     use googletest::expect_that;
     use googletest::matchers::{
         all, container_eq, contains_substring, displays_as, eq, err, none, ok, pat, predicate,
@@ -92,7 +99,7 @@ mod tests {
     use protobuf::well_known_types::empty::Empty;
     use protobuf::MessageFull;
     use rand::RngCore;
-    use sdv_comms::sd::UnitRegistrationArgs;
+    use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition, UnitRegistrationArgs};
     use sdv_telemetry_test_utils::{downcast_ref, parameterized_test};
     use std::str::FromStr;
 
@@ -120,6 +127,26 @@ mod tests {
             .await
     }
 
+    pub(crate) async fn discover_service(
+        ctx: ContextRef,
+        unit_type: &UnitType,
+        unit_name: &str,
+    ) -> ServiceUnitDefinition {
+        let sd = ServiceDiscoveryManager::new(ctx);
+        let service_units = sd
+            .list_units_by_type(unit_type)
+            .filter(|service_unit| {
+                future::ready(service_unit.get_unit_identifier().get_unit_name() == unit_name)
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        let [ref service_unit] = service_units[..] else {
+            panic!("Expected exactly one service unit, but got: {service_units:?}");
+        };
+        service_unit.to_owned()
+    }
+
     #[googletest::test]
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
@@ -144,12 +171,17 @@ mod tests {
     #[googletest::test]
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn factory_create_sdv_comms_rpc_returns_none() {
+    async fn factory_create_sdv_comms_rpc_returns_some() {
         let mut factory = PublishingStrategyFactoryImpl::new(make_context);
 
         let result = factory.create(&PublishingStrategyType::SdvCommsRpc).await;
 
-        expect_that!(result, none());
+        expect_that!(
+            result,
+            some(ok(downcast_ref::<dyn PublishingStrategy, RpcPublishingStrategy, _>(pat!(
+                &RpcPublishingStrategy { .. }
+            ))))
+        );
     }
 
     #[googletest::test]

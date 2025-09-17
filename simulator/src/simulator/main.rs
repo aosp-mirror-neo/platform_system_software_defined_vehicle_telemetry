@@ -318,5 +318,11 @@ mod tests {
             )),
             ..Default::default()
         })),
+        sdv_comms_rpc: (Some(PublishingStrategy {
+            type_: Some(publishing_strategy::Type::SdvCommsRpc(
+                publishing_strategy::SdvCommsRpc { ..Default::default() },
+            )),
+            ..Default::default()
+        })),
     );
 }

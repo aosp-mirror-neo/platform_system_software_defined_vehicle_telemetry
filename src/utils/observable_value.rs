@@ -13,6 +13,7 @@ use tokio_stream::wrappers::BroadcastStream;
 /// implement observation of changes: If the `BroadcastStream`s created through `Self::observe` are
 /// not read fast enough, the channel's buffer fills up. If the buffer is full, values will be
 /// discarded in FIFO order.
+#[derive(Debug)]
 pub struct ObservableValue<T: Clone + Debug + Send + 'static, const C: usize> {
     value: Option<T>,
     tx: broadcast::Sender<T>,

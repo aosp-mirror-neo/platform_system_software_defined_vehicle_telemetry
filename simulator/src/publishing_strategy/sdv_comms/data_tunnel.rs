@@ -83,40 +83,17 @@ impl Debug for PublishingStrategyImpl {
 mod tests {
     use super::*;
 
-    use futures::{future, StreamExt};
+    use futures::StreamExt;
     use googletest::expect_that;
     use googletest::matchers::{container_eq, contains_substring, displays_as, err, ok};
     use itertools::Itertools;
     use protobuf::{well_known_types::wrappers::Int32Value, MessageFull};
-    use sdv_comms::{
-        dt,
-        sd::{ServiceDiscoveryManager, ServiceUnitDefinition, UnitType},
-    };
+    use sdv_comms::{dt, sd::UnitType};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::str::FromStr;
     use std::time::Duration;
 
-    use crate::tests::make_context;
-
-    async fn discover_service(
-        ctx: ContextRef,
-        unit_type: &UnitType,
-        unit_name: &str,
-    ) -> ServiceUnitDefinition {
-        let sd = ServiceDiscoveryManager::new(ctx);
-        let service_units = sd
-            .list_units_by_type(unit_type)
-            .filter(|service_unit| {
-                future::ready(service_unit.get_unit_identifier().get_unit_name() == unit_name)
-            })
-            .collect::<Vec<_>>()
-            .await;
-
-        let [ref service_unit] = service_units[..] else {
-            panic!("Expected exactly one service unit, but got: {service_units:?}");
-        };
-        service_unit.to_owned()
-    }
+    use crate::tests::{discover_service, make_context};
 
     #[googletest::test]
     #[sdv_telemetry_test_utils::timeout]
