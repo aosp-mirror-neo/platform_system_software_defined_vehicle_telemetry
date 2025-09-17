@@ -1,0 +1,29 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_applicable_licenses: ["sdv_license"],
+}
+
+genrule {
+    name: "vsidlc_telemetry_catalog_protos_with_bp_file",
+    srcs: [
+        ":telemetry_catalog_protos_with_bp_file",
+        ":sdv_vsidl_v1_protos",
+        ":telemetry_catalog_protos",
+    ],
+    tools: [
+        "vsidlc",
+        "soong_zip",
+        "generate_zip_catalog",
+    ],
+    out: [
+        "generated_rs.zip",
+    ],
+    cmd: "bash $(location generate_zip_catalog) " +
+        "$(location vsidlc) " +
+        "$(location soong_zip) " +
+        "'$(locations :telemetry_catalog_protos_with_bp_file)' " +
+        "$(genDir) " +
+        "$(out)" +
+        " '$(locations :telemetry_catalog_protos)'",
+}
