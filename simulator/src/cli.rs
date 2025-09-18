@@ -50,7 +50,13 @@ pub enum Commands {
 #[group(multiple = true)]
 pub struct TelemetryClientArgs {
     /// Metrics config files to execute
-    #[arg(long = "metrics-configs", required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath, action = Append)]
+    #[arg(
+        long = "metrics-configs",
+        required = true,
+        num_args = 1..,
+        value_hint = clap::ValueHint::FilePath,
+        action = Append,
+    )]
     pub metrics_config_paths: Vec<PathBuf>,
 
     /// Disable writing metrics reports to disk and only write human readable
@@ -63,7 +69,11 @@ pub struct TelemetryClientArgs {
     pub max_report_count: Option<u64>,
 
     /// The output directory to write results to.
-    #[arg(long = "output-directory", default_value = "/data/local/tmp/telemetry_simulator_out", value_hint = clap::ValueHint::DirPath)]
+    #[arg(
+        long = "output-directory",
+        default_value = "/data/local/tmp/telemetry_simulator_out",
+        value_hint = clap::ValueHint::DirPath,
+    )]
     pub output_directory: PathBuf,
 }
 
@@ -71,73 +81,74 @@ pub struct TelemetryClientArgs {
 #[group(multiple = true)]
 pub struct SimulationPublisherArgs {
     /// Publisher config files to execute
-    #[arg(long = "publisher-configs", required = true, num_args = 1.., value_hint = clap::ValueHint::FilePath, action = Append)]
+    #[arg(
+        long = "publisher-configs",
+        required = true,
+        num_args = 1..,
+        value_hint = clap::ValueHint::FilePath,
+        action = Append
+    )]
     pub publisher_config_paths: Vec<PathBuf>,
 }
 
 impl fmt::Display for CliArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fn write_finish_condition(
-            f: &mut fmt::Formatter<'_>,
-            max_simulation_time: &Duration,
-            max_report_count: Option<u64>,
-        ) -> fmt::Result {
-            if let Some(max_report_count) = max_report_count {
-                writeln!(
-                    f,
-                    "Application will finish after {} or {} returned reports, whichever comes first.",
-                    printable_duration(max_simulation_time)?,
-                    max_report_count
-                )
-            } else {
-                writeln!(
-                    f,
-                    "Application will finish after {}.",
-                    printable_duration(max_simulation_time)?,
-                )
-            }
-        }
-
-        match &self.command {
+        let (title, telemetry_args, publisher_args) = match &self.command {
             Commands::TelemetryClient { telemetry_client_args } => {
-                writeln!(f, "Running telemetry client only")?;
-                writeln!(f, "Metrics configs: {:?}", telemetry_client_args.metrics_config_paths)?;
-                if telemetry_client_args.no_binary_reports {
-                    writeln!(f, "Not writing reports to disk.")?;
-                }
-                write_finish_condition(
-                    f,
-                    &self.max_simulation_time,
-                    telemetry_client_args.max_report_count,
-                )
+                ("Running telemetry client only", Some(telemetry_client_args), None)
             }
             Commands::SimulationPublishers { simulation_publisher_args } => {
-                writeln!(f, "Running simulation publishers only")?;
-                writeln!(
-                    f,
-                    "Publisher configs: {:?}",
-                    simulation_publisher_args.publisher_config_paths
-                )?;
-                write_finish_condition(f, &self.max_simulation_time, None)
+                ("Running simulation publishers only", None, Some(simulation_publisher_args))
             }
-            Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => {
-                writeln!(f, "Running telemetry client and simulation publishers")?;
-                writeln!(f, "Metrics configs: {:?}", telemetry_client_args.metrics_config_paths)?;
-                writeln!(
-                    f,
-                    "Publisher configs: {:?}",
-                    simulation_publisher_args.publisher_config_paths
-                )?;
-                if telemetry_client_args.no_binary_reports {
-                    writeln!(f, "Not writing reports to disk.")?;
-                }
-                write_finish_condition(
-                    f,
-                    &self.max_simulation_time,
-                    telemetry_client_args.max_report_count,
-                )
-            }
+            Commands::FullSimulation { telemetry_client_args, simulation_publisher_args } => (
+                "Running telemetry client and simulation publishers",
+                Some(telemetry_client_args),
+                Some(simulation_publisher_args),
+            ),
+        };
+
+        writeln!(f, "{title}")?;
+        if let Some(args) = telemetry_args {
+            write!(f, "{args}")?;
         }
+        if let Some(args) = publisher_args {
+            write!(f, "{args}")?;
+        }
+
+        let max_report_count = telemetry_args.and_then(|a| a.max_report_count);
+        if let Some(max_report_count) = max_report_count {
+            writeln!(
+                f,
+                "Application will finish after {} or {} returned reports, whichever comes first.",
+                printable_duration(&self.max_simulation_time)?,
+                max_report_count
+            )
+        } else {
+            writeln!(
+                f,
+                "Application will finish after {}.",
+                printable_duration(&self.max_simulation_time)?
+            )
+        }
+    }
+}
+
+impl fmt::Display for TelemetryClientArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Metrics configs: {:?}", self.metrics_config_paths)?;
+        writeln!(f, "Output directory: {}", self.output_directory.display())?;
+        if self.no_binary_reports {
+            write!(f, "Writing only human-readable report summary, ")?;
+            writeln!(f, "not writing binary reports.")
+        } else {
+            writeln!(f, "Writing both binary reports and human-readable report summary.")
+        }
+    }
+}
+
+impl fmt::Display for SimulationPublisherArgs {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Publisher configs: {:?}", self.publisher_config_paths)
     }
 }
 
@@ -357,6 +368,8 @@ mod tests {
 
         let expected_output = r#"Running telemetry client only
 Metrics configs: ["metrics_config_1.textproto"]
+Output directory: /foo/bar
+Writing both binary reports and human-readable report summary.
 Application will finish after 00:00:10 or 5 returned reports, whichever comes first.
 "#;
         let actual_output = format!("{args}");
@@ -407,8 +420,9 @@ Application will finish after 00:00:10.
 
         let expected_output = r#"Running telemetry client and simulation publishers
 Metrics configs: ["metrics_config_1.textproto"]
+Output directory: /foo/bar
+Writing only human-readable report summary, not writing binary reports.
 Publisher configs: ["publisher_config_1.textproto", "publisher_config_2.textproto"]
-Not writing reports to disk.
 Application will finish after 00:00:10 or 5 returned reports, whichever comes first.
 "#;
         let actual_output = format!("{args}");
