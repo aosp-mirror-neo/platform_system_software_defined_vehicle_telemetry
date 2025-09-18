@@ -5,3 +5,4 @@
 output_path: ".."
 prebuilts_filegroup: "telemetry_catalog_protos_with_bp_file"
 prebuilts_output_path: "vsidl_provider_targets/Android.bp"
+vsidlc_gen_args: "--genrule"

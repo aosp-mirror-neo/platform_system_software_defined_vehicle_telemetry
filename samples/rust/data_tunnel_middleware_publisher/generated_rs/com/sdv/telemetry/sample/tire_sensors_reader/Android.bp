@@ -7,11 +7,21 @@ package {
     default_applicable_licenses: ["sdv_license"],
 }
 
+genrule {
+    name: "libsdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader_rs",
+    tools: ["extract_catalog_zip"],
+    srcs: [":vsidlc_telemetry_catalog_protos_with_bp_file"],
+    out: [
+        "service_bundle.rs",
+    ],
+    cmd: "$(location extract_catalog_zip) $(in) --service-bundle com.sdv.telemetry.sample TireSensorsReader",
+}
+
 rust_library {
     name: "libsdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader",
     crate_name: "sdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader",
     srcs: [
-        "service_bundle.rs",
+        ":libsdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader_rs{service_bundle.rs}",
     ],
     rustlibs: [
         "libprotobuf",
