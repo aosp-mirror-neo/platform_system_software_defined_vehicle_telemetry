@@ -14,6 +14,7 @@ use sdv_status_rs::{SdvResult, SdvStatus};
 use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
 use sdv_telemetry_utils::conversions::u32_into_usize;
 
+#[cfg_attr(test, derive(Debug))]
 pub(crate) struct Messages {
     message_count: usize,
     message_size: usize,
@@ -117,12 +118,15 @@ pub(crate) async fn create_message_stream(
 mod integration_tests {
     use super::*;
 
+    use googletest::assert_that;
+    use googletest::matchers::{container_eq, elements_are, eq, ok, pat};
+    use protobuf::well_known_types::empty::Empty;
     use protobuf::well_known_types::wrappers::Int64Value;
     use protobuf::{Message, MessageFull};
     use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
     use std::pin::pin;
     use std::thread;
-    use tokio::time::{timeout_at, Duration, Instant};
+    use tokio::time::{sleep, timeout_at, Duration, Instant};
 
     use crate::data_tunnel_publisher::DataTunnelPublisher;
     use crate::data_tunnel_subscriber::DataTunnelSubscriber;
@@ -217,5 +221,123 @@ mod integration_tests {
 
         // Check that the test actually did something :)
         assert!(i > 1000, "Too few messages were processed, got: {i:?}")
+    }
+
+    #[sdv_telemetry_test_utils::timeout(10_000)]
+    #[tokio::test]
+    async fn correctly_handles_no_last_message_when_creating_subscription() {
+        const MESSAGE_SIZE: u32 = 10;
+
+        let ctx = test_utils::make_context(0).await;
+        let unit_type = test_utils::make_unique_unit_type();
+
+        let publisher = DataTunnelPublisher::register_topic(
+            ctx,
+            &unit_type,
+            test_utils::UNIT_NAME,
+            10,
+            MESSAGE_SIZE,
+            MessageMetadata {
+                file_descriptors: vec![Empty::descriptor().file_descriptor_proto().to_owned()],
+                message_full_name: format!(".{}", Empty::descriptor().full_name()),
+                ..Default::default()
+            }
+            .write_to_bytes()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        let unit_identifier =
+            test_utils::discover_service(ctx, &unit_type).await.get_unit_identifier();
+
+        let message_stream = create_message_stream(
+            ctx,
+            unit_identifier,
+            SubSamplingInterval::ZERO,
+            // Important: Set fetch_last_message to `true`.
+            true,
+        )
+        .await
+        .unwrap();
+        let message_stream = pin!(message_stream);
+
+        // Give the message stream some time to fetch the latest (non-existing) message.
+        sleep(Duration::from_secs(1)).await;
+
+        // Drop the publisher so that the message stream ends.
+        drop(publisher);
+
+        let messages = message_stream.collect::<Vec<_>>().await;
+        assert_that!(&messages, elements_are!());
+    }
+
+    #[sdv_telemetry_test_utils::timeout(10_000)]
+    #[tokio::test]
+    async fn correctly_handles_empty_messages() {
+        const MESSAGE_SIZE: u32 = 10;
+
+        let ctx = test_utils::make_context(0).await;
+        let unit_type = test_utils::make_unique_unit_type();
+
+        let publisher = DataTunnelPublisher::register_topic(
+            ctx,
+            &unit_type,
+            test_utils::UNIT_NAME,
+            10,
+            MESSAGE_SIZE,
+            MessageMetadata {
+                file_descriptors: vec![Empty::descriptor().file_descriptor_proto().to_owned()],
+                message_full_name: format!(".{}", Empty::descriptor().full_name()),
+                ..Default::default()
+            }
+            .write_to_bytes()
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+
+        // Send the first message before the message stream is created.
+        publisher.publish_length_delimited_proto(&Empty::default()).unwrap();
+
+        let unit_identifier =
+            test_utils::discover_service(ctx, &unit_type).await.get_unit_identifier();
+
+        let message_stream = create_message_stream(
+            ctx,
+            unit_identifier,
+            SubSamplingInterval::ZERO,
+            // Important: Set fetch_last_message to `true`.
+            true,
+        )
+        .await
+        .unwrap();
+        let message_stream = pin!(message_stream);
+
+        // Give the message stream some time to fetch the latest message.
+        sleep(Duration::from_secs(1)).await;
+
+        // Send another message.
+        publisher.publish_length_delimited_proto(&Empty::default()).unwrap();
+
+        // Drop the publisher so that the message stream ends.
+        drop(publisher);
+
+        let messages = message_stream.collect::<Vec<_>>().await;
+        assert_that!(
+            &messages,
+            elements_are!(
+                ok(pat!(&Messages {
+                    message_count: eq(1),
+                    message_size: eq(u32_into_usize(MESSAGE_SIZE)),
+                    buffer: ref container_eq(vec![0; u32_into_usize(MESSAGE_SIZE)]),
+                })),
+                ok(pat!(&Messages {
+                    message_count: eq(1),
+                    message_size: eq(u32_into_usize(MESSAGE_SIZE)),
+                    buffer: ref container_eq(vec![0; u32_into_usize(MESSAGE_SIZE)]),
+                }))
+            )
+        );
     }
 }

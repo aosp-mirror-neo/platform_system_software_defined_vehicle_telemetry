@@ -482,13 +482,15 @@ mod integration_tests {
     use super::*;
 
     use futures::{stream, FutureExt};
-    use googletest::assert_that;
     use googletest::description::Description;
     use googletest::matcher::{Matcher, MatcherBase, MatcherResult};
     use googletest::matchers::{
-        all, contains_substring, displays_as, each, eq, err, ok, pat, some,
+        all, contains_substring, displays_as, each, eq, err, is_false, none, ok, pat, result_of,
+        result_of_ref, some,
     };
+    use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
+    use parking_lot::Mutex;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::{reflect::ReflectValueRef, MessageFull};
     use sdv_comms::dt;
@@ -509,6 +511,7 @@ mod integration_tests {
     use tokio::sync::mpsc;
     use tokio::time::Instant;
 
+    use crate::data_tunnel_publisher::DataTunnelPublisher;
     use crate::test_utils::{self, UNIT_NAME};
 
     const INVALID_SERVICE_NAME: &str = "lalala";
@@ -663,6 +666,14 @@ mod integration_tests {
         let int_field_descriptor = message.descriptor_dyn().field_by_name("int_field").unwrap();
         match int_field_descriptor.get_singular(&*message) {
             Some(ReflectValueRef::I32(value)) => value,
+            result => panic!("Unexpected value: {result:?}"),
+        }
+    }
+
+    fn get_bool_field_value(message: Box<dyn MessageDyn>, field_name: &str) -> bool {
+        let field_descriptor = message.descriptor_dyn().field_by_name(field_name).unwrap();
+        match field_descriptor.get_singular_field_or_default(&*message) {
+            ReflectValueRef::Bool(value) => value,
             result => panic!("Unexpected value: {result:?}"),
         }
     }
@@ -1478,6 +1489,40 @@ mod integration_tests {
         );
     }
 
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_rpc_message_provider_latest_message_not_found() {
+        let ctx = test_utils::make_context(0).await;
+        let service_name = test_utils::make_unique_service_name();
+
+        let _server = test_utils::register_server(
+            ctx,
+            &service_name,
+            Some(MESSAGE_METADATA_INT32.clone()),
+            HashMap::from([(
+                "GetLatestMessage".to_owned(),
+                rpc::RpcMethod::Unary(Arc::new(move |_, _| {
+                    future::ready(Err(SdvStatus::new(SdvStatusCode::NotFound))).boxed()
+                })),
+            )]),
+        )
+        .await
+        .unwrap();
+
+        let subscriber = create_accessor(ctx);
+        let outcome = subscriber
+            .get_message_provider(&service_name)
+            .await
+            .expect("Message provider retrieval should be successful");
+        let GetMessageProviderOutcome::Success(provider) = outcome else {
+            panic!("Unexpected outcome: {outcome:?}");
+        };
+
+        let maybe_message = provider.get_latest_message(None).await;
+
+        assert_that!(maybe_message, ok(none()));
+    }
+
     // Unit Type -> 0 matches
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
@@ -1823,4 +1868,144 @@ mod integration_tests {
         // changes, the logic in `discover_service` needs to be updated.
         assert!(publisher2.is_err());
     }
+
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout]
+        #[googletest::test]
+        #[tokio::test]
+        read_message_with_zero_bytes_success,
+
+        |create_publisher_and_get_publish_callback| async move {
+            let ctx = test_utils::make_context(0).await;
+
+            let unit_type = test_utils::make_unique_unit_type();
+            let unit_name = test_utils::UNIT_NAME;
+            let service_name = format!("{}|{}", unit_type, unit_name);
+            let config = None;
+            let message_metadata = MessageMetadata {
+                file_descriptors: vec![BoolValue::descriptor().file_descriptor_proto().to_owned()],
+                message_full_name: format!(".{}", BoolValue::descriptor().full_name()),
+                ..Default::default()
+            };
+
+            let (_publisher, publish) = create_publisher_and_get_publish_callback(ctx, unit_type, unit_name, message_metadata).await;
+
+            let (tx, rx) = oneshot_callback();
+            let subscriber = create_accessor(ctx);
+            let subscription_outcome = subscriber
+                .create_subscription(
+                    &service_name,
+                    config,
+                    false,
+                    &SubSamplingInterval::ZERO,
+                    Box::new(tx),
+                    create_empty_fn_box(),
+                )
+                .await
+                .unwrap();
+            assert!(matches!(subscription_outcome, CreateSubscriptionOutcome::Subscribed(_)));
+
+            let message_provider_outcome =
+                subscriber.get_message_provider(&service_name).await.unwrap();
+            let GetMessageProviderOutcome::Success(message_provider) = message_provider_outcome else {
+                panic!("Unexpected outcome: {message_provider_outcome:?}");
+            };
+
+            let message = BoolValue { value: false, ..Default::default() };
+            // This test checks that a protobuf message that serializes to an empty byte array is
+            // still correctly received. Hence, we assert that the message we use for testing actually
+            // produces zero bytes when serialized (otherwise the test makes no sense).
+            assert_eq!(message.write_to_bytes().unwrap(), vec![]);
+            publish(message).await;
+
+            let subscription_message = rx.await.unwrap();
+            let maybe_getter_message = message_provider.get_latest_message(config).await.unwrap();
+
+            expect_that!(
+                subscription_message.descriptor_dyn().full_name(),
+                eq(BoolValue::descriptor().full_name())
+            );
+            expect_that!(
+                maybe_getter_message,
+                some(
+                    result_of_ref!(
+                        #[expect(clippy::borrowed_box)]
+                        |getter_message: &Box<dyn MessageDyn>| getter_message.descriptor_dyn().full_name().to_owned(),
+                        eq(&BoolValue::descriptor().full_name())
+                    )
+                )
+            );
+            expect_that!(get_bool_field_value(subscription_message, "value"), is_false());
+            expect_that!(
+                maybe_getter_message,
+                some(
+                    result_of!(
+                        #[expect(clippy::borrowed_box)]
+                        |getter_message: &Box<dyn MessageDyn>| get_bool_field_value(getter_message.to_owned(), "value"),
+                        is_false()
+                    )
+                )
+            );
+        },
+
+        data_tunnel: (async |ctx, unit_type, unit_name, message_metadata: MessageMetadata| {
+            let publisher = Arc::new(Mutex::new(
+                DataTunnelPublisher::register_topic(
+                    ctx,
+                    &unit_type,
+                    unit_name,
+                    10,
+                    10,
+                    message_metadata
+                    .write_to_bytes()
+                    .unwrap(),
+                )
+                .await
+                .unwrap()
+            ));
+
+            (
+                Arc::clone(&publisher),
+                async move |message: BoolValue| {
+                    publisher.lock().publish_length_delimited_proto(&message).unwrap();
+                }
+            )
+        }),
+        rpc: (async |ctx, unit_type, unit_name, message_metadata: MessageMetadata| {
+            let (tx, rx1) = oneshot_callback();
+            let rx1 = rx1.shared();
+            let rx2 = rx1.clone();
+
+            let service_name = format!("{}|{}", unit_type, unit_name);
+            let server = test_utils::register_server(
+                ctx,
+                &service_name,
+                Some(message_metadata),
+                HashMap::from([(
+                    "CreateSubscription".to_owned(),
+                    rpc::RpcMethod::ServerStreaming(Arc::new(move |_, _| {
+                        future::ready(Ok(
+                            stream::once(rx1.clone().map(Ok))
+                                .chain(stream::pending())
+                                .boxed()
+                        )).boxed()
+                    })),
+                ), (
+                    "GetLatestMessage".to_owned(),
+                    rpc::RpcMethod::Unary(Arc::new(move |_, _| {
+                        rx2.clone().map(Ok).boxed()
+                    })),
+                )]),
+            )
+            .await
+            .unwrap();
+
+            (
+                server,
+                async move |message: BoolValue| {
+                    tx(message.write_to_bytes().unwrap());
+                }
+            )
+        }),
+    );
 }
