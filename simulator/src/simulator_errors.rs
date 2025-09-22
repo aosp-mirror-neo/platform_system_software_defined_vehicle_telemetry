@@ -3,29 +3,37 @@
 use anyhow::Error;
 use sdv_telemetry_rust_wrapper::TelemetryError;
 use std::collections::HashSet;
+use std::ffi::OsString;
 use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 #[non_exhaustive]
 pub enum SimulatorError {
-    #[error("Descriptor proto message {message_name} found more than once in metrics config \"{file_name}\"")]
-    DuplicateDescriptorProtoMessage { message_name: String, file_name: String },
+    #[error(
+        "Descriptor proto message {message_name} found more than once in metrics config \"{}\"",
+        .file_name.display()
+    )]
+    DuplicateDescriptorProtoMessage { message_name: String, file_name: OsString },
 
-    #[error("Metrics config \"{file_name}\" could not be added because is has the same UUID as already added metrics config \"{duplicate_file_name}\"")]
-    DuplicateMetricsConfigUuid { file_name: String, duplicate_file_name: String },
+    #[error(
+        "Metrics config \"{}\" could not be added because is has the same UUID as already \
+        added metrics config \"{}\"",
+        file_name.display(), duplicate_file_name.display()
+    )]
+    DuplicateMetricsConfigUuid { file_name: OsString, duplicate_file_name: OsString },
 
     #[error(
         "Telemetry Service produced an error{}:\n\"{error}\"",
-        .file_name.as_ref().map(|f| format!(" (metrics config filename: {f})")).unwrap_or_default()
+        .file_name.as_ref().map(|f| format!(" (metrics config filename: {})", f.display())).unwrap_or_default()
     )]
-    TelemetryServiceError { file_name: Option<String>, error: TelemetryError },
+    TelemetryServiceError { file_name: Option<OsString>, error: TelemetryError },
 
     #[error("Received a report for report config \"{report_config_name}\" but failed to decode its data: \"{error}\"")]
     FailedToDecodeReport { report_config_name: String, error: protobuf::Error },
 
-    #[error("Failed to parse file \"{file_name}\":\n{error_message}")]
-    FailedToParseFile { file_name: String, error_message: String },
+    #[error("Failed to parse file \"{}\":\n{error_message}", file_name.display())]
+    FailedToParseFile { file_name: OsString, error_message: String },
 
     #[error(
         "Failed to read file at \"{}\":\n\"{error}\"",
@@ -33,8 +41,11 @@ pub enum SimulatorError {
     )]
     FailedToReadFile { file_path: PathBuf, error: Error },
 
-    #[error("\"{file_name}\" contains header(s) {incorrect_headers:?} that do not correspond to a message field.")]
-    IncorrectCSVHeaders { file_name: String, incorrect_headers: HashSet<String> },
+    #[error(
+        "\"{}\" contains header(s) {incorrect_headers:?} that do not correspond to a message field",
+        file_name.display(),
+    )]
+    IncorrectCSVHeaders { file_name: OsString, incorrect_headers: HashSet<String> },
 
     #[error("{error_message}")]
     Error { error_message: String },
@@ -54,8 +65,11 @@ pub enum SimulatorError {
     #[error("{feature} is not supported (yet).")]
     NotImplemented { feature: String },
 
-    #[error("{file_name}\" is missing the descriptor proto message \"{message_name}\"")]
-    MissingDescriptorProto { file_name: String, message_name: String },
+    #[error(
+        "{}\" is missing the descriptor proto message \"{message_name}\"",
+        file_name.display(),
+    )]
+    MissingDescriptorProto { file_name: OsString, message_name: String },
 
     #[error("Metrics config UUID not found: {config_uuid}")]
     MetricsConfigNotFound { config_uuid: String },

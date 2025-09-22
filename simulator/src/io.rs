@@ -7,6 +7,7 @@ use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_publisher::SimulationPublisher as PublisherConfigProto;
 use std::{
     collections::HashSet,
+    ffi::OsStr,
     fs,
     fs::{File, OpenOptions},
     io::Write,
@@ -18,35 +19,25 @@ use crate::{output_strings::report_log_header, SimulatorError};
 pub const REPORTS_DIR_NAME: &str = "reports";
 
 /// Reads the metrics config at the provided file path into a byte array.
-pub fn read_metrics_config_from_file(
-    file_path: &Path,
-) -> Result<(String, Vec<u8>), SimulatorError> {
-    let Some(file_name_os) = file_path.file_name() else {
-        return Err(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() });
-    };
-    let file_name = file_name_os.to_string_lossy().into_owned().clone();
-    Ok((
-        file_name,
-        proto_reader::read_as_bytes::<MetricsConfig>(file_path).map_err(|error| {
-            SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error }
-        })?,
-    ))
+pub fn read_metrics_config_from_file(file_path: &Path) -> Result<Vec<u8>, SimulatorError> {
+    proto_reader::read_as_bytes::<MetricsConfig>(file_path).map_err(|error| {
+        SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error }
+    })
 }
 
 /// Reads the publisher config at the provided file path into a
 /// PublisherConfigProto message.
 pub fn read_publisher_config_from_file(
     file_path: &Path,
-) -> Result<(String, PublisherConfigProto), SimulatorError> {
-    let Some(file_name_os) = file_path.file_name() else {
-        return Err(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() });
-    };
-    let file_name = file_name_os.to_string_lossy().into_owned().clone();
+) -> Result<PublisherConfigProto, SimulatorError> {
+    let file_name = file_path
+        .file_name()
+        .ok_or(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() })?;
 
     let extension = file_path.extension().and_then(|o| o.to_str());
     if extension != Some("textproto") && extension != Some("txtpb") {
         return Err(SimulatorError::FailedToParseFile {
-            file_name,
+            file_name: file_name.to_owned(),
             error_message: "Publisher config files must have file extension .textproto".to_owned(),
         });
     }
@@ -54,18 +45,19 @@ pub fn read_publisher_config_from_file(
     let textproto = fs::read_to_string(file_path).map_err(|error| {
         SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error: error.into() }
     })?;
-    Ok((
-        file_name.clone(),
-        parse_from_str::<PublisherConfigProto>(&textproto).map_err(|error| {
-            SimulatorError::FailedToParseFile { file_name, error_message: error.to_string() }
-        })?,
-    ))
+    let textproto = parse_from_str::<PublisherConfigProto>(&textproto).map_err(|error| {
+        SimulatorError::FailedToParseFile {
+            file_name: file_name.to_owned(),
+            error_message: error.to_string(),
+        }
+    })?;
+    Ok(textproto)
 }
 
 pub fn parse_csv_file(
-    file_path: &str,
+    file_path: &Path,
     delimiter: u8,
-    file_name: &str,
+    file_name: &OsStr,
     expected_headers_set: HashSet<String>,
 ) -> Result<(Vec<String>, Vec<Vec<String>>), SimulatorError> {
     let mut csv_reader: Reader<_> = csv::ReaderBuilder::new()
@@ -74,7 +66,7 @@ pub fn parse_csv_file(
         .comment(Some(b'#'))
         .from_path(file_path)
         .map_err(|error| SimulatorError::IOError {
-            error_message: format!("Failed to open file \"{}\": {error}", file_path.to_owned()),
+            error_message: format!("Failed to open file \"{}\": {error}", file_path.display()),
         })?;
     let headers = collect_headers(&mut csv_reader, file_name)?;
     check_headers(headers.clone(), expected_headers_set, file_name)?;
@@ -85,7 +77,7 @@ pub fn parse_csv_file(
 
 fn collect_headers(
     csv_reader: &mut Reader<File>,
-    file_name: &str,
+    file_name: &OsStr,
 ) -> Result<Vec<String>, SimulatorError> {
     Ok(csv_reader
         .headers()
@@ -101,7 +93,7 @@ fn collect_headers(
 fn check_headers(
     headers: Vec<String>,
     expected_headers_set: HashSet<String>,
-    file_name: &str,
+    file_name: &OsStr,
 ) -> Result<(), SimulatorError> {
     let headers_set = HashSet::from_iter(headers);
     let incorrect_headers =
@@ -118,7 +110,7 @@ fn check_headers(
 
 fn collect_records(
     csv_reader: &mut Reader<File>,
-    file_name: &str,
+    file_name: &OsStr,
 ) -> Result<Vec<Vec<String>>, SimulatorError> {
     csv_reader
         .records()
@@ -136,7 +128,7 @@ fn collect_records(
 /// including the metrics config file name, UUID and report config name.
 pub fn create_report_log(
     file_path: &Path,
-    metrics_config_file_name: &str,
+    metrics_config_file_name: &OsStr,
     uuid: &str,
     report_config_name: &str,
 ) -> Result<(), SimulatorError> {
@@ -208,10 +200,7 @@ mod tests {
     #[test]
     fn test_read_metrics_config_from_file_valid() {
         let file_path = Path::new("test_data/valid_metrics_config.textproto");
-
-        let (file_name, serialized_config) = read_metrics_config_from_file(file_path).unwrap();
-
-        assert_eq!(file_name, "valid_metrics_config.textproto");
+        let serialized_config = read_metrics_config_from_file(file_path).unwrap();
         assert!(!serialized_config.is_empty());
     }
 
@@ -227,9 +216,7 @@ mod tests {
     #[test]
     fn test_read_publisher_config_from_file_valid() {
         let file_path = Path::new("test_data/valid_publisher_config.textproto");
-        let (file_name, publisher_config_proto) =
-            read_publisher_config_from_file(file_path).unwrap();
-        assert_eq!(file_name, "valid_publisher_config.textproto");
+        let publisher_config_proto = read_publisher_config_from_file(file_path).unwrap();
         assert_eq!(publisher_config_proto.service_name, "TestPublisher");
     }
 
@@ -249,8 +236,8 @@ mod tests {
 
     #[test]
     fn test_parse_csv_file_valid() {
-        let file_path = "test_data/valid_publisher_data.csv";
-        let file_name = "valid_publisher_data.csv";
+        let file_path = Path::new("test_data/valid_publisher_data.csv");
+        let file_name = OsStr::new("valid_publisher_data.csv");
         let expected_headers_set = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
             .into_iter()
             .map(ToString::to_string)
@@ -265,8 +252,8 @@ mod tests {
 
     #[test]
     fn test_parse_csv_file_custom_delimiter() {
-        let file_path = "test_data/valid_publisher_data_custom_delimiter.csv";
-        let file_name = "valid_publisher_data_custom_delimiter.csv";
+        let file_path = Path::new("test_data/valid_publisher_data_custom_delimiter.csv");
+        let file_name = OsStr::new("valid_publisher_data_custom_delimiter.csv");
         let expected_headers_set = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
             .into_iter()
             .map(ToString::to_string)
@@ -280,6 +267,8 @@ mod tests {
         test_parse_csv_file,
 
         |file_path, file_name, error_string| {
+            let file_path = Path::new(file_path);
+            let file_name = OsStr::new(file_name);
             let expected_headers_set =
                 vec!["_delay_before_publishing", "speed", "above_speed_limit"]
                     .into_iter()
@@ -299,7 +288,7 @@ mod tests {
 
     #[test]
     fn test_check_headers_valid() {
-        let file_name = "file_name.csv";
+        let file_name = OsStr::new("file_name.csv");
         let expected_headers_set = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
             .into_iter()
             .map(ToString::to_string)
@@ -314,7 +303,7 @@ mod tests {
 
     #[test]
     fn test_check_headers_redundant_header() {
-        let file_name = "file_name.csv";
+        let file_name = OsStr::new("file_name.csv");
         let expected_headers_set = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
             .into_iter()
             .map(ToString::to_string)
@@ -336,7 +325,7 @@ mod tests {
         let tmp_dir = tempdir().unwrap();
 
         let file_path = tmp_dir.path().join("report_log.txt");
-        let metrics_config_file_name = "test_metrics_config";
+        let metrics_config_file_name = OsStr::new("test_metrics_config");
         let uuid = "test uuid";
         let report_config_name = "test_report_config";
 

@@ -8,6 +8,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsRepo
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::{
     collections::{HashMap, HashSet},
+    ffi::{OsStr, OsString},
     time::Duration,
 };
 
@@ -21,7 +22,7 @@ pub const DELAY_FIELD_NAME: &str = "_delay_before_publishing";
 
 pub fn parse_message_descriptors(
     config: &MetricsConfig,
-    metrics_config_file_name: String,
+    metrics_config_file_name: &OsStr,
 ) -> Result<HashMap<String, MessageDescriptor>, SimulatorError> {
     let decoding_message_descriptor_names: HashSet<String> = config
         .metrics_report_configs
@@ -36,7 +37,7 @@ pub fn parse_message_descriptors(
         &WELL_KNOWN_FILE_DESCRIPTORS,
     )
     .map_err(|error| SimulatorError::FailedToParseFile {
-        file_name: metrics_config_file_name.clone(),
+        file_name: metrics_config_file_name.to_owned(),
         error_message: format!("Failed to parse descriptor_protos: {error}"),
     })?;
     for file_descriptor in &file_descriptors {
@@ -44,7 +45,7 @@ pub fn parse_message_descriptors(
             if message_descriptors.contains_key(message.full_name()) {
                 return Err(SimulatorError::DuplicateDescriptorProtoMessage {
                     message_name: message.full_name().to_owned(),
-                    file_name: metrics_config_file_name,
+                    file_name: metrics_config_file_name.to_owned(),
                 });
             }
             if decoding_message_descriptor_names.contains(message.full_name()) {
@@ -56,7 +57,7 @@ pub fn parse_message_descriptors(
     for message_name in &decoding_message_descriptor_names {
         if !message_descriptors.contains_key(message_name) {
             return Err(SimulatorError::MissingDescriptorProto {
-                file_name: metrics_config_file_name,
+                file_name: metrics_config_file_name.to_owned(),
                 message_name: message_name.clone(),
             });
         }
@@ -89,7 +90,7 @@ pub fn decode_report(
 
 pub struct CsvToProtoMessagesParser {
     headers: Vec<String>,
-    file_name: String,
+    file_name: OsString,
     default_delay: Duration,
     message_descriptor_tree: MessageDescriptorTree,
 }
@@ -97,12 +98,12 @@ pub struct CsvToProtoMessagesParser {
 impl CsvToProtoMessagesParser {
     pub fn new(
         headers: Vec<String>,
-        file_name: String,
+        file_name: &OsStr,
         default_delay: Duration,
         mut message_descriptor_tree: MessageDescriptorTree,
     ) -> Self {
         trim_message_descriptor_tree(&headers, &mut message_descriptor_tree);
-        Self { headers, file_name, default_delay, message_descriptor_tree }
+        Self { headers, file_name: file_name.to_owned(), default_delay, message_descriptor_tree }
     }
 
     pub fn parse(&self, records: Vec<Vec<String>>) -> Result<Vec<ParsedDataEntry>, SimulatorError> {

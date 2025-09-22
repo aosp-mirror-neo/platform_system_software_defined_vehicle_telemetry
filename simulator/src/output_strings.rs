@@ -2,18 +2,20 @@
 
 use chrono::{DateTime, Utc};
 use sdv_telemetry_proto_rust::metrics_configuration::metrics_report::ReportReason;
+use std::ffi::OsStr;
 
 pub fn report_log_header(
-    metrics_config_file_name: &str,
+    metrics_config_file_name: &OsStr,
     uuid: &str,
     report_config_name: &str,
 ) -> String {
     format!(
-        r#"Metrics config "{metrics_config_file_name}", UUID: "{uuid}"
+        r#"Metrics config "{}", UUID: "{uuid}"
 Report configuration "{report_config_name}"
 
 Created reports below
-"#
+"#,
+        metrics_config_file_name.display(),
     )
 }
 
@@ -90,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_report_log_header() {
-        let metrics_config_file_name = "metrics_config_1.textproto";
+        let metrics_config_file_name = OsStr::new("metrics_config_1.textproto");
         let uuid = "uuid_1";
         let report_config_name = "report_config_1";
         let actual_output = report_log_header(metrics_config_file_name, uuid, report_config_name);

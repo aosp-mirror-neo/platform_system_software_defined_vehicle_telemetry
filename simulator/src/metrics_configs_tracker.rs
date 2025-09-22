@@ -38,25 +38,29 @@ impl MetricsConfigsTracker {
     /// content into a MetricsConfig object. Returns an error if the tracker
     /// already contains a metrics config with the same UUID.
     pub fn parse_metrics_config(&mut self, file_path: &Path) -> Result<(), SimulatorError> {
-        let (file_name, serialized_config) = read_metrics_config_from_file(file_path)?;
+        let file_name = file_path
+            .file_name()
+            .ok_or(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() })?;
+
+        let serialized_config = read_metrics_config_from_file(file_path)?;
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(&serialized_config)
             .map_err(|error| SimulatorError::FailedToParseFile {
-                file_name: file_name.clone(),
+                file_name: file_name.to_owned(),
                 error_message: error.to_string(),
             })?;
 
         if let Some(entry) = self.metrics_configs.get(&config.uuid) {
             let duplicate_file_name = entry.file_name.clone();
             return Err(SimulatorError::DuplicateMetricsConfigUuid {
-                file_name,
+                file_name: file_name.to_owned(),
                 duplicate_file_name,
             });
         };
 
-        let message_descriptors = parse_message_descriptors(&config, file_name.clone())?;
+        let message_descriptors = parse_message_descriptors(&config, file_name)?;
 
         let mut config_info =
-            MetricsConfigInfo::new(&file_name, serialized_config, message_descriptors);
+            MetricsConfigInfo::new(file_name, serialized_config, message_descriptors);
 
         for report_config in &config.metrics_report_configs {
             let report_log_path = self.output_directory.join(format!(
@@ -64,7 +68,7 @@ impl MetricsConfigsTracker {
                 config.uuid,
                 report_config.name.to_ascii_lowercase()
             ));
-            create_report_log(&report_log_path, &file_name, &config.uuid, &report_config.name)?;
+            create_report_log(&report_log_path, file_name, &config.uuid, &report_config.name)?;
             config_info.report_configs.insert(
                 report_config.name.clone(),
                 ReportConfigStatus::new(

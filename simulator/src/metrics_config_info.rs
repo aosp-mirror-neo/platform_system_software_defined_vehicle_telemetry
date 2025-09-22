@@ -4,6 +4,7 @@ use protobuf::reflect::MessageDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::{
     collections::{HashMap, HashSet},
+    ffi::{OsStr, OsString},
     fmt,
     fs::File,
     path::Path,
@@ -65,7 +66,7 @@ impl fmt::Display for ReportConfigStatus {
 }
 
 pub struct MetricsConfigInfo {
-    pub file_name: String,
+    pub file_name: OsString,
     pub serialized_config: Vec<u8>,
     pub status: MetricsConfigStatus,
     pub descriptor_protos: HashMap<String, MessageDescriptor>,
@@ -75,7 +76,7 @@ pub struct MetricsConfigInfo {
 
 impl MetricsConfigInfo {
     pub fn new(
-        file_name: &str,
+        file_name: &OsStr,
         serialized_config: Vec<u8>,
         descriptor_protos: HashMap<String, MessageDescriptor>,
     ) -> Self {
@@ -103,15 +104,15 @@ impl MetricsConfigInfo {
                 message: "Failed to retrieve simulator's report_configs".to_owned(),
             })?;
 
-        let message_descriptor = self
-            .descriptor_protos
-            .get(&report_config_status.descriptor_proto_name[1..])
-            .ok_or_else(|| SimulatorError::ProgrammingError {
-                error_message: format!(
+        let message_descriptor =
+            self.descriptor_protos
+                .get(&report_config_status.descriptor_proto_name[1..])
+                .ok_or_else(|| SimulatorError::ProgrammingError {
+                    error_message: format!(
                     "descriptor_protos for metrics config \"{}\" missing descriptor proto \"{}\"",
-                    self.file_name, report_config_status.descriptor_proto_name
+                    self.file_name.display(), report_config_status.descriptor_proto_name
                 ),
-            })?;
+                })?;
 
         Ok((report_config_status, message_descriptor))
     }
@@ -127,7 +128,8 @@ METRICS CONFIG INFO
 "{}":
 Status: {}
 Results for report configs:"#,
-            self.file_name, self.status
+            self.file_name.display(),
+            self.status
         )?;
         for (report_config_name, report_config_status) in &self.report_configs {
             writeln!(f, "\"{report_config_name}\": {report_config_status}")?;

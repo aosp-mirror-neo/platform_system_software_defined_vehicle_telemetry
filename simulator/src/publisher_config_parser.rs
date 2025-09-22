@@ -9,6 +9,7 @@ use sdv_telemetry_simulator_proto::simulation_publisher::data_generator::Data_so
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
 };
+use std::ffi::OsStr;
 use std::{collections::HashSet, path::Path};
 
 use crate::{
@@ -19,12 +20,16 @@ use crate::{
 };
 
 pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, SimulatorError> {
-    let (file_name, publisher_config_proto) = read_publisher_config_from_file(file_path)?;
+    let file_name = file_path
+        .file_name()
+        .ok_or(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() })?;
+
+    let publisher_config_proto = read_publisher_config_from_file(file_path)?;
 
     let message_descriptor = get_message_descriptor(
         &publisher_config_proto.data_format_protos,
         &publisher_config_proto.data_format_message_name,
-        &file_name,
+        file_name,
     )?;
 
     // TODO(b/351183822): Allow more than one data generator.
@@ -62,8 +67,12 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
                 get_message_descriptor_tree_and_expected_headers(&message_descriptor)?;
             expected_csv_headers.insert(DELAY_FIELD_NAME.to_owned());
 
-            let (ordered_headers, records) =
-                parse_csv_file(&csv_file.file_path, delimiter, &file_name, expected_csv_headers)?;
+            let (ordered_headers, records) = parse_csv_file(
+                Path::new(&csv_file.file_path),
+                delimiter,
+                file_name,
+                expected_csv_headers,
+            )?;
 
             let csv_to_proto_parser =
                 CsvToProtoMessagesParser::new(ordered_headers, file_name, default_delay, tree);
@@ -77,7 +86,7 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
             })
         }
         _ => Err(SimulatorError::FailedToParseFile {
-            file_name,
+            file_name: file_name.to_owned(),
             error_message: "Failed to read data in data generator".to_owned(),
         }),
     }
@@ -162,7 +171,7 @@ fn get_message_descriptor_tree_and_expected_headers_recursively(
 fn get_message_descriptor(
     file_descriptor_protos: &[FileDescriptorProto],
     message_name: &str,
-    file_name: &str,
+    file_name: &OsStr,
 ) -> Result<MessageDescriptor, SimulatorError> {
     let file_descriptors = FileDescriptor::new_dynamic_fds(
         file_descriptor_protos.to_vec(),
