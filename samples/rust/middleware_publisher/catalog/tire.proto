@@ -4,6 +4,7 @@ syntax = "proto3";
 
 package com.sdv.telemetry.sample;
 
+import "google/protobuf/any.proto";
 import "sdv/vsidl/v1/annotations.proto";
 
 enum Location {
@@ -40,4 +41,19 @@ message VehicleSpeed {
   };
 
   float speed = 1;
+}
+
+message GetTireStatusRequest {
+  Location tire = 1;
+}
+
+message GetTireStatusResponse {
+  uint32 pressure = 2;
+  uint32 temperature = 3;
+}
+
+service TireStatus {
+  rpc CreateSubscription(GetTireStatusRequest) returns (stream GetTireStatusResponse) {}
+
+  rpc GetLatestMessage(GetTireStatusRequest) returns (GetTireStatusResponse) {}
 }

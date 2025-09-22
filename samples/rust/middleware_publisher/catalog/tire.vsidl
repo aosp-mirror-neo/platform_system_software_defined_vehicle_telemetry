@@ -34,4 +34,13 @@ service_bundle {
     unit_type {
       type: "VehicleSpeed"
     }
+
+    server {
+      service: "TireStatus"
+    }
+
+    unit_type {
+      type: "TireStatus"
+    }
 }
+
