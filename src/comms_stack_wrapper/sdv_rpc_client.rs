@@ -301,12 +301,13 @@ fn get_either_or_ensure_equal(
 mod tests {
     use super::*;
 
-    use protobuf::well_known_types::{
-        any::Any,
-        empty::Empty,
-        wrappers::{Int32Value, StringValue},
-    };
+    use protobuf::well_known_types::wrappers::{Int32Value, StringValue};
     use protobuf::MessageFull;
+
+    #[test]
+    fn any_full_name_matches_descriptor() {
+        assert_eq!(Any::descriptor().full_name(), PROTO_ANY_FULL_NAME);
+    }
 
     #[test]
     fn test_serialize_configuration_none() {
