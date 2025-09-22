@@ -16,7 +16,7 @@ adb shell sdv_ivi_telemetry_service_agent
 adb shell am startservice -n google.sdv.telemetry.java.JavaSdkSampleIviPublisher/.JavaSdkSampleIviPublisher
 
 # Push Configuration and run sample client
-adb push samples/sample_protos/error_publisher.textproto /tmp/
+adb push samples/sample_protos/error_publisher_java_sdk.textproto /tmp/
 adb shell telemetry_rust_c_client --write-reports-to=/tmp/ /tmp/error_publisher_java_sdk.textproto
 ```
 

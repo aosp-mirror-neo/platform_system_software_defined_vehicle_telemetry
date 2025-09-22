@@ -9,11 +9,14 @@ package {
 java_library {
     name: "libsdvconfigurablepublisher-java",
     srcs: ["src/**/*.java"],
-    platform_apis: true,
+    sdk_version: "system_current",
     static_libs: [
         "google.sdv.telemetry.configurable_publisher-V1-java",
         "guava",
+        "telemetry_binder_accessor",
     ],
+
+    vendor: true,
 }
 
 android_test {
