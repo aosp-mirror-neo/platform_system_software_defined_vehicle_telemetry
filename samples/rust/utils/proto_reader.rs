@@ -3,13 +3,12 @@
 //! This module contains helper functions to read metrics configurations from a file.
 
 use anyhow::anyhow;
-use protobuf::{text_format::parse_from_str, Message};
-use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
+use protobuf::{text_format::parse_from_str, MessageFull};
 use std::fs;
 use std::path::Path;
-/// Reads the metrics config from either a binary or legacy formatted textproto file into a bytes
-/// array.
-pub fn read(path: &Path) -> anyhow::Result<Vec<u8>> {
+
+/// Reads a proto from either a binary or legacy formatted textproto file into a bytes array.
+pub fn read_as_bytes<M: MessageFull>(path: &Path) -> anyhow::Result<Vec<u8>> {
     match path.extension().and_then(|o| o.to_str()) {
         Some("bin") | Some("binpb") | Some("pb") => {
             // Read binary into a vector
@@ -17,11 +16,9 @@ pub fn read(path: &Path) -> anyhow::Result<Vec<u8>> {
         }
         Some("textproto") | Some("txtpb") => {
             // Note that go/textformat-spec currently only supports the legacy text proto format.
-            move || -> anyhow::Result<Vec<u8>> {
-                let textproto = fs::read_to_string(path)?;
-                let mc: MetricsConfig = parse_from_str::<MetricsConfig>(&textproto)?;
-                Ok(mc.write_to_bytes()?)
-            }()
+            let textproto = fs::read_to_string(path)?;
+            let proto = parse_from_str::<M>(&textproto)?;
+            Ok(proto.write_to_bytes()?)
         }
         Some(unknown_ext) => Err(anyhow!(
             "Unsupported config file extension {}. Use .textproto, .txtpb, .binpb, .pb or .bin.",
@@ -36,13 +33,16 @@ mod tests {
     use super::*;
 
     use protobuf::MessageField;
+    use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::time::Duration;
 
     #[test]
     fn serialized_bytes_match_legacy_textproto_file_contents() {
-        let serialized_legacy_textproto_config =
-            read(Path::new("config_without_service_publishers.textproto")).unwrap();
+        let serialized_legacy_textproto_config = read_as_bytes::<MetricsConfig>(Path::new(
+            "config_without_service_publishers.textproto",
+        ))
+        .unwrap();
         let config: MetricsConfig =
             protobuf::Message::parse_from_bytes(&serialized_legacy_textproto_config).unwrap();
 

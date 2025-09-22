@@ -2,8 +2,8 @@
 
 use csv::{Reader, Trim};
 use protobuf::{text_format::parse_from_str, Message};
-use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
-use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
+use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_publisher::SimulationPublisher as PublisherConfigProto;
 use std::{
     collections::HashSet,
@@ -27,7 +27,7 @@ pub fn read_metrics_config_from_file(
     let file_name = file_name_os.to_string_lossy().into_owned().clone();
     Ok((
         file_name,
-        metrics_config_reader_utils::read(file_path).map_err(|error| {
+        proto_reader::read_as_bytes::<MetricsConfig>(file_path).map_err(|error| {
             SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error }
         })?,
     ))

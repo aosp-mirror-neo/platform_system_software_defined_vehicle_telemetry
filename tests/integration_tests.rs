@@ -35,7 +35,7 @@ use sdv_telemetry_rust_wrapper::{
 use sdv_telemetry_sample_middleware_proto::tire::{
     GetTireStatusRequest, GetTireStatusResponse, Location as TireLocation, TirePressure,
 };
-use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_test_proto::test_message;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
@@ -111,7 +111,8 @@ async fn telemetry_service_simple_config_end_to_end_test() {
         .await
         .unwrap();
 
-    let serialized_config = metrics_config_reader_utils::read(Path::new(CONFIG_PATH)).unwrap();
+    let serialized_config =
+        proto_reader::read_as_bytes::<MetricsConfig>(Path::new(CONFIG_PATH)).unwrap();
     let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
 
     info!("Adding config");
@@ -176,9 +177,10 @@ async fn telemetry_service_same_trigger_config() {
         .await
         .unwrap();
 
-    let serialized_config =
-        metrics_config_reader_utils::read(Path::new("tests/same_trigger_config.textproto"))
-            .unwrap();
+    let serialized_config = proto_reader::read_as_bytes::<MetricsConfig>(Path::new(
+        "tests/same_trigger_config.textproto",
+    ))
+    .unwrap();
     let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
 
     info!("Adding config");
@@ -600,8 +602,10 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
         .unwrap();
 
     info!("Adding metrics config");
-    let config =
-        metrics_config_reader_utils::read(Path::new("tests/aggregation_config.textproto")).unwrap();
+    let config = proto_reader::read_as_bytes::<MetricsConfig>(Path::new(
+        "tests/aggregation_config.textproto",
+    ))
+    .unwrap();
     let mut config = MetricsConfig::parse_from_bytes(&config).unwrap();
     assert!(config.publishers[0].has_service_publisher());
     assert_eq!(config.publishers[0].service_publisher().service_name, "<placeholder>");
@@ -720,7 +724,7 @@ async fn telemetry_service_someip() {
         .unwrap();
 
     let serialized_config =
-        metrics_config_reader_utils::read(Path::new("tests/someip.textproto")).unwrap();
+        proto_reader::read_as_bytes::<MetricsConfig>(Path::new("tests/someip.textproto")).unwrap();
     let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
     service.add_metrics_config(&serialized_config).await.unwrap();
     service.activate_metrics_config(&config.uuid).await.unwrap();
@@ -853,8 +857,10 @@ async fn telemetry_service_middleware() {
         .unwrap();
 
     info!("Adding metrics config");
-    let config =
-        metrics_config_reader_utils::read(Path::new("tests/middleware_config.textproto")).unwrap();
+    let config = proto_reader::read_as_bytes::<MetricsConfig>(Path::new(
+        "tests/middleware_config.textproto",
+    ))
+    .unwrap();
     let config = MetricsConfig::parse_from_bytes(&config).unwrap();
     let serialized_config = config.write_to_bytes().unwrap();
     let config_uuid = service.add_metrics_config(&serialized_config).await.unwrap();
