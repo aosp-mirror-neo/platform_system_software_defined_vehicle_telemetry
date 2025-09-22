@@ -1,0 +1,18 @@
+// Copyright 2025 Google LLC
+
+gensrcs {
+    name: "error_report_publisher_schema_gen",
+    tools: [
+        "sdv_telemetry_descriptor_generator",
+        "aprotoc",
+    ],
+    srcs: ["ErrorReportPublisher.proto"],
+    output_extension: "java",
+    cmd: "$(location sdv_telemetry_descriptor_generator) " +
+        "--proto_file $(location ErrorReportPublisher.proto) " +
+        "--protoc_tool $(location aprotoc) " +
+        "--output_file $(out) " +
+        "--output_package com.google.android.sdv.telemetry.schemas " +
+        "--output_class ErrorReportPublisher " +
+        "--root_message_name com.google.sdv.telemetry.samples.ErrorReportData",
+}
