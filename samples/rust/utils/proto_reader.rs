@@ -8,17 +8,22 @@ use std::fs;
 use std::path::Path;
 
 /// Reads a proto from either a binary or legacy formatted textproto file into a bytes array.
+/// Returns an error if the bytes do not correspond to a valid Message
 pub fn read_as_bytes<M: MessageFull>(path: &Path) -> anyhow::Result<Vec<u8>> {
+    let message = read_as_message::<M>(path)?;
+    Ok(message.write_to_bytes()?)
+}
+
+/// Reads a proto from either a binary or legacy formatted textproto file into a message.
+pub fn read_as_message<M: MessageFull>(path: &Path) -> anyhow::Result<M> {
     match path.extension().and_then(|o| o.to_str()) {
         Some("bin") | Some("binpb") | Some("pb") => {
-            // Read binary into a vector
-            Ok(fs::read(path)?)
+            let bytes = fs::read(path)?;
+            Ok(M::parse_from_bytes(&bytes)?)
         }
         Some("textproto") | Some("txtpb") => {
-            // Note that go/textformat-spec currently only supports the legacy text proto format.
             let textproto = fs::read_to_string(path)?;
-            let proto = parse_from_str::<M>(&textproto)?;
-            Ok(proto.write_to_bytes()?)
+            Ok(parse_from_str::<M>(&textproto)?)
         }
         Some(unknown_ext) => Err(anyhow!(
             "Unsupported config file extension {}. Use .textproto, .txtpb, .binpb, .pb or .bin.",

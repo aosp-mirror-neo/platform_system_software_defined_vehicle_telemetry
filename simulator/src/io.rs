@@ -1,10 +1,8 @@
 // Copyright 2024 Google LLC
 
 use csv::{Reader, Trim};
-use protobuf::{text_format::parse_from_str, Message};
-use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
-use sdv_telemetry_sample_utils::proto_reader;
-use sdv_telemetry_simulator_proto::simulation_publisher::SimulationPublisher as PublisherConfigProto;
+use protobuf::Message;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::{
     collections::HashSet,
     ffi::OsStr,
@@ -17,42 +15,6 @@ use std::{
 use crate::{output_strings::report_log_header, SimulatorError};
 
 pub const REPORTS_DIR_NAME: &str = "reports";
-
-/// Reads the metrics config at the provided file path into a byte array.
-pub fn read_metrics_config_from_file(file_path: &Path) -> Result<Vec<u8>, SimulatorError> {
-    proto_reader::read_as_bytes::<MetricsConfig>(file_path).map_err(|error| {
-        SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error }
-    })
-}
-
-/// Reads the publisher config at the provided file path into a
-/// PublisherConfigProto message.
-pub fn read_publisher_config_from_file(
-    file_path: &Path,
-) -> Result<PublisherConfigProto, SimulatorError> {
-    let file_name = file_path
-        .file_name()
-        .ok_or(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() })?;
-
-    let extension = file_path.extension().and_then(|o| o.to_str());
-    if extension != Some("textproto") && extension != Some("txtpb") {
-        return Err(SimulatorError::FailedToParseFile {
-            file_name: file_name.to_owned(),
-            error_message: "Publisher config files must have file extension .textproto".to_owned(),
-        });
-    }
-
-    let textproto = fs::read_to_string(file_path).map_err(|error| {
-        SimulatorError::FailedToReadFile { file_path: file_path.to_owned(), error: error.into() }
-    })?;
-    let textproto = parse_from_str::<PublisherConfigProto>(&textproto).map_err(|error| {
-        SimulatorError::FailedToParseFile {
-            file_name: file_name.to_owned(),
-            error_message: error.to_string(),
-        }
-    })?;
-    Ok(textproto)
-}
 
 pub fn parse_csv_file(
     file_path: &Path,
@@ -194,45 +156,9 @@ pub fn create_output_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use sdv_telemetry_test_utils::parameterized_test;
     use tempfile::tempdir;
-
-    #[test]
-    fn test_read_metrics_config_from_file_valid() {
-        let file_path = Path::new("test_data/valid_metrics_config.textproto");
-        let serialized_config = read_metrics_config_from_file(file_path).unwrap();
-        assert!(!serialized_config.is_empty());
-    }
-
-    #[test]
-    fn test_read_metrics_config_from_file_invalid_path() {
-        let file_path = Path::new("test_data/invalid_path/metrics_config.textproto");
-        assert!(
-            read_metrics_config_from_file(file_path).is_err(),
-            "Should have failed to return content for non-existent file"
-        );
-    }
-
-    #[test]
-    fn test_read_publisher_config_from_file_valid() {
-        let file_path = Path::new("test_data/valid_publisher_config.textproto");
-        let publisher_config_proto = read_publisher_config_from_file(file_path).unwrap();
-        assert_eq!(publisher_config_proto.service_name, "TestPublisher");
-    }
-
-    parameterized_test!(
-        #[test]
-        test_read_publisher_config_from_file,
-
-        |file_path, error_string| {
-            let file_path = Path::new(file_path);
-            assert!(read_publisher_config_from_file(file_path).is_err(), "{}", error_string);
-        },
-
-        invalid_path: ("test_data/invalid_path/.", "Should have failed to return content for non-existent file",),
-        invalid_extension: ("test_data/valid_publisher_config.txt","Should have failed to parse file with incorrect extension",),
-        invalid_textproto: ("test_data/invalid_publisher_config.textproto", "Should have failed to parse file with invalid textproto",),
-    );
 
     #[test]
     fn test_parse_csv_file_valid() {

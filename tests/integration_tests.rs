@@ -10,7 +10,7 @@ use log::{debug, info};
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
 use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
 use protobuf::EnumOrUnknown;
-use protobuf::{text_format::parse_from_str, Message, MessageDyn, MessageFull};
+use protobuf::{Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
@@ -976,8 +976,7 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
 
     for path in paths {
         eprintln!("Attempting to parse: {}", path.display());
-        let textproto = fs::read_to_string(path)?;
-        let _proto = parse_from_str::<MetricsConfig>(&textproto)?;
+        let _proto = proto_reader::read_as_message::<MetricsConfig>(&path)?;
     }
 
     Ok(())

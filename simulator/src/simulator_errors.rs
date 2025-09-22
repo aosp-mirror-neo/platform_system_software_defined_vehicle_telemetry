@@ -1,6 +1,5 @@
 // Copyright 2024 Google LLC
 
-use anyhow::Error;
 use sdv_telemetry_rust_wrapper::TelemetryError;
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -34,12 +33,6 @@ pub enum SimulatorError {
 
     #[error("Failed to parse file \"{}\":\n{error_message}", file_name.display())]
     FailedToParseFile { file_name: OsString, error_message: String },
-
-    #[error(
-        "Failed to read file at \"{}\":\n\"{error}\"",
-        .file_path.display()
-    )]
-    FailedToReadFile { file_path: PathBuf, error: Error },
 
     #[error(
         "\"{}\" contains header(s) {incorrect_headers:?} that do not correspond to a message field",

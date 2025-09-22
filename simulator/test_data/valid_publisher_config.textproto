@@ -10,7 +10,7 @@ data_format_protos {
         }
     }
 }
-data_format_message_name: "TestMessage"
+data_format_message_name: ".TestMessage"
 data_generators {
     loop_data: true
     default_delay {
@@ -18,7 +18,7 @@ data_generators {
         nanos: 0
     }
     csv_file {
-        file_path: "test_data.csv"
+        file_path: "test_data/valid_test_data.csv"
         delimiter: ","
     }
 }

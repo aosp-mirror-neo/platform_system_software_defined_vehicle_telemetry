@@ -5,7 +5,10 @@ use protobuf::{
     descriptor::FileDescriptorProto,
     reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor, RuntimeType},
 };
-use sdv_telemetry_simulator_proto::simulation_publisher::data_generator::Data_source;
+use sdv_telemetry_sample_utils::proto_reader;
+use sdv_telemetry_simulator_proto::simulation_publisher::{
+    data_generator::Data_source, SimulationPublisher,
+};
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
 };
@@ -13,7 +16,7 @@ use std::ffi::OsStr;
 use std::{collections::HashSet, path::Path};
 
 use crate::{
-    io::{parse_csv_file, read_publisher_config_from_file},
+    io::parse_csv_file,
     protobuf_parsing::{CsvToProtoMessagesParser, DELAY_FIELD_NAME},
     publisher_config::PublisherConfig,
     simulator_errors::SimulatorError,
@@ -24,7 +27,11 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
         .file_name()
         .ok_or(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() })?;
 
-    let publisher_config_proto = read_publisher_config_from_file(file_path)?;
+    let publisher_config_proto = proto_reader::read_as_message::<SimulationPublisher>(file_path)
+        .map_err(|err| SimulatorError::FailedToParseFile {
+            file_name: file_name.to_owned(),
+            error_message: err.to_string(),
+        })?;
 
     let message_descriptor = get_message_descriptor(
         &publisher_config_proto.data_format_protos,
@@ -198,7 +205,7 @@ mod tests {
     use super::*;
 
     use googletest::assert_that;
-    use googletest::matchers::{eq, ok, pat, result_of_ref};
+    use googletest::matchers::{eq, err, ok, pat, result_of_ref};
     use protobuf::well_known_types::empty::Empty;
     use protobuf::{text_format, MessageFull};
     use sdv_telemetry_simulator_proto::simulation_publisher::{
@@ -260,4 +267,20 @@ mod tests {
         message_with_well_known_type: (".TestMessageWithWellKnownType", &[TestMessageWithWellKnownType::descriptor().file_descriptor_proto()], TestMessageWithWellKnownType::descriptor()),
 
     );
+
+    parameterized_test!(
+        #[test]
+        test_read_publisher_config_from,
+
+        |path, matcher| {
+            let result = parse_publisher_config(Path::new(path));
+            assert_that!(result, matcher);
+        },
+
+        textproto: ("test_data/valid_publisher_config.textproto", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
+        binary: ("test_data/valid_publisher_config.pb", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
+        invalid_path: ("test_data/invalid_path/.", err(pat!(SimulatorError::FailedToParseFile { .. }))),
+        invalid_extension: ("test_data/valid_publisher_config.txt", err(pat!(SimulatorError::FailedToParseFile { .. }))),
+        invalid_textproto: ("test_data/invalid_publisher_config.textproto", err(pat!(SimulatorError::FailedToParseFile { .. })),
+    ));
 }

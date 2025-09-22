@@ -4,6 +4,7 @@ use protobuf::{text_format::print_to_string_pretty, MessageDyn};
 use sdv_telemetry_proto_rust::metrics_configuration::publisher::Publisher_type as PublisherTypeProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
+use sdv_telemetry_sample_utils::proto_reader;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
@@ -12,7 +13,7 @@ use std::{
 
 use crate::{
     io,
-    io::{create_report_log, read_metrics_config_from_file, write_report_to_file},
+    io::{create_report_log, write_report_to_file},
     metrics_config_info::{MetricsConfigInfo, MetricsConfigStatus, ReportConfigStatus},
     output_strings::report_log_entry,
     protobuf_parsing::{decode_report, parse_message_descriptors},
@@ -42,7 +43,13 @@ impl MetricsConfigsTracker {
             .file_name()
             .ok_or(SimulatorError::InvalidFilePath { file_path: file_path.to_owned() })?;
 
-        let serialized_config = read_metrics_config_from_file(file_path)?;
+        let serialized_config =
+            proto_reader::read_as_bytes::<MetricsConfig>(file_path).map_err(|err| {
+                SimulatorError::FailedToParseFile {
+                    file_name: file_name.to_owned(),
+                    error_message: err.to_string(),
+                }
+            })?;
         let config: MetricsConfig = protobuf::Message::parse_from_bytes(&serialized_config)
             .map_err(|error| SimulatorError::FailedToParseFile {
                 file_name: file_name.to_owned(),
@@ -258,4 +265,43 @@ fn create_readable_report(
     };
 
     Ok(report_log_entry(report.report_number, &date_time, reason, &report_content))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::assert_that;
+    use googletest::matchers::container_eq;
+    use sdv_telemetry_test_utils::parameterized_test;
+    use tempfile::tempdir;
+
+    parameterized_test!(
+        #[test]
+        test_read_metrics_config_from,
+
+        |path, matcher| {
+            let tmp_dir = tempdir().unwrap();
+            let mut tracker = MetricsConfigsTracker::new(false, tmp_dir.path().to_owned());
+
+            // Ignore if error is returned
+            let _  = tracker.parse_metrics_config(Path::new(path));
+
+            let result = tracker.get_metrics_config_uuids().into_iter().collect::<Vec<_>>();
+            assert_that!(result, matcher);
+        },
+
+        textproto: (
+            "test_data/valid_metrics_config.textproto",
+            container_eq(vec!["d3456cf0-8fde-436a-9f29-c12f16d10c10"])
+        ),
+        binary: (
+            "test_data/valid_metrics_config.pb",
+            container_eq(vec!["d3456cf0-8fde-436a-9f29-c12f16d10c10"])
+        ),
+        invalid_path: (
+            "test_data/invalid_path/metrics_config.textproto",
+            container_eq(Vec::<&str>::new())
+        ),
+    );
 }
