@@ -76,7 +76,7 @@ rust_binary {
 rust_protobuf {
     name: "libsdv_telemetry_simulator_test_proto",
     crate_name: "sdv_telemetry_simulator_test_proto",
-    protos: ["test_data/test_enum.proto"],
+    protos: ["test_data/test.proto"],
     proto_flags: [
         "-I external/protobuf/src",
     ],

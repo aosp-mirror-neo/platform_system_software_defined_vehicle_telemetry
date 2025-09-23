@@ -1,9 +1,0 @@
-// Copyright 2024 Google LLC
-
-syntax = "proto3";
-
-enum TestEnum {
-  ZERO = 0;
-  ONE = 1;
-  TWO = 2;
-}

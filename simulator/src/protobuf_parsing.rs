@@ -277,7 +277,7 @@ fn parse_value(
 mod tests {
     use super::*;
     use protobuf::EnumFull;
-    use sdv_telemetry_simulator_test_proto::test_enum::TestEnum;
+    use sdv_telemetry_simulator_test_proto::test::TestEnum;
     use sdv_telemetry_test_utils::parameterized_test;
 
     parameterized_test!(

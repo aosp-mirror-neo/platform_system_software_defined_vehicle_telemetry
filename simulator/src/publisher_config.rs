@@ -9,6 +9,7 @@ use std::{
 
 use crate::util::printable_small_duration;
 
+#[cfg_attr(test, derive(Debug))]
 pub struct PublisherConfig {
     pub service_name: String,
     pub loop_data: bool,
@@ -31,6 +32,7 @@ impl PartialEq for PublisherConfig {
 impl Eq for PublisherConfig {}
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug))]
 pub struct ParsedDataEntry {
     pub message: Box<dyn MessageDyn>,
     pub message_bytes: Vec<u8>,
