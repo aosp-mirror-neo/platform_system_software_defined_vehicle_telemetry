@@ -390,19 +390,15 @@ def run_test_batch(
         except subprocess.CalledProcessError:
             success = False
 
-        if success:
-            print_large(f"Test succeeded: {test_name}", color=GREEN)
-            results.set(TestResult(test_name, True, invocation_summary))
-        else:
-            msg = f"Test failed: {test_name}"
+        msg = f"Test {'succeeded' if success else 'failed'}: {test_name}"
+        if test_log_dir is not None:
+            msg += "\nDetailed test run information:"
+            msg += f"\n- Logs: {test_log_dir}"
+        print_large(msg, color=GREEN if success else RED)
 
-            if test_log_dir is not None:
-                msg += "\nDetailed test failure information:"
-                msg += f"\n- Logs: {test_log_dir}"
+        results.set(TestResult(test_name, success, invocation_summary))
 
-            print_large(msg, color=RED)
-            results.set(TestResult(test_name, False, invocation_summary))
-
+        if not success:
             # Reset devices for the next test if this one failed
             if test_num < len(test_names) - 1:
                 print("Resetting devices due to test failure...")
