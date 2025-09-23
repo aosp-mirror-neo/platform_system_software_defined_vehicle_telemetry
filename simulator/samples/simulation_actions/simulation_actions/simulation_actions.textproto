@@ -1,0 +1,80 @@
+# Copyright 2025 Google LLC
+
+# Reports should be generated at the following timestamps:
+# * 1 second
+# * 2 seconds
+# * 3 seconds
+# * 3.5 seconds (INCOMPLETE)
+# * 8 seconds
+# * 8.5 seconds (INCOMPLETE)
+
+actions {
+  delay {
+    # timestamp = 0s
+    seconds: 0
+  }
+  metrics_config_action {
+    config_uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    action_type: ADD
+  }
+}
+actions {
+  delay {
+    # timestamp = 0s
+    seconds: 0
+  }
+  metrics_config_action {
+    config_uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    action_type: ACTIVATE
+  }
+}
+actions {
+  delay {
+    # timestamp = 3.5s
+    seconds: 3
+    nanos: 500000000
+  }
+  metrics_config_action {
+    config_uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    action_type: DEACTIVATE
+  }
+}
+actions {
+  delay {
+    # timestamp = 4.5s
+    seconds: 1
+  }
+  remove_all_metrics_configs_action {}
+}
+actions {
+  delay {
+    # timestamp = 7s
+    seconds: 2
+    nanos: 500000000
+  }
+  metrics_config_action {
+    config_uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    action_type: ADD
+  }
+}
+actions {
+  delay {
+    # timestamp = 7s
+    seconds: 0
+  }
+  metrics_config_action {
+    config_uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    action_type: ACTIVATE
+  }
+}
+actions {
+  delay {
+    # timestamp = 8.5s
+    seconds: 1
+    nanos: 500000000
+  }
+  metrics_config_action {
+    config_uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+    action_type: REMOVE
+  }
+}

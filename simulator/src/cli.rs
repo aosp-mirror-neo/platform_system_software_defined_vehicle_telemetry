@@ -59,6 +59,13 @@ pub struct TelemetryClientArgs {
     )]
     pub metrics_config_paths: Vec<PathBuf>,
 
+    /// Simulation actions config to execute
+    #[arg(
+        long = "simulation-actions",
+        value_hint = clap::ValueHint::FilePath,
+    )]
+    pub sim_actions_path: Option<PathBuf>,
+
     /// Disable writing metrics reports to disk and only write human readable
     /// reports to report log(s)
     #[arg(long = "no-binary-reports")]
@@ -137,6 +144,9 @@ impl fmt::Display for TelemetryClientArgs {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Metrics configs: {:?}", self.metrics_config_paths)?;
         writeln!(f, "Output directory: {}", self.output_directory.display())?;
+        if let Some(path) = &self.sim_actions_path {
+            writeln!(f, "Simulation actions config: {}", path.display())?;
+        }
         if self.no_binary_reports {
             write!(f, "Writing only human-readable report summary, ")?;
             writeln!(f, "not writing binary reports.")
@@ -212,6 +222,7 @@ mod tests {
                 telemetry_client_args: matches_pattern!(TelemetryClientArgs {
                     no_binary_reports: eq(&true),
                     max_report_count: some(eq(&5u64)),
+                    sim_actions_path: none(),
                     output_directory: eq(&PathBuf::from("/data/local/tmp/telemetry_simulator_out")),
                 })
             })
@@ -243,6 +254,8 @@ mod tests {
             "--metrics-configs",
             "metrics_config_1.textproto",
             "metrics_config_2.textproto",
+            "--simulation-actions",
+            "sim_actions.textproto",
             "--publisher-configs",
             "publisher_config_1.textproto",
             "publisher_config_2.textproto",
@@ -263,6 +276,7 @@ mod tests {
                         PathBuf::from("metrics_config_1.textproto"),
                         PathBuf::from("metrics_config_2.textproto")
                     ]),
+                    sim_actions_path: some(eq(&PathBuf::from("sim_actions.textproto"))),
                     output_directory: eq(&PathBuf::from("/foo/bar")),
                 }),
                 simulation_publisher_args: matches_pattern!(SimulationPublisherArgs {
@@ -359,6 +373,7 @@ mod tests {
                 telemetry_client_args: TelemetryClientArgs {
                     max_report_count: Some(5),
                     metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
+                    sim_actions_path: None,
                     no_binary_reports: false,
                     output_directory: PathBuf::from("/foo/bar"),
                 },
@@ -405,6 +420,7 @@ Application will finish after 00:00:10.
                 telemetry_client_args: TelemetryClientArgs {
                     max_report_count: Some(5),
                     metrics_config_paths: vec![PathBuf::from("metrics_config_1.textproto")],
+                    sim_actions_path: PathBuf::from("sim_actions.textproto").into(),
                     no_binary_reports: true,
                     output_directory: PathBuf::from("/foo/bar"),
                 },
@@ -421,6 +437,7 @@ Application will finish after 00:00:10.
         let expected_output = r#"Running telemetry client and simulation publishers
 Metrics configs: ["metrics_config_1.textproto"]
 Output directory: /foo/bar
+Simulation actions config: sim_actions.textproto
 Writing only human-readable report summary, not writing binary reports.
 Publisher configs: ["publisher_config_1.textproto", "publisher_config_2.textproto"]
 Application will finish after 00:00:10 or 5 returned reports, whichever comes first.

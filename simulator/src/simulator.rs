@@ -30,6 +30,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::{
 use log::{error, info};
 use protobuf::{well_known_types::duration::Duration as DurationProto, Message};
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatus};
+use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_actions::{
     metrics_config_action::ActionType as MetricsConfigActionTypeProto,
     simulation_action::Action as SimulationActionTypeProto,
@@ -85,6 +86,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
             run_telemetry_client(
                 None,
                 &telemetry_client_args.metrics_config_paths,
+                telemetry_client_args.sim_actions_path,
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
@@ -103,6 +105,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
             run_telemetry_client(
                 Some(simulation_publisher_args.publisher_config_paths),
                 &telemetry_client_args.metrics_config_paths,
+                telemetry_client_args.sim_actions_path,
                 telemetry_client_args.no_binary_reports,
                 telemetry_client_args.max_report_count,
                 cli_args.max_simulation_time,
@@ -118,6 +121,7 @@ async fn wrapped_main() -> anyhow::Result<()> {
 async fn run_telemetry_client(
     publisher_config_paths: Option<Vec<PathBuf>>,
     metrics_config_paths: &Vec<PathBuf>,
+    sim_actions_path: Option<PathBuf>,
     no_binary_reports: bool,
     max_report_count: Option<u64>,
     max_simulation_time: Duration,
@@ -141,9 +145,12 @@ async fn run_telemetry_client(
 
     let telemetry_service = Arc::new(telemetry_service);
     let metrics_configs_tracker = Arc::new(AsyncMutex::new(metrics_configs_tracker));
-    let actions_task_handle = perform_simulator_actions(
+    let simulation_actions =
+        get_simulation_actions(sim_actions_path, Arc::clone(&metrics_configs_tracker)).await?;
+    let actions_task_handle = perform_simulation_actions(
         Arc::clone(&telemetry_service),
         Arc::clone(&metrics_configs_tracker),
+        simulation_actions,
     )
     .await;
 
@@ -217,13 +224,13 @@ async fn run_telemetry_client(
     Ok(())
 }
 
-async fn perform_simulator_actions(
+async fn perform_simulation_actions(
     service: Arc<TelemetryServiceHolder>,
     tracker: Arc<AsyncMutex<MetricsConfigsTracker>>,
+    actions: SimulationActionsProto,
 ) -> task::JoinHandle<()> {
-    let simulator_actions = get_simulator_actions(Arc::clone(&tracker)).await;
     tokio::spawn(async move {
-        for simulator_action in &simulator_actions.actions {
+        for simulator_action in actions.actions {
             let Ok(delay) = try_into_duration(&simulator_action.delay) else {
                 error!("Invalid delay in simulator action {simulator_action}");
                 continue;
@@ -268,9 +275,21 @@ async fn perform_simulator_actions(
     })
 }
 
-async fn get_simulator_actions(
+async fn get_simulation_actions(
+    config_path: Option<PathBuf>,
     tracker: Arc<AsyncMutex<MetricsConfigsTracker>>,
-) -> SimulationActionsProto {
+) -> Result<SimulationActionsProto, SimulatorError> {
+    if let Some(path) = config_path {
+        let file_name = path
+            .file_name()
+            .ok_or(SimulatorError::InvalidFilePath { file_path: path.to_owned() })?;
+        return proto_reader::read_as_message::<SimulationActionsProto>(&path).map_err(|err| {
+            SimulatorError::FailedToParseFile {
+                file_name: file_name.to_owned(),
+                error_message: err.to_string(),
+            }
+        });
+    }
     // Default simulator actions: add and activate all metrics configs on simulator start
     let actions = tracker
         .lock()
@@ -305,7 +324,7 @@ async fn get_simulator_actions(
         })
         .collect::<Vec<_>>();
 
-    SimulationActionsProto { actions, ..Default::default() }
+    Ok(SimulationActionsProto { actions, ..Default::default() })
 }
 
 /// Parses, registers, and starts the simulation publishers as configured in the provided config
@@ -426,4 +445,33 @@ async fn await_next_report(
     report_ready_tx.recv().await.ok_or_else(|| SimulatorError::Error {
         error_message: "Report listener dropped.".to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::assert_that;
+    use googletest::matchers::{eq, err, len, ok, pat};
+    use sdv_telemetry_test_utils::parameterized_test;
+    use tempfile::tempdir;
+
+    parameterized_test!(
+        #[tokio::test]
+        test_get_simulator_actions,
+
+        |path: Option<PathBuf>, matcher| async move {
+            let tempdir = tempdir().unwrap().path().to_owned();
+            let tracker = Arc::new(AsyncMutex::new(MetricsConfigsTracker::new(false, tempdir)));
+
+            let result = get_simulation_actions(path, tracker).await;
+            assert_that!(result, matcher);
+        },
+
+        none: (None, ok(pat!(SimulationActionsProto { actions: len(eq(0)) }))),
+        txtpb: (Some("test_data/valid_simulation_actions.txtpb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
+        pb: (Some("test_data/valid_simulation_actions.pb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
+        invalid: (Some("test_data/invalid_simulation_actions.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
+        does_not_exist: (Some("does_not_exist.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
+    );
 }
