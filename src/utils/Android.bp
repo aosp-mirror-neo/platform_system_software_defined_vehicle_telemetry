@@ -19,6 +19,7 @@ rust_defaults {
         "liblogger",
         "libprotobuf",
         "libtokio",
+        "libtokio_stream",
         // keep-sorted end
     ],
     proc_macros: [
