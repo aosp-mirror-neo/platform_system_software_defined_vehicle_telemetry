@@ -24,6 +24,7 @@ max_report_count=""
 write_binary_reports=false
 max_simulation_time=""
 base_output_dir=""
+sim_actions_path=""
 
 # Output directory for this run.
 output_dir=""
@@ -130,6 +131,16 @@ while [[ $# -gt 0 ]]; do
       # --binary-reports: Enables writing binary report files.
       write_binary_reports=true
       shift # past argument
+      ;;
+    --sim-actions)
+      # --sim-actions: Sets the path to the simulation actions file.
+      if [[ -n "$2" ]] && [[ "$2" != -* ]]; then
+        sim_actions_path="$2"
+        shift 2 # past argument and value
+      else
+        echo "Error: --sim-actions requires an argument." >&2
+        exit 1
+      fi
       ;;
     *)
       shift # unknown option
@@ -246,6 +257,37 @@ get_config_dir() {
     echo "$selected_dir"
 }
 
+# Prompts the user for the path to a simulation actions file.
+# This is only called if the --sim-actions command-line flag is not used.
+# The simulator will use its default behavior if not specified.
+get_sim_actions_file() {
+    # If path is already set by command-line arg, do nothing.
+    if [ -n "$sim_actions_path" ]; then
+        return
+    fi
+
+    # Don't prompt if using defaults, as simulator actions are not used in the default scenario.
+    if [ "$use_defaults" = true ]; then
+        return
+    fi
+
+    local selected_file
+
+    printf "\nSimulation actions file (optional) [or ENTER to skip]\n>" >&2
+    read -r selected_file </dev/tty
+
+    # No simulation actions configuration specified.
+    if [ -z "$selected_file" ]; then
+        return
+    fi
+
+    if [[ ! -f "$selected_file" ]]; then
+        echo "File '$selected_file' does not seem to exist or is not a regular file, aborting" >&2
+        exit 1
+    fi
+
+    sim_actions_path="$selected_file"
+}
 # Prompts the user for the maximum number of reports to wait for.
 # Only called if there is no `--max-reports` command-line flag.
 get_max_reports() {
@@ -310,6 +352,23 @@ push_publisher_configs() {
             PUBLISHER_CONFIGS+="/data/local/tmp/$FILE_NAME "
         fi
     done
+}
+
+# Pushes the simulation actions file to the VM if specified.
+# It returns the destination path on the VM for use as a command-line argument.
+push_sim_actions() {
+    SIM_ACTIONS_ARG=""
+    if [ -n "$sim_actions_path" ]; then
+        if [ ! -f "$sim_actions_path" ]; then
+            echo "Error: Simulation actions file not found at '$sim_actions_path'" >&2
+            exit 1
+        fi
+        FILE_NAME=${sim_actions_path##*/}
+        adb push "$sim_actions_path" "/data/local/tmp/$FILE_NAME" >/dev/null 2>&1
+        # This will be expanded into --simulation-actions /path/to/file
+        SIM_ACTIONS_ARG="--simulation-actions \"/data/local/tmp/$FILE_NAME\""
+    fi
+    echo "$SIM_ACTIONS_ARG"
 }
 
 # Manages logging and waits for the main simulator process to complete.
@@ -454,15 +513,17 @@ fi
 # directories and other parameters from the user.
 case "$sim_mode" in
     "client")
-        METRICS_DIR=$(get_config_dir "Metrics configs" "metrics_configs")
+        METRICS_DIR=$(get_config_dir "Metrics configs" "average_speed/metrics_configs")
+        get_sim_actions_file
         get_max_reports
         ;;
     "publisher")
-        PUBLISHERS_DIR=$(get_config_dir "Publisher configs and data" "publisher_configs")
+        PUBLISHERS_DIR=$(get_config_dir "Publisher configs and data" "average_speed/publisher_configs")
         ;;
     "both")
-        METRICS_DIR=$(get_config_dir "Metrics configs" "metrics_configs")
-        PUBLISHERS_DIR=$(get_config_dir "Publisher configs and data" "publisher_configs")
+        METRICS_DIR=$(get_config_dir "Metrics configs" "average_speed/metrics_configs")
+        PUBLISHERS_DIR=$(get_config_dir "Publisher configs and data" "average_speed/publisher_configs")
+        get_sim_actions_file
         get_max_reports
         ;;
 esac
@@ -548,6 +609,7 @@ case "$sim_mode" in
     "client")
         # For client-only mode, push metrics configs and run the client.
         push_metrics_configs
+        SIM_ACTIONS_ARG=$(push_sim_actions)
 
         # Ensure the simulator's output directory on the VM is clean before starting.
         # This prevents artifacts from previous runs from being included in the results.
@@ -555,7 +617,7 @@ case "$sim_mode" in
 
         # Construct and run the simulator command via adb shell.
         status_update "Starting simulator..."
-        local no_binary_reports_flag="--no-binary-reports"
+        no_binary_reports_flag="--no-binary-reports"
         if [[ "$write_binary_reports" == true ]]; then
             no_binary_reports_flag=""
         fi
@@ -564,6 +626,7 @@ case "$sim_mode" in
             telemetry-client \
             --output-directory "$SIMULATOR_VM_OUTPUT_DIR" \
             --metrics-configs "$METRICS_CONFIGS" \
+            $SIM_ACTIONS_ARG \
             $no_binary_reports_flag \
             --max-report-count "$max_report_count" &
         # Capture the PID of the backgrounded simulator process.
@@ -592,13 +655,14 @@ case "$sim_mode" in
         # For full simulation, push both sets of configs.
         push_metrics_configs
         push_publisher_configs
+        SIM_ACTIONS_ARG=$(push_sim_actions)
 
         # Ensure the simulator's output directory on the VM is clean before starting.
         adb shell "rm -rf $SIMULATOR_VM_OUTPUT_DIR"
 
         # Construct and run the simulator command for a full simulation.
         status_update "Starting simulator..."
-        local no_binary_reports_flag="--no-binary-reports"
+        no_binary_reports_flag="--no-binary-reports"
         if [[ "$write_binary_reports" == true ]]; then
             no_binary_reports_flag=""
         fi
@@ -607,6 +671,7 @@ case "$sim_mode" in
             full-simulation \
             --output-directory "$SIMULATOR_VM_OUTPUT_DIR" \
             --metrics-configs "$METRICS_CONFIGS" \
+            $SIM_ACTIONS_ARG \
             --publisher-configs "$PUBLISHER_CONFIGS" \
             $no_binary_reports_flag \
             --max-report-count "$max_report_count" &
