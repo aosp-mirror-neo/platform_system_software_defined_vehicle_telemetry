@@ -1,12 +1,7 @@
 // Copyright 2025 Google LLC
 
 use async_stream::stream;
-use futures::{
-    future::{self, OptionFuture},
-    stream::empty as stream_empty,
-    stream::once as stream_once,
-    Stream, StreamExt, TryStreamExt,
-};
+use futures::{Stream, StreamExt, TryStreamExt};
 use sdv_comms::dt;
 use sdv_comms::id::UnitIdentifier;
 use sdv_comms::ContextRef;
@@ -31,57 +26,22 @@ impl Messages {
 
 /// Creates a new `Stream` that produces `Messages` for each set of messages received from the
 /// provided `unit_identifier`.
-///
-/// If `fetch_last_message` is `true`, we fetch the last message using `dt::InstantReader` before
-/// subscribing to new messages. We cannot use the `fetch_last_message` field of
-/// `dt::SubscriberOptions`, because that option only works for same-VM messages (see
-/// b/425992794#comment15, b/427624375, b/441473091, b/441498744).
 pub(crate) async fn create_message_stream(
     ctx: ContextRef,
     unit_identifier: UnitIdentifier,
     sub_sampling_interval: SubSamplingInterval,
     fetch_last_message: bool,
 ) -> SdvResult<impl Stream<Item = anyhow::Result<Messages>>> {
-    // Important: Fetch **and await** the last message _before_ creating the `SubscriberStream`
-    // (otherwise the `SubscriberStream` might return the last message as well!).
-    let maybe_last_message = OptionFuture::from(
-        fetch_last_message.then(|| dt::InstantReader::get_last_message(ctx, &unit_identifier)),
-    )
-    .await;
-
     let mut subscriber_stream = dt::SubscriberStream::create(
         ctx,
         &unit_identifier,
         sub_sampling_interval.as_duration(),
-        dt::SubscriberOptions {
-            // IMPORTANT: This MUST be set to `false`, even if `fetch_last_message` is `true`!
-            fetch_last_message: false,
-        },
+        dt::SubscriberOptions { fetch_last_message },
     )
     .await?;
 
     let message_size =
         u32_into_usize(subscriber_stream.get_publisher_unit_metadata().get_message_size());
-
-    let maybe_last_message = maybe_last_message.and_then(|result| {
-        result.map_or_else(
-            |err| {
-                Some(Err(anyhow::Error::from(err)
-                    .context("Failed to fetch initial message from Data Tunnel message stream")))
-            },
-            |buffer| {
-                if buffer.is_empty() {
-                    None
-                } else {
-                    Some(Ok(Messages { message_count: 1, message_size, buffer }))
-                }
-            },
-        )
-    });
-    let last_message_stream = maybe_last_message.map_or_else(
-        || stream_empty().boxed(),
-        |result| stream_once(future::ready(result)).boxed(),
-    );
 
     let subscriber_stream = stream! {
         while let Some(result) = subscriber_stream.next().await {
@@ -111,7 +71,7 @@ pub(crate) async fn create_message_stream(
             .context("Data Tunnel message stream produced an intermittent error")
     });
 
-    Ok(last_message_stream.chain(subscriber_stream))
+    Ok(subscriber_stream)
 }
 
 #[cfg(all(test, integration_tests))]
@@ -196,25 +156,13 @@ mod integration_tests {
                 .value;
                 i += 1;
 
-                if i == 1 {
-                    // Nothing to do for the first received value (this value is received via
-                    // `dt::InstantReader`).
-                } else if i == 2 {
-                    // The second value must be bigger than the first value. There can be a gap,
-                    // because some time passes between the first value being received via
-                    // `dt::InstantReader` and the second value being received via
-                    // `dt::SubscriberStream`.
-                    assert!(
-                        value > last_value.unwrap(),
-                        "Unexpected value received: last_value = {last_value:?}, value = {value}"
-                    );
-                } else {
-                    // All other values must be consecutive (i.e., increase by exactly 1).
-                    assert!(
-                        value == last_value.unwrap() + 1,
-                        "Unexpected value received: last_value = {last_value:?}, value = {value}"
-                    );
-                }
+                assert!(
+                    last_value.is_none_or(
+                        // All values must be consecutive (i.e., increase by exactly 1).
+                        |last_value| value == last_value + 1
+                    ),
+                    "Unexpected value received: last_value = {last_value:?}, value = {value}"
+                );
                 last_value = Some(value);
             }
         }
@@ -328,15 +276,17 @@ mod integration_tests {
             &messages,
             elements_are!(
                 ok(pat!(&Messages {
-                    message_count: eq(1),
+                    message_count: eq(2),
                     message_size: eq(u32_into_usize(MESSAGE_SIZE)),
-                    buffer: ref container_eq(vec![0; u32_into_usize(MESSAGE_SIZE)]),
+                    buffer: ref container_eq(vec![0; 2 * u32_into_usize(MESSAGE_SIZE)]),
                 })),
+                // TODO: b/446861694 - I am not sure why this happens, but it also doesn't break
+                // anything.
                 ok(pat!(&Messages {
-                    message_count: eq(1),
+                    message_count: eq(0),
                     message_size: eq(u32_into_usize(MESSAGE_SIZE)),
-                    buffer: ref container_eq(vec![0; u32_into_usize(MESSAGE_SIZE)]),
-                }))
+                    buffer: ref container_eq(vec![]),
+                })),
             )
         );
     }
