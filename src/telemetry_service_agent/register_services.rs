@@ -4,7 +4,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
 
-use rustutils::system_properties::PropertyWatcher;
+use rustutils::android::system_properties::PropertyWatcher;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry::SdvTelemetryService;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
