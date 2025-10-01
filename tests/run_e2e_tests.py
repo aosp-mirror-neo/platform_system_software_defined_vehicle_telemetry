@@ -491,7 +491,7 @@ def main() -> None:
         sys.exit(1)
 
     android_build_top = Path(os.environ["ANDROID_BUILD_TOP"])
-    out_dir = os.environ["OUT_DIR"]
+    out_dir = os.environ.get("OUT_DIR", "out")
 
     catbox_dir = (
         android_build_top / out_dir / "host/linux-x86/catbox/android-catbox"
