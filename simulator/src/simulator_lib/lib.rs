@@ -39,7 +39,6 @@ use sdv_telemetry_simulator_proto::simulation_actions::{
 };
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, duration_utils::try_into_duration,
-    logging::validated_log_tag,
 };
 use std::{
     collections::HashMap, collections::HashSet, ops::Deref, path::Path, path::PathBuf, pin::pin,
@@ -63,19 +62,8 @@ use crate::{
     },
 };
 
-const LOG_TAG: &str = validated_log_tag("SdvTelemetrySimulator");
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    sdv_log::init_logger(LOG_TAG)?;
-    sdv_tracing::init_tracing();
-
-    wrapped_main().await.inspect_err(|error| {
-        error!("Simulator failed with error: {error:?}");
-    })
-}
-
-async fn wrapped_main() -> anyhow::Result<()> {
+/// run is the main entrypoint of the simulator.
+pub async fn run() -> anyhow::Result<()> {
     let cli_args = cli::CliArgs::parse();
     info!("Running simulator with args:\n{cli_args}");
 
@@ -469,9 +457,9 @@ mod tests {
         },
 
         none: (None, ok(pat!(SimulationActionsProto { actions: len(eq(0)) }))),
-        txtpb: (Some("test_data/valid_simulation_actions.txtpb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
-        pb: (Some("test_data/valid_simulation_actions.pb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
-        invalid: (Some("test_data/invalid_simulation_actions.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
+        txtpb: (Some("valid_simulation_actions.txtpb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
+        pb: (Some("valid_simulation_actions.pb".into()), ok(pat!(SimulationActionsProto { actions: len(eq(3)) }))),
+        invalid: (Some("invalid_simulation_actions.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
         does_not_exist: (Some("does_not_exist.txtpb".into()), err(pat!(SimulatorError::FailedToParseFile { .. }))),
     );
 }

@@ -277,10 +277,10 @@ mod tests {
             assert_that!(result, matcher);
         },
 
-        textproto: ("test_data/valid_publisher_config.textproto", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
-        binary: ("test_data/valid_publisher_config.pb", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
-        invalid_path: ("test_data/invalid_path/.", err(pat!(SimulatorError::FailedToParseFile { .. }))),
-        invalid_extension: ("test_data/valid_publisher_config.txt", err(pat!(SimulatorError::FailedToParseFile { .. }))),
-        invalid_textproto: ("test_data/invalid_publisher_config.textproto", err(pat!(SimulatorError::FailedToParseFile { .. })),
+        textproto: ("valid_publisher_config.textproto", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
+        binary: ("valid_publisher_config.pb", ok(pat!(PublisherConfig { service_name: eq("TestPublisher"), loop_data: eq(&true)}))),
+        invalid_path: ("invalid_path/.", err(pat!(SimulatorError::FailedToParseFile { .. }))),
+        invalid_extension: ("valid_publisher_config.txt", err(pat!(SimulatorError::FailedToParseFile { .. }))),
+        invalid_textproto: ("invalid_publisher_config.textproto", err(pat!(SimulatorError::FailedToParseFile { .. })),
     ));
 }

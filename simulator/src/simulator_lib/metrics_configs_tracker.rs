@@ -292,15 +292,15 @@ mod tests {
         },
 
         textproto: (
-            "test_data/valid_metrics_config.textproto",
+            "valid_metrics_config.textproto",
             container_eq(vec!["d3456cf0-8fde-436a-9f29-c12f16d10c10"])
         ),
         binary: (
-            "test_data/valid_metrics_config.pb",
+            "valid_metrics_config.pb",
             container_eq(vec!["d3456cf0-8fde-436a-9f29-c12f16d10c10"])
         ),
         invalid_path: (
-            "test_data/invalid_path/metrics_config.textproto",
+            "invalid_path/metrics_config.textproto",
             container_eq(Vec::<&str>::new())
         ),
     );
