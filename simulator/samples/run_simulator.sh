@@ -196,11 +196,6 @@ wait_for_vm() {
         sleep .5
     done
     adb root >/dev/null 2>&1
-
-    if [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
-        # Special handling for the IVI target: start the telemetry service agent.
-        adb shell sdv_ivi_telemetry_service_agent >/dev/null 2>&1 &
-    fi
 }
 
 # Asks the user for a config directory, validates it, and returns the path.
@@ -601,6 +596,15 @@ status_update "Output will be saved to: $output_dir"
 # Wait for the VM to finish booting before proceeding.
 wait_for_vm
 
+if [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
+    simulator_binary=sdv_ivi_telemetry_simulator
+
+    # Special handling for the IVI target: start the telemetry service agent.
+    adb shell sdv_ivi_telemetry_service_agent >/dev/null 2>&1 &
+else
+    simulator_binary=sdv_telemetry_simulator
+fi
+
 trap cleanup EXIT # The EXIT trap runs on any script exit, including signals.
 
 
@@ -621,7 +625,7 @@ case "$sim_mode" in
         if [[ "$write_binary_reports" == true ]]; then
             no_binary_reports_flag=""
         fi
-        adb shell sdv_telemetry_simulator \
+        adb shell "$simulator_binary" \
             --max-simulation-time "$max_simulation_time" \
             telemetry-client \
             --output-directory "$SIMULATOR_VM_OUTPUT_DIR" \
@@ -642,7 +646,7 @@ case "$sim_mode" in
 
         # Construct and run the simulator command.
         status_update "Starting simulator..."
-        adb shell sdv_telemetry_simulator \
+        adb shell "$simulator_binary" \
             --max-simulation-time "$max_simulation_time" \
             simulation-publishers \
             --publisher-configs "$PUBLISHER_CONFIGS" &
@@ -666,7 +670,7 @@ case "$sim_mode" in
         if [[ "$write_binary_reports" == true ]]; then
             no_binary_reports_flag=""
         fi
-        adb shell sdv_telemetry_simulator \
+        adb shell "$simulator_binary" \
             --max-simulation-time "$max_simulation_time" \
             full-simulation \
             --output-directory "$SIMULATOR_VM_OUTPUT_DIR" \
