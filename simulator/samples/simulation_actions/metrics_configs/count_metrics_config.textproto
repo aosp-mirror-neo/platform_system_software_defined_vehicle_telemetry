@@ -7,29 +7,17 @@ descriptor_protos {
   package: "aaos.sdv.telemetry.adhoc"
   message_type {
     name: "count_publisher"
-    field {
-      name: "value"
-      number: 1
-      type: TYPE_INT32
-    }
+    field { name: "value" number: 1 type: TYPE_INT32 }
   }
   message_type {
     name: "report"
-    field {
-      name: "count"
-      number: 1
-      type: TYPE_INT32
-    }
+    field { name: "count" number: 1 type: TYPE_INT32 }
   }
   syntax: "proto2"
 }
 triggers {
   name: "periodic_1s"
-  periodic_trigger {
-    interval {
-      seconds: 1
-    }
-  }
+  periodic_trigger { interval { seconds: 1 } }
 }
 publishers {
   name: "count_publisher"
@@ -45,12 +33,7 @@ publishers {
   }
 }
 # Expression Node 0
-expression_nodes {
-  field_leaf_node {
-    publisher_name: "count_publisher"
-    field_names: "value"
-  }
-}
+expression_nodes { field_leaf_node { publisher_name: "count_publisher" field_names: "value" } }
 metrics_report_configs {
   name: "report"
   trigger_names: "periodic_1s"
@@ -59,9 +42,7 @@ metrics_report_configs {
     message_type: ".aaos.sdv.telemetry.adhoc.report"
     field_assignments {
       field_name: "count"
-      no_aggregation {
-        expression_node_index: 0
-      }
+      no_aggregation { expression_node_index: 0 }
     }
   }
 }

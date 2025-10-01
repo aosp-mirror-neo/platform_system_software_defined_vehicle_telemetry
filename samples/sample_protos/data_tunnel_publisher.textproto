@@ -27,28 +27,15 @@ publishers {
   }
 }
 
-expression_nodes {
-  field_leaf_node {
-    publisher_name: "TestPublisher"
-    field_names: "sample_data"
-  }
-}
+expression_nodes { field_leaf_node { publisher_name: "TestPublisher" field_names: "sample_data" } }
 
 triggers {
   name: "start_trigger"
-  periodic_trigger {
-    interval {
-      seconds: 2
-    }
-  }
+  periodic_trigger { interval { seconds: 2 } }
 }
 triggers {
   name: "period_2s"
-  periodic_trigger {
-    interval {
-      seconds: 2
-    }
-  }
+  periodic_trigger { interval { seconds: 2 } }
 }
 
 start_trigger_name: "start_trigger"

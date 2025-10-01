@@ -4,168 +4,112 @@ version: 1
 
 # ------------------------ DESCRIPTOR PROTOS -----------------------------------
 descriptor_protos {
-    enum_type {
-        name: "Severity"
-        value {
-            name: "UNSPECIFIED"
-            number: 0
-        }
-        value {
-            name:"FATAL"
-            number: 1
-        }
-        value {
-            name: "ERROR"
-            number: 2
-        }
-        value {
-            name: "WARN"
-            number: 3
-        }
-        value {
-            name: "INFO"
-            number: 4
-        }
-        value {
-            name: "TRACE"
-            number: 5
-        }
-      }
+  enum_type {
+    name: "Severity"
+    value { name: "UNSPECIFIED" number: 0 }
+    value { name: "FATAL" number: 1 }
+    value { name: "ERROR" number: 2 }
+    value { name: "WARN" number: 3 }
+    value { name: "INFO" number: 4 }
+    value { name: "TRACE" number: 5 }
+  }
 
-    message_type {
-        name: "ErrorReport"
-        field {
-            type: TYPE_STRING
-            name: "title"
-            number: 1
-        }
-        field {
-            type: TYPE_STRING
-            name: "description"
-            number: 2
-        }
-        field {
-            type: TYPE_ENUM
-            type_name: ".Severity"
-            name: "severity"
-            number: 3
-        }
-        field {
-            type: TYPE_UINT64
-            name: "timestamp"
-            number: 4
-        }
-        field {
-            type: TYPE_BYTES
-            name: "memory_dump"
-            number: 5
-        }
-      }
+  message_type {
+    name: "ErrorReport"
+    field { type: TYPE_STRING name: "title" number: 1 }
+    field { type: TYPE_STRING name: "description" number: 2 }
+    field { type: TYPE_ENUM type_name: ".Severity" name: "severity" number: 3 }
+    field { type: TYPE_UINT64 name: "timestamp" number: 4 }
+    field { type: TYPE_BYTES name: "memory_dump" number: 5 }
+  }
 }
 # ----------------------------- TRIGGERS ---------------------------------------
 
 triggers {
-    name: "new_error_report"
-    data_trigger {
-        publisher_name: "error_report_publisher"
-    }
+  name: "new_error_report"
+  data_trigger { publisher_name: "error_report_publisher" }
 }
-
 
 # ----------------------------- PUBLISHERS -------------------------------------
 
 publishers {
-    name: "error_report_publisher"
-    service_publisher {
-        service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherErrorReport#ErrorReport"
-    }
+  name: "error_report_publisher"
+  service_publisher {
+    service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherErrorReport#ErrorReport"
+  }
 }
 
 # -------------------------- EXPRESSION NODES ----------------------------------
 
-
 # index 0
 expression_nodes {
-    field_leaf_node {
-        publisher_name: "error_report_publisher"
-        field_names: "error_info"
-        field_names: "title"
-      }
+  field_leaf_node {
+    publisher_name: "error_report_publisher"
+    field_names: "error_info"
+    field_names: "title"
+  }
 }
 
 # index 1
 expression_nodes {
-    field_leaf_node {
-        publisher_name: "error_report_publisher"
-        field_names: "error_info"
-        field_names: "description"
-      }
+  field_leaf_node {
+    publisher_name: "error_report_publisher"
+    field_names: "error_info"
+    field_names: "description"
+  }
 }
 
 # index 2
 expression_nodes {
-    field_leaf_node {
-        publisher_name: "error_report_publisher"
-        field_names: "error_info"
-        field_names: "severity"
-      }
+  field_leaf_node {
+    publisher_name: "error_report_publisher"
+    field_names: "error_info"
+    field_names: "severity"
+  }
 }
 
 # index 3
 expression_nodes {
-    field_leaf_node {
-        publisher_name: "error_report_publisher"
-        field_names: "timestamp"
-      }
+  field_leaf_node { publisher_name: "error_report_publisher" field_names: "timestamp" }
 }
 
 # index 4
 expression_nodes {
-    field_leaf_node {
-        publisher_name: "error_report_publisher"
-        field_names: "error_info"
-        field_names: "memory_dump"
-      }
+  field_leaf_node {
+    publisher_name: "error_report_publisher"
+    field_names: "error_info"
+    field_names: "memory_dump"
+  }
 }
 
 # ------------------------ METRIC REPORT CONFIGS -------------------------------
 
 metrics_report_configs {
-    name: "error_report"
-    trigger_names: "new_error_report"
-    report_incomplete: false
+  name: "error_report"
+  trigger_names: "new_error_report"
+  report_incomplete: false
 
-    message_builder {
-        message_type: ".ErrorReport"
-        field_assignments {
-            field_name: "title"
-            no_aggregation {
-                expression_node_index: 0
-            }
-        }
-        field_assignments {
-            field_name: "description"
-            no_aggregation {
-                expression_node_index: 1
-            }
-        }
-        field_assignments {
-            field_name: "severity"
-            no_aggregation {
-                expression_node_index: 2
-            }
-        }
-        field_assignments {
-            field_name: "timestamp"
-            no_aggregation {
-                expression_node_index: 3
-            }
-        }
-        field_assignments {
-            field_name: "memory_dump"
-            no_aggregation {
-                expression_node_index: 4
-            }
-        }
+  message_builder {
+    message_type: ".ErrorReport"
+    field_assignments {
+      field_name: "title"
+      no_aggregation { expression_node_index: 0 }
     }
+    field_assignments {
+      field_name: "description"
+      no_aggregation { expression_node_index: 1 }
+    }
+    field_assignments {
+      field_name: "severity"
+      no_aggregation { expression_node_index: 2 }
+    }
+    field_assignments {
+      field_name: "timestamp"
+      no_aggregation { expression_node_index: 3 }
+    }
+    field_assignments {
+      field_name: "memory_dump"
+      no_aggregation { expression_node_index: 4 }
+    }
+  }
 }

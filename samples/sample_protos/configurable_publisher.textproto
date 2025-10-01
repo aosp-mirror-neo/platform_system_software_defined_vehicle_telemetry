@@ -22,31 +22,18 @@ descriptor_protos {
 
 publishers {
   name: "TestPublisher"
-  service_publisher {
-    service_name: "SampleService"
-  }
+  service_publisher { service_name: "SampleService" }
 }
 
-expression_nodes {
-  field_leaf_node {
-    publisher_name: "TestPublisher"
-    field_names: "sample_data"
-  }
-}
+expression_nodes { field_leaf_node { publisher_name: "TestPublisher" field_names: "sample_data" } }
 
 triggers {
   name: "StartTrigger"
-  periodic_trigger {
-    interval {
-      seconds: 2
-    }
-  }
+  periodic_trigger { interval { seconds: 2 } }
 }
 triggers {
   name: "TestPublisherTrigger"
-  data_trigger {
-    publisher_name: "TestPublisher"
-  }
+  data_trigger { publisher_name: "TestPublisher" }
 }
 
 start_trigger_name: "StartTrigger"
@@ -57,9 +44,7 @@ metrics_report_configs {
     message_type: ".android.automotive.telemetry.messages.SampleReport"
     field_assignments {
       field_name: "sample_data"
-      no_aggregation {
-        expression_node_index: 0
-      }
+      no_aggregation { expression_node_index: 0 }
     }
   }
 }
