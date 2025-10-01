@@ -3,8 +3,9 @@
 //! A Data Tunnel publisher used in the `SdvE2ETelemetryDtFetchLastMessageTest`.
 //! TODO: b/420890689 - Use the Simulator instead, once it supports simulation of DT publishers.
 
-use anyhow::{bail, Context};
-use log::error;
+use anyhow::Context;
+use clap::Parser;
+use log::{error, info};
 use protobuf::{Message, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
@@ -14,22 +15,41 @@ use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
 use sdv_telemetry_dt_publisher_for_fetch_last_message_e2e_test_proto::publisher::Data;
 use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
-use std::env;
 use std::process::ExitCode;
 use std::str::FromStr;
+use std::sync::LazyLock;
 use std::thread::sleep;
 use std::time::Duration;
 
 const LOG_TAG: &str = validated_log_tag("TelemetryTestDtFlmPub");
 
-const SERVICE_FQIN: &str =
-    "vm:com.google.sdv.telemetry.tests.DtPublisherForFetchLastMessageE2ETest/instance";
+static SERVICE_FQIN: LazyLock<String> = LazyLock::new(|| {
+    // Tests may want to run multiple instances of this publisher binary. Therefore, we need to
+    // ensure that the FQINs created by the processes do not conflict with each other. This is
+    // achieved by embedding the process ID into the FQIN.
+    format!(
+        "vm:com.google.sdv.telemetry.tests.DtPublisherForFetchLastMessageE2ETest{}/instance",
+        std::process::id()
+    )
+});
+
 const UNIT_TYPE: &str =
     "com.google.sdv.telemetry.tests.DtPublisherForFetchLastMessageE2ETest#Value";
-const UNIT_NAME: &str = "default";
 
-const MESSAGE_COUNT: u32 = 10;
-const MESSAGE_SIZE: u32 = 32;
+const MESSAGE_COUNT: u32 = 1000;
+const MESSAGE_SIZE: u32 = 10;
+
+/// A Data Tunnel publisher used in the `SdvE2ETelemetryDtFetchLastMessageTest`.
+#[derive(Parser, Debug)]
+#[command()]
+struct Args {
+    /// Unit name to publish under.
+    #[arg(short, long, default_value = "default")]
+    unit_name: String,
+
+    /// Values to publish
+    values: Vec<u32>,
+}
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -68,33 +88,27 @@ async fn create_dt_publisher(
 }
 
 async fn wrapped_main() -> anyhow::Result<()> {
-    let args = env::args()
-        // Skip the first entry, which is the program name.
-        .skip(1)
-        .collect::<Vec<_>>();
+    let args = Args::parse();
 
-    let [ref value] = args[..] else {
-        bail!(
-            "Expected exactly one argument, which is the u32 value of the message to be published, but got: {}",
-            args.join(" ")
-        );
-    };
-    let value = value.parse::<u32>().with_context(|| "Failed to parse value as u32.")?;
-
-    let fqin = ServiceFqin::from_str(SERVICE_FQIN)
-        .with_context(|| format!("Failed to parse FQIN '{SERVICE_FQIN}'."))?;
+    info!("Setting up Data Tunnel publisher");
+    let fqin = ServiceFqin::from_str(&SERVICE_FQIN)
+        .with_context(|| format!("Failed to parse FQIN '{}'.", *SERVICE_FQIN))?;
     let ctx = wait_for_sdv_agents_and_create_context(fqin).await;
 
     let unit_type = UnitType::from_str(UNIT_TYPE)
         .with_context(|| format!("Failed to parse unit type '{UNIT_TYPE}'"))?;
-    let dt_publisher = create_dt_publisher(ctx, &unit_type, UNIT_NAME).await?;
+    let dt_publisher = create_dt_publisher(ctx, &unit_type, &args.unit_name).await?;
 
-    let message = Data { value, ..Default::default() };
-    dt_publisher
-        .publish_length_delimited_proto(&message)
-        .with_context(|| format!("Failed to write message: {message}"))?;
+    for value in args.values {
+        info!("Publishing value {value}");
+        let message = Data { value, ..Default::default() };
+        dt_publisher
+            .publish_length_delimited_proto(&message)
+            .with_context(|| format!("Failed to write message: {message}"))?;
+    }
 
     // Sleep forever and never return. This is necessary, so that the DT topic remains available.
+    info!("Finished publishing values. Sleeping for eternity.");
     sleep(Duration::MAX);
     Ok(())
 }

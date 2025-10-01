@@ -12,6 +12,7 @@ rust_binary {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
+        "libclap",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
