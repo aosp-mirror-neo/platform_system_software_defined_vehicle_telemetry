@@ -29,8 +29,6 @@ rust_binary {
     defaults: ["sdv_telemetry_simulator_defaults"],
 }
 
-// TODO: b/448368262 - Update SDV_IVI_TELEMETRY_SAMPLES_PACKAGES to use this
-// target, as well as all of our e2e tests that run on IVI.
 rust_binary {
     name: "sdv_ivi_telemetry_simulator",
     defaults: ["sdv_telemetry_simulator_defaults"],
