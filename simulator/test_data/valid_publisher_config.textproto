@@ -1,24 +1,14 @@
 # Copyright 2024 Google LLC
 service_name: "TestPublisher"
 data_format_protos {
-    message_type {
-        name: "TestMessage"
-        field {
-            name: "test_field"
-            number: 1
-            type: TYPE_INT32
-        }
-    }
+  message_type {
+    name: "TestMessage"
+    field { name: "test_field" number: 1 type: TYPE_INT32 }
+  }
 }
 data_format_message_name: ".TestMessage"
 data_generators {
-    loop_data: true
-    default_delay {
-        seconds: 1
-        nanos: 0
-    }
-    csv_file {
-        file_path: "test_data/valid_test_data.csv"
-        delimiter: ","
-    }
+  loop_data: true
+  default_delay { seconds: 1 nanos: 0 }
+  csv_file { file_path: "valid_test_data.csv" delimiter: "," }
 }

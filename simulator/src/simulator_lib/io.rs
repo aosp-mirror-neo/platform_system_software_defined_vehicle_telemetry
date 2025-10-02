@@ -162,7 +162,7 @@ mod tests {
 
     #[test]
     fn test_parse_csv_file_valid() {
-        let file_path = Path::new("test_data/valid_publisher_data.csv");
+        let file_path = Path::new("valid_publisher_data.csv");
         let file_name = OsStr::new("valid_publisher_data.csv");
         let expected_headers_set = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
             .into_iter()
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn test_parse_csv_file_custom_delimiter() {
-        let file_path = Path::new("test_data/valid_publisher_data_custom_delimiter.csv");
+        let file_path = Path::new("valid_publisher_data_custom_delimiter.csv");
         let file_name = OsStr::new("valid_publisher_data_custom_delimiter.csv");
         let expected_headers_set = vec!["_delay_before_publishing", "speed", "above_speed_limit"]
             .into_iter()
@@ -207,9 +207,9 @@ mod tests {
             );
         },
 
-        invalid_file_format: ("test_data/invalid_publisher_data_not_csv.txt.csv", "invalid_publisher_data_not_csv.txt.csv", "Parsed non-csv file",),
-        missing_value: ("test_data/invalid_publisher_data_missing_value.csv", "invalid_publisher_data_missing_value.csv", "Parsed csv file with missing value",),
-        redundant_value: ("test_data/invalid_publisher_data_redundant_value.csv", "invalid_publisher_data_redundant_value.csv", "Parsed csv file with redundant value",),
+        invalid_file_format: ("invalid_publisher_data_not_csv.txt.csv", "invalid_publisher_data_not_csv.txt.csv", "Parsed non-csv file",),
+        missing_value: ("invalid_publisher_data_missing_value.csv", "invalid_publisher_data_missing_value.csv", "Parsed csv file with missing value",),
+        redundant_value: ("invalid_publisher_data_redundant_value.csv", "invalid_publisher_data_redundant_value.csv", "Parsed csv file with redundant value",),
     );
 
     #[test]

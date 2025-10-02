@@ -1,0 +1,22 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+rust_protobuf {
+    name: "libsdv_telemetry_simulator_test_proto",
+    crate_name: "sdv_telemetry_simulator_test_proto",
+    protos: ["test.proto"],
+    proto_flags: [
+        "-I external/protobuf/src",
+    ],
+    source_stem: "sdv_telemetry_simulator_test_proto",
+    vendor_available: true,
+}
+
+filegroup {
+    name: "libsdv_telemetry_simulator_test_data",
+    srcs: ["*"],
+}

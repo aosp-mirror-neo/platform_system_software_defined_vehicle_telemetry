@@ -1,48 +1,13 @@
 // Copyright 2024 Google LLC
 
 package {
+    default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
 }
 
 rust_defaults {
-    name: "telemetry_simulator@rust_defaults",
-    defaults: [
-        "sdv_telemetry@rust_defaults",
-    ],
-    srcs: [
-        "src/simulator.rs",
-    ],
-    rustlibs: [
-        // keep-sorted start
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
-        "libanyhow",
-        "libbinder_rs",
-        "libchrono",
-        "libclap",
-        "libcsv",
-        "libfutures",
-        "liblog_rust",
-        "liblogger",
-        "libparking_lot",
-        "libprotobuf",
-        "libscopeguard",
-        "libsdv_log_rust",
-        "libsdv_telemetry_proto_rust",
-        "libsdv_telemetry_rust_wrapper",
-        "libsdv_telemetry_sample_utils",
-        "libsdv_telemetry_simulator_proto",
-        "libsdv_telemetry_utils",
-        "libstrum",
-        "libthiserror",
-        "libtokio",
-        "libtokio_stream",
-        // keep-sorted end
-    ],
-    proc_macros: [
-        // keep-sorted start
-        "libstrum_macros",
-        // keep-sorted end
-    ],
+    name: "sdv_telemetry_simulator@rust_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
     flags: [
         // keep-sorted start
         "-D clippy::allow_attributes_without_reason",
@@ -65,60 +30,4 @@ rust_defaults {
         "-D clippy::unwrap_used",
         // keep-sorted end
     ],
-    vendor: true,
-}
-
-rust_binary {
-    name: "sdv_telemetry_simulator",
-    defaults: ["telemetry_simulator@rust_defaults"],
-}
-
-rust_protobuf {
-    name: "libsdv_telemetry_simulator_test_proto",
-    crate_name: "sdv_telemetry_simulator_test_proto",
-    protos: ["test_data/test.proto"],
-    proto_flags: [
-        "-I external/protobuf/src",
-    ],
-    source_stem: "sdv_telemetry_simulator_test_proto",
-    vendor_available: true,
-}
-
-rust_test {
-    name: "sdv_mt_telemetry_unit_simulator_test",
-    defaults: [
-        "telemetry_simulator@rust_defaults",
-    ],
-    rustlibs: [
-        // keep-sorted start
-        "libgoogletest_rust",
-        "libsdv_telemetry_simulator_test_proto",
-        "libsdv_telemetry_test_utils",
-        "libtempfile",
-        // keep-sorted end
-    ],
-    data: [
-        // keep-sorted start
-        "test_data/*",
-        // keep-sorted end
-    ],
-    flags: [
-        // keep-sorted start
-        "-A clippy::panic",
-        "-A clippy::unwrap_used",
-        // keep-sorted end
-    ],
-    test_suites: [
-        // keep-sorted start
-        "automotive-sdv-tests",
-        "general-tests",
-        // keep-sorted end
-    ],
-    test_options: {
-        unit_test: true,
-    },
-    auto_gen_config: true,
-    // Requires root so the test can create required directories in
-    // /data/local/tests/
-    require_root: true,
 }
