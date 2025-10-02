@@ -119,7 +119,7 @@ def run_command(
         raise
 
 
-def setup_devices(device_count: int) -> List[str]:
+def setup_devices(device_count: int, is_ivi: bool) -> List[str]:
     """Sets up `device_count` Cuttlefish virtual devices."""
     print(f"Setting up {device_count} device(s)...")
 
@@ -130,8 +130,9 @@ def setup_devices(device_count: int) -> List[str]:
 
     adb_serials: List[str] = list()
     for i in range(1, device_count + 1):
+        config = f"sdv_ivi_instance{i}" if is_ivi else f"sdv_core_instance{i}"
         result = run_command(
-            ["cvd", "create", f"--config=sdv_core_instance{i}"],
+            ["cvd", "create", f"--config={config}"],
             capture_output=True,
         )
         result = json.loads(result.stdout)
@@ -355,6 +356,7 @@ def run_test_batch(
     test_runner: TestRunner,
     catbox_binary: Path,
     catbox_dir: Path,
+    is_ivi: bool,
 ) -> TestResults:
     """Runs a batch of tests that require the same number of devices."""
     results = TestResults()
@@ -362,7 +364,7 @@ def run_test_batch(
     if not test_names:
         return results
 
-    adb_serials = setup_devices(device_count)
+    adb_serials = setup_devices(device_count, is_ivi)
 
     for test_num, test_name in enumerate(test_names):
         print_large(f"Running test: {test_name}")
@@ -402,7 +404,7 @@ def run_test_batch(
             # Reset devices for the next test if this one failed
             if test_num < len(test_names) - 1:
                 print("Resetting devices due to test failure...")
-                adb_serials = setup_devices(device_count)
+                adb_serials = setup_devices(device_count, is_ivi)
 
     return results
 
@@ -433,6 +435,7 @@ def run_all_tests(
     catbox_dir: Path,
     catbox_binary: Path,
     sdv_catbox_config_dir: Path,
+    is_ivi: bool,
 ) -> None:
     """Categorizes and runs all specified tests."""
     # Build necessary components
@@ -452,7 +455,12 @@ def run_all_tests(
     # Run tests
     for device_count, test_names in test_batches.items():
         batch_results = run_test_batch(
-            device_count, test_names, test_runner, catbox_binary, catbox_dir
+            device_count,
+            test_names,
+            test_runner,
+            catbox_binary,
+            catbox_dir,
+            is_ivi,
         )
         all_results.extend(batch_results)
 
@@ -475,6 +483,7 @@ def run_all_tests(
                     catbox_dir=catbox_dir,
                     catbox_binary=catbox_binary,
                     sdv_catbox_config_dir=sdv_catbox_config_dir,
+                    is_ivi=is_ivi,
                 )
         except (EOFError, KeyboardInterrupt):
             # Handle cases where stdin is not available or user interrupts
@@ -491,6 +500,7 @@ def main() -> None:
         sys.exit(1)
 
     android_build_top = Path(os.environ["ANDROID_BUILD_TOP"])
+    target_product = os.environ["TARGET_PRODUCT"]
     out_dir = os.environ.get("OUT_DIR", "out")
 
     catbox_dir = (
@@ -502,6 +512,12 @@ def main() -> None:
         android_build_top / "vendor/google_testing/software_defined_vehicle"
     )
     sdv_catbox_config_dir = sdv_e2e_test_repo / "tools/sdv_catbox/res/config"
+
+    # TODO: We do not currently support running tests that require both IVI and
+    # Core VMs.
+    if not ("_ivi_" in target_product or "_core_" in target_product):
+        raise Exception(f"Unexpected TARGET_PRODUCT: {target_product}")
+    is_ivi = "_ivi_" in target_product
 
     parser = argparse.ArgumentParser(
         description="Run SDV Telemetry end-to-end tests."
@@ -537,6 +553,7 @@ def main() -> None:
         catbox_dir=catbox_dir,
         catbox_binary=catbox_binary,
         sdv_catbox_config_dir=sdv_catbox_config_dir,
+        is_ivi=is_ivi,
     )
 
 
