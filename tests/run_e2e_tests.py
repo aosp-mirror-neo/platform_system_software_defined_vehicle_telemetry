@@ -327,20 +327,13 @@ def run_test_with_catbox(
 
 
 def run_test_with_atest(
-    test_name: str,
+    atest_test_name: str,
     device_count: int,
     adb_serials: List[str],
 ) -> Tuple[bool, Optional[Path]]:
     serials = adb_serials[:device_count]
     test_env = os.environ.copy()
     test_env["NOTIFY_AS_NATIVE"] = ",".join(serials)
-
-    # Convert test name from kebab-case to CamelCase for atest
-    atest_test_name = re.sub(
-        r"(?:^|-|(?<=\d))([a-z])",
-        lambda x: x.group(1).upper(),
-        test_name,
-    )
 
     returncode, test_log_dir = stream_and_parse_command(
         command=["atest", atest_test_name],
@@ -356,6 +349,7 @@ def run_test_batch(
     test_runner: TestRunner,
     catbox_binary: Path,
     catbox_dir: Path,
+    sdv_catbox_config_dir: Path,
     is_ivi: bool,
 ) -> TestResults:
     """Runs a batch of tests that require the same number of devices."""
@@ -384,8 +378,11 @@ def run_test_batch(
                     )
                 )
             elif test_runner == TestRunner.ATEST:
+                atest_test_name = get_atest_name_for_test(
+                    test_name, sdv_catbox_config_dir
+                )
                 success, test_log_dir = run_test_with_atest(
-                    test_name=test_name,
+                    atest_test_name=atest_test_name,
                     device_count=device_count,
                     adb_serials=adb_serials,
                 )
@@ -428,6 +425,26 @@ def get_device_count_for_test(
 
     raise Exception(f"Unable to determine device count for test: {test_name}")
 
+def get_atest_name_for_test(
+    test_name: str, sdv_catbox_config_dir: Path
+) -> str:
+    """Parses the test's XML config to determine test's atest name."""
+    config_path = sdv_catbox_config_dir / f"{test_name}.xml"
+    if config_path.exists():
+        tree = ET.parse(config_path)
+        # We actually parse the value of mobly-host:mobly-par-file-name which is
+        # in fact the atest name
+        option = tree.find(".//option[@name='mobly-host:mobly-par-file-name']")
+        if option is not None:
+            atest_name = option.get("value")
+            if atest_name:
+                return atest_name
+
+    raise Exception(
+        "Unable to determine atest name for test:"
+        f" {test_name}"
+    )
+
 
 def run_all_tests(
     test_names: List[str],
@@ -460,6 +477,7 @@ def run_all_tests(
             test_runner,
             catbox_binary,
             catbox_dir,
+            sdv_catbox_config_dir,
             is_ivi,
         )
         all_results.extend(batch_results)
