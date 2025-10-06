@@ -45,16 +45,11 @@ public class JavaSdkSampleIviPublisher extends Service {
     }
 
     PublisherInfoJava pubInfo = getPublisherInfo();
-    if (pubInfo != null) {
-      try {
-        mRegistry.registerPublisher(pubInfo, publisherInterfaceImpl);
-        Log.i(SERVICE_NAME, "Successfully Registered Publisher with Publisher Registry");
-      } catch (ConfigurablePublisherRegistryException e) {
-        Log.e(SERVICE_NAME, "Error in registering publisher: " + e.getMessage(), e);
-      }
-    } else {
-      Log.e(SERVICE_NAME, "Could not create PublisherInfo, stopping service.");
-      stopSelf();
+    try {
+      mRegistry.registerPublisher(pubInfo, publisherInterfaceImpl);
+      Log.i(SERVICE_NAME, "Successfully Registered Publisher with Publisher Registry");
+    } catch (ConfigurablePublisherRegistryException e) {
+      Log.e(SERVICE_NAME, "Error in registering publisher: " + e.getMessage(), e);
     }
   }
 
@@ -85,15 +80,15 @@ public class JavaSdkSampleIviPublisher extends Service {
   }
 
   private PublisherInfoJava getPublisherInfo() {
-    // 1. Get the descriptor byte array from our generated class.
-    byte[] fileDescriptorProto = ErrorReportPublisher.DESCRIPTOR;
+    // 1. Get the file descriptor set byte array from our generated class.
+    byte[] fileDescriptorSet = ErrorReportPublisher.FILE_DESCRIPTOR_SET;
 
     // 2. Get the root message name from our generated class.
     String messageTypeName = ErrorReportPublisher.ROOT_MESSAGE_NAME;
 
     // 3. Create the PublisherInfoJava object.
-    return new PublisherInfoJava(PUBLISHER_NAME, fileDescriptorProto, messageTypeName,
-        true // Whether this publisher supports getLatestMessage().
+    return new PublisherInfoJava(PUBLISHER_NAME, fileDescriptorSet, messageTypeName,
+                                 true // Whether this publisher supports getLatestMessage().
     );
   }
 }

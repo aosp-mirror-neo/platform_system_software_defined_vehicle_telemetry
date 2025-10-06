@@ -17,7 +17,7 @@ android_app {
     ],
     manifest: "sample_ivi_publisher/AndroidManifest.xml",
     static_libs: [
-        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "google.sdv.telemetry.configurable_publisher-V2-java",
         "libprotobuf-java-lite",
         "telemetry_binder_accessor",
     ],
@@ -48,7 +48,7 @@ android_app {
     ],
     manifest: "sample_ivi_publisher/AndroidManifestProd.xml",
     static_libs: [
-        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "google.sdv.telemetry.configurable_publisher-V2-java",
         "libprotobuf-java-lite",
         "telemetry_binder_accessor",
     ],

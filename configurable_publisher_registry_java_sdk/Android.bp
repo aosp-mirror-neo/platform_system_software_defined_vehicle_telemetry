@@ -11,7 +11,7 @@ java_library {
     srcs: ["src/**/*.java"],
     sdk_version: "system_current",
     static_libs: [
-        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "google.sdv.telemetry.configurable_publisher-V2-java",
         "guava",
         "telemetry_binder_accessor",
     ],
@@ -27,7 +27,7 @@ android_test {
 
     static_libs: [
         "libsdvconfigurablepublisher-java",
-        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "google.sdv.telemetry.configurable_publisher-V2-java",
         "mockito-target-inline",
         "mockito-core",
         "androidx.test.runner",

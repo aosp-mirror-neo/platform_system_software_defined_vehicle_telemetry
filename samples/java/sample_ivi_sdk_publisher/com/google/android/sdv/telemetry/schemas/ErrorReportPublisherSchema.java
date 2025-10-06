@@ -10,7 +10,10 @@ public final class ErrorReportPublisherSchema {
   public static final String ROOT_MESSAGE_NAME =
       ".com.google.sdv.telemetry.samples.ErrorReportData";
 
-  public static final byte[] DESCRIPTOR = new byte[] {
+  public static final byte[] FILE_DESCRIPTOR_SET = new byte[] {
+      10,
+      -38,
+      3,
       10,
       28,
       101,
