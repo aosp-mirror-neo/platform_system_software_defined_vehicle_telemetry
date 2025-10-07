@@ -7,9 +7,10 @@ use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
-    ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider,
-    ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval,
+    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
+    NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription,
+    SubSamplingInterval,
 };
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use std::collections::HashMap;
@@ -29,7 +30,7 @@ struct MockServicePublisherAccessorData {
         Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
     >,
     /// Last passed cancellation callback.
-    cancellation_callback: Option<Box<dyn FnOnce() + Send + Sync>>,
+    cancellation_callback: Option<CancellationCallback>,
     /// The last configuration message that was passed to create_subscription.
     last_configuration: Option<Any>,
     /// When set, the descriptor will be returned on the next call to get_metadata.
@@ -151,7 +152,10 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
             data: Arc::downgrade(&self.data),
             sub_sampling_interval: sub_sampling_interval.to_owned(),
         };
-        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(subscription)))
+        Ok(CreateSubscriptionOutcome::Subscribed {
+            subscription: Box::new(subscription),
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        })
     }
 
     async fn register_availability_callback(

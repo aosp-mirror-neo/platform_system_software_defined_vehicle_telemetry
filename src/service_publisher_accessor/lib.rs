@@ -118,10 +118,38 @@ pub struct ServicePublisherMetadata {
     pub message_descriptor: MessageDescriptor,
 }
 
+/// Represents the outcome of whether `fetch_last_message` was enabled, disabled, or is not
+/// supported by the service publisher.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum FetchLastMessageOutcome {
+    /// `fetch_last_message` is not supported by this service publisher.
+    NotSupported,
+    /// `fetch_last_message` is supported and enabled for this service publisher.
+    Enabled,
+    /// `fetch_last_message` is supported but disabled for this service publisher.
+    Disabled,
+}
+
+impl FetchLastMessageOutcome {
+    /// Creates an instance of `Self` that is either `Self::Enabled` or `Self::Disabled`.
+    pub fn new_supported(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+}
+
 /// Successful result of subscription creation.
 pub enum CreateSubscriptionOutcome {
     /// Service publisher is available and a subscription was successfully created.
-    Subscribed(Box<dyn ServicePublisherSubscription>),
+    Subscribed {
+        /// The subscription handle.
+        subscription: Box<dyn ServicePublisherSubscription>,
+        /// Whether the subscription supports `fetch_last_message` and whether it is enabled or not.
+        fetch_last_message_outcome: FetchLastMessageOutcome,
+    },
     /// The service with the specified service name is not registered.
     NotRegistered {
         /// New message callback passed to the create subscription call.
@@ -163,13 +191,16 @@ pub trait ServicePublisherSubscription: Send + Sync {
     async fn unsubscribe(self: Box<Self>);
 }
 
-impl CreateSubscriptionOutcome {
-    /// Returns the contained Subscribed value, consuming the self value.
-    /// Panics if the value is not Subscribed.
-    pub fn unwrap(self) -> Box<dyn ServicePublisherSubscription> {
-        match self {
-            Self::Subscribed(subscription) => subscription,
-            Self::NotRegistered { .. } => panic!("Unexpected result: Not Registered"),
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fetch_last_message_outcome_new_supported() {
+        assert_eq!(FetchLastMessageOutcome::new_supported(true), FetchLastMessageOutcome::Enabled);
+        assert_eq!(
+            FetchLastMessageOutcome::new_supported(false),
+            FetchLastMessageOutcome::Disabled
+        );
     }
 }

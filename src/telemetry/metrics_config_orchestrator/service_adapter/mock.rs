@@ -108,6 +108,7 @@ impl ServiceAdapter for MockServiceAdapter {
                     service_name: String::default(),
                     subscription_id: SequenceNumberType::MAX,
                     sub_sampling_interval: SubSamplingInterval::MAX,
+                    fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
                 },
             }))
         } else {

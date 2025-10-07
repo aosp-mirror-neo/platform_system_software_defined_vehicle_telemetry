@@ -2,6 +2,8 @@
 
 #![cfg(test)]
 
+mod fetch_last_message;
+
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
 use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport as MetricsReportProto;
@@ -22,7 +24,6 @@ use crate::{
 
 /// Uses polling to wait for a Metrics Config with the provided UUID to become inactive. Will fail
 /// if the Metrics Config is not active when this function is called.
-#[expect(dead_code)]
 async fn wait_for_metrics_config_inactive(
     manager: &Arc<impl MetricsConfigManager>,
     config_uuid: &MetricsConfigUuid,
@@ -36,7 +37,6 @@ async fn wait_for_metrics_config_inactive(
 
 /// Creates a `MetricsConfigManager` with the provided `ServicePublisherAccessor`s that uses no
 /// mocks, except for a stub `PlatformAbstractionLayer`.
-#[expect(dead_code)]
 async fn create_manager(
     service_publisher_accessors: Vec<Arc<dyn ServicePublisherAccessor>>,
 ) -> (

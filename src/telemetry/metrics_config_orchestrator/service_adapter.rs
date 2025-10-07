@@ -3,17 +3,18 @@
 use async_trait::async_trait;
 use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
-use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome,
+    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, FetchLastMessageOutcome,
     GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
     ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    SubSamplingInterval,
 };
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
+use tokio::task;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::metrics_config_orchestrator::async_event_processor::{
@@ -27,7 +28,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 };
 
 type CallbackContainer = Arc<
-    AsyncMutex<
+    AsyncMutex<(
         HashMap<
             SequenceNumberType,
             (
@@ -35,7 +36,9 @@ type CallbackContainer = Arc<
                 Box<dyn FnOnce() + Send + Sync>,
             ),
         >,
-    >,
+        // Latest message that was sent to the callbacks.
+        Option<Arc<dyn MessageDyn>>,
+    )>,
 >;
 
 /// Provides an interface to subscribe to messages published by services.
@@ -98,6 +101,8 @@ enum ServiceSubscriptionType {
         service_name: String,
         /// The sub-sampling interval of the shared subscription.
         sub_sampling_interval: SubSamplingInterval,
+        /// The fetch last message outcome of the shared subscription.
+        fetch_last_message_outcome: FetchLastMessageOutcome,
         /// Unique service subscription identifier.
         subscription_id: SequenceNumberType,
     },
@@ -111,17 +116,18 @@ pub(crate) struct ServiceAdapterImpl {
     // The registry of available service publishers.
     service_publisher_accessor: Arc<dyn ServicePublisherAccessor>,
 
-    // The map with service name and sub-sampling interval as a key and a tuple as a value that
-    // consists of:
+    // The map with service name, sub-sampling interval, and fetch last message outcome as a key and
+    // a tuple as a value that consists of:
     // 1. Underlying ServicePublisherSubscription.
-    // 2. The map of functions that need to be called when a new message is available.
+    // 2. Async event processor.
+    // 3. The map of functions that need to be called when a new message is available.
     //
     // The first subscription to service creates a new function map and passes it to the callback
     // that handles new messages. Last unsubscription to service clears the map signaling that the
     // callback shouldn't process messages.
     service_subscriptions: AsyncMutex<
         HashMap<
-            (String, SubSamplingInterval),
+            (String, SubSamplingInterval, FetchLastMessageOutcome),
             (
                 // Underlying accessor subscription.
                 Box<dyn ServicePublisherSubscription>,
@@ -146,8 +152,14 @@ impl ServiceSubscriptionType {
         service_name: String,
         subscription_id: SequenceNumberType,
         sub_sampling_interval: SubSamplingInterval,
+        fetch_last_message_outcome: FetchLastMessageOutcome,
     ) -> ServiceSubscriptionType {
-        ServiceSubscriptionType::Shared { service_name, subscription_id, sub_sampling_interval }
+        ServiceSubscriptionType::Shared {
+            service_name,
+            subscription_id,
+            sub_sampling_interval,
+            fetch_last_message_outcome,
+        }
     }
 }
 
@@ -225,113 +237,175 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 .await?;
 
             match create_subscription_outcome {
-                CreateSubscriptionOutcome::Subscribed(subscription) => {
-                    Some(ServiceSubscriptionType::new_configured(subscription))
-                }
+                CreateSubscriptionOutcome::Subscribed {
+                    subscription,
+                    fetch_last_message_outcome: _,
+                } => Some(ServiceSubscriptionType::new_configured(subscription)),
                 CreateSubscriptionOutcome::NotRegistered { .. } => None,
             }
         } else {
             // Subscription doesn't have configuration, so it can be shared.
             let subscription_id = self.next_subscription_id.next();
 
-            match self
-                .service_subscriptions
-                .lock()
-                .await
-                .entry((service_name.to_owned(), sub_sampling_interval.to_owned()))
-            {
-                Entry::Occupied(o) => {
-                    // If there's already an active subscription, add callback to its map.
-                    let (_, _, callback_container) = o.get();
-                    callback_container
-                        .lock()
-                        .await
-                        .insert(subscription_id, (new_message_callback, cancellation_callback));
+            let mut service_subscriptions = self.service_subscriptions.lock().await;
 
-                    Some(ServiceSubscriptionType::new_shared(
+            // First, try to find an existing subscription that supports `fetch_last_message` for
+            // the `service_name`, `sub_sampling_interval`, and requested `fetch_last_message`.
+            let existing_subscription = service_subscriptions
+                .get_key_value(&(
+                    service_name.to_owned(),
+                    sub_sampling_interval.to_owned(),
+                    FetchLastMessageOutcome::new_supported(fetch_last_message),
+                ))
+                .or_else(|| {
+                    // If no existing subscription that supports `fetch_last_message` is found, try
+                    // to fall back to an existing subscription that doesn't support
+                    // `fetch_last_message`.
+                    service_subscriptions.get_key_value(&(
                         service_name.to_owned(),
-                        subscription_id,
                         sub_sampling_interval.to_owned(),
+                        FetchLastMessageOutcome::NotSupported,
                     ))
-                }
-                Entry::Vacant(v) => {
-                    // If there is no active subscription, create a new one and store it.
-                    let status_reporter = Arc::clone(&self.status_reporter);
-                    let (sender, receiver) = mpsc::unbounded_channel();
-                    let service_name_clone = service_name.to_owned();
-                    let service_name_clone2 = service_name.to_owned();
-                    let self_clone = Arc::clone(&self);
-                    let sub_sampling_interval_clone = sub_sampling_interval.clone();
-                    let create_subscription_outcome = self
-                        .service_publisher_accessor
-                        .create_subscription(
-                            service_name,
-                            None,
-                            fetch_last_message,
-                            sub_sampling_interval,
-                            Box::new(move |msg| match msg {
-                                Ok(msg) => {
-                                    if sender.send(msg).is_err() {
-                                        // This means that `receiver` was dropped - which should
-                                        // never happen, since it is only dropped when unsubscribing.
-                                        error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
-                                    }
-                                }
-                                Err(err) => {
-                                    status_reporter.report(
-                                        err.get_status_code(),
-                                        format!("Service runtime error for service '{service_name_clone}': {err}'"),
-                                        StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
-                                            serviceName: service_name_clone.clone(),
-                                        }));
-                                }
-                            }),
-                            Box::new(move || self_clone.on_shared_subscription_cancelled(&service_name_clone2, &sub_sampling_interval_clone)),
-                        )
-                        .await?;
+                });
+            if let Some(((_, _, fetch_last_message_outcome), (_, _, callback_container))) =
+                existing_subscription
+            {
+                let mut callback_container = callback_container.lock().await;
+                let (ref mut callback_container, ref latest_message) = *callback_container;
 
-                    match create_subscription_outcome {
-                        CreateSubscriptionOutcome::Subscribed(subscription) => {
-                            struct ServiceAdapterHandler {
-                                callback_container: CallbackContainer,
-                            }
-
-                            #[async_trait]
-                            impl AsyncEventHandler<Box<dyn MessageDyn>> for ServiceAdapterHandler {
-                                async fn handle(&mut self, message: Box<dyn MessageDyn>) {
-                                    let mut callbacks = self.callback_container.lock().await;
-
-                                    // Synchronously invoke callbacks. The loop needs to wait before
-                                    // they finish to release the mutex lock when they're done
-                                    // because they're allowed to mutate themselves.
-                                    let msg = message.into();
-                                    for (new_message_callback, _) in callbacks.values_mut() {
-                                        new_message_callback(&msg);
-                                    }
-                                }
-                            }
-
-                            let callbacks = HashMap::from([(
-                                subscription_id,
-                                (new_message_callback, cancellation_callback),
-                            )]);
-                            let callback_container = Arc::new(AsyncMutex::new(callbacks));
-                            let callback_container_clone = Arc::clone(&callback_container);
-                            let event_queue = AsyncEventProcessor::new(
-                                UnboundedReceiverStream::new(receiver),
-                                ServiceAdapterHandler {
-                                    callback_container: callback_container_clone,
-                                },
-                            );
-                            v.insert((subscription, event_queue, callback_container));
-                            Some(ServiceSubscriptionType::new_shared(
-                                service_name.to_owned(),
-                                subscription_id,
-                                sub_sampling_interval.to_owned(),
-                            ))
-                        }
-                        CreateSubscriptionOutcome::NotRegistered { .. } => None,
+                // If a subscription already exists, and the subscribe() call requests
+                // `fetch_last_message`, and the existing subscription has `fetch_last_message`
+                // supported and enabled, then manually call `new_message_callback` to ensure the
+                // same behavior as with a fresh new subscription.
+                if fetch_last_message
+                    && matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled)
+                {
+                    if let Some(latest_message) = latest_message {
+                        new_message_callback(latest_message);
                     }
+                }
+
+                // If there's already an active subscription, add callback to its map.
+                callback_container
+                    .insert(subscription_id, (new_message_callback, cancellation_callback));
+
+                Some(ServiceSubscriptionType::new_shared(
+                    service_name.to_owned(),
+                    subscription_id,
+                    sub_sampling_interval.to_owned(),
+                    *fetch_last_message_outcome,
+                ))
+            } else {
+                // If there is no active subscription, create a new one and store it.
+                let service_name_clone = service_name.to_owned();
+                let status_reporter = Arc::clone(&self.status_reporter);
+                let (new_message_tx, new_message_rx) = mpsc::unbounded_channel();
+                let (cancel_tx, cancel_rx) = oneshot::channel();
+                let create_subscription_outcome = self
+                .service_publisher_accessor
+                .create_subscription(
+                    service_name,
+                    None,
+                    fetch_last_message,
+                    sub_sampling_interval,
+                    Box::new(move |msg| match msg {
+                        Ok(msg) => {
+                            if new_message_tx.send(msg).is_err() {
+                                // This means that `receiver` was dropped - which should never
+                                // happen, since it is only dropped when unsubscribing.
+                                error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
+                            }
+                        }
+                        Err(err) => {
+                            status_reporter.report(
+                                err.get_status_code(),
+                                format!("Service runtime error for service '{service_name_clone}': {err}'"),
+                                StatusDetails::ServiceErrorDetails(ServiceErrorDetails {
+                                    serviceName: service_name_clone.clone(),
+                                }));
+                        }
+                    }),
+                    Box::new(move || {
+                        // An error here would mean that the receiver has already been dropped, in
+                        // which case we are no longer interested in the cancellation.
+                        let _ = cancel_tx.send(());
+                    }),
+                )
+                .await?;
+
+                match create_subscription_outcome {
+                    CreateSubscriptionOutcome::Subscribed {
+                        subscription,
+                        fetch_last_message_outcome,
+                    } => {
+                        let self_clone = Arc::clone(&self);
+                        let service_name_clone = service_name.to_owned();
+                        let sub_sampling_interval_clone = sub_sampling_interval.to_owned();
+                        // We cannot directly call `on_shared_subscription_cancelled` inside of the
+                        // cancellation callback argument passed to `create_subscription`, because
+                        // we need to know the `fetch_last_message_outcome` to perform cancellation,
+                        // which we only know after we have subscribed successfully.
+                        task::spawn(async move {
+                            let Ok(()) = cancel_rx.await else {
+                                // An error here means that the sender was dropped, which means that
+                                // cancellation can no longer occur.
+                                return;
+                            };
+                            self_clone.on_shared_subscription_cancelled(
+                                &service_name_clone,
+                                &sub_sampling_interval_clone,
+                                fetch_last_message_outcome,
+                            )
+                        });
+
+                        struct ServiceAdapterHandler {
+                            callback_container: CallbackContainer,
+                        }
+
+                        #[async_trait]
+                        impl AsyncEventHandler<Box<dyn MessageDyn>> for ServiceAdapterHandler {
+                            async fn handle(&mut self, message: Box<dyn MessageDyn>) {
+                                let mut callback_container = self.callback_container.lock().await;
+                                let (ref mut callbacks, ref mut latest_message) =
+                                    *callback_container;
+
+                                // Synchronously invoke callbacks. The loop needs to wait before
+                                // they finish to release the mutex lock when they're done because
+                                // they're allowed to mutate themselves.
+                                let msg = message.into();
+                                for (new_message_callback, _) in callbacks.values_mut() {
+                                    new_message_callback(&msg);
+                                }
+                                *latest_message = Some(msg);
+                            }
+                        }
+
+                        let callbacks = HashMap::from([(
+                            subscription_id,
+                            (new_message_callback, cancellation_callback),
+                        )]);
+                        let callback_container = Arc::new(AsyncMutex::new((callbacks, None)));
+                        let callback_container_clone = Arc::clone(&callback_container);
+                        let event_queue = AsyncEventProcessor::new(
+                            UnboundedReceiverStream::new(new_message_rx),
+                            ServiceAdapterHandler { callback_container: callback_container_clone },
+                        );
+                        service_subscriptions.insert(
+                            (
+                                service_name.to_owned(),
+                                sub_sampling_interval.to_owned(),
+                                fetch_last_message_outcome,
+                            ),
+                            (subscription, event_queue, callback_container),
+                        );
+                        Some(ServiceSubscriptionType::new_shared(
+                            service_name.to_owned(),
+                            subscription_id,
+                            sub_sampling_interval.to_owned(),
+                            fetch_last_message_outcome,
+                        ))
+                    }
+                    CreateSubscriptionOutcome::NotRegistered { .. } => None,
                 }
             }
         };
@@ -349,17 +423,18 @@ impl ServiceAdapter for ServiceAdapterImpl {
                 service_name,
                 subscription_id,
                 sub_sampling_interval,
+                fetch_last_message_outcome,
             } => {
-                match self
-                    .service_subscriptions
-                    .lock()
-                    .await
-                    .entry((service_name, sub_sampling_interval))
-                {
+                match self.service_subscriptions.lock().await.entry((
+                    service_name,
+                    sub_sampling_interval,
+                    fetch_last_message_outcome,
+                )) {
                     Entry::Occupied(o) => {
                         let (_, _, callback_container) = o.get();
                         let is_last_callback = {
-                            let mut callbacks = callback_container.lock().await;
+                            let mut callback_container = callback_container.lock().await;
+                            let (ref mut callbacks, ref _latest_message) = *callback_container;
                             let _ = callbacks
                                 .remove(&subscription_id)
                                 .expect("Subscription with the specified ID should exist");
@@ -409,21 +484,25 @@ impl ServiceAdapterImpl {
         self: &Arc<Self>,
         service_name: &str,
         sub_sampling_interval: &SubSamplingInterval,
+        fetch_last_message_outcome: FetchLastMessageOutcome,
     ) {
         let self_clone = Arc::clone(self);
         let service_name_clone = service_name.to_owned();
         let sub_sampling_interval_clone = sub_sampling_interval.to_owned();
         tokio::spawn(async move {
-            let Some((_, _, callback_container)) = self_clone
-                .service_subscriptions
-                .lock()
-                .await
-                .remove(&(service_name_clone, sub_sampling_interval_clone))
+            let Some((_, _, callback_container)) =
+                self_clone.service_subscriptions.lock().await.remove(&(
+                    service_name_clone,
+                    sub_sampling_interval_clone,
+                    fetch_last_message_outcome,
+                ))
             else {
                 return;
             };
 
-            for (_, (_, cancellation_callback)) in callback_container.lock().await.drain() {
+            let mut callback_container = callback_container.lock().await;
+            let (ref mut callbacks, ref _latest_message) = *callback_container;
+            for (_, (_, cancellation_callback)) in callbacks.drain() {
                 cancellation_callback();
             }
         });
@@ -512,6 +591,7 @@ pub(super) mod tests {
                 service_name: String::default(),
                 subscription_id: SequenceNumberType::MAX,
                 sub_sampling_interval: SubSamplingInterval::MAX,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
             },
         }
     }
@@ -1213,5 +1293,727 @@ pub(super) mod tests {
             if message.contains("Service runtime error for service") && message.contains(ERROR_MESSAGE) && serviceName == SERVICE_NAME),
             "Unexpected status: {status:?}"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests_with_mockall {
+    use super::*;
+
+    use futures::{stream, StreamExt};
+    use googletest::expect_that;
+    use googletest::matchers::{container_eq, eq};
+    use mockall::{predicate as m, Sequence};
+    use protobuf::well_known_types::wrappers::Int32Value;
+    use rand::random_bool;
+    use sdv_telemetry_service_publisher_accessor::{
+        MockServicePublisherAccessor, MockServicePublisherSubscription,
+    };
+    use sdv_telemetry_test_utils::oneshot_callback;
+    use sdv_telemetry_test_utils::parameterized_test;
+    use std::{sync::LazyLock, time::Duration};
+    use tokio::time::sleep;
+
+    use crate::StatusReporterImpl;
+
+    const SERVICE_NAME: &str = "service";
+
+    static CONFIG_1: LazyLock<Option<Any>> =
+        LazyLock::new(|| Some(Any::pack(&Int32Value { value: 1, ..Default::default() }).unwrap()));
+    static CONFIG_2: LazyLock<Option<Any>> =
+        LazyLock::new(|| Some(Any::pack(&Int32Value { value: 2, ..Default::default() }).unwrap()));
+
+    fn create_service_adapter(
+        accessor: Arc<MockServicePublisherAccessor>,
+    ) -> Arc<ServiceAdapterImpl> {
+        Arc::new(ServiceAdapterImpl::new(
+            accessor,
+            Arc::new(StatusReporterImpl::new(|status| {
+                panic!("Unexpected status: {status:?}");
+            })),
+        ))
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_with_config_does_not_share_subscription() {
+        // All of these subscribe requests should create individual subscriptions, since all of them
+        // specify a configuration.
+        let steps = [
+            (CONFIG_1.as_ref(), false, FetchLastMessageOutcome::Disabled),
+            (CONFIG_1.as_ref(), false, FetchLastMessageOutcome::Disabled),
+            (CONFIG_1.as_ref(), false, FetchLastMessageOutcome::NotSupported),
+            (CONFIG_1.as_ref(), true, FetchLastMessageOutcome::NotSupported),
+            (CONFIG_1.as_ref(), true, FetchLastMessageOutcome::NotSupported),
+            (CONFIG_1.as_ref(), true, FetchLastMessageOutcome::Enabled),
+            (CONFIG_1.as_ref(), true, FetchLastMessageOutcome::Enabled),
+            (CONFIG_2.as_ref(), false, FetchLastMessageOutcome::Disabled),
+            (CONFIG_2.as_ref(), false, FetchLastMessageOutcome::Disabled),
+            (CONFIG_2.as_ref(), false, FetchLastMessageOutcome::NotSupported),
+            (CONFIG_2.as_ref(), false, FetchLastMessageOutcome::NotSupported),
+            (CONFIG_2.as_ref(), false, FetchLastMessageOutcome::Enabled),
+            (CONFIG_2.as_ref(), true, FetchLastMessageOutcome::Enabled),
+            (CONFIG_2.as_ref(), true, FetchLastMessageOutcome::Disabled),
+            (CONFIG_2.as_ref(), true, FetchLastMessageOutcome::Disabled),
+        ];
+
+        let mut seq = Sequence::new();
+        let mut accessor = MockServicePublisherAccessor::new();
+        for (expected_config, expected_fetch_last_message, expected_fetch_last_message_outcome) in
+            steps.iter().cloned()
+        {
+            accessor
+                .expect_create_subscription()
+                .once()
+                .in_sequence(&mut seq)
+                .withf(
+                    move |service_name,
+                          configuration,
+                          fetch_last_message,
+                          sub_sampling_interval,
+                          _new_message_callback,
+                          _cancellation_callback| {
+                        service_name == SERVICE_NAME
+                            && *configuration == expected_config
+                            && *fetch_last_message == expected_fetch_last_message
+                            && *sub_sampling_interval == SubSamplingInterval::ZERO
+                    },
+                )
+                .return_once(
+                    move |_service_name,
+                          _configuration,
+                          _fetch_last_message,
+                          _sub_sampling_interval,
+                          _new_message_callback,
+                          _cancellation_callback| {
+                        Ok(CreateSubscriptionOutcome::Subscribed {
+                            subscription: Box::new(MockServicePublisherSubscription::new()),
+                            fetch_last_message_outcome: expected_fetch_last_message_outcome,
+                        })
+                    },
+                );
+        }
+        let accessor = Arc::new(accessor);
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+        for (config, fetch_last_message, _) in steps.into_iter() {
+            let outcome = Arc::clone(&service_adapter)
+                .subscribe(
+                    SERVICE_NAME,
+                    config,
+                    fetch_last_message,
+                    &SubSamplingInterval::ZERO,
+                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move || panic!("Unexpected cancellation")),
+                )
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                outcome,
+                Some(ServiceSubscription {
+                    subscription_type: ServiceSubscriptionType::Configured {
+                        accessor_subscription: _
+                    }
+                })
+            ));
+        }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_without_config_and_unsupported_fetch_last_message_shares_subscription() {
+        let fetch_last_message_values = [
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+        ];
+        eprintln!("fetch_last_message_values: {fetch_last_message_values:?}");
+
+        let mut accessor = MockServicePublisherAccessor::new();
+        accessor
+            .expect_create_subscription()
+            .once()
+            .withf(
+                move |service_name,
+                      configuration,
+                      fetch_last_message,
+                      sub_sampling_interval,
+                      _new_message_callback,
+                      _cancellation_callback| {
+                    service_name == SERVICE_NAME
+                        && configuration.is_none()
+                        && *fetch_last_message == fetch_last_message_values[0]
+                        && *sub_sampling_interval == SubSamplingInterval::ZERO
+                },
+            )
+            .return_once(
+                move |_service_name,
+                      _configuration,
+                      _fetch_last_message,
+                      _sub_sampling_interval,
+                      _new_message_callback,
+                      _cancellation_callback| {
+                    Ok(CreateSubscriptionOutcome::Subscribed {
+                        subscription: Box::new(MockServicePublisherSubscription::new()),
+                        fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+                    })
+                },
+            );
+        let accessor = Arc::new(accessor);
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+        for fetch_last_message in fetch_last_message_values.into_iter() {
+            let outcome = Arc::clone(&service_adapter)
+                .subscribe(
+                    SERVICE_NAME,
+                    None,
+                    fetch_last_message,
+                    &SubSamplingInterval::ZERO,
+                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move || panic!("Unexpected cancellation")),
+                )
+                .await
+                .unwrap();
+
+            assert!(matches!(
+                outcome,
+                Some(ServiceSubscription {
+                    subscription_type: ServiceSubscriptionType::Shared {
+                        fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+                        ..
+                    }
+                })
+            ));
+        }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribe_without_config_and_supported_fetch_last_message_shares_subscription_for_same_fetch_last_message_value(
+    ) {
+        let fetch_last_message_values = [
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            random_bool(0.5),
+            // Ensure that at least one value is true and one value is false.
+            true,
+            false,
+        ];
+        eprintln!("fetch_last_message_values: {fetch_last_message_values:?}");
+
+        let mut accessor = MockServicePublisherAccessor::new();
+        for want_fetch_last_message in [true, false] {
+            accessor
+                .expect_create_subscription()
+                .once()
+                .withf(
+                    move |service_name,
+                          configuration,
+                          fetch_last_message,
+                          sub_sampling_interval,
+                          _new_message_callback,
+                          _cancellation_callback| {
+                        service_name == SERVICE_NAME
+                            && configuration.is_none()
+                            && *fetch_last_message == want_fetch_last_message
+                            && *sub_sampling_interval == SubSamplingInterval::ZERO
+                    },
+                )
+                .return_once(
+                    move |_service_name,
+                          _configuration,
+                          _fetch_last_message,
+                          _sub_sampling_interval,
+                          _new_message_callback,
+                          _cancellation_callback| {
+                        Ok(CreateSubscriptionOutcome::Subscribed {
+                            subscription: Box::new(MockServicePublisherSubscription::new()),
+                            fetch_last_message_outcome: FetchLastMessageOutcome::new_supported(
+                                want_fetch_last_message,
+                            ),
+                        })
+                    },
+                );
+        }
+        let accessor = Arc::new(accessor);
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+        for fetch_last_message in fetch_last_message_values.into_iter() {
+            let subscription = Arc::clone(&service_adapter)
+                .subscribe(
+                    SERVICE_NAME,
+                    None,
+                    fetch_last_message,
+                    &SubSamplingInterval::ZERO,
+                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move || panic!("Unexpected cancellation")),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+
+            let ServiceSubscription {
+                subscription_type:
+                    ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. },
+            } = subscription
+            else {
+                panic!("Unexpected subscription");
+            };
+
+            assert!(if fetch_last_message {
+                matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled)
+            } else {
+                matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Disabled)
+            });
+        }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribing_twice_with_fetch_last_message_but_there_is_no_last_message() {
+        let mut accessor = MockServicePublisherAccessor::new();
+        accessor
+            .expect_create_subscription()
+            .once()
+            .withf(
+                move |service_name,
+                      configuration,
+                      fetch_last_message,
+                      sub_sampling_interval,
+                      _new_message_callback,
+                      _cancellation_callback| {
+                    service_name == SERVICE_NAME
+                        && configuration.is_none()
+                        && *fetch_last_message
+                        && *sub_sampling_interval == SubSamplingInterval::ZERO
+                },
+            )
+            .return_once(
+                move |_service_name,
+                      _configuration,
+                      _fetch_last_message,
+                      _sub_sampling_interval,
+                      _new_message_callback,
+                      _cancellation_callback| {
+                    Ok(CreateSubscriptionOutcome::Subscribed {
+                        subscription: Box::new(MockServicePublisherSubscription::new()),
+                        fetch_last_message_outcome: FetchLastMessageOutcome::new_supported(true),
+                    })
+                },
+            );
+        let accessor = Arc::new(accessor);
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+        for _ in 0..2 {
+            let subscription = Arc::clone(&service_adapter)
+                .subscribe(
+                    SERVICE_NAME,
+                    None,
+                    true,
+                    &SubSamplingInterval::ZERO,
+                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move || panic!("Unexpected cancellation")),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+
+            let ServiceSubscription {
+                subscription_type:
+                    ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. },
+            } = subscription
+            else {
+                panic!("Unexpected subscription");
+            };
+
+            assert!(matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled));
+        }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn subscribing_twice_with_fetch_last_message_and_there_is_a_last_message() {
+        let mut accessor = MockServicePublisherAccessor::new();
+        accessor
+            .expect_create_subscription()
+            .once()
+            .withf(
+                move |service_name,
+                      configuration,
+                      fetch_last_message,
+                      sub_sampling_interval,
+                      _new_message_callback,
+                      _cancellation_callback| {
+                    service_name == SERVICE_NAME
+                        && configuration.is_none()
+                        && *fetch_last_message
+                        && *sub_sampling_interval == SubSamplingInterval::ZERO
+                },
+            )
+            .return_once(
+                move |_service_name,
+                      _configuration,
+                      _fetch_last_message,
+                      _sub_sampling_interval,
+                      mut new_message_callback,
+                      _cancellation_callback| {
+                    new_message_callback(Ok(Box::new(Int32Value {
+                        value: 123,
+                        ..Default::default()
+                    })));
+
+                    Ok(CreateSubscriptionOutcome::Subscribed {
+                        subscription: Box::new(MockServicePublisherSubscription::new()),
+                        fetch_last_message_outcome: FetchLastMessageOutcome::new_supported(true),
+                    })
+                },
+            );
+        let accessor = Arc::new(accessor);
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+        for _ in 0..2 {
+            let (tx, rx) = oneshot_callback();
+            let subscription = Arc::clone(&service_adapter)
+                .subscribe(
+                    SERVICE_NAME,
+                    None,
+                    true,
+                    &SubSamplingInterval::ZERO,
+                    Box::new(move |msg| tx(msg.to_owned())),
+                    Box::new(move || panic!("Unexpected cancellation")),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+
+            let ServiceSubscription {
+                subscription_type:
+                    ServiceSubscriptionType::Shared { fetch_last_message_outcome, .. },
+            } = subscription
+            else {
+                panic!("Unexpected subscription");
+            };
+
+            assert!(matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled));
+
+            let msg = rx.await.downcast_ref::<Int32Value>().unwrap().to_owned();
+            assert_eq!(msg.value, 123);
+        }
+    }
+
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        subscribing_thrice_times_with_fetch_last_message_and_there_are_multiple_messages,
+
+        |expected_fetch_last_message| async move {
+            let (new_message_tx, new_message_rx) = mpsc::unbounded_channel();
+            let mut new_message_rx = UnboundedReceiverStream::new(new_message_rx);
+
+            let mut accessor = MockServicePublisherAccessor::new();
+            accessor
+                .expect_create_subscription()
+                .once()
+                .withf(
+                    move |service_name,
+                        configuration,
+                        fetch_last_message,
+                        sub_sampling_interval,
+                        _new_message_callback,
+                        _cancellation_callback| {
+                        service_name == SERVICE_NAME
+                            && configuration.is_none()
+                            && expected_fetch_last_message == *fetch_last_message
+                            && *sub_sampling_interval == SubSamplingInterval::ZERO
+                    },
+                )
+                .return_once(
+                    move |_service_name,
+                        _configuration,
+                        _fetch_last_message,
+                        _sub_sampling_interval,
+                        mut new_message_callback,
+                        _cancellation_callback| {
+                        task::spawn(async move {
+                            while let Some(value) = new_message_rx.next().await {
+                                new_message_callback(Ok(Box::new(Int32Value {
+                                    value,
+                                    ..Default::default()
+                                })));
+                            }
+                        });
+
+                        let mut subscription = MockServicePublisherSubscription::new();
+                        subscription.expect_unsubscribe().once().return_const(());
+
+                        Ok(CreateSubscriptionOutcome::Subscribed {
+                            subscription: Box::new(subscription),
+                            fetch_last_message_outcome: FetchLastMessageOutcome::new_supported(expected_fetch_last_message),
+                        })
+                    },
+                );
+
+            let accessor = Arc::new(accessor);
+            let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+            let (subscriber1_tx, subscriber1_rx) = mpsc::unbounded_channel();
+            let (subscriber2_tx, subscriber2_rx) = mpsc::unbounded_channel();
+            let (subscriber3_tx, subscriber3_rx) = mpsc::unbounded_channel();
+            let mut subscriptions = vec![];
+            for (i, subscriber_tx) in [subscriber1_tx, subscriber2_tx, subscriber3_tx].into_iter().enumerate() {
+                let subscription = Arc::clone(&service_adapter)
+                    .subscribe(
+                        SERVICE_NAME,
+                        None,
+                        expected_fetch_last_message,
+                        &SubSamplingInterval::ZERO,
+                        Box::new(move |msg| subscriber_tx.send(msg.to_owned()).unwrap()),
+                        Box::new(move || panic!("Unexpected cancellation")),
+                    )
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert!(if expected_fetch_last_message {
+                    matches!(
+                        subscription,
+                        ServiceSubscription {
+                            subscription_type: ServiceSubscriptionType::Shared {
+                                fetch_last_message_outcome: FetchLastMessageOutcome::Enabled,
+                                ..
+                            },
+                        }
+                    )
+                } else {
+                    matches!(
+                        subscription,
+                        ServiceSubscription {
+                            subscription_type: ServiceSubscriptionType::Shared {
+                                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+                                ..
+                            },
+                        }
+                    )
+                });
+                subscriptions.push(subscription);
+
+                // Publish a few messages after creating the first subscription, but before the second
+                // and third subscription.
+                if i == 0 {
+                    new_message_tx.send(1).unwrap();
+                    new_message_tx.send(2).unwrap();
+                    new_message_tx.send(3).unwrap();
+
+                    // Give the code some time to process the messages before creating the next
+                    // subscription.
+                    sleep(Duration::from_millis(200)).await;
+                }
+            }
+
+            // Publish a few more messages after all three subscriptions are created.
+            new_message_tx.send(4).unwrap();
+            new_message_tx.send(5).unwrap();
+            new_message_tx.send(6).unwrap();
+
+            // Give the code some time to process the messages before unsubscribing.
+            sleep(Duration::from_millis(200)).await;
+            for subscription in subscriptions.into_iter() {
+                service_adapter.unsubscribe(subscription).await;
+            }
+
+            let [messages1, messages2, messages3] =
+                stream::iter([subscriber1_rx, subscriber2_rx, subscriber3_rx])
+                    .then(|subscriber_rx| {
+                        UnboundedReceiverStream::new(subscriber_rx)
+                            .map(|msg| msg.downcast_ref::<Int32Value>().unwrap().value)
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>()
+                    .await
+                    .try_into()
+                    .unwrap();
+
+            expect_that!(messages1, container_eq([1, 2, 3, 4, 5, 6]));
+            if expected_fetch_last_message {
+                expect_that!(messages2, container_eq([3, 4, 5, 6]));
+                expect_that!(messages3, container_eq([3, 4, 5, 6]));
+            } else {
+                expect_that!(messages2, container_eq([4, 5, 6]));
+                expect_that!(messages3, container_eq([4, 5, 6]));
+            }
+        },
+
+        flm_true: (true),
+        flm_false: (false),
+    );
+
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        fetch_last_message_works,
+
+        |fetch_last_message_values: Vec<bool>| async move {
+            run_fetch_last_message_works(fetch_last_message_values).await;
+        },
+
+        r#false: (vec![false]),
+        r#true:  (vec![true]),
+
+        false_false: (vec![false, false]),
+        false_true:  (vec![false, true]),
+        true_false:  (vec![true,  false]),
+        true_true:   (vec![true,  true]),
+
+        false_false_false: (vec![false, false, false]),
+        false_false_true:  (vec![false, false, true]),
+        false_true_false:  (vec![false, true,  false]),
+        false_true_true:   (vec![false, true,  true]),
+        true_false_false:  (vec![true,  false, false]),
+        true_false_true:   (vec![true,  false, true]),
+        true_true_false:   (vec![true,  true,  false]),
+        true_true_true:    (vec![true,  true,  true]),
+    );
+
+    async fn run_fetch_last_message_works(fetch_last_message_values: Vec<bool>) {
+        let mut accessor = MockServicePublisherAccessor::new();
+
+        if fetch_last_message_values.iter().any(|fetch_last_message| !*fetch_last_message) {
+            accessor
+                .expect_create_subscription()
+                .once()
+                .with(
+                    /* service_name */ m::eq(SERVICE_NAME),
+                    /* configuration */ m::always(),
+                    /* fetch_last_message */ m::eq(false),
+                    /* sub_sampling_interval */ m::eq(SubSamplingInterval::ZERO),
+                    /* new_message_callback */ m::always(),
+                    /* cancellation_callback */ m::always(),
+                )
+                .returning(
+                    move |_service_name,
+                          _configuration,
+                          _fetch_last_message,
+                          _sub_sampling_interval,
+                          _new_message_callback,
+                          _cancellation_callback| {
+                        Ok(CreateSubscriptionOutcome::Subscribed {
+                            subscription: Box::new(MockServicePublisherSubscription::new()),
+                            fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+                        })
+                    },
+                );
+        }
+
+        if fetch_last_message_values.iter().any(|fetch_last_message| *fetch_last_message) {
+            accessor
+                .expect_create_subscription()
+                .once()
+                .with(
+                    /* service_name */ m::eq(SERVICE_NAME),
+                    /* configuration */ m::always(),
+                    /* fetch_last_message */ m::eq(true),
+                    /* sub_sampling_interval */ m::eq(SubSamplingInterval::ZERO),
+                    /* new_message_callback */ m::always(),
+                    /* cancellation_callback */ m::always(),
+                )
+                .returning(
+                    move |_service_name,
+                          _configuration,
+                          _fetch_last_message,
+                          _sub_sampling_interval,
+                          mut new_message_callback,
+                          _cancellation_callback| {
+                        new_message_callback(Ok(Box::new(Int32Value {
+                            value: 123,
+                            ..Default::default()
+                        })));
+
+                        Ok(CreateSubscriptionOutcome::Subscribed {
+                            subscription: Box::new(MockServicePublisherSubscription::new()),
+                            fetch_last_message_outcome: FetchLastMessageOutcome::Enabled,
+                        })
+                    },
+                );
+        }
+
+        let accessor = Arc::new(accessor);
+        let service_adapter = create_service_adapter(Arc::clone(&accessor));
+
+        let messages = stream::iter(fetch_last_message_values.into_iter())
+            .then(|fetch_last_message| {
+                let service_adapter = Arc::clone(&service_adapter);
+                async move {
+                    let (message_tx, message_rx) = oneshot_callback();
+
+                    let subscription = service_adapter
+                        .subscribe(
+                            SERVICE_NAME,
+                            None,
+                            fetch_last_message,
+                            &SubSamplingInterval::ZERO,
+                            Box::new(move |msg| {
+                                if fetch_last_message {
+                                    message_tx(msg.to_owned());
+                                } else {
+                                    panic!("Unexpected message: {msg:?}")
+                                }
+                            }),
+                            Box::new(|| panic!("Unexpected cancellation")),
+                        )
+                        .await
+                        .unwrap()
+                        .unwrap();
+                    assert!(if fetch_last_message {
+                        matches!(
+                            subscription,
+                            ServiceSubscription {
+                                subscription_type: ServiceSubscriptionType::Shared {
+                                    fetch_last_message_outcome: FetchLastMessageOutcome::Enabled,
+                                    ..
+                                },
+                            }
+                        )
+                    } else {
+                        matches!(
+                            subscription,
+                            ServiceSubscription {
+                                subscription_type: ServiceSubscriptionType::Shared {
+                                    fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+                                    ..
+                                },
+                            }
+                        )
+                    });
+                    (fetch_last_message, message_rx)
+                }
+            })
+            .collect::<Vec<_>>()
+            .await;
+
+        // Give the code some time to process the messages.
+        sleep(Duration::from_millis(200)).await;
+
+        for (fetch_last_message, message_rx) in messages {
+            if fetch_last_message {
+                let msg = message_rx.await.downcast_ref::<Int32Value>().unwrap().to_owned();
+                expect_that!(msg.value, eq(123));
+            }
+        }
     }
 }
