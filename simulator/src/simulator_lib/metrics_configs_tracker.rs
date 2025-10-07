@@ -231,8 +231,11 @@ impl MetricsConfigsTracker {
 
         if let Some(report_file_names) = &mut report_config.report_file_names {
             let output_file_name = format!(
-                "{}_{}_{}.pb",
-                report.metrics_config_uuid, report.report_config_name, report.report_number
+                "{}_{}_{}_{}.pb",
+                report.metrics_config_uuid,
+                report.report_config_name,
+                report.report_number,
+                report.report_uuid,
             );
             let output_file_path = reports_directory.join(&output_file_name);
             write_report_to_file(&output_file_path, &report)?;
