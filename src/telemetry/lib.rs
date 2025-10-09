@@ -2,18 +2,17 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
+mod component_tests;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
 mod metrics_config_orchestrator_factory;
 mod metrics_config_uuid;
 mod metrics_report_listener;
+mod mock_service_publisher_accessor;
 mod status_listener;
 mod status_reporter;
 
 pub mod service_publisher_manager;
-
-#[cfg(test)]
-mod mock_service_publisher_accessor;
 
 // External dependencies.
 use async_trait::async_trait;
