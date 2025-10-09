@@ -10,7 +10,7 @@ use futures::{FutureExt, StreamExt};
 use log::{debug, error, info};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
-use protobuf::{Message, MessageDyn, MessageFull};
+use protobuf::{Message, MessageFull};
 use sdv_comms::sd::{
     ServiceDiscoveryManager, ServiceUnitChangeEvent, ServiceUnitDefinition, UnitMetadata,
     UnitNameDiscoveryArgs,
@@ -20,7 +20,8 @@ use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProvide
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
@@ -112,16 +113,14 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         }
     }
 
-    async fn create_subscription(
-        &self,
-        service_name: &str,
-        configuration: Option<&Any>,
+    async fn create_subscription<'a>(
+        &'a self,
+        service_name: &'a str,
+        configuration: Option<&'a Any>,
         fetch_last_message: bool,
-        sub_sampling_interval: &SubSamplingInterval,
-        new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        sub_sampling_interval: &'a SubSamplingInterval,
+        new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(CreateSubscriptionOutcome::NotRegistered {
@@ -172,7 +171,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
     async fn register_availability_callback(
         &self,
         service_name: &str,
-        callback: &Arc<dyn Fn() + Send + Sync>,
+        callback: &AvailabilityCallback,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let Ok(service_name) = ServiceName::parse(service_name) else {
             return Ok(None);
@@ -492,7 +491,7 @@ mod integration_tests {
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
-    use protobuf::{reflect::ReflectValueRef, MessageFull};
+    use protobuf::{reflect::ReflectValueRef, MessageDyn, MessageFull};
     use sdv_comms::dt;
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;

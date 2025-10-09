@@ -15,6 +15,7 @@ rust_defaults {
         // keep-sorted start
         "libanyhow",
         "libeither",
+        "libmockall",
         "libnum_integer",
         "libparking_lot",
         "libprotobuf",
