@@ -77,6 +77,7 @@ android_app {
     manifest: "sample_ivi_sdk_publisher/AndroidManifest.xml",
     static_libs: [
         "libsdvconfigurablepublisher-java",
+        "error_report_publisher_schema",
         "libprotobuf-java-lite",
     ],
     proto: {
@@ -100,5 +101,12 @@ java_library {
     srcs: [
         "binder_accessor_lib/BinderServiceAccessor.java",
     ],
+    sdk_version: "system_current",
+}
+
+java_library {
+    name: "error_report_publisher_schema",
+    srcs: [":error_report_publisher_schema_gen"],
+    vendor: true,
     sdk_version: "system_current",
 }

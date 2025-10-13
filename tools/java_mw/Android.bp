@@ -1,0 +1,12 @@
+// Copyright 2025 Google LLC
+
+java_binary_host {
+    name: "sdv_telemetry_descriptor_generator",
+    srcs: ["src/google/sdv/telemetry/descriptor_generator/ProtoDescriptorGenerator.java"],
+    main_class: "google.sdv.telemetry.descriptor_generator.ProtoDescriptorGenerator",
+    static_libs: [
+        "libprotobuf-java-full",
+        "javapoet",
+        "jcommander",
+    ],
+}

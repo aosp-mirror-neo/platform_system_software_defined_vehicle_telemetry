@@ -1,0 +1,42 @@
+// Copyright 2025 Google LLC
+
+// Generates the Java source file from the test proto
+gensrcs {
+    name: "sdv_telemetry_descriptor_generator_test_output",
+    tools: [
+        "sdv_telemetry_descriptor_generator",
+        "aprotoc",
+    ],
+    srcs: ["reference_files/TestMessageSchema.proto"],
+    output_extension: "java",
+    cmd: "$(location sdv_telemetry_descriptor_generator) " +
+        "--proto_file $(location reference_files/TestMessageSchema.proto) " +
+        "--protoc_tool $(location aprotoc) " +
+        "--output_file $(out) " +
+        "--output_package com.google.android.sdv.telemetry.schemas " +
+        "--output_class TestMessageSchema " +
+        "--root_message_name com.google.sdv.telemetry.test.TestMessage",
+}
+
+java_test_host {
+    name: "sdv_mt_proto_descriptor_generator_test",
+    srcs: [
+        "src/google/sdv/telemetry/descriptor_generator/ProtoDescriptorGeneratorTest.java",
+        ":sdv_telemetry_descriptor_generator_test_output",
+    ],
+    data: ["reference_files/InvalidMessageSchema.proto"],
+    static_libs: [
+        "junit",
+        "libprotobuf-java-full",
+        "truth",
+        "sdv_telemetry_descriptor_generator",
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    auto_gen_config: true,
+    test_suites: [
+        "automotive-sdv-tests",
+        "general-tests",
+    ],
+}

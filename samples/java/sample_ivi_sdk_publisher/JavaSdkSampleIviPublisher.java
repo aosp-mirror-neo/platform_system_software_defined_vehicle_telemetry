@@ -11,7 +11,7 @@ import android.os.Bundle;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.util.Log;
-import com.google.sdv.telemetry.samples.ErrorReportPublisher;
+import com.google.android.sdv.telemetry.schemas.ErrorReportPublisher;
 import google.sdv.telemetry.configurable_publisher_sdk.*;
 import java.io.File;
 import java.io.IOException;
@@ -44,7 +44,7 @@ public class JavaSdkSampleIviPublisher extends Service {
       Log.e(SERVICE_NAME, "Error in connecting to Publisher Registry");
     }
 
-    PublisherInfoJava pubInfo = createSamplePublisherInfo();
+    PublisherInfoJava pubInfo = getPublisherInfo();
     if (pubInfo != null) {
       try {
         mRegistry.registerPublisher(pubInfo, publisherInterfaceImpl);
@@ -84,16 +84,16 @@ public class JavaSdkSampleIviPublisher extends Service {
     return null;
   }
 
-  private PublisherInfoJava createSamplePublisherInfo() {
-    try {
-      InputStream input =
-          getApplicationContext().getAssets().open("error_pub_proto_descriptor.bin");
-      byte[] fileContent = input.readAllBytes();
-      return new PublisherInfoJava(
-          PUBLISHER_NAME, fileContent, ".com.google.sdv.telemetry.samples.ErrorReportData", true);
-    } catch (IOException e) {
-      Log.e(SERVICE_NAME, "Failed to read error_pub_proto_descriptor", e);
-      return null;
-    }
+  private PublisherInfoJava getPublisherInfo() {
+    // 1. Get the descriptor byte array from our generated class.
+    byte[] fileDescriptorProto = ErrorReportPublisher.DESCRIPTOR;
+
+    // 2. Get the root message name from our generated class.
+    String messageTypeName = ErrorReportPublisher.ROOT_MESSAGE_NAME;
+
+    // 3. Create the PublisherInfoJava object.
+    return new PublisherInfoJava(PUBLISHER_NAME, fileDescriptorProto, messageTypeName,
+        true // Whether this publisher supports getLatestMessage().
+    );
   }
 }
