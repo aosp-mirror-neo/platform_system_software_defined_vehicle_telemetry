@@ -5,39 +5,25 @@ version: 1
 descriptor_protos {
   message_type {
     name: "Report"
-    field {
-      type: TYPE_INT32
-      name: "status"
-      number: 1
-    }
+    field { type: TYPE_INT32 name: "status" number: 1 }
   }
 }
 
-expression_nodes {
-  constant_leaf_node {
-    int32_value: 12345
-  }
-}
+expression_nodes { constant_leaf_node { int32_value: 12345 } }
 
 triggers {
   name: "every_3_seconds"
-  periodic_trigger {
-    interval {
-      seconds: 3
-    }
-  }
+  periodic_trigger { interval { seconds: 3 } }
 }
 
 metrics_report_configs {
-    name: "report_with_constant"
-    trigger_names: "every_3_seconds"
-    message_builder {
-        message_type: ".Report"
-        field_assignments {
-            field_name: "status"
-            no_aggregation {
-                expression_node_index: 0
-            }
-        }
+  name: "report_with_constant"
+  trigger_names: "every_3_seconds"
+  message_builder {
+    message_type: ".Report"
+    field_assignments {
+      field_name: "status"
+      no_aggregation { expression_node_index: 0 }
     }
+  }
 }

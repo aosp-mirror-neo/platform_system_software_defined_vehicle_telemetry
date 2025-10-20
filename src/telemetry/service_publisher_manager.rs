@@ -5,9 +5,10 @@
 
 use async_trait::async_trait;
 use futures::future;
-use protobuf::{well_known_types::any::Any, MessageDyn};
+use protobuf::well_known_types::any::Any;
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
@@ -68,16 +69,14 @@ impl ServicePublisherAccessor for ServicePublisherManager {
         })
     }
 
-    async fn create_subscription(
-        &self,
-        service_name: &str,
-        configuration: Option<&Any>,
+    async fn create_subscription<'a>(
+        &'a self,
+        service_name: &'a str,
+        configuration: Option<&'a Any>,
         fetch_last_message: bool,
-        sub_sampling_interval: &SubSamplingInterval,
-        mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        mut cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        sub_sampling_interval: &'a SubSamplingInterval,
+        mut new_message_callback: NewMessageCallback,
+        mut cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         for accessor in &self.service_publisher_registry {
             (new_message_callback, cancellation_callback) = match accessor
@@ -105,7 +104,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
     async fn register_availability_callback(
         &self,
         service_name: &str,
-        callback: &Arc<dyn Fn() + Send + Sync>,
+        callback: &AvailabilityCallback,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let mut registrations = Vec::new();
 
@@ -147,7 +146,7 @@ mod tests {
 
     use anyhow::anyhow;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-    use protobuf::MessageFull;
+    use protobuf::{MessageDyn, MessageFull};
     use std::sync::Arc;
 
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;

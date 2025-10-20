@@ -1,10 +1,13 @@
 // Copyright 2023 Google LLC
 
+#![cfg(test)]
+
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, GetMessageProviderOutcome,
+    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
+    CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider,
     ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval,
 };
@@ -108,16 +111,14 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
         })))
     }
 
-    async fn create_subscription(
-        &self,
-        service_name: &str,
-        configuration: Option<&Any>,
+    async fn create_subscription<'a>(
+        &'a self,
+        service_name: &'a str,
+        configuration: Option<&'a Any>,
         _fetch_last_message: bool,
-        sub_sampling_interval: &SubSamplingInterval,
-        new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        sub_sampling_interval: &'a SubSamplingInterval,
+        new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let mut data = self.data.lock();
         data.last_configuration = configuration.cloned();
@@ -156,7 +157,7 @@ impl ServicePublisherAccessor for MockServicePublisherAccessor {
     async fn register_availability_callback(
         &self,
         _service_name: &str,
-        _callback: &Arc<dyn Fn() + Send + Sync>,
+        _callback: &AvailabilityCallback,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let mut data = self.data.lock();
         data.num_register_availability_callback_calls += 1;

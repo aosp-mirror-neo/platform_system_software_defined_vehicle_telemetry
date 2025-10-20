@@ -10,10 +10,11 @@ use crate::metrics_config_orchestrator::subscription_manager::{
     Activatable, ActivationId, SubscriptionManager, SubscriptionManagerImpl,
 };
 use crate::metrics_config_orchestrator::trigger::TriggerSubscriber;
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 pub(super) struct BaseTrigger {
     name: String,
-    metrics_config_uuid: String,
+    metrics_config_uuid: MetricsConfigUuid,
 
     pub(super) state: AsyncMutex<TriggerState>,
 
@@ -36,7 +37,7 @@ pub(super) enum TriggerState {
 impl BaseTrigger {
     pub(super) fn new(
         name: String,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         trigger: Weak<dyn Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>>>,
     ) -> Self {
         BaseTrigger {
@@ -51,7 +52,7 @@ impl BaseTrigger {
         &self.name
     }
 
-    pub(super) fn get_metrics_config_uuid(&self) -> &str {
+    pub(super) fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         &self.metrics_config_uuid
     }
 

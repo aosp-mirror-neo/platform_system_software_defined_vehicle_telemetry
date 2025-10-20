@@ -2,17 +2,17 @@
 
 //! This module implements the ITelemetryService AIDL interface
 
+mod component_tests;
 mod metrics_config_manager;
 mod metrics_config_orchestrator;
 mod metrics_config_orchestrator_factory;
+mod metrics_config_uuid;
 mod metrics_report_listener;
+mod mock_service_publisher_accessor;
 mod status_listener;
 mod status_reporter;
 
 pub mod service_publisher_manager;
-
-#[cfg(test)]
-mod mock_service_publisher_accessor;
 
 // External dependencies.
 use async_trait::async_trait;
@@ -186,7 +186,9 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
                         error!("Unable to add Metrics Config: {e:?}");
                         get_error_code_and_message(e)
                     },
-                    |config_uuid| (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, config_uuid),
+                    |config_uuid| {
+                        (StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS, config_uuid.to_string())
+                    },
                 );
 
             data.status_listener.send_api_status(api_call_id, status_code, &status_message);
@@ -324,7 +326,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             if let Err(e) = config_list_listener.deref().sendConfigList(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                 "",
-                &uuids,
+                &uuids.into_iter().map(|uuid| uuid.to_string()).collect::<Vec<_>>(),
             ) {
                 warn!("Unable to send config list to the client: {e:?}");
             }
@@ -348,7 +350,7 @@ impl ITelemetryServiceAsyncServer for SdvTelemetryService {
             if let Err(e) = config_list_listener.deref().sendConfigList(
                 StatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS,
                 "",
-                &uuids,
+                &uuids.into_iter().map(|uuid| uuid.to_string()).collect::<Vec<_>>(),
             ) {
                 warn!("Unable to send config list to the client: {e:?}");
             }
@@ -1219,7 +1221,9 @@ mod tests {
         );
 
         let config_uuids = [UUID1.to_string(), UUID2.to_string()];
-        test_environment.metrics_config_manager.populate_active_configs(config_uuids.to_vec());
+        test_environment.metrics_config_manager.populate_active_configs(
+            config_uuids.iter().map(|uuid| uuid.parse().unwrap()).collect::<Vec<_>>(),
+        );
         let status_receiver = config_list_listener.expect_call();
 
         test_environment
@@ -1251,7 +1255,9 @@ mod tests {
         );
 
         let config_uuids = [UUID1.to_string(), UUID2.to_string()];
-        test_environment.metrics_config_manager.populate_inactive_configs(config_uuids.to_vec());
+        test_environment.metrics_config_manager.populate_inactive_configs(
+            config_uuids.iter().map(|uuid| uuid.parse().unwrap()).collect::<Vec<_>>(),
+        );
         let status_receiver = config_list_listener.expect_call();
 
         test_environment

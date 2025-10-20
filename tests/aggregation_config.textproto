@@ -9,20 +9,13 @@ descriptor_protos {
   package: "android.automotive.telemetry.messages"
   message_type {
     name: "Report"
-    field {
-      label: LABEL_REPEATED
-      type: TYPE_INT32
-      name: "int_vector"
-      number: 1
-    }
+    field { label: LABEL_REPEATED type: TYPE_INT32 name: "int_vector" number: 1 }
   }
 }
 
 publishers {
   name: "dt_publisher"
-  service_publisher {
-    service_name: "<placeholder>"
-  }
+  service_publisher { service_name: "<placeholder>" }
 }
 
 publishers {
@@ -33,52 +26,29 @@ publishers {
       message_type: ".android.automotive.telemetry.messages.Report"
       field_assignments {
         field_name: "int_vector"
-        vector_aggregation {
-          expression_node_index: 0
-          max_length: 100
-        }
+        vector_aggregation { expression_node_index: 0 max_length: 100 }
       }
     }
   }
 }
 
-expression_nodes {
-  field_leaf_node {
-    publisher_name: "dt_publisher"
-    field_names: "int_field"
-  }
-}
+expression_nodes { field_leaf_node { publisher_name: "dt_publisher" field_names: "int_field" } }
 
-expression_nodes {
-  field_leaf_node {
-    publisher_name: "agg_publisher"
-    field_names: "int_vector"
-  }
-}
+expression_nodes { field_leaf_node { publisher_name: "agg_publisher" field_names: "int_vector" } }
 
 triggers {
   name: "finish_trigger"
-  periodic_trigger {
-    interval {
-      seconds: 6
-    }
-  }
+  periodic_trigger { interval { seconds: 6 } }
 }
 
 triggers {
   name: "report_trigger"
-  periodic_trigger {
-    interval {
-      seconds: 4
-    }
-  }
+  periodic_trigger { interval { seconds: 4 } }
 }
 
 triggers {
   name: "data_trigger"
-  data_trigger {
-    publisher_name: "dt_publisher"
-  }
+  data_trigger { publisher_name: "dt_publisher" }
 }
 
 finish_trigger_name: "finish_trigger"
@@ -90,9 +60,7 @@ metrics_report_configs {
     message_type: ".android.automotive.telemetry.messages.Report"
     field_assignments {
       field_name: "int_vector"
-      no_aggregation {
-        expression_node_index: 1
-      }
+      no_aggregation { expression_node_index: 1 }
     }
   }
 }

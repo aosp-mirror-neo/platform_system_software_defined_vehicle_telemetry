@@ -24,11 +24,6 @@ cc_library {
 
 python_library_host {
     name: "libsdv_telemetry_proto_python",
-    version: {
-        py3: {
-            enabled: true,
-        },
-    },
     srcs: [":sdv_telemetry_proto_srcs"],
     proto: {
         canonical_path_from_root: true,
@@ -51,5 +46,23 @@ rust_protobuf {
     product_available: true,
     vendor_available: true,
     system_ext_specific: true,
+    visibility: ["//visibility:public"],
+}
+
+java_library {
+    name: "libsdv_telemetry_proto_java",
+    sdk_version: "system_current",
+    srcs: [
+        ":sdv_telemetry_proto_srcs",
+        ":libprotobuf-internal-protos",
+        ":libprotobuf-internal-any-proto",
+    ],
+    proto: {
+        type: "lite",
+        include_dirs: ["external/protobuf/src"],
+    },
+    static_libs: [
+        "libprotobuf-java-lite",
+    ],
     visibility: ["//visibility:public"],
 }

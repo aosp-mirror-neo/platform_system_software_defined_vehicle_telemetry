@@ -42,7 +42,19 @@ pub enum ServicePublisherAccessorError {
     ServiceNotSupported,
 }
 
+/// Callback that is called when a new message is available.
+pub type NewMessageCallback =
+    Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>;
+
+/// Callback that is called when a subscription is cancelled/ended by the
+/// underlying data provider.
+pub type CancellationCallback = Box<dyn FnOnce() + Send + Sync>;
+
+/// Callback that is called when a service becomes available.
+pub type AvailabilityCallback = Arc<dyn Fn() + Send + Sync>;
+
 /// Interface of an entity that provides access to Service Publishers.
+#[mockall::automock]
 #[async_trait]
 pub trait ServicePublisherAccessor: Send + Sync {
     /// Returns metadata of the specified service publisher.
@@ -63,16 +75,14 @@ pub trait ServicePublisherAccessor: Send + Sync {
 
     /// Attempts to create subscription to the new messages from the publisher
     /// specified by the service name with certain configuration, if provided.
-    async fn create_subscription(
-        &self,
-        service_name: &str,
-        configuration: Option<&Any>,
+    async fn create_subscription<'a>(
+        &'a self,
+        service_name: &'a str,
+        configuration: Option<&'a Any>,
         fetch_last_message: bool,
-        sub_sampling_interval: &SubSamplingInterval,
-        new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        sub_sampling_interval: &'a SubSamplingInterval,
+        new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError>;
 
     /// Registers a callback that will be called when a service with the specified string
@@ -80,7 +90,7 @@ pub trait ServicePublisherAccessor: Send + Sync {
     async fn register_availability_callback(
         &self,
         service_name: &str,
-        callback: &Arc<dyn Fn() + Send + Sync>,
+        callback: &AvailabilityCallback,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>>;
 }
 
@@ -115,11 +125,9 @@ pub enum CreateSubscriptionOutcome {
     /// The service with the specified service name is not registered.
     NotRegistered {
         /// New message callback passed to the create subscription call.
-        new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
+        new_message_callback: NewMessageCallback,
         /// Cancellation callback passed to the create subscription call.
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        cancellation_callback: CancellationCallback,
     },
 }
 
@@ -148,6 +156,7 @@ impl fmt::Debug for GetMessageProviderOutcome {
 }
 
 /// Interface of the Service Publisher subscription.
+#[mockall::automock]
 #[async_trait]
 pub trait ServicePublisherSubscription: Send + Sync {
     /// Ends the underlying subscription.

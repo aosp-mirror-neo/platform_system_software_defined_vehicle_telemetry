@@ -1,0 +1,12 @@
+<!-- Copyright 2025 Google LLC -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="google.sdv.telemetry.configurable_publisher_sdk" >
+
+    <uses-sdk android:targetSdkVersion="35" android:minSdkVersion="35" />
+
+    <application android:label="ConfigurablePublisherJavaTests" ></application>
+
+    <instrumentation android:name="androidx.test.runner.AndroidJUnitRunner"
+                     android:targetPackage="google.sdv.telemetry.configurable_publisher_sdk"
+                     android:label="ConfigurablePublisherSdkTest"/>
+</manifest>

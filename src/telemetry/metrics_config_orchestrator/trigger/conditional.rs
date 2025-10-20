@@ -27,6 +27,7 @@ use crate::metrics_config_orchestrator::{
     error_status_codes::ErrorStatusCodes,
     node_evaluation_context_factory::NodeEvaluationContextFactory,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -74,7 +75,7 @@ impl Trigger for ConditionalTrigger {
         self.base.get_name()
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         self.base.get_metrics_config_uuid()
     }
 
@@ -119,7 +120,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                         // triggers do not wait until aggregation publishers with the same parent
                         // trigger perform their aggregations.
                         // As we don't want to potentially block the execution by waiting for
-                        // countdown_latch.wait(compute_order - 1), conditional trigger computation
+                        // countdown_latch.wait(compute_order), conditional trigger computation
                         // should be refactored to be performed in a separate task, but still
                         // considering that AsyncEventProcessor is specifically used to avoid random
                         // order of tokio tasks execution
@@ -264,7 +265,7 @@ impl ConditionalTrigger {
     pub(crate) fn new(
         name: String,
         condition_type: ConditionType,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         selector_expression: Arc<Node>,
         triggers: Vec<Arc<dyn Trigger>>,
 
@@ -304,7 +305,7 @@ impl ConditionalTrigger {
                 self.status_reporter.report(err.get_status_code(),
                     format!("Metrics config {metrics_config_uuid} conditional trigger '{trigger_name}' failed to evaluate condition: {err}"),
                     StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
-                        metricsConfigUUID: metrics_config_uuid,
+                        metricsConfigUUID: metrics_config_uuid.to_string(),
                         triggerName: trigger_name,
                     }));
                 return;
@@ -360,7 +361,6 @@ mod tests {
     };
     use crate::StatusReporterImpl;
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
     const TRIGGER_NAME: &str = "trigger";
     const PARENT_TRIGGER_NAME: &str = "parent_trigger";
     const PUBLISHER_NAME: &str = "publisher";
@@ -368,6 +368,8 @@ mod tests {
     const ERROR_MESSAGE: &str = "Error 42";
 
     lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
         static ref FALSE_MSG: Arc<dyn MessageDyn> =
             Arc::new(BoolValue { value: false, ..Default::default() });
         static ref TRUE_MSG: Arc<dyn MessageDyn> =
@@ -395,7 +397,7 @@ mod tests {
         let parent_trigger = parent_trigger.unwrap_or_else(|| {
             Arc::new(MockTrigger::new_for_subscriber(
                 PARENT_TRIGGER_NAME.to_owned(),
-                CONFIG_UUID.to_owned(),
+                *CONFIG_UUID,
                 TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
             ))
         });
@@ -403,7 +405,7 @@ mod tests {
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
             condition_type,
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
@@ -469,19 +471,19 @@ mod tests {
     async fn activate_subscribes_to_parents() {
         let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
         let parent_trigger2 = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
             ConditionType::AllChanges,
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             vec![
                 Arc::<MockTrigger>::clone(&parent_trigger1),
@@ -533,7 +535,7 @@ mod tests {
     async fn shares_context_across_subscribers() {
         let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         ));
         let parent_context = Arc::new(NodeEvaluationContext::new(None));
@@ -541,7 +543,7 @@ mod tests {
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
             ConditionType::IsTrue,
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             vec![Arc::<MockTrigger>::clone(&parent_trigger)],
             Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
@@ -666,7 +668,7 @@ mod tests {
     async fn deactivate_unsubscribes_from_parents() {
         let mut parent_trigger = MockTrigger::new_for_subscriber(
             PARENT_TRIGGER_NAME.to_owned(),
-            CONFIG_UUID.to_owned(),
+            *CONFIG_UUID,
             TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
         );
         let callback_listener = Arc::new(MockCallbackListener::new());
@@ -731,7 +733,7 @@ mod tests {
                     ConditionalTriggerErrorDetails { metricsConfigUUID, triggerName }
                 ),
             }
-            if message.contains("failed to evaluate condition") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && triggerName == TRIGGER_NAME),
+            if message.contains("failed to evaluate condition") && message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && triggerName == TRIGGER_NAME),
             "Unexpected status: {status:?}"
         );
     }

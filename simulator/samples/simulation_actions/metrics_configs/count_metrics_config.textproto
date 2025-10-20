@@ -1,0 +1,48 @@
+# Copyright 2025 Google LLC
+
+uuid: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+version: 3758096386
+descriptor_protos {
+  name: "adhoc.proto"
+  package: "aaos.sdv.telemetry.adhoc"
+  message_type {
+    name: "count_publisher"
+    field { name: "value" number: 1 type: TYPE_INT32 }
+  }
+  message_type {
+    name: "report"
+    field { name: "count" number: 1 type: TYPE_INT32 }
+  }
+  syntax: "proto2"
+}
+triggers {
+  name: "periodic_1s"
+  periodic_trigger { interval { seconds: 1 } }
+}
+publishers {
+  name: "count_publisher"
+  aggregation_publisher {
+    trigger_names: "periodic_1s"
+    message_builder {
+      message_type: ".aaos.sdv.telemetry.adhoc.count_publisher"
+      field_assignments {
+        field_name: "value"
+        count_aggregation {}
+      }
+    }
+  }
+}
+# Expression Node 0
+expression_nodes { field_leaf_node { publisher_name: "count_publisher" field_names: "value" } }
+metrics_report_configs {
+  name: "report"
+  trigger_names: "periodic_1s"
+  report_incomplete: true
+  message_builder {
+    message_type: ".aaos.sdv.telemetry.adhoc.report"
+    field_assignments {
+      field_name: "count"
+      no_aggregation { expression_node_index: 0 }
+    }
+  }
+}

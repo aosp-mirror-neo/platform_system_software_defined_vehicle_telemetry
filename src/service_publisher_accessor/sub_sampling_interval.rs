@@ -26,16 +26,6 @@ impl SubSamplingInterval {
     pub fn as_duration(&self) -> Duration {
         Duration::from_millis(self.interval_ms.into())
     }
-
-    /// Returns the greatest common denominator of `self` and `other`, or `ZERO` if any of them is
-    /// `ZERO`.
-    pub fn gcd_or_zero(&self, other: &Self) -> Self {
-        if self == &Self::ZERO || other == &Self::ZERO {
-            return Self::ZERO;
-        }
-        use num_integer::Integer;
-        Self { interval_ms: self.interval_ms.gcd(&other.interval_ms) }
-    }
 }
 
 impl TryFrom<Duration> for SubSamplingInterval {
@@ -52,8 +42,6 @@ impl TryFrom<Duration> for SubSamplingInterval {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use sdv_telemetry_test_utils::parameterized_test;
 
     #[test]
     fn sub_sampling_interval_zero_is_zero() {
@@ -86,26 +74,4 @@ mod tests {
 
         assert_eq!(sub_sampling_interval.as_duration(), duration);
     }
-
-    parameterized_test!(
-        #[test]
-        sub_sampling_interval_gcd_or_zero,
-
-        |expected, a, b| {
-            let expected = SubSamplingInterval::try_from(Duration::from_millis(expected)).unwrap();
-            let a = SubSamplingInterval::try_from(Duration::from_millis(a)).unwrap();
-            let b = SubSamplingInterval::try_from(Duration::from_millis(b)).unwrap();
-
-            let result = a.gcd_or_zero(&b);
-
-            assert_eq!(result, expected);
-        },
-
-        zero_and_zero: (0, 0, 0,),
-        zero_and_five: (0, 0, 5,),
-        five_and_zero: (0, 5, 0,),
-        five_and_six: (1, 5, 6,),
-        ten_and_fifty: (10, 10, 50,),
-        thirty_and_forty_five: (15, 30, 45,),
-    );
 }

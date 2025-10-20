@@ -14,6 +14,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::{TriggerCallbackFn, TriggerSubscriber};
 use crate::metrics_config_orchestrator::Publisher;
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 pub(crate) struct DataTrigger {
     base: BaseTrigger,
@@ -26,7 +27,7 @@ impl Trigger for DataTrigger {
         self.base.get_name()
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         self.base.get_metrics_config_uuid()
     }
 
@@ -109,7 +110,7 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for DataTrigger 
 impl DataTrigger {
     pub(crate) fn new(
         name: String,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         publisher: Arc<dyn Publisher>,
     ) -> Arc<Self> {
         Arc::new_cyclic(|me: &Weak<Self>| Self {
@@ -127,6 +128,8 @@ impl DataTrigger {
 mod tests {
     use super::*;
 
+    use lazy_static::lazy_static;
+
     use crate::metrics_config_orchestrator::trigger::mock::{
         MockCallbackListener, MockSubscriptionManager,
     };
@@ -134,19 +137,23 @@ mod tests {
         publisher::mock::MockPublisher, subscription_manager::Activatable,
     };
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const TRIGGER_NAME: &str = "trigger";
     const PUBLISHER_NAME: &str = "publisher";
     const ACTIVATION_ID: ActivationId = ActivationId::new(3);
 
     fn create_valid_mock_publisher() -> MockPublisher {
-        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), CONFIG_UUID.to_owned());
+        let mut publisher = MockPublisher::new(PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
         publisher.expected_trigger_names.insert(TRIGGER_NAME.to_owned());
         publisher
     }
 
     fn create_valid_data_trigger(publisher: Arc<MockPublisher>) -> Arc<DataTrigger> {
-        DataTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned(), publisher)
+        DataTrigger::new(TRIGGER_NAME.to_owned(), *CONFIG_UUID, publisher)
     }
 
     fn create_valid_data_trigger_with_mock_subscription_manager(

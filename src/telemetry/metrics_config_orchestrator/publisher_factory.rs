@@ -23,6 +23,7 @@ use crate::metrics_config_orchestrator::{
     message_builder::MessageBuilder, node_evaluation_context_factory::NodeEvaluationContextFactory,
     service_adapter::ServiceAdapter, NodeValueType, Publisher, Trigger,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 #[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::Downcast))]
@@ -30,7 +31,7 @@ pub(crate) trait PublisherFactory: Send + Sync {
     /// Returns a new publisher encapsulated object based on the protobuf message.
     fn create(
         &self,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError>;
@@ -81,7 +82,7 @@ pub(crate) struct PublisherFactoryImpl {
         dyn Fn(
                 String,
                 Arc<dyn MessageBuilder>,
-                String,
+                MetricsConfigUuid,
                 bool,
                 Vec<Arc<dyn Trigger>>,
                 Arc<dyn StatusReporter>,
@@ -98,7 +99,7 @@ pub(crate) struct PublisherFactoryImpl {
                 bool,
                 Option<Any>,
                 ConnectionType,
-                String,
+                MetricsConfigUuid,
                 String,
                 SubSamplingInterval,
                 Arc<dyn NodeEvaluationContextFactory>,
@@ -114,7 +115,7 @@ pub(crate) struct PublisherFactoryImpl {
 impl PublisherFactory for PublisherFactoryImpl {
     fn create(
         &self,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         publisher_proto: &PublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
@@ -234,7 +235,7 @@ impl PublisherFactoryImpl {
     fn create_aggregation_publisher(
         &self,
         publisher_name: String,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         aggregation_publisher_proto: &AggregationPublisherProto,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Box<dyn Publisher>, PublisherFactoryError> {
@@ -254,7 +255,7 @@ impl PublisherFactoryImpl {
             .collect();
         let publisher = (self.aggregation_publisher_new_func)(
             publisher_name,
-            message_builder.into(),
+            message_builder,
             metrics_config_uuid,
             aggregation_publisher_proto.reset_on_get,
             triggers,
@@ -306,6 +307,7 @@ mod tests {
     use super::*;
 
     use async_trait::async_trait;
+    use lazy_static::lazy_static;
     use protobuf::well_known_types::duration::Duration as DurationProto;
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
@@ -330,7 +332,11 @@ mod tests {
     };
     use crate::StatusReporterImpl;
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const PUBLISHER_NAME: &str = "publisher";
     const SERVICE_NAME: &str = "service";
     const TRIGGER_NAME: &str = "trigger";
@@ -450,7 +456,7 @@ mod tests {
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
-        let trigger = Arc::new(MockTrigger::new(TRIGGER_NAME.to_owned(), CONFIG_UUID.to_owned()));
+        let trigger = Arc::new(MockTrigger::new(TRIGGER_NAME.to_owned(), *CONFIG_UUID));
 
         (publisher, trigger)
     }
@@ -532,7 +538,7 @@ mod tests {
                 node_types: &node_types,
                 triggers: &triggers,
             };
-            self.create(CONFIG_UUID.to_owned(), publisher_proto, &context)
+            self.create(*CONFIG_UUID, publisher_proto, &context)
         }
 
         fn validate_using_default_context(
@@ -609,7 +615,7 @@ mod tests {
         let res = factory.create_using_default_context(&publisher).unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
-        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
+        assert_eq!(res.get_metrics_config_uuid(), &*CONFIG_UUID);
 
         let data_holder_value = data_holder.get().unwrap();
         let configuration_value =
@@ -651,7 +657,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(res.get_name(), PUBLISHER_NAME);
-        assert_eq!(res.get_metrics_config_uuid(), CONFIG_UUID);
+        assert_eq!(res.get_metrics_config_uuid(), &*CONFIG_UUID);
         let data_holder_value = data_holder.get().unwrap();
         assert!(data_holder_value.reset_on_get);
         assert_eq!(data_holder_value.triggers.len(), 1);

@@ -6,75 +6,51 @@ version: 1
 # ------------------------ DESCRIPTOR PROTOS -----------------------------------
 
 descriptor_protos {
-    message_type {
-        name: "Report"
-        field {
-          label: LABEL_REQUIRED
-          type: TYPE_INT32
-          name: "current_speed"
-          number: 1
-        }
-      }
+  message_type {
+    name: "Report"
+    field { label: LABEL_REQUIRED type: TYPE_INT32 name: "current_speed" number: 1 }
+  }
 }
 
 # ----------------------------- TRIGGERS ---------------------------------------
 
 triggers {
-    name: "frequent_trigger"
-    periodic_trigger {
-        interval {
-            seconds: 0
-            nanos: 10000000
-        }
-    }
+  name: "frequent_trigger"
+  periodic_trigger { interval { seconds: 0 nanos: 10000000 } }
 }
 
-
 triggers {
-    name: "finish_trigger"
-    periodic_trigger {
-        interval {
-            seconds: 2
-            nanos: 0
-        }
-    }
+  name: "finish_trigger"
+  periodic_trigger { interval { seconds: 2 nanos: 0 } }
 }
 
 # ----------------------------- PUBLISHERS -------------------------------------
 
 publishers {
-    name: "speed_publisher"
-    service_publisher {
-        service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherSpeed#Speed"
-    }
+  name: "speed_publisher"
+  service_publisher {
+    service_name: "com.google.sdv.telemetry.samples.DataTunnelPublisherSpeed#Speed"
+  }
 }
 
 # -------------------------- EXPRESSION NODES ----------------------------------
 
-
 # index 0
-expression_nodes {
-    field_leaf_node {
-        publisher_name: "speed_publisher"
-        field_names: "speed"
-      }
-}
+expression_nodes { field_leaf_node { publisher_name: "speed_publisher" field_names: "speed" } }
 
 # ------------------------ METRIC REPORT CONFIGS -------------------------------
 
 metrics_report_configs {
-    name: "frequently_generated_report"
-    trigger_names: "frequent_trigger"
-    report_incomplete: false
-    message_builder {
-        message_type: ".Report"
-        field_assignments {
-            field_name: "current_speed"
-            no_aggregation {
-                expression_node_index: 0
-            }
-        }
+  name: "frequently_generated_report"
+  trigger_names: "frequent_trigger"
+  report_incomplete: false
+  message_builder {
+    message_type: ".Report"
+    field_assignments {
+      field_name: "current_speed"
+      no_aggregation { expression_node_index: 0 }
     }
+  }
 }
 
 finish_trigger_name: "finish_trigger"

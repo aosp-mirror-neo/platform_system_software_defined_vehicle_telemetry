@@ -8,7 +8,7 @@
 #include <jni.h>
 
 extern "C" JNIEXPORT jobject JNICALL
-Java_google_sdv_telemetry_java_JavaSampleIviPublisher_BinderServiceAccessor_getService__Ljava_lang_String_2(
+Java_google_sdv_telemetry_java_Binder_BinderServiceAccessor_getService__Ljava_lang_String_2(
         JNIEnv* env, jclass /**/, jstring str) {
     ALOGI("%s", __func__);
 

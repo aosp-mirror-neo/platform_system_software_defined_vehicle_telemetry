@@ -9,12 +9,13 @@ use log::{error, info, trace};
 use protobuf::Message;
 use rust_to_c::TelemetryServiceHolder;
 use rust_to_c::TelemetryServiceStatus;
+use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 use sdv_telemetry_rust_wrapper::StatusDetails::{
     AggregationPublisherErrorDetails, MetricsReportGeneratorErrorDetails,
     ServicePublisherErrorDetails,
 };
 use sdv_telemetry_rust_wrapper::{self as rust_to_c, TelemetryServiceStatusCodes};
-use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
 use std::collections::HashSet;
 use std::fs;
@@ -32,7 +33,7 @@ async fn process_config(path: &Path, service: &TelemetryServiceHolder) -> anyhow
 
     // Metrics config is either read directly from a binary file into serialized config or from a
     // textproto file and then converted into serialized config.
-    let serialized_config = metrics_config_reader_utils::read(path)
+    let serialized_config = proto_reader::read_as_bytes::<MetricsConfig>(path)
         .with_context(|| "Failed to read config".to_owned())?;
 
     let config_uuid = service

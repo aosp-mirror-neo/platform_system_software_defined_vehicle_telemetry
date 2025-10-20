@@ -19,7 +19,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, ServicePublisherAccessorError, GetMessageProviderOutcome, ServicePublisherAccessor, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval,
+    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval
 };
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::mem;
@@ -130,17 +130,15 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         Ok(provider)
     }
 
-    async fn create_subscription(
-        &self,
-        service_name: &str,
-        configuration: Option<&Any>,
+    async fn create_subscription<'a>(
+        &'a self,
+        service_name: &'a str,
+        configuration: Option<&'a Any>,
         _fetch_last_message: bool,
         // TODO: b/373332101 - Not yet implemented.
-        _sub_sampling_interval: &SubSamplingInterval,
-        new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        _sub_sampling_interval: &'a SubSamplingInterval,
+        new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let (message_descriptor, publisher) = {
             let Some(mut entry) = self.publisher_entries.get_mut(service_name) else {
@@ -174,7 +172,7 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
     async fn register_availability_callback(
         &self,
         service_name: &str,
-        callback: &Arc<dyn Fn() + Send + Sync>,
+        callback: &AvailabilityCallback,
     ) -> anyhow::Result<Option<Box<dyn AvailabilityCallbackRegistration>>> {
         let callback_weak = Arc::downgrade(callback);
 

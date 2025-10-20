@@ -6,12 +6,14 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::metrics_config_orchestrator::subscription_manager::{ActivationId, SubscriptionManager};
+use crate::metrics_config_uuid::MetricsConfigUuid;
 
 /// Mock implementation of Trigger trait for unit tests.
 pub(crate) struct MockTrigger {
@@ -20,8 +22,8 @@ pub(crate) struct MockTrigger {
     pub unsubscribe_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
 
     name: String,
-    metrics_config_uuid: String,
-    on_fired_callback: AsyncMutex<Option<(TriggerSubscriber, TriggerCallbackFn)>>,
+    metrics_config_uuid: MetricsConfigUuid,
+    on_fired_callback_map: AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>,
 }
 
 #[async_trait]
@@ -30,7 +32,7 @@ impl Trigger for MockTrigger {
         &self.name
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         &self.metrics_config_uuid
     }
 
@@ -40,7 +42,7 @@ impl Trigger for MockTrigger {
         on_fired_callback: TriggerCallbackFn,
     ) {
         self.verify_subscriber(subscriber);
-        self.on_fired_callback.lock().await.replace((subscriber.clone(), on_fired_callback));
+        self.on_fired_callback_map.lock().await.insert(subscriber.clone(), on_fired_callback);
 
         if let Some(callback) = &self.subscribe_callback {
             callback(&self.name);
@@ -49,6 +51,7 @@ impl Trigger for MockTrigger {
 
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
         self.verify_subscriber(subscriber);
+        self.on_fired_callback_map.lock().await.remove(subscriber);
 
         if let Some(callback) = &self.unsubscribe_callback {
             callback(&self.name);
@@ -57,20 +60,20 @@ impl Trigger for MockTrigger {
 }
 
 impl MockTrigger {
-    pub(crate) fn new(name: String, metrics_config_uuid: String) -> Self {
+    pub(crate) fn new(name: String, metrics_config_uuid: MetricsConfigUuid) -> Self {
         Self {
             name,
             metrics_config_uuid,
             expected_subscribers: vec![],
             subscribe_callback: None,
             unsubscribe_callback: None,
-            on_fired_callback: None.into(),
+            on_fired_callback_map: HashMap::new().into(),
         }
     }
 
     pub(crate) fn new_for_subscriber(
         name: String,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         expected_subscriber: TriggerSubscriber,
     ) -> Self {
         let mut trigger = Self::new(name, metrics_config_uuid);
@@ -83,13 +86,13 @@ impl MockTrigger {
     }
 
     pub(crate) async fn fire_with_context(&self, context: Arc<NodeEvaluationContext>) {
-        let mut lock = self.on_fired_callback.lock().await;
-        let (subscriber, on_fired_callback) = lock.as_mut().unwrap();
-
-        let compute_order = Level(subscriber.compute_order());
-        let countdown_latch =
-            MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
-        on_fired_callback(context, compute_order, countdown_latch);
+        let mut lock = self.on_fired_callback_map.lock().await;
+        for (subscriber, on_fired_callback) in lock.iter_mut() {
+            let compute_order = Level(subscriber.compute_order());
+            let countdown_latch =
+                MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
+            on_fired_callback(Arc::clone(&context), compute_order, countdown_latch);
+        }
     }
 
     pub(crate) fn set_subscribe_callback(

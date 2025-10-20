@@ -1,0 +1,46 @@
+# Copyright 2024 Google LLC
+# proto-file: system/software_defined_vehicle/core_services/vsidl/protos/sdv/vsidl/v1/syntax.proto
+# proto-message: VsidlEntry
+
+package: "com.sdv.telemetry.sample"
+
+service_bundle {
+    name: "TireSensorsReader"
+
+    publisher {
+      message: "TirePressure"
+      channel: "FRONT_LEFT"
+      channel: "FRONT_RIGHT"
+      channel: "REAR_LEFT"
+      channel: "REAR_RIGHT"
+    }
+
+    publisher {
+      message: "TireTemperature"
+    }
+
+    publisher {
+      message: "VehicleSpeed"
+    }
+
+    unit_type {
+      type: "TirePressure"
+    }
+
+    unit_type {
+      type: "TireTemperature"
+    }
+
+    unit_type {
+      type: "VehicleSpeed"
+    }
+
+    server {
+      service: "TireStatus"
+    }
+
+    unit_type {
+      type: "TireStatus"
+    }
+}
+

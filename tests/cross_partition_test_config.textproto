@@ -17,27 +17,15 @@ descriptor_protos {
   }
 }
 
-expression_nodes {
-  constant_leaf_node {
-    int32_value: 0
-  }
-}
+expression_nodes { constant_leaf_node { int32_value: 0 } }
 
 triggers {
   name: "start_trigger"
-  periodic_trigger {
-    interval {
-      seconds: 3
-    }
-  }
+  periodic_trigger { interval { seconds: 3 } }
 }
 triggers {
   name: "period_3s"
-  periodic_trigger {
-    interval {
-      seconds: 3
-    }
-  }
+  periodic_trigger { interval { seconds: 3 } }
 }
 
 start_trigger_name: "start_trigger"

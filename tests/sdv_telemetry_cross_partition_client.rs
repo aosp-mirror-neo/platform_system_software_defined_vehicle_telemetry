@@ -7,7 +7,7 @@ use log::info;
 use protobuf::Message;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
-use sdv_telemetry_sample_utils::metrics_config_reader_utils;
+use sdv_telemetry_sample_utils::proto_reader;
 use std::path::Path;
 use tokio::sync::mpsc;
 
@@ -33,7 +33,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .unwrap();
 
-    let serialized_config = metrics_config_reader_utils::read(Path::new(CONFIG_PATH)).unwrap();
+    let serialized_config =
+        proto_reader::read_as_bytes::<MetricsConfig>(Path::new(CONFIG_PATH)).unwrap();
     let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
 
     info!("Adding config");

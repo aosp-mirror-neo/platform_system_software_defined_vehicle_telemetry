@@ -52,9 +52,16 @@ impl MultiLevelCountdownLatch {
         }
     }
 
+    /// Waits until the count for all levels below the given reaches zero.
+    pub async fn wait(&self, level: Level) {
+        for l in (0..level.0).map(Level) {
+            self.wait_on_level(l).await;
+        }
+    }
+
     /// Waits until the count for the given level reaches zero. If the level hasn't been
     /// initialized or the count is already zero, returns immediately.
-    pub async fn wait(&self, level: Level) {
+    async fn wait_on_level(&self, level: Level) {
         if let Some(notifier) = {
             let notifiers_guard = self.notifiers.lock().await;
             match notifiers_guard.get(&level) {
@@ -109,7 +116,7 @@ mod tests {
     async fn test_init_and_wait_zero() {
         let latch = MultiLevelCountdownLatch::builder().with_level(Level(1), 0).build();
         // Should return immediately since count is zero
-        latch.wait(Level(1)).await;
+        latch.wait_on_level(Level(1)).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -117,7 +124,7 @@ mod tests {
     async fn test_wait_uninitialized_ok() {
         let latch = MultiLevelCountdownLatch::builder().build();
         // Should return immediately
-        latch.wait(Level(123)).await;
+        latch.wait_on_level(Level(123)).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -135,7 +142,7 @@ mod tests {
 
         let latch_clone = latch.clone();
         let waiter = tokio::spawn(async move {
-            latch_clone.wait(Level(1)).await;
+            latch_clone.wait_on_level(Level(1)).await;
         });
 
         tokio::time::sleep(Duration::from_millis(10)).await;
@@ -155,14 +162,14 @@ mod tests {
         let waiter1 = {
             let latch = latch.clone();
             tokio::spawn(async move {
-                latch.wait(Level(42)).await;
+                latch.wait_on_level(Level(42)).await;
             })
         };
 
         let waiter2 = {
             let latch = latch.clone();
             tokio::spawn(async move {
-                latch.wait(Level(42)).await;
+                latch.wait_on_level(Level(42)).await;
             })
         };
 
@@ -180,7 +187,7 @@ mod tests {
 
         latch.count_down(Level(5)).await;
         // Should return immediately since count is already zero
-        latch.wait(Level(5)).await;
+        latch.wait_on_level(Level(5)).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -192,7 +199,7 @@ mod tests {
             .build();
 
         latch.count_down(Level(1)).await;
-        latch.wait(Level(1)).await;
+        latch.wait_on_level(Level(1)).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -209,7 +216,7 @@ mod tests {
         let waiter1 = {
             let latch = latch.clone();
             tokio::spawn(async move {
-                latch.wait(Level(1)).await;
+                latch.wait_on_level(Level(1)).await;
             })
         };
 
@@ -217,7 +224,7 @@ mod tests {
         let waiter2 = {
             let latch = latch.clone();
             tokio::spawn(async move {
-                latch.wait(Level(2)).await;
+                latch.wait_on_level(Level(2)).await;
             })
         };
 
@@ -242,7 +249,7 @@ mod tests {
         latch.count_down(Level(1)).await;
         latch.count_down(Level(1)).await;
         latch.count_down(Level(1)).await;
-        latch.wait(Level(1)).await;
+        latch.wait_on_level(Level(1)).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -257,7 +264,7 @@ mod tests {
 
         // Now, spawn a waiter. It should not block.
         let late_waiter = tokio::spawn(async move {
-            latch.wait(Level(1)).await;
+            latch.wait_on_level(Level(1)).await;
         });
 
         assert!(timeout(Duration::from_secs(1), late_waiter).await.is_ok());
@@ -276,7 +283,7 @@ mod tests {
             let latch = latch.clone();
             let completion_count = Arc::clone(&completion_count);
             async move {
-                latch.wait(Level(1)).await;
+                latch.wait_on_level(Level(1)).await;
                 completion_count.fetch_add(1, Ordering::AcqRel);
             }
         });
@@ -315,7 +322,7 @@ mod tests {
             let latch = latch.clone();
             async move {
                 // 1. Wait for the signal that Phase 1 is complete.
-                latch.wait(Level(1)).await;
+                latch.wait_on_level(Level(1)).await;
                 // 2. Do "work" and then signal that Phase 2 is complete.
                 latch.count_down(Level(2)).await;
             }
@@ -326,7 +333,7 @@ mod tests {
             let latch = latch.clone();
             async move {
                 // 1. Wait for the initial signal (Phase 0).
-                latch.wait(Level(0)).await;
+                latch.wait_on_level(Level(0)).await;
                 // 2. Do "work" and then signal that Phase 1 is complete.
                 latch.count_down(Level(1)).await;
             }
@@ -336,5 +343,96 @@ mod tests {
         latch.count_down(Level(0)).await;
 
         assert!(phase_2_handle.await.is_ok());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn test_wait_on_level_0_returns_immediately() {
+        let latch = MultiLevelCountdownLatch::builder().with_level(Level(0), 1).build();
+        // wait(Level(0)) should not wait for anything, as it waits for levels *below* 0.
+        latch.wait(Level(0)).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn test_wait_waits_for_all_lower_levels() {
+        let latch = MultiLevelCountdownLatch::builder()
+            .with_level(Level(0), 1)
+            .with_level(Level(1), 2)
+            .with_level(Level(2), 1)
+            .build();
+
+        let latch_clone = latch.clone();
+        let waiter = tokio::spawn(async move {
+            latch_clone.wait(Level(2)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(!waiter.is_finished(), "Waiter should be blocked on Level(0)");
+
+        // Countdown level 1 first (out of order)
+        latch.count_down(Level(1)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(!waiter.is_finished(), "Waiter should still be blocked on Level(0)");
+
+        // Countdown level 0
+        latch.count_down(Level(0)).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(!waiter.is_finished(), "Waiter should still be blocked on Level(1)");
+
+        // Countdown level 1 again to bring its count to zero
+        latch.count_down(Level(1)).await;
+
+        // Waiter should complete now
+        waiter.await.unwrap();
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn test_wait_with_uninitialized_and_zero_count_levels() {
+        let latch = MultiLevelCountdownLatch::builder()
+            // Level 0 is not initialized
+            .with_level(Level(1), 0) // Already at zero
+            .with_level(Level(2), 1)
+            .build();
+
+        let latch_clone = latch.clone();
+        let waiter = tokio::spawn(async move {
+            // Should wait for Level(2), but not block on Level(0) or Level(1)
+            latch_clone.wait(Level(3)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(!waiter.is_finished(), "Waiter should be blocked on Level(2)");
+
+        latch.count_down(Level(2)).await;
+
+        // Waiter should complete now
+        waiter.await.unwrap();
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn test_wait_considers_uninitialized_intermediate_levels() {
+        let latch = MultiLevelCountdownLatch::builder()
+            .with_level(Level(0), 1)
+            .with_level(Level(2), 1)
+            .build();
+
+        let latch_clone = latch.clone();
+        let waiter = tokio::spawn(async move {
+            // wait(Level(2)) should wait for levels 0 and 1.
+            // Since level 1 is uninitialized, it should only block on level 0.
+            latch_clone.wait(Level(2)).await;
+        });
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+        assert!(!waiter.is_finished(), "Waiter should be blocked on Level(0)");
+
+        // Countdown level 0
+        latch.count_down(Level(0)).await;
+
+        // Waiter should complete now
+        waiter.await.unwrap();
     }
 }

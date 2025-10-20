@@ -14,6 +14,7 @@ use sdv_comms::rpc;
 use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
+use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription,
@@ -66,16 +67,20 @@ impl SdvRpcClient {
             ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
                 let configuration_bytes =
                     SdvRpcClient::serialize_configuration(configuration, &self.config_descriptor)?;
-                let response_bytes = self
+                let maybe_response_bytes = self
                     .client
                     .unary_call(GET_LATEST_MESSAGE_METHOD, &configuration_bytes)
                     .await
-                    .map_err(|err| {
-                        ServicePublisherAccessorError::MessageRetrievalFailed(err.into())
-                    })?;
-                if response_bytes.is_empty() {
-                    return Ok(None);
-                }
+                    .map_or_else(
+                        |err| match err.status_code() {
+                            SdvStatusCode::NotFound => Ok(None),
+                            _ => Err(ServicePublisherAccessorError::MessageRetrievalFailed(
+                                err.into(),
+                            )),
+                        },
+                        |response_bytes| Ok(Some(response_bytes)),
+                    )?;
+                let Some(response_bytes) = maybe_response_bytes else { return Ok(None) };
 
                 let response =
                     self.message_descriptor.parse_from_bytes(&response_bytes).map_err(|err| {
@@ -301,12 +306,13 @@ fn get_either_or_ensure_equal(
 mod tests {
     use super::*;
 
-    use protobuf::well_known_types::{
-        any::Any,
-        empty::Empty,
-        wrappers::{Int32Value, StringValue},
-    };
+    use protobuf::well_known_types::wrappers::{Int32Value, StringValue};
     use protobuf::MessageFull;
+
+    #[test]
+    fn any_full_name_matches_descriptor() {
+        assert_eq!(Any::descriptor().full_name(), PROTO_ANY_FULL_NAME);
+    }
 
     #[test]
     fn test_serialize_configuration_none() {

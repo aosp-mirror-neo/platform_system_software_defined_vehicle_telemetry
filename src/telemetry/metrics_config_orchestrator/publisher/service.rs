@@ -31,6 +31,7 @@ use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynami
 use crate::metrics_config_orchestrator::service_adapter::{
     GetMessageProviderOutcome, ServiceAdapter, ServiceMessageProvider, ServiceSubscription,
 };
+use crate::metrics_config_uuid::MetricsConfigUuid;
 use crate::status_reporter::StatusReporter;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
@@ -137,7 +138,7 @@ impl Publisher for ServicePublisher {
         self.base.get_name()
     }
 
-    fn get_metrics_config_uuid(&self) -> &str {
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
         self.base.get_metrics_config_uuid()
     }
 
@@ -224,6 +225,15 @@ impl Publisher for ServicePublisher {
         self.base.reset_latest_message();
     }
 
+    async fn start_data_collection(&self) {
+        // Service Publishers are activated immediately when Metrics Config is initialized,
+        // so data collection start is noop
+    }
+    async fn stop_data_collection(&self) {
+        // Service Publishers are activated immediately when Metrics Config is initialized,
+        // so data collection stop is noop
+    }
+
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn) {
         if !self.is_subscribable() {
             panic!("Unable to subscribe to publisher {}: it's not subscribable", self.get_name());
@@ -295,7 +305,7 @@ impl ServicePublisher {
         configuration: Option<Any>,
         connection_type: ConnectionType,
         fetch_last_message: bool,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         service_name: String,
         sub_sampling_interval: SubSamplingInterval,
 
@@ -417,7 +427,7 @@ impl ServicePublisher {
             format!("Metrics config {metrics_config_uuid} service publisher {publisher_name} {message}: {err}"),
             StatusDetails::ServicePublisherErrorDetails(
                 ServicePublisherErrorDetails {
-                    metricsConfigUUID: metrics_config_uuid,
+                    metricsConfigUUID: metrics_config_uuid.to_string(),
                     publisherName: publisher_name,
             }));
     }
@@ -681,6 +691,7 @@ mod tests {
     };
     use googletest::assert_that;
     use googletest::matchers::pat;
+    use lazy_static::lazy_static;
     use protobuf::reflect::ReflectEqMode;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::Message;
@@ -694,7 +705,11 @@ mod tests {
     };
     use crate::StatusReporterImpl;
 
-    const CONFIG_UUID: &str = "01bf0754-df95-46bb-bb35-522b6af66600";
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
     const DATA_TRIGGER_NAME: &str = "datatrigger";
     const ERROR_MESSAGE: &str = "Error 42";
     const PUBLISHER_NAME: &str = "publisher";
@@ -705,7 +720,7 @@ mod tests {
         configuration: Option<Any>,
         connection_type: ConnectionType,
         fetch_last_message: bool,
-        metrics_config_uuid: String,
+        metrics_config_uuid: MetricsConfigUuid,
         service_name: String,
         sub_sampling_interval: SubSamplingInterval,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
@@ -721,7 +736,7 @@ mod tests {
                 configuration: None,
                 connection_type: ConnectionType::Getter,
                 fetch_last_message: false,
-                metrics_config_uuid: CONFIG_UUID.to_owned(),
+                metrics_config_uuid: *CONFIG_UUID,
                 service_name: SERVICE_NAME.to_owned(),
                 sub_sampling_interval: SubSamplingInterval::ZERO,
                 node_evaluation_context_factory: Arc::new(NodeEvaluationContextFactoryImpl::new(
@@ -1153,7 +1168,7 @@ mod tests {
                     ServicePublisherErrorDetails { metricsConfigUUID, publisherName }
                 ),
             }
-            if message.contains("failed to retry activation") && message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME),
+            if message.contains("failed to retry activation") && message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && publisherName == PUBLISHER_NAME),
             "Unexpected status: {status:?}"
         );
     }
@@ -1325,7 +1340,7 @@ mod tests {
                     ServicePublisherErrorDetails { metricsConfigUUID, publisherName }
                 ),
             }
-            if message.contains(ERROR_MESSAGE) && metricsConfigUUID == CONFIG_UUID && publisherName == PUBLISHER_NAME),
+            if message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && publisherName == PUBLISHER_NAME),
             "Unexpected status: {status:?}"
         );
     }

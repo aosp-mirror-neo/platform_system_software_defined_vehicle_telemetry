@@ -3,24 +3,17 @@ uuid: "d3456cf0-8fde-436a-9f29-c12f16d10c10"
 version: 01
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "someip_publisher"
-    field_names: "sample_int"
-  }
+  field_leaf_node { publisher_name: "someip_publisher" field_names: "sample_int" }
 }
 
 publishers {
   name: "someip_publisher"
-  service_publisher {
-    service_name: "com.sdv.someip.SomeIpBroker#SecondPart"
-  }
+  service_publisher { service_name: "com.sdv.someip.SomeIpBroker#SecondPart" }
 }
 
 triggers {
   name: "someip_publisher_trigger"
-  data_trigger {
-    publisher_name: "someip_publisher"
-  }
+  data_trigger { publisher_name: "someip_publisher" }
 }
 
 metrics_report_configs {

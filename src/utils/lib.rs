@@ -10,6 +10,7 @@ pub mod descriptor_utils;
 pub mod duration_utils;
 pub mod file_io_utils;
 pub mod logging;
+pub mod observable_value;
 pub mod operation_result;
 pub mod option_extension;
 pub mod value_holder;

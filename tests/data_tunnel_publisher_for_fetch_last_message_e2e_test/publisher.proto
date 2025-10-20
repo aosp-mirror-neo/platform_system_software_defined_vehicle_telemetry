@@ -1,0 +1,7 @@
+// Copyright 2025 Google LLC
+
+syntax = "proto3";
+
+message Data {
+  uint32 value = 1;
+}

@@ -1,0 +1,17 @@
+# Copyright 2025 Google LLC
+
+actions {
+  delay { nanos: 200000000 }
+  metrics_config_action { config_uuid: "b588d6f1-4b1d-4940-952c-1d890365e557" action_type: ADD }
+}
+actions {
+  delay { seconds: 3 nanos: 500000000 }
+  metrics_config_action {
+    config_uuid: "b588d6f1-4b1d-4940-952c-1d890365e557"
+    action_type: ACTIVATE
+  }
+}
+actions {
+  delay { seconds: 2 }
+  remove_all_metrics_configs_action {}
+}

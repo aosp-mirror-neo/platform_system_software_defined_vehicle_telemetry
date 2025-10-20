@@ -1,0 +1,42 @@
+// Copyright 2025 Google LLC
+
+syntax = "proto3";
+
+package google.sdv.telemetry;
+
+import "google/protobuf/duration.proto";
+
+message SimulationActions {
+  // List of the actions to perform
+  repeated SimulationAction actions = 1;
+}
+
+message SimulationAction {
+  // Delay before performing the action.
+  google.protobuf.Duration delay = 1;
+
+  // Action to be performed
+  oneof action {
+    MetricsConfigAction metrics_config_action = 2;
+    RemoveAllMetricsConfigsAction remove_all_metrics_configs_action = 3;
+  };
+}
+
+message MetricsConfigAction {
+  // UUID of the Metrics Config to be acted upon
+  string config_uuid = 1;
+
+  // Type of the action to be performed on Metrics Config
+  ActionType action_type = 2;
+
+  // Types of the action
+  enum ActionType {
+    ACTION_TYPE_UNSPECIFIED = 0;
+    ADD = 1;
+    ACTIVATE = 2;
+    DEACTIVATE = 3;
+    REMOVE = 4;
+  }
+}
+
+message RemoveAllMetricsConfigsAction {}

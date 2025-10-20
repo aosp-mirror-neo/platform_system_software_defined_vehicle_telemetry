@@ -164,17 +164,30 @@ impl ValueAggregatorFactoryImpl {
     }
 
     fn is_compatible(expected: &NodeValueType, actual: &NodeValueType) -> bool {
-        expected == actual
+        match (expected, actual) {
             // MessageBuilder can convert integers to floating points, so assigning an
             // integer to a float field is valid. But the reverse is not true.
-            || (matches!(expected, NodeValueType::Float) && matches!(actual, NodeValueType::Int))
-            || (matches!(expected, NodeValueType::FloatList) && matches!(actual, NodeValueType::IntList))
+            (NodeValueType::Float, NodeValueType::Int)
+            | (NodeValueType::FloatList, NodeValueType::IntList)
             // If the actual type not known yet, it's valid to assign it to any message field.
-            || (matches!(expected, NodeValueType::Message { .. }) && matches!(actual, NodeValueType::Message { descriptor } if descriptor.is_none()))
-            || (matches!(expected, NodeValueType::MessageList { .. }) && matches!(actual, NodeValueType::MessageList { descriptor } if descriptor.is_none()))
-            // If the expected type is protobuf Any, it's valid to assign any message field.
-            || (matches!(expected, NodeValueType::Message { descriptor } if descriptor.as_ref().is_some_and(|d| d == &Any::descriptor())) && matches!(actual, NodeValueType::Message { .. }))
-            || (matches!(expected, NodeValueType::MessageList { descriptor } if descriptor.as_ref().is_some_and(|d| d == &Any::descriptor())) && matches!(actual, NodeValueType::MessageList { .. }))
+            | (NodeValueType::Message { .. }, NodeValueType::Message { descriptor: None })
+            | (
+                NodeValueType::MessageList { .. },
+                NodeValueType::MessageList { descriptor: None },
+            ) => true,
+
+            // If the expected type is protobuf Any, it's valid to assign any message or message list field.
+            (
+                NodeValueType::Message { descriptor: Some(descriptor) },
+                NodeValueType::Message { .. },
+            )
+            | (
+                NodeValueType::MessageList { descriptor: Some(descriptor) },
+                NodeValueType::MessageList { .. },
+            ) if descriptor == &Any::descriptor() => true,
+
+            _ => expected == actual,
+        }
     }
 }
 

@@ -1,0 +1,10 @@
+# Copyright 2025 Google LLC
+
+actions {
+  delay { nanos: 200000000 }
+  metrics_config_action {
+    config_uuid: "b588d6f1-4b1d-4940-952c-1d890365e557"
+    # there is no DELETE action
+    action_type: DELETE
+  }
+}
