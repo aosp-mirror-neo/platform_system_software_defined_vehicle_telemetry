@@ -184,6 +184,7 @@ rust_test {
     rustlibs: [
         // keep-sorted start
         "libgoogletest_rust",
+        "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],
     test_suites: [

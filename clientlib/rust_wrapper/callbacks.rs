@@ -16,6 +16,17 @@ type OnConfigListReceivedResult = TelemetryResult<Vec<String>>;
 type OnReportReceivedResult = TelemetryResult<MetricsReport>;
 type OnReadyReportsInfoReceivedResult = TelemetryResult<Vec<ReportInfo>>;
 
+/// Wrapper around `oneshot::Sender` that never errors, even if the receiver was dropped.
+struct Sender<T>(oneshot::Sender<T>);
+
+impl<T> Sender<T> {
+    fn send(self, value: T) {
+        // Sending may fail if the receiver has been dropped (e.g., when the user of this library
+        // drops the future). Thus, we ignore that error here.
+        let _ = self.0.send(value);
+    }
+}
+
 /// This function abstracts the complexity of calling an async C API.
 ///
 /// * `call_api` is a callback that must do the actual call to the C API. It receives user data and
@@ -26,7 +37,7 @@ where
     F: FnOnce(*mut c_void, C) -> i32,
 {
     let (result_tx, result_rx) = oneshot::channel();
-    let result_tx = Box::into_raw(Box::new(result_tx));
+    let result_tx = Box::into_raw(Box::new(Sender(result_tx)));
 
     let status_code = call_api(result_tx as *mut c_void, callback);
     let status_code = TelemetryServiceStatusCodes(status_code);
@@ -51,8 +62,8 @@ where
 ///
 /// # Safety
 ///
-/// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
-///   `call_api_with_status_callback` API call. It will not be valid after the function completes
+/// * `sender` must point to a valid `Sender` originally sent to the caller during the
+///   `call_api_with_status_callback` API call. It will not be valid after the function completes.
 /// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
 unsafe extern "C" fn on_status_received(
     sender: *mut std::ffi::c_void,
@@ -62,7 +73,7 @@ unsafe extern "C" fn on_status_received(
     let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the sender passed by the caller was originally allocated using a
     // global allocator using Box::new().
-    let sender = unsafe { Box::from_raw(sender as *mut oneshot::Sender<OnStatusReceivedResult>) };
+    let sender = unsafe { Box::from_raw(sender as *mut Sender<OnStatusReceivedResult>) };
 
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
@@ -73,13 +84,13 @@ unsafe extern "C" fn on_status_received(
     } else {
         Err(TelemetryError { status: status_code, message: status_message })
     };
-    sender.send(result).unwrap();
+    sender.send(result);
 }
 
 /// Safely call a C API that returns data through a `StatusCallbackFunction` callback. This wrapper
 /// ensures that the correct callback function (`on_status_received`) is used for these calls.
 ///
-/// The return type of this function MUST match the type used in the `oneshot::Sender` typecast in
+/// The return type of this function MUST match the type used in the `Sender` typecast in
 /// `on_status_received`.
 pub(super) async fn call_api_with_status_callback<F>(call_api: F) -> OnStatusReceivedResult
 where
@@ -92,7 +103,7 @@ where
 ///
 /// # Safety
 ///
-/// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
+/// * `sender` must point to a valid `Sender` originally sent to the caller during the
 ///   `call_api_with_config_list_callback` API call. It will not be valid after the function
 ///   completes.
 /// * `status_msg` must point to a C raw string that satisfies `CStr::from_ptr` safety requirements.
@@ -110,8 +121,7 @@ unsafe extern "C" fn on_config_list_received(
     let status_code = TelemetryServiceStatusCodes(status_code);
     // SAFETY: safe to use as the `listener` passed by the caller was originally allocated using a
     // global allocator using Box::new().
-    let sender =
-        unsafe { Box::from_raw(sender as *mut oneshot::Sender<OnConfigListReceivedResult>) };
+    let sender = unsafe { Box::from_raw(sender as *mut Sender<OnConfigListReceivedResult>) };
 
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
@@ -119,7 +129,7 @@ unsafe extern "C" fn on_config_list_received(
 
     if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving config list: {status_msg}");
-        sender.send(Err(TelemetryError { status: status_code, message: status_msg })).unwrap();
+        sender.send(Err(TelemetryError { status: status_code, message: status_msg }));
         return;
     }
 
@@ -135,14 +145,14 @@ unsafe extern "C" fn on_config_list_received(
         })
         .collect::<Vec<_>>();
 
-    sender.send(Ok(config_list)).unwrap();
+    sender.send(Ok(config_list));
 }
 
 /// Safely call a C API that returns data through a `ConfigListCallbackFunction` callback. This
 /// wrapper ensures that the correct callback function (`on_config_list_received`) is used for these
 /// calls.
 ///
-/// The return type of this function MUST match the type used in the `oneshot::Sender` typecast in
+/// The return type of this function MUST match the type used in the `Sender` typecast in
 /// `on_config_list_received`.
 pub(super) async fn call_api_with_config_list_callback<F>(call_api: F) -> OnConfigListReceivedResult
 where
@@ -155,7 +165,7 @@ where
 ///
 /// # Safety
 ///
-/// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
+/// * `sender` must point to a valid `Sender` originally sent to the caller during the
 ///   `call_api_with_metrics_report_callback` API call. It will not be valid after the function
 ///   completes.
 /// * `status_msg` must point to C raw string that satisfies `CStr::from_ptr` safety requirements.
@@ -172,7 +182,7 @@ unsafe extern "C" fn on_report_received(
     // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
     // global allocator using Box::new(). For more info check
     // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender = unsafe { Box::from_raw(sender as *mut oneshot::Sender<OnReportReceivedResult>) };
+    let sender = unsafe { Box::from_raw(sender as *mut Sender<OnReportReceivedResult>) };
 
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
@@ -180,7 +190,7 @@ unsafe extern "C" fn on_report_received(
 
     if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving metrics report: {msg}");
-        sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
+        sender.send(Err(TelemetryError { status: status_code, message: msg }));
         return;
     }
 
@@ -192,24 +202,22 @@ unsafe extern "C" fn on_report_received(
     let metrics_report = match MetricsReport::parse_from_bytes(byte_slice) {
         Ok(report) => report,
         Err(e) => {
-            sender
-                .send(Err(TelemetryError {
-                    status: status_code,
-                    message: format!("Error in parsing report {e}"),
-                }))
-                .unwrap();
+            sender.send(Err(TelemetryError {
+                status: status_code,
+                message: format!("Error in parsing report {e}"),
+            }));
             return;
         }
     };
 
-    sender.send(Ok(metrics_report)).unwrap();
+    sender.send(Ok(metrics_report));
 }
 
 /// Safely call a C API that returns data through a `GetSerializedDataCallbackFunction` callback.
 /// This wrapper ensures that the correct callback function (`on_report_received`) is used for these
 /// calls.
 ///
-/// The return type of this function MUST match the type used in the `oneshot::Sender` typecast in
+/// The return type of this function MUST match the type used in the `Sender` typecast in
 /// `on_report_received`.
 pub(super) async fn call_api_with_metrics_report_callback<F>(call_api: F) -> OnReportReceivedResult
 where
@@ -222,14 +230,15 @@ where
 ///
 /// # Safety
 ///
-/// * `sender` points to a valid `oneshot::Sender` originally sent to the caller during the
+/// * `sender` must point to a valid `Sender` originally sent to the caller during the
 ///   `call_api_with_ready_reports_info_callback` API call. It will not be valid after the function
 ///   completes.
 /// * `status_msg` must point to C raw string that satisfies `CStr::from_ptr` safety requirements.
 /// * `ready_reports_info` must point to a valid pointer array of MetricsReportInfo with
 ///   `config_uuid` and `report_uuid` fields as C raw strings that satisfy `CStr::from_ptr` safety
 ///   requirements.
-/// * `ready_reports_info_size` must contain the length of the byte array that can be parsed from `ready_reports_info`.
+/// * `ready_reports_info_size` must contain the length of the byte array that can be parsed from
+///   `ready_reports_info`.
 unsafe extern "C" fn on_ready_reports_info_received(
     sender: *mut c_void,
     status_code: i32,
@@ -241,8 +250,7 @@ unsafe extern "C" fn on_ready_reports_info_received(
     // SAFETY: safe to use as the listener passed by the caller was originally allocated using a
     // global allocator using Box::new(). For more info check
     // https://doc.rust-lang.org/std/boxed/index.html#memory-layout
-    let sender =
-        unsafe { Box::from_raw(sender as *mut oneshot::Sender<OnReadyReportsInfoReceivedResult>) };
+    let sender = unsafe { Box::from_raw(sender as *mut Sender<OnReadyReportsInfoReceivedResult>) };
 
     // SAFETY: The caller has provided a pointer that satisfies `CStr::from_ptr` safety
     // requirements.
@@ -250,7 +258,7 @@ unsafe extern "C" fn on_ready_reports_info_received(
 
     if status_code != TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS {
         error!("Error in receiving metrics report: {msg}");
-        sender.send(Err(TelemetryError { status: status_code, message: msg })).unwrap();
+        sender.send(Err(TelemetryError { status: status_code, message: msg }));
         return;
     }
 
@@ -280,14 +288,14 @@ unsafe extern "C" fn on_ready_reports_info_received(
         })
         .collect::<Vec<_>>();
 
-    sender.send(Ok(ready_reports_info)).unwrap();
+    sender.send(Ok(ready_reports_info));
 }
 
 /// Safely call a C API that returns data through a `ReadyReportsInfoCallbackFunction` callback.
 /// This wrapper ensures that the correct callback function (`on_ready_reports_info_received`) is
 /// used for these calls.
 ///
-/// The return type of this function MUST match the type used in the `oneshot::Sender` typecast in
+/// The return type of this function MUST match the type used in the `Sender` typecast in
 /// `on_ready_reports_info_received`.
 pub(super) async fn call_api_with_ready_reports_info_callback<F>(
     call_api: F,
@@ -296,4 +304,383 @@ where
     F: FnOnce(*mut c_void, rust_to_c::ReadyReportsInfoCallbackFunction) -> i32,
 {
     call_async_c_api(call_api, Some(on_ready_reports_info_received)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::matchers::{container_eq, elements_are, eq, err, ok, pat};
+    use googletest::{assert_that, expect_that};
+    use sdv_telemetry_test_utils::oneshot_callback;
+    use tokio::join;
+    use tokio::time::{error::Elapsed, sleep, timeout, Duration};
+
+    type AsyncReturnValue = String;
+    // In reality the callback would be a function pointer.
+    type Callback = u8;
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_async_c_api_success() {
+        let (tx, rx) = oneshot_callback();
+        let result_future = call_async_c_api::<AsyncReturnValue, Callback, _>(
+            |callback_data, callback| -> i32 {
+                tx((callback, callback_data));
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+            },
+            123,
+        );
+
+        let (result, ()) = join!(result_future, async move {
+            // Simulate the C-API calling the callback asynchronously after 100ms.
+            sleep(Duration::from_millis(100)).await;
+            let (callback, callback_data) = rx.await;
+
+            assert_that!(callback, eq(123));
+            let result_tx =
+                // SAFETY: This test simulates the C FFI boundary. `call_async_c_api`
+                // creates a `Box<Sender>` and passes it as a `*mut c_void`. This code
+                // reclaims ownership of the `Box` as the C callback would.
+                unsafe { Box::from_raw(callback_data as *mut Sender<TelemetryResult<AsyncReturnValue>>) };
+
+            result_tx.send(Ok("return value".to_owned()));
+        });
+
+        expect_that!(result, ok(eq("return value")));
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_async_c_api_drop_future() {
+        let (tx, rx) = oneshot_callback();
+        let result_future = call_async_c_api::<AsyncReturnValue, Callback, _>(
+            |callback_data, callback| -> i32 {
+                tx((callback, callback_data));
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+            },
+            123,
+        );
+
+        // Simulate that the caller waits for the future for 200ms, but then gives up.
+        let result = timeout(Duration::from_millis(200), result_future).await;
+        assert_that!(result, err(pat!(Elapsed { .. })));
+        drop(result);
+
+        // Now, simulate the API call returning. This should not panic, even though the future is
+        // already dropped.
+        let (callback, callback_data) = rx.await;
+
+        assert_that!(callback, eq(123));
+        let result_tx =
+            // SAFETY: This test simulates the C FFI boundary. `call_async_c_api`
+            // creates a `Box<Sender>` and passes it as a `*mut c_void`. This code
+            // reclaims ownership of the `Box` as the C callback would.
+            unsafe { Box::from_raw(callback_data as *mut Sender<TelemetryResult<AsyncReturnValue>>) };
+        result_tx.send(Ok("return value".to_owned()));
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_status_callback_success() {
+        let (tx, rx) = oneshot_callback();
+        let result_future = call_api_with_status_callback(|callback_data, callback| -> i32 {
+            tx((callback.unwrap(), callback_data));
+            TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+        });
+
+        let (result, ()) = join!(result_future, async move {
+            // Simulate the C-API calling the callback asynchronously after 100ms.
+            sleep(Duration::from_millis(100)).await;
+            let (callback, callback_data) = rx.await;
+
+            // SAFETY: This test simulates the C side calling the callback. The arguments
+            // are constructed to be valid, matching the contract of the
+            // `on_status_received` function. `callback_data` and `callback` are known
+            // to be valid from the call to `call_api_with_status_callback`.
+            unsafe {
+                (callback)(
+                    callback_data,
+                    TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                    c"some status message".as_ptr(),
+                );
+            }
+        });
+
+        expect_that!(result, ok(eq("some status message")));
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_status_callback_drop_future() {
+        let (tx, rx) = oneshot_callback();
+        let result_future = call_api_with_status_callback(|callback_data, callback| -> i32 {
+            tx((callback.unwrap(), callback_data));
+            TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+        });
+
+        // Simulate that the caller waits for the future for 200ms, but then gives up.
+        let result = timeout(Duration::from_millis(200), result_future).await;
+        assert_that!(result, err(pat!(Elapsed { .. })));
+        drop(result);
+
+        // Now, simulate the API call returning. This should not panic, even though the future is
+        // already dropped.
+        let (callback, callback_data) = rx.await;
+
+        // SAFETY: This test simulates the C side calling the callback. The arguments
+        // are constructed to be valid, matching the contract of the
+        // `on_status_received` function. `callback_data` and `callback` are known
+        // to be valid from the call to `call_api_with_status_callback`.
+        unsafe {
+            (callback)(
+                callback_data,
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                c"some status message".as_ptr(),
+            );
+        }
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_config_list_callback_success() {
+        let (tx, rx) = oneshot_callback();
+        let result_future = call_api_with_config_list_callback(|callback_data, callback| -> i32 {
+            tx((callback.unwrap(), callback_data));
+            TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+        });
+
+        let (result, ()) = join!(result_future, async move {
+            // Simulate the C-API calling the callback asynchronously after 100ms.
+            sleep(Duration::from_millis(100)).await;
+            let (callback, callback_data) = rx.await;
+            let configs = [c"config1".as_ptr(), c"config2".as_ptr()];
+
+            // SAFETY: This test simulates the C side calling the callback. The arguments
+            // are constructed to be valid, matching the contract of the
+            // `on_config_list_received` function. `callback_data` and `callback` are
+            // known to be valid from the call to `call_api_with_config_list_callback`.
+            unsafe {
+                (callback)(
+                    callback_data,
+                    TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                    c"some status message".as_ptr(),
+                    configs.as_ptr(),
+                    configs.len(),
+                );
+            }
+        });
+
+        expect_that!(result, ok(container_eq(vec!["config1", "config2"])));
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_config_list_callback_drop_future() {
+        let (tx, rx) = oneshot_callback();
+        let result_future = call_api_with_config_list_callback(|callback_data, callback| -> i32 {
+            tx((callback.unwrap(), callback_data));
+            TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+        });
+
+        // Simulate that the caller waits for the future for 200ms, but then gives up.
+        let result = timeout(Duration::from_millis(200), result_future).await;
+        assert_that!(result, err(pat!(Elapsed { .. })));
+        drop(result);
+
+        // Now, simulate the API call returning. This should not panic, even though the future is
+        // already dropped.
+        let (callback, callback_data) = rx.await;
+        let configs = [c"config1".as_ptr(), c"config2".as_ptr()];
+
+        // SAFETY: This test simulates the C side calling the callback. The arguments
+        // are constructed to be valid, matching the contract of the
+        // `on_config_list_received` function. `callback_data` and `callback` are
+        // known to be valid from the call to `call_api_with_config_list_callback`.
+        unsafe {
+            (callback)(
+                callback_data,
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                c"some status message".as_ptr(),
+                configs.as_ptr(),
+                configs.len(),
+            );
+        }
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_metrics_report_callback_success() {
+        let (tx, rx) = oneshot_callback();
+        let result_future =
+            call_api_with_metrics_report_callback(|callback_data, callback| -> i32 {
+                tx((callback.unwrap(), callback_data));
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+            });
+
+        let (result, ()) = join!(result_future, async move {
+            // Simulate the C-API calling the callback asynchronously after 100ms.
+            sleep(Duration::from_millis(100)).await;
+            let (callback, callback_data) = rx.await;
+            let report = MetricsReport { report_number: 123, ..Default::default() };
+            let report_bytes = report.write_to_bytes().unwrap();
+
+            // SAFETY: This test simulates the C side calling the callback. The arguments
+            // are constructed to be valid, matching the contract of the
+            // `on_report_received` function. `callback_data` and `callback` are known
+            // to be valid from the call to `call_api_with_metrics_report_callback`.
+            unsafe {
+                (callback)(
+                    callback_data,
+                    TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                    c"some status message".as_ptr(),
+                    report_bytes.as_ptr(),
+                    report_bytes.len(),
+                );
+            }
+        });
+
+        expect_that!(result, ok(pat!(MetricsReport { report_number: &123 })));
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_metrics_report_callback_drop_future() {
+        let (tx, rx) = oneshot_callback();
+        let result_future =
+            call_api_with_metrics_report_callback(|callback_data, callback| -> i32 {
+                tx((callback.unwrap(), callback_data));
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+            });
+
+        // Simulate that the caller waits for the future for 200ms, but then gives up.
+        let result = timeout(Duration::from_millis(200), result_future).await;
+        assert_that!(result, err(pat!(Elapsed { .. })));
+        drop(result);
+
+        // Now, simulate the API call returning. This should not panic, even though the future is
+        // already dropped.
+        let (callback, callback_data) = rx.await;
+        let report = MetricsReport { report_number: 123, ..Default::default() };
+        let report_bytes = report.write_to_bytes().unwrap();
+
+        // SAFETY: This test simulates the C side calling the callback. The arguments
+        // are constructed to be valid, matching the contract of the
+        // `on_report_received` function. `callback_data` and `callback` are known
+        // to be valid from the call to `call_api_with_metrics_report_callback`.
+        unsafe {
+            (callback)(
+                callback_data,
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                c"some status message".as_ptr(),
+                report_bytes.as_ptr(),
+                report_bytes.len(),
+            );
+        }
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_ready_reports_info_callback_success() {
+        let (tx, rx) = oneshot_callback();
+        let result_future =
+            call_api_with_ready_reports_info_callback(|callback_data, callback| -> i32 {
+                tx((callback.unwrap(), callback_data));
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+            });
+
+        let (result, ()) = join!(result_future, async move {
+            // Simulate the C-API calling the callback asynchronously after 100ms.
+            sleep(Duration::from_millis(100)).await;
+            let (callback, callback_data) = rx.await;
+            let reports_info = [
+                rust_to_c::MetricsReportInfo {
+                    config_uuid: c"config1".as_ptr(),
+                    report_uuid: c"report1".as_ptr(),
+                },
+                rust_to_c::MetricsReportInfo {
+                    config_uuid: c"config2".as_ptr(),
+                    report_uuid: c"report2".as_ptr(),
+                },
+            ];
+
+            // SAFETY: This test simulates the C side calling the callback. The arguments
+            // are constructed to be valid, matching the contract of the
+            // `on_ready_reports_info_received` function. `callback_data` and
+            // `callback` are known to be valid from the call to
+            // `call_api_with_ready_reports_info_callback`.
+            unsafe {
+                (callback)(
+                    callback_data,
+                    TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                    c"some status message".as_ptr(),
+                    reports_info.as_ptr(),
+                    reports_info.len(),
+                );
+            }
+        });
+
+        expect_that!(
+            result,
+            ok(elements_are![
+                pat!(ReportInfo { config_uuid: "config1", report_uuid: "report1" }),
+                pat!(ReportInfo { config_uuid: "config2", report_uuid: "report2" }),
+            ])
+        );
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn call_api_with_ready_reports_info_callback_drop_future() {
+        let (tx, rx) = oneshot_callback();
+        let result_future =
+            call_api_with_ready_reports_info_callback(|callback_data, callback| -> i32 {
+                tx((callback.unwrap(), callback_data));
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0
+            });
+
+        // Simulate that the caller waits for the future for 200ms, but then gives up.
+        let result = timeout(Duration::from_millis(200), result_future).await;
+        assert_that!(result, err(pat!(Elapsed { .. })));
+        drop(result);
+
+        // Now, simulate the API call returning. This should not panic, even though the future is
+        // already dropped.
+        let (callback, callback_data) = rx.await;
+        let reports_info = [
+            rust_to_c::MetricsReportInfo {
+                config_uuid: c"config1".as_ptr(),
+                report_uuid: c"report1".as_ptr(),
+            },
+            rust_to_c::MetricsReportInfo {
+                config_uuid: c"config2".as_ptr(),
+                report_uuid: c"report2".as_ptr(),
+            },
+        ];
+
+        // SAFETY: This test simulates the C side calling the callback. The arguments
+        // are constructed to be valid, matching the contract of the
+        // `on_ready_reports_info_received` function. `callback_data` and
+        // `callback` are known to be valid from the call to
+        // `call_api_with_ready_reports_info_callback`.
+        unsafe {
+            (callback)(
+                callback_data,
+                TelemetryServiceStatusCodes::TELEMETRY_SERVICE_API_CALL_SUCCESS.0,
+                c"some status message".as_ptr(),
+                reports_info.as_ptr(),
+                reports_info.len(),
+            );
+        }
+    }
 }
