@@ -8,14 +8,28 @@ use sdv_comms::sd::UnitType;
 use std::fmt;
 use std::str::FromStr;
 
+/// A `ServiceName` is the identifier of an SDV Comms service.
 #[derive(Clone, Eq, PartialEq, Hash, Debug)]
-pub(super) enum ServiceName {
-    UnitTypeBased { unit_type: UnitType, unit_name: Option<String> },
-    FqinBased { fqin: ServiceFqin, unit_name: String },
+pub enum ServiceName {
+    /// The service is addressed via its unit type, and optionally unit name.
+    UnitTypeBased {
+        /// The service's unit type.
+        unit_type: UnitType,
+        /// Optionally, the service's unit name.
+        unit_name: Option<String>,
+    },
+    /// The service is addressed via its FQIN and unit name.
+    FqinBased {
+        /// The service's FQIN.
+        fqin: ServiceFqin,
+        /// The service's unit name.
+        unit_name: String,
+    },
 }
 
 impl ServiceName {
-    pub(super) fn parse(input: &str) -> anyhow::Result<Self> {
+    /// Tries to parse a string into a `ServiceName`.
+    pub fn parse(input: &str) -> anyhow::Result<Self> {
         if input.contains(':') {
             let (fqin, unit_name) = input.rsplit_once("|").ok_or(anyhow!(
                 "Missing `|` in input '{input}' to divide the FQIN from the Service Unit Name."

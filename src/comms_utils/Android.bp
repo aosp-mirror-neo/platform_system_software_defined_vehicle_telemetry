@@ -13,6 +13,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
+        "libanyhow",
         "libbinder_tokio_rs",
         "liblog_rust",
         "libsdv_comms_ctx_impl",
@@ -28,4 +29,29 @@ rust_library {
     name: "libsdv_telemetry_comms_utils",
     defaults: ["libsdv_telemetry_comms_utils_defaults"],
     crate_name: "sdv_telemetry_comms_utils",
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_unit_comms_utils_test",
+    defaults: ["libsdv_telemetry_comms_utils_defaults"],
+    crate_name: "sdv_telemetry_comms_utils_unit_tests",
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
 }

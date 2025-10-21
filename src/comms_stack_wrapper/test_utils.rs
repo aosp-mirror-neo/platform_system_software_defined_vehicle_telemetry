@@ -17,10 +17,9 @@ use sdv_comms::sd::{
 use sdv_comms::ContextRef;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvResult;
+use sdv_telemetry_comms_utils::ServiceName;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
 use std::{collections::HashMap, str::FromStr};
-
-use crate::service_name::ServiceName;
 
 pub(super) const UNIT_NAME: &str = "default";
 

@@ -3,12 +3,16 @@
 //! This module includes utility functions used in Telemetry for interacting with the new Comm's
 //! stack.
 
+mod service_name;
+
 use log::info;
 use tokio::time::{sleep, Duration};
 
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::ContextRef;
 use sdv_comms_ctx::wait_for_agents;
+
+pub use service_name::ServiceName;
 
 /// Waits for SDV agents to be ready and then converts the provided FQIN into a `ContextRef`
 /// object.

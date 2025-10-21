@@ -21,10 +21,13 @@
       "name": "sdv_mt_telemetry_unit_comms_stack_wrapper_test"
     },
     {
+      "name": "sdv_mt_telemetry_unit_comms_utils_test"
+    },
+    {
       "name": "sdv_mt_telemetry_unit_get_proto_file_descriptors_test"
     },
     {
-    "name": "sdv_mt_telemetry_unit_lib_expr_test"
+      "name": "sdv_mt_telemetry_unit_lib_expr_test"
     },
     {
       "name": "sdv_mt_telemetry_unit_platform_abstraction_layer_core_test"
