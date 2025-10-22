@@ -162,7 +162,6 @@ impl fmt::Display for SimulationPublisherArgs {
     }
 }
 
-#[expect(clippy::as_conversions, reason = "No alternatives for casting from float to int exist")]
 fn parse_duration(s: &str) -> Result<Duration, Error> {
     let Some((text, value)) = s.split_once(':') else {
         return Err(clap::Error::new(ErrorKind::InvalidValue));
@@ -183,9 +182,14 @@ fn parse_duration(s: &str) -> Result<Duration, Error> {
         return Err(clap::Error::new(ErrorKind::InvalidValue));
     }
 
+    #[expect(clippy::cast_possible_truncation, reason = "We want to truncate the value.")]
     let whole_seconds = seconds.trunc() as i64;
-    let sub_seconds = seconds.fract();
-    let sub_nanos = (sub_seconds * 1_000_000_000.0).floor() as u32;
+    #[expect(clippy::cast_possible_truncation, reason = "We want to truncate the value.")]
+    #[expect(
+        clippy::cast_sign_loss,
+        reason = "`seconds` is guaranteed to be positive due to the guard clause above."
+    )]
+    let sub_nanos = (seconds.fract() * 1_000_000_000.0).floor() as u32;
 
     Ok(ChronoDuration::new(whole_seconds, sub_nanos)
         .ok_or(clap::Error::new(ErrorKind::InvalidValue))?
