@@ -23,24 +23,8 @@ service_bundle {
       message: "VehicleSpeed"
     }
 
-    unit_type {
-      type: "TirePressure"
-    }
-
-    unit_type {
-      type: "TireTemperature"
-    }
-
-    unit_type {
-      type: "VehicleSpeed"
-    }
-
     server {
       service: "TireStatus"
-    }
-
-    unit_type {
-      type: "TireStatus"
     }
 }
 
