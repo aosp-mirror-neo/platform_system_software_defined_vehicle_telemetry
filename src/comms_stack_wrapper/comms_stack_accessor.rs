@@ -231,7 +231,7 @@ impl CommsStackAccessor {
         &self,
         service_name: ServiceName,
     ) -> Result<Option<CachedMetadata>, ServicePublisherAccessorError> {
-        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| (v.0.clone())) {
+        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| v.0.clone()) {
             return Ok(Some(metadata));
         }
 
