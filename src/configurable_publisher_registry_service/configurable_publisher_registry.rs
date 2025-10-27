@@ -19,7 +19,7 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval
+    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval
 };
 use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
 use std::mem;
@@ -162,11 +162,12 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
             .createSubscription(&listener_wrapper, configuration_bytes.as_deref())
             .map_err(|err| ServicePublisherAccessorError::FailedToSubscribe(err.into()))?;
 
-        Ok(CreateSubscriptionOutcome::Subscribed(Box::new(
-            ConfigurablePublisherRegistrySubscription {
+        Ok(CreateSubscriptionOutcome::Subscribed {
+            subscription: Box::new(ConfigurablePublisherRegistrySubscription {
                 configurable_publisher_subscription: subscription,
-            },
-        )))
+            }),
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        })
     }
 
     async fn register_availability_callback(
@@ -387,6 +388,7 @@ mod tests {
     use sample_publisher_proto::sample_publisher::SampleMessage;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
+    use sdv_telemetry_test_utils::parameterized_test;
 
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
@@ -635,28 +637,42 @@ mod tests {
         assert!(configurable_publisher_registry.publisher_entries.is_empty());
     }
 
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn create_subscription_success() {
-        let configurable_publisher = MockConfigurablePublisher::new(false);
-        let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher.clone()).await;
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        create_subscription_success,
 
-        configurable_publisher_registry
-            .create_subscription(
-                SERVICE_NAME,
-                None,
-                false,
-                &SubSamplingInterval::ZERO,
-                create_empty_message_handler(),
-                create_empty_fn_box(),
-            )
-            .await
-            .unwrap();
+        |fetch_last_message| async move {
+            let configurable_publisher = MockConfigurablePublisher::new(false);
+            let (configurable_publisher_registry, _) =
+                create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
-        assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
-    }
+            let outcome = configurable_publisher_registry
+                .create_subscription(
+                    SERVICE_NAME,
+                    None,
+                    fetch_last_message,
+                    &SubSamplingInterval::ZERO,
+                    create_empty_message_handler(),
+                    create_empty_fn_box(),
+                )
+                .await
+                .unwrap();
+            let CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+            } = outcome
+            else {
+                panic!("Unexpected outcome")
+            };
+
+            assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
+            assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
+        },
+
+        flm_true: (true),
+        flm_false: (false),
+    );
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
@@ -685,7 +701,7 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        let subscription = configurable_publisher_registry
+        let outcome = configurable_publisher_registry
             .create_subscription(
                 SERVICE_NAME,
                 None,
@@ -695,8 +711,14 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .unwrap()
             .unwrap();
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
+            panic!("Unexpected outcome")
+        };
         subscription.unsubscribe().await;
 
         assert_eq!(configurable_publisher.get_num_subscribe_calls(), 1);
@@ -709,7 +731,7 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher.clone()).await;
 
-        configurable_publisher_registry
+        let outcome = configurable_publisher_registry
             .create_subscription(
                 SERVICE_NAME,
                 None,
@@ -719,8 +741,15 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .unwrap()
             .unwrap();
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription: _,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
+            panic!("Unexpected outcome")
+        };
+
         configurable_publisher_registry.unregister_publisher(SERVICE_NAME).await.unwrap();
 
         assert!(!configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));
@@ -736,7 +765,7 @@ mod tests {
         let (configurable_publisher_registry, _) =
             create_configurable_publisher_registry(configurable_publisher).await;
 
-        configurable_publisher_registry
+        let outcome = configurable_publisher_registry
             .create_subscription(
                 SERVICE_NAME,
                 None,
@@ -746,8 +775,15 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .unwrap()
             .unwrap();
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription: _,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
+            panic!("Unexpected outcome")
+        };
+
         let res = configurable_publisher_registry.unregister_publisher(SERVICE_NAME2).await;
 
         assert!(configurable_publisher_registry.publisher_entries.contains_key(SERVICE_NAME));

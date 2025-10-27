@@ -90,7 +90,7 @@ impl ServicePublisherAccessor for ServicePublisherManager {
                 )
                 .await?
             {
-                outcome @ CreateSubscriptionOutcome::Subscribed(_) => return Ok(outcome),
+                outcome @ CreateSubscriptionOutcome::Subscribed { .. } => return Ok(outcome),
                 CreateSubscriptionOutcome::NotRegistered {
                     new_message_callback,
                     cancellation_callback,
@@ -147,6 +147,7 @@ mod tests {
     use anyhow::anyhow;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
     use protobuf::{MessageDyn, MessageFull};
+    use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
     use std::sync::Arc;
 
     use crate::mock_service_publisher_accessor::MockServicePublisherAccessor;
@@ -381,7 +382,7 @@ mod tests {
 
         let service_publisher_manager_impl = ServicePublisherManager::new(service_publishers);
 
-        let subscription = service_publisher_manager_impl
+        let outcome = service_publisher_manager_impl
             .create_subscription(
                 SERVICE_NAME,
                 None,
@@ -391,8 +392,14 @@ mod tests {
                 create_empty_fn_box(),
             )
             .await
-            .unwrap()
             .unwrap();
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
+            panic!("Unexpected outcome")
+        };
         subscription.unsubscribe().await;
 
         assert_eq!(service_publisher.get_num_subscribe_calls(), 1);

@@ -11,10 +11,13 @@ rust_defaults {
     flags: [
         // keep-sorted start
         "-D clippy::allow_attributes_without_reason",
-        "-D clippy::as_conversions",
         "-D clippy::assertions_on_result_states",
         "-D clippy::branches_sharing_code",
         "-D clippy::cast_lossless",
+        "-D clippy::cast_possible_truncation",
+        "-D clippy::cast_possible_wrap",
+        "-D clippy::cast_precision_loss",
+        "-D clippy::cast_sign_loss",
         "-D clippy::clone_on_copy",
         "-D clippy::clone_on_ref_ptr",
         "-D clippy::cloned_instead_of_copied",

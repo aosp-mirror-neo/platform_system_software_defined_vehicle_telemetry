@@ -9,12 +9,20 @@ use std::{
 
 use crate::util::printable_small_duration;
 
+#[derive(Debug)]
+pub(crate) enum PublishingStrategyType {
+    ConfigurablePublisherRegistry,
+    SdvCommsDataTunnel,
+    SdvCommsRpc,
+}
+
 #[cfg_attr(test, derive(Debug))]
 pub struct PublisherConfig {
     pub service_name: String,
     pub loop_data: bool,
     pub parsed_data: Vec<ParsedDataEntry>,
     pub message_descriptor: MessageDescriptor,
+    pub publishing_strategy: PublishingStrategyType,
 }
 
 impl Hash for PublisherConfig {

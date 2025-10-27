@@ -497,6 +497,7 @@ mod integration_tests {
     use sdv_comms::rpc;
     use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProviderV1, RpcMethodDescriptor};
     use sdv_status_rs::SdvStatus;
+    use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
     use sdv_telemetry_test_proto_bool_value::{
         test_bool_value_1::BoolValue as TestBoolValue1,
@@ -892,39 +893,58 @@ mod integration_tests {
         assert!(matches!(outcome, CreateSubscriptionOutcome::NotRegistered { .. }));
     }
 
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn create_subscription_success() {
-        let ctx = test_utils::make_context(0).await;
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        create_subscription_success,
 
-        let service_name = test_utils::make_unique_service_name();
+        |fetch_last_message| async move {
+            let ctx = test_utils::make_context(0).await;
 
-        let _publisher = test_utils::register_topic(
-            ctx,
-            &service_name,
-            MessageMetadata {
-                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
-                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+            let service_name = test_utils::make_unique_service_name();
 
-        let subscriber = create_accessor(ctx);
-        let outcome = subscriber
-            .create_subscription(
+            let _publisher = test_utils::register_topic(
+                ctx,
                 &service_name,
-                None,
-                false,
-                &SubSamplingInterval::ZERO,
-                create_empty_message_handler(),
-                create_empty_fn_box(),
+                MessageMetadata {
+                    file_descriptors: vec![test_message::file_descriptor().proto().clone()],
+                    message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
-        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
-    }
+
+            let subscriber = create_accessor(ctx);
+            let outcome = subscriber
+                .create_subscription(
+                    &service_name,
+                    None,
+                    fetch_last_message,
+                    &SubSamplingInterval::ZERO,
+                    create_empty_message_handler(),
+                    create_empty_fn_box(),
+                )
+                .await
+                .unwrap();
+            assert!(
+                if fetch_last_message {
+                    matches!(outcome, CreateSubscriptionOutcome::Subscribed {
+                        subscription: _,
+                        fetch_last_message_outcome: FetchLastMessageOutcome::Enabled,
+                    })
+                } else {
+                    matches!(outcome, CreateSubscriptionOutcome::Subscribed {
+                        subscription: _,
+                        fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+                    })
+                }
+            );
+        },
+
+        fetch_last_message_true: (true),
+        fetch_last_message_false: (false),
+    );
 
     #[sdv_telemetry_test_utils::timeout(10_000)]
     #[tokio::test]
@@ -969,8 +989,20 @@ mod integration_tests {
             )
             .await
             .unwrap();
-        assert!(matches!(outcome1, CreateSubscriptionOutcome::Subscribed(_)));
-        assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
+        assert!(matches!(
+            outcome1,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+            }
+        ));
+        assert!(matches!(
+            outcome2,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+            }
+        ));
     }
 
     #[sdv_telemetry_test_utils::timeout(10_000)]
@@ -1027,8 +1059,20 @@ mod integration_tests {
         write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
         write_message(&publisher, TestMessage { int_field: 2, ..Default::default() });
 
-        assert!(matches!(outcome1, CreateSubscriptionOutcome::Subscribed(_)));
-        assert!(matches!(outcome2, CreateSubscriptionOutcome::Subscribed(_)));
+        assert!(matches!(
+            outcome1,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+            }
+        ));
+        assert!(matches!(
+            outcome2,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+            }
+        ));
 
         assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap()), 1);
         assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap()), 2);
@@ -1072,7 +1116,13 @@ mod integration_tests {
             )
             .await
             .unwrap();
-        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+        assert!(matches!(
+            outcome,
+            CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled,
+            }
+        ));
 
         let message1_sent_at = Instant::now();
         write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
@@ -1142,7 +1192,10 @@ mod integration_tests {
                 )
                 .await
                 .unwrap();
-            assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed(_)));
+            assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed {
+                subscription: _,
+                fetch_last_message_outcome: FetchLastMessageOutcome::Disabled
+            }));
 
             // Cause an overflow.
             for i in 1..=30 {
@@ -1379,7 +1432,11 @@ mod integration_tests {
             .unwrap();
         let received_msg = rx.await.unwrap();
 
-        let CreateSubscriptionOutcome::Subscribed(subscription) = outcome else {
+        let CreateSubscriptionOutcome::Subscribed {
+            subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        } = outcome
+        else {
             panic!("Unexpected outcome");
         };
         let value_field = received_msg.descriptor_dyn().field_by_name("value").unwrap();
@@ -1902,7 +1959,9 @@ mod integration_tests {
                 )
                 .await
                 .unwrap();
-            assert!(matches!(subscription_outcome, CreateSubscriptionOutcome::Subscribed(_)));
+            assert!(matches!(subscription_outcome, CreateSubscriptionOutcome::Subscribed {
+                subscription: _, fetch_last_message_outcome: _
+            }));
 
             let message_provider_outcome =
                 subscriber.get_message_provider(&service_name).await.unwrap();

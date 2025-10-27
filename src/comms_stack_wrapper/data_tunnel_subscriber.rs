@@ -16,8 +16,9 @@ use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
-    ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
+    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    SubSamplingInterval,
 };
 use std::iter::Iterator;
 use std::pin::pin;
@@ -129,7 +130,10 @@ impl DataTunnelSubscriber {
         let data_tunnel_subscription =
             Box::new(DataTunnelSubscription { _subscription_drop_guard: subscription_drop_guard });
 
-        Ok(CreateSubscriptionOutcome::Subscribed(data_tunnel_subscription))
+        Ok(CreateSubscriptionOutcome::Subscribed {
+            subscription: data_tunnel_subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::new_supported(fetch_last_message),
+        })
     }
 
     pub fn get_message_provider(

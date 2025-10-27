@@ -16,8 +16,8 @@ use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionOutcome, GetMessageProviderOutcome, ServicePublisherAccessorError,
-    ServicePublisherMessageProvider, ServicePublisherSubscription,
+    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
+    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -167,7 +167,10 @@ impl SdvRpcClient {
         let subscription =
             Box::new(SdvRpcSubscription { _subscription_drop_guard: subscription_drop_guard });
 
-        Ok(CreateSubscriptionOutcome::Subscribed(subscription))
+        Ok(CreateSubscriptionOutcome::Subscribed {
+            subscription,
+            fetch_last_message_outcome: FetchLastMessageOutcome::NotSupported,
+        })
     }
 
     pub(super) async fn get_message_descriptor(
