@@ -19,6 +19,7 @@ use sdv_comms::ContextRef;
 use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProviderV1};
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
+use sdv_telemetry_comms_utils::ServiceName;
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
     CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
@@ -32,7 +33,6 @@ use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber::DataTunnelSubscriber;
 use crate::sdv_rpc_client::SdvRpcClient;
-use crate::service_name::ServiceName;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 pub struct CommsStackAccessor {
@@ -231,7 +231,7 @@ impl CommsStackAccessor {
         &self,
         service_name: ServiceName,
     ) -> Result<Option<CachedMetadata>, ServicePublisherAccessorError> {
-        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| (v.0.clone())) {
+        if let Some(metadata) = self.cached_metadata.view(&service_name, |_k, v| v.0.clone()) {
             return Ok(Some(metadata));
         }
 
