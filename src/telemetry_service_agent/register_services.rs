@@ -23,7 +23,7 @@ pub async fn register_services(
     pal: Arc<dyn PlatformAbstractionLayer>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
-    let value = watcher.read(|_, value| Ok(value.trim().to_owned())).ok();
+    let value = watcher.read(|_, value| value.trim().to_owned()).ok();
 
     // Default size 1 MB
     let configured_size: usize = value.and_then(|value| value.parse().ok()).unwrap_or(1);
