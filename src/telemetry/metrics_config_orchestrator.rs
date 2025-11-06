@@ -397,8 +397,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             .set_metrics_config(&config)
             .unwrap_or_else(|_| panic!("Provider shouldn't have metrics config set"));
 
-        // Activate all publishers.
-        Self::activate_publishers(&config).await;
+        // Activate publishers which should be activated immediately one by one
+        // in topologically sorted order.
+        for publisher_name in &config.ordered_publisher_names.start_collection_on_init {
+            Arc::clone(&config.publishers[publisher_name]).activate().await;
+        }
 
         // Once publishers are activated, it's unsafe to return errors without rolling back all state changes,
         // which in turn may not be safe either. Because of that, the rest of the logic is performed in a block
@@ -469,7 +472,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     end_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigEnd).await;
                 }
 
-                Self::stop_data_collection(&config, ReportReason::INCOMPLETE_FINISHED).await;
+                Self::end_data_collection(&config, ReportReason::INCOMPLETE_FINISHED).await;
             }
             state => {
                 panic!(
@@ -478,7 +481,10 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             }
         };
 
-        Self::deactivate_publishers(&config).await;
+        // Deactivate publishers in reverse topologically sorted order.
+        for publisher_name in config.ordered_publisher_names.start_collection_on_init.iter().rev() {
+            config.publishers[publisher_name].deactivate().await;
+        }
 
         // Change state to Finished and release the mutex.
         *config_state = MetricsConfigState::Finished;
@@ -669,45 +675,12 @@ impl MetricsConfigOrchestratorImpl {
         )?))
     }
 
-    async fn activate_publishers(config: &Arc<MetricsConfig>) {
-        // Activate publishers which should be activated immediately one by one
-        // in topologically sorted order. Since either start trigger is not set at all, or
-        // it depends on these publishers, data collection should also start immediately.
-        for publisher_name in &config.ordered_publisher_names.start_collection_on_init {
-            Arc::clone(&config.publishers[publisher_name]).activate().await;
-            Arc::clone(&config.publishers[publisher_name]).start_data_collection().await;
-        }
-
-        // Activate publishers which should be activated on start trigger fire event one by one
-        // in topologically sorted order. Data collection will be started once the trigger fires.
-        for publisher_name in &config.ordered_publisher_names.start_collection_on_start_trigger {
-            Arc::clone(&config.publishers[publisher_name]).activate().await;
-        }
-    }
-
-    async fn deactivate_publishers(config: &Arc<MetricsConfig>) {
-        // Deactivate publishers which were activated on start trigger fire event in reversed
-        // topologically sorted order. Publishers have already stopped performing data collection.
-        for publisher_name in
-            config.ordered_publisher_names.start_collection_on_start_trigger.iter().rev()
-        {
-            Arc::clone(&config.publishers[publisher_name]).deactivate().await;
-        }
-
-        // Stop data collection for publishers which were activated immediately on config
-        // initialization and deactivate them in reversed topologically sorted order.
-        for publisher_name in config.ordered_publisher_names.start_collection_on_init.iter().rev() {
-            Arc::clone(&config.publishers[publisher_name]).stop_data_collection().await;
-            Arc::clone(&config.publishers[publisher_name]).deactivate().await;
-        }
-    }
-
     async fn start_data_collection(config: &Arc<MetricsConfig>) {
-        // If start trigger is set and has fired, start data collection for publishers used only for
-        // data collection, in topologically sorted order
+        // If start trigger is set and has fired, activate publishers used only for data collection
+        // in topologically sorted order
         for publisher_name in &config.ordered_publisher_names.start_collection_on_start_trigger {
             let publisher = &config.publishers[publisher_name];
-            Arc::clone(publisher).start_data_collection().await;
+            Arc::clone(publisher).activate().await;
         }
         // Activate metrics report generators.
         for generator in &config.metrics_report_generators {
@@ -715,17 +688,18 @@ impl MetricsConfigOrchestratorImpl {
         }
     }
 
-    async fn stop_data_collection(config: &Arc<MetricsConfig>, reason: ReportReason) {
+    async fn end_data_collection(config: &Arc<MetricsConfig>, reason: ReportReason) {
         // Deactivate metrics report generators.
         for generator in &config.metrics_report_generators {
             Arc::clone(generator).deactivate(reason).await;
         }
-        // Stop data collection of corresponding publishers
+        // Deactivate publishers used only for data collection
+        // in reversed topologically sorted order
         for publisher_name in
             config.ordered_publisher_names.start_collection_on_start_trigger.iter().rev()
         {
             let publisher = &config.publishers[publisher_name];
-            Arc::clone(publisher).stop_data_collection().await;
+            Arc::clone(publisher).deactivate().await;
         }
     }
 
@@ -863,8 +837,6 @@ impl MetricsConfigOrchestratorImpl {
         )
     }
 
-    // Extends dependencies_map with publisher names used in expression evaluation and finds which
-    // publishers start_trigger is dependent on. Cycles are now allowed in dependencies_map
     fn get_start_trigger_dependencies(
         config_proto: &MetricsConfigProto,
         dependency_map: HashMap<(&str, &str), (DependencyContainer<'_>, Vec<(&str, &str)>)>,
@@ -1053,7 +1025,7 @@ impl MetricsConfigOrchestratorImpl {
                 .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
                 .await;
 
-            Self::stop_data_collection(&config, ReportReason::INCOMPLETE_END).await;
+            Self::end_data_collection(&config, ReportReason::INCOMPLETE_END).await;
 
             // Subscribe to start trigger.
             Self::subscribe_to_start_trigger(
@@ -1076,8 +1048,7 @@ mod tests {
     use super::*;
 
     use googletest::assert_that;
-    use googletest::matcher::MatcherBase;
-    use googletest::matchers::{elements_are, eq, err, len, pat};
+    use googletest::matchers::{eq, err, len, pat, unordered_elements_are};
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
     use protobuf::descriptor::{
@@ -2396,8 +2367,6 @@ mod tests {
         const DEACTIVATE: &str = "deactivate";
         const SUBSCRIBE: &str = "subscribe";
         const UNSUBSCRIBE: &str = "unsubscribe";
-        const START_DATA_COLLECTION: &str = "start_data_collection";
-        const STOP_DATA_COLLECTION: &str = "stop_data_collection";
 
         // Setup callbacks that log actions and current MetricsConfig state.
         let factory_calls = Arc::new(Mutex::new(Vec::new()));
@@ -2441,14 +2410,6 @@ mod tests {
         let factory_calls_clone = Arc::clone(&factory_calls);
         publisher_mock.set_activate_callback(move |name| {
             factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()));
-        });
-        let factory_calls_clone = Arc::clone(&factory_calls);
-        publisher_mock.set_start_data_collection_callback(move |name| {
-            factory_calls_clone.lock().push((START_DATA_COLLECTION.to_owned(), name.to_owned()));
-        });
-        let factory_calls_clone = Arc::clone(&factory_calls);
-        publisher_mock.set_stop_data_collection_callback(move |name| {
-            factory_calls_clone.lock().push((STOP_DATA_COLLECTION.to_owned(), name.to_owned()));
         });
 
         // Create and setup mock report generator.
@@ -2516,22 +2477,18 @@ mod tests {
         // Yield to make sure trigger handler task is processed.
         tokio::task::yield_now().await;
 
-        assert_that!(
-            *factory_calls.lock(),
-            elements_are!(
-                eq(&(ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned())),
-                eq(&(SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned())),
-                eq(&(SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned())),
-                eq(&(UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned())),
-                eq(&(START_DATA_COLLECTION.to_owned(), SOME_PUBLISHER_NAME.to_owned())),
-                eq(&(ACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned())),
-                eq(&(SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned())),
-                eq(&(UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned())),
-                eq(&(DEACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned())),
-                eq(&(STOP_DATA_COLLECTION.to_owned(), SOME_PUBLISHER_NAME.to_owned())),
-                eq(&(SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned())),
-            )
-        );
+        let expected_calls = vec![
+            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), FINISH_TRIGGER_NAME.to_owned()),
+            (UNSUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
+            (ACTIVATE.to_owned(), SOME_PUBLISHER_NAME.to_owned()),
+            (ACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
+            (UNSUBSCRIBE.to_owned(), END_TRIGGER_NAME.to_owned()),
+            (DEACTIVATE.to_owned(), REPORT_GENERATOR_NAME.to_owned()),
+            (SUBSCRIBE.to_owned(), START_TRIGGER_NAME.to_owned()),
+        ];
+        assert_eq!(*factory_calls.lock(), expected_calls);
         let config = { Arc::clone(&orchestrator.configs.lock()[&*CONFIG_UUID]) };
         let config_state = config.state.lock().await;
         assert!(
@@ -2746,29 +2703,18 @@ mod tests {
                 actions_container_clone.lock().push(("activate", name.to_owned()));
             };
 
-            let actions_container_clone = Arc::clone(&actions_container);
-            let start_collection_callback = move |name: &str| {
-                actions_container_clone.lock().push(("start_collection", name.to_owned()));
-            };
-
             // Setup mock publishers.
             let mut service_publisher_mock =
                 MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
             service_publisher_mock.set_activate_callback(activate_callback.clone());
-            service_publisher_mock
-                .set_start_data_collection_callback(start_collection_callback.clone());
 
             let mut start_aggregation_publisher_mock =
                 MockPublisher::new(START_AGGREGATION_PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
             start_aggregation_publisher_mock.set_activate_callback(activate_callback.clone());
-            start_aggregation_publisher_mock
-                .set_start_data_collection_callback(start_collection_callback.clone());
 
             let mut collect_aggregation_publisher_mock =
                 MockPublisher::new(COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
             collect_aggregation_publisher_mock.set_activate_callback(activate_callback.clone());
-            collect_aggregation_publisher_mock
-                .set_start_data_collection_callback(start_collection_callback.clone());
 
             // Setup orchestrator with a real (non-mocked) node factory
             let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -2798,20 +2744,10 @@ mod tests {
             // service publishers can be any because expressions do not impact topological sorting
             assert_that!(
                 *actions_container.lock(),
-                elements_are!(
+                unordered_elements_are!(
                     eq(&("activate", START_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                    eq(&("start_collection", START_AGGREGATION_PUBLISHER_NAME.to_owned())),
                     eq(&("activate", SERVICE_PUBLISHER_NAME.to_owned())),
-                    eq(&("start_collection", SERVICE_PUBLISHER_NAME.to_owned())),
-                    eq(&("activate", COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned())),
                 )
-                .or(elements_are!(
-                    eq(&("activate", SERVICE_PUBLISHER_NAME.to_owned())),
-                    eq(&("start_collection", SERVICE_PUBLISHER_NAME.to_owned())),
-                    eq(&("activate", START_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                    eq(&("start_collection", START_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                    eq(&("activate", COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                ))
             );
 
             // Start data collection
@@ -2820,10 +2756,10 @@ mod tests {
             tokio::task::yield_now().await;
 
             // Verify that data collection has been started for collection publisher
-            assert_that!(*actions_container.lock(), len(eq(6)));
+            assert_that!(*actions_container.lock(), len(eq(3)));
             assert_that!(
                 *actions_container.lock().last().unwrap(),
-                eq(&("start_collection", COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned()))
+                eq(&("activate", COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned())),
             );
         },
 
@@ -3068,14 +3004,11 @@ mod tests {
         );
 
         // Verify the order of calls.
-        assert_that!(
+        // Note: aggregation publisher depends on start_trigger which doesn't fire before the config
+        // is finished, so no activation and deactivation happens for it
+        assert_eq!(
             *name_container.lock(),
-            elements_are!(
-                eq(&FINISH_TRIGGER_NAME),
-                eq(&START_TRIGGER_NAME),
-                eq(&AGGREGATION_PUBLISHER_NAME),
-                eq(&SERVICE_PUBLISHER_NAME),
-            )
+            [FINISH_TRIGGER_NAME, START_TRIGGER_NAME, SERVICE_PUBLISHER_NAME]
         );
     }
 
@@ -3252,37 +3185,27 @@ mod tests {
             TriggerSubscriber::MetricsConfigFinish,
         ));
 
-        // Setup stop_data_collection and deactivate callbacks
-        let actions_container = Arc::new(Mutex::new(Vec::new()));
-
-        let actions_container_clone = Arc::clone(&actions_container);
-        let stop_data_collection_callback = move |name: &str| {
-            actions_container_clone.lock().push(("stop_data_collection", name.to_owned()));
-        };
-
-        let actions_container_clone = Arc::clone(&actions_container);
-        let deactivate_callback = move |name: &str| {
-            actions_container_clone.lock().push(("deactivate", name.to_owned()));
+        // Create deactivation callback
+        let deactivation_container = Arc::new(Mutex::new(HashSet::new()));
+        let set_deactivation_callback = |publisher_mock: &mut MockPublisher| {
+            let deactivation_container_clone = Arc::clone(&deactivation_container);
+            publisher_mock.set_deactivate_callback(move |name| {
+                deactivation_container_clone.lock().insert(name.to_owned());
+            });
         };
 
         // Setup mock publishers.
         let mut service_publisher_mock =
             MockPublisher::new(SERVICE_PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
-        service_publisher_mock
-            .set_stop_data_collection_callback(stop_data_collection_callback.clone());
-        service_publisher_mock.set_deactivate_callback(deactivate_callback.clone());
+        set_deactivation_callback(&mut service_publisher_mock);
 
         let mut start_aggregation_publisher_mock =
             MockPublisher::new(START_AGGREGATION_PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
-        start_aggregation_publisher_mock
-            .set_stop_data_collection_callback(stop_data_collection_callback.clone());
-        start_aggregation_publisher_mock.set_deactivate_callback(deactivate_callback.clone());
+        set_deactivation_callback(&mut start_aggregation_publisher_mock);
 
         let mut collect_aggregation_publisher_mock =
             MockPublisher::new(COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned(), *CONFIG_UUID);
-        collect_aggregation_publisher_mock
-            .set_stop_data_collection_callback(stop_data_collection_callback.clone());
-        collect_aggregation_publisher_mock.set_deactivate_callback(deactivate_callback.clone());
+        set_deactivation_callback(&mut collect_aggregation_publisher_mock);
 
         // Setup orchestrator with real node factory (not mocked)
         let mut orchestrator = MockedMetricsConfigOrchestratorImpl::new_mocked();
@@ -3314,27 +3237,22 @@ mod tests {
         end_trigger_mock.fire().await;
         // Yield to make sure trigger handler task is processed.
         tokio::task::yield_now().await;
-
-        assert_that!(
-            *actions_container.lock(),
-            elements_are!(eq(&(
-                "stop_data_collection",
-                COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned()
-            )))
+        assert_eq!(
+            *deactivation_container.lock(),
+            [COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned()].into_iter().collect()
         );
 
         // Finish config and verify all publishers are deactivated
         orchestrator.finish_config(&CONFIG_UUID).await.unwrap();
-        assert_that!(
-            *actions_container.lock(),
-            elements_are!(
-                eq(&("stop_data_collection", COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                eq(&("deactivate", COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                eq(&("stop_data_collection", SERVICE_PUBLISHER_NAME.to_owned())),
-                eq(&("deactivate", SERVICE_PUBLISHER_NAME.to_owned())),
-                eq(&("stop_data_collection", START_AGGREGATION_PUBLISHER_NAME.to_owned())),
-                eq(&("deactivate", START_AGGREGATION_PUBLISHER_NAME.to_owned())),
-            )
+        assert_eq!(
+            *deactivation_container.lock(),
+            [
+                COLLECT_AGGREGATION_PUBLISHER_NAME.to_owned(),
+                SERVICE_PUBLISHER_NAME.to_owned(),
+                START_AGGREGATION_PUBLISHER_NAME.to_owned()
+            ]
+            .into_iter()
+            .collect()
         );
     }
 

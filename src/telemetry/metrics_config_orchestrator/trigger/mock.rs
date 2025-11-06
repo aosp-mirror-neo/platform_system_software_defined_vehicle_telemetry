@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -23,7 +22,7 @@ pub(crate) struct MockTrigger {
 
     name: String,
     metrics_config_uuid: MetricsConfigUuid,
-    on_fired_callback_map: AsyncMutex<HashMap<TriggerSubscriber, TriggerCallbackFn>>,
+    on_fired_callback: AsyncMutex<Option<(TriggerSubscriber, TriggerCallbackFn)>>,
 }
 
 #[async_trait]
@@ -42,7 +41,7 @@ impl Trigger for MockTrigger {
         on_fired_callback: TriggerCallbackFn,
     ) {
         self.verify_subscriber(subscriber);
-        self.on_fired_callback_map.lock().await.insert(subscriber.clone(), on_fired_callback);
+        self.on_fired_callback.lock().await.replace((subscriber.clone(), on_fired_callback));
 
         if let Some(callback) = &self.subscribe_callback {
             callback(&self.name);
@@ -51,7 +50,6 @@ impl Trigger for MockTrigger {
 
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
         self.verify_subscriber(subscriber);
-        self.on_fired_callback_map.lock().await.remove(subscriber);
 
         if let Some(callback) = &self.unsubscribe_callback {
             callback(&self.name);
@@ -67,7 +65,7 @@ impl MockTrigger {
             expected_subscribers: vec![],
             subscribe_callback: None,
             unsubscribe_callback: None,
-            on_fired_callback_map: HashMap::new().into(),
+            on_fired_callback: None.into(),
         }
     }
 
@@ -86,13 +84,13 @@ impl MockTrigger {
     }
 
     pub(crate) async fn fire_with_context(&self, context: Arc<NodeEvaluationContext>) {
-        let mut lock = self.on_fired_callback_map.lock().await;
-        for (subscriber, on_fired_callback) in lock.iter_mut() {
-            let compute_order = Level(subscriber.compute_order());
-            let countdown_latch =
-                MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
-            on_fired_callback(Arc::clone(&context), compute_order, countdown_latch);
-        }
+        let mut lock = self.on_fired_callback.lock().await;
+        let (subscriber, on_fired_callback) = lock.as_mut().unwrap();
+
+        let compute_order = Level(subscriber.compute_order());
+        let countdown_latch =
+            MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
+        on_fired_callback(context, compute_order, countdown_latch);
     }
 
     pub(crate) fn set_subscribe_callback(
