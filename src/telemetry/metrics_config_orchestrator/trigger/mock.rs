@@ -55,6 +55,10 @@ impl Trigger for MockTrigger {
             callback(&self.name);
         }
     }
+
+    async fn fire_manually(&self, context: Arc<NodeEvaluationContext>) {
+        self.fire_with_context(context).await;
+    }
 }
 
 impl MockTrigger {
@@ -156,6 +160,7 @@ pub(super) struct MockSubscriptionManager {
     pub(super) key: Arc<Mutex<Option<TriggerSubscriber>>>,
     pub(super) callback: Arc<Mutex<Option<TriggerCallbackFn>>>,
     activation_id: Arc<Mutex<Option<ActivationId>>>,
+    notify_count: Arc<Mutex<u32>>,
 }
 
 #[async_trait]
@@ -172,14 +177,21 @@ impl SubscriptionManager<TriggerSubscriber, Arc<NodeEvaluationContext>>
     }
 
     async fn notify(&self, activation_id: ActivationId, arg: Arc<NodeEvaluationContext>) {
+        *self.notify_count.lock() += 1;
+
+        self.set_activation_id(activation_id).await;
+
         let mut callback_lock = self.callback.lock();
-        *self.activation_id.lock() = Some(activation_id);
         if let Some(callback) = &mut *callback_lock {
             let compute_order = Level(self.key.lock().as_ref().unwrap().compute_order());
             let countdown_latch =
                 MultiLevelCountdownLatch::builder().with_level(compute_order, 1).build();
             callback(arg, compute_order, countdown_latch.clone());
         }
+    }
+
+    async fn get_current_activation_id(&self) -> Option<ActivationId> {
+        self.activation_id.lock().as_ref().cloned()
     }
 }
 
@@ -189,7 +201,17 @@ impl MockSubscriptionManager {
             key: Arc::new(Mutex::new(None)),
             callback: Arc::new(Mutex::new(None)),
             activation_id: Arc::new(Mutex::new(None)),
+            notify_count: Arc::new(Mutex::new(0)),
         }
+    }
+
+    pub(super) fn get_notify_count(&self) -> u32 {
+        *self.notify_count.lock()
+    }
+
+    // Sets activation id
+    pub(super) async fn set_activation_id(&self, activation_id: ActivationId) {
+        *self.activation_id.lock() = Some(activation_id);
     }
 
     /// Just like `subscribe`, but also passes the `ActivationId` of the notification to the

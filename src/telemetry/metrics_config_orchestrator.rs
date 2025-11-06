@@ -711,12 +711,8 @@ impl MetricsConfigOrchestratorImpl {
         Arc::clone(start_trigger)
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move |_context, compute_order, countdown_latch| {
-                    Self::on_start_trigger_fired(
-                        config_clone.take(),
-                        compute_order,
-                        countdown_latch,
-                    );
+                Box::new(move |context, _compute_order, _countdown_latch| {
+                    Self::on_start_trigger_fired(config_clone.take(), context);
                 }),
             )
             .await;
@@ -944,12 +940,10 @@ impl MetricsConfigOrchestratorImpl {
 
     fn on_start_trigger_fired(
         maybe_config: Option<Arc<MetricsConfig>>,
-        compute_order: Level,
-        countdown_latch: MultiLevelCountdownLatch,
+        context: Arc<NodeEvaluationContext>,
     ) {
         tokio::spawn(async move {
             let Some(config) = maybe_config else {
-                countdown_latch.count_down(compute_order).await;
                 return;
             };
             debug!("MetricsConfig {} start trigger fired", config.uuid);
@@ -990,9 +984,22 @@ impl MetricsConfigOrchestratorImpl {
                     .await;
             }
 
+            // The Self::start_data_collection call above might have introduced new subscribers of
+            // the `start_trigger`. These subscribers also have to be notified that the trigger has
+            // fired, so we fire the trigger manually one more time.
+            //
+            // TODO: b/460078057: the `fire_manually` usage is a workaround and it should never be
+            // called. Ideally, the architecture over object activations should be different so that
+            // it supports such a scenario.
+            config
+                .start_trigger
+                .as_ref()
+                .expect("Start trigger is expected to exist in the start trigger fired handler")
+                .fire_manually(context)
+                .await;
+
             // Change state to Running and release the mutex.
             *config_state = MetricsConfigState::Running;
-            countdown_latch.count_down(compute_order).await;
         });
     }
 

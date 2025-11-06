@@ -43,6 +43,9 @@ pub(crate) trait Trigger: Send + Sync {
     /// Last unsubscription deactivates the trigger.
     /// After asynchronous function is complete, the callback is guaranteed not to be called.
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber);
+
+    // Fire the trigger out of order. Does nothing if there are currently no subscribers.
+    async fn fire_manually(&self, context: Arc<NodeEvaluationContext>);
 }
 
 #[derive(Clone, Eq, Hash, PartialEq, strum_macros::Display)]
