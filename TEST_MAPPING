@@ -95,6 +95,9 @@
     },
     {
       "name": "sdv_mt_telemetry_integration_general_test"
+    },
+    {
+      "name": "sdv_mt_telemetry_integration_simulator_test"
     }
     // keep-sorted end
   ]

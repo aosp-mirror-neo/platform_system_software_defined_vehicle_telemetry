@@ -8,8 +8,10 @@ use crate::util::printable_duration;
 
 #[derive(Parser, Debug)]
 #[command(long_about = None)]
+/// CLI Args
 pub struct CliArgs {
     #[command(subcommand)]
+    /// Subcommand to run
     pub command: Commands,
 
     /// After what duration to finish the simulator

@@ -14,6 +14,7 @@ rust_defaults {
     rustlibs: [
         // keep-sorted start
         "libanyhow",
+        "libclap",
         "liblog_rust",
         "libsdv_log_rust",
         "libsdv_telemetry_simulator_lib",
@@ -32,4 +33,40 @@ rust_binary {
 rust_binary {
     name: "sdv_ivi_telemetry_simulator",
     defaults: ["sdv_telemetry_simulator_defaults"],
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_integration_simulator_test",
+    defaults: ["sdv_telemetry_simulator_defaults"],
+    test_config_template: ":sdv_telemetry_integration_test_config_template",
+    test_options: {
+        unit_test: false,
+    },
+    rustlibs: [
+        // keep-sorted start
+        "libcsv",
+        "libenv_logger",
+        "libgoogletest_rust",
+        "libprotobuf",
+        "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_simulator_proto",
+        "libsdv_telemetry_test_utils",
+        "libserde",
+        "libtempfile",
+        // keep-sorted end
+    ],
+    flags: [
+        // keep-sorted start
+        "-A clippy::panic",
+        "-A clippy::unwrap_used",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    require_root: true,
 }

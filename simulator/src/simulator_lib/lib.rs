@@ -19,7 +19,6 @@ mod util;
 
 use anyhow::Error;
 use binder::BinderFeatures;
-use clap::Parser;
 use futures::{StreamExt, TryStreamExt};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::{
     configurable_publisher::IConfigurablePublisher::BnConfigurablePublisher,
@@ -63,9 +62,10 @@ use crate::{
     },
 };
 
+pub use cli::CliArgs;
+
 /// run is the main entrypoint of the simulator.
-pub async fn run() -> anyhow::Result<()> {
-    let cli_args = cli::CliArgs::parse();
+pub async fn run(cli_args: CliArgs) -> anyhow::Result<()> {
     info!("Running simulator with args:\n{cli_args}");
 
     binder::ProcessState::start_thread_pool();
