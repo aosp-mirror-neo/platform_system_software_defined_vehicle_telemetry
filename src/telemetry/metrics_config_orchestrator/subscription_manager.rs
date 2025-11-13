@@ -44,6 +44,9 @@ pub(crate) trait SubscriptionManager<
     /// Notifies all subscribers with the provided callback argument, if the provided
     /// `activation_id` matches that of the most recent activation. Otherwise does nothing.
     async fn notify(&self, activation_id: ActivationId, arg: TCallbackArg);
+
+    /// Returns current `activation_id` or None if there are no subscribers.
+    async fn get_current_activation_id(&self) -> Option<ActivationId>;
 }
 
 /// Trait of an object that can be activated.
@@ -155,6 +158,10 @@ impl<TKey: ComputeOrder + Display + Eq + Hash + Send + Sync, TCallbackArg: Clone
         for (key, callback) in callback_map {
             callback(arg.clone(), Level(key.compute_order()), countdown_latch.clone());
         }
+    }
+
+    async fn get_current_activation_id(&self) -> Option<ActivationId> {
+        self.maybe_callback_map.lock().await.as_ref().map(|(activation_id, _)| *activation_id)
     }
 }
 
@@ -335,6 +342,54 @@ mod tests {
         manager.unsubscribe(&KEY.to_owned()).await;
         manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
         manager.unsubscribe(&KEY.to_owned()).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_current_activation_id_no_subscribers_returns_none() {
+        let (manager, _activatable) = create_subscription_manager(|_activatable| {});
+
+        let activation_id = manager.get_current_activation_id().await;
+        assert!(activation_id.is_none());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_current_activation_id_with_subscriber_returns_id() {
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            activatable.expect_activate().with(eq(ActivationId(0))).once().return_const(());
+        });
+
+        manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
+        let activation_id = manager.get_current_activation_id().await;
+        assert_eq!(activation_id, Some(ActivationId(0)));
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn get_current_activation_id_after_resubscribe_returns_new_id() {
+        let (manager, _activatable) = create_subscription_manager(|activatable| {
+            let mut seq = mockall::Sequence::new();
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(0)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+            activatable.expect_deactivate().once().in_sequence(&mut seq).return_const(());
+            activatable
+                .expect_activate()
+                .with(eq(ActivationId(1)))
+                .once()
+                .in_sequence(&mut seq)
+                .return_const(());
+        });
+
+        manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
+        manager.unsubscribe(&KEY.to_owned()).await;
+        manager.subscribe(KEY.to_owned(), create_empty_fn_box()).await;
+        let activation_id = manager.get_current_activation_id().await;
+        assert_eq!(activation_id, Some(ActivationId(1)));
     }
 
     #[sdv_telemetry_test_utils::timeout]

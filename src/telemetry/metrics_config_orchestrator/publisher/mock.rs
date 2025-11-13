@@ -21,8 +21,6 @@ pub(crate) struct MockPublisher {
     metrics_config_uuid: MetricsConfigUuid,
     activate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     deactivate_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    start_data_collection_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
-    stop_data_collection_callback: Option<Box<dyn Fn(&str) + Send + Sync>>,
     latest_message_error: Mutex<Option<ServicePublisherAccessorError>>,
     new_message_callback: AsyncMutex<Option<CallbackFn>>,
     unsubscribe_callback: Option<Box<dyn Fn() + Send + Sync>>,
@@ -65,18 +63,6 @@ impl Publisher for MockPublisher {
         }
     }
 
-    async fn start_data_collection(&self) {
-        if let Some(callback) = &self.start_data_collection_callback {
-            callback(&self.name);
-        }
-    }
-
-    async fn stop_data_collection(&self) {
-        if let Some(callback) = &self.stop_data_collection_callback {
-            callback(&self.name);
-        }
-    }
-
     async fn subscribe(&self, data_trigger_name: &str, new_message_callback: CallbackFn) {
         assert!(self.expected_trigger_names.contains(data_trigger_name));
         self.new_message_callback.lock().await.replace(new_message_callback);
@@ -101,8 +87,6 @@ impl MockPublisher {
             metrics_config_uuid,
             activate_callback: None,
             deactivate_callback: None,
-            start_data_collection_callback: None,
-            stop_data_collection_callback: None,
             new_message_callback: None.into(),
             unsubscribe_callback: None,
         }
@@ -124,20 +108,6 @@ impl MockPublisher {
         callback: impl Fn(&str) + Send + Sync + 'static,
     ) {
         self.deactivate_callback.replace(Box::new(callback));
-    }
-
-    pub(crate) fn set_start_data_collection_callback(
-        &mut self,
-        callback: impl Fn(&str) + Send + Sync + 'static,
-    ) {
-        self.start_data_collection_callback.replace(Box::new(callback));
-    }
-
-    pub(crate) fn set_stop_data_collection_callback(
-        &mut self,
-        callback: impl Fn(&str) + Send + Sync + 'static,
-    ) {
-        self.stop_data_collection_callback.replace(Box::new(callback));
     }
 
     pub(crate) fn set_latest_message_error(&self, error: ServicePublisherAccessorError) {
