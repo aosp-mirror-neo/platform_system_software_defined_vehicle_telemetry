@@ -2,6 +2,7 @@
 
 //! Utility functions for unit tests.
 
+mod downcast_matcher;
 mod msg_dyn_matcher;
 
 use lazy_static::lazy_static;
@@ -13,6 +14,7 @@ use std::fmt::Debug;
 use std::future::Future;
 use tokio::sync::oneshot;
 
+pub use downcast_matcher::downcast_ref;
 pub use msg_dyn_matcher::msg_dyn_eq;
 pub use sdv_telemetry_test_utils_macros::parameterized_test;
 pub use sdv_telemetry_test_utils_macros::timeout;
