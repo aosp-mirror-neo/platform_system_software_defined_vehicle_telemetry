@@ -26,7 +26,7 @@ use sdv_telemetry_proto_rust::expression::{
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::Condition_type, metrics_report::ReportReason, publisher::Publisher_type,
-    trigger::Trigger_type, AggregationPublisher, ConditionalTrigger, MetricsConfig,
+    trigger::Trigger_type, AggregationPublisher, ConditionalTrigger, DataTrigger, MetricsConfig,
     MetricsReportConfig, PeriodicTrigger, ProtoMessageBuilder, Publisher, Trigger,
 };
 use sdv_telemetry_rust_wrapper::{
@@ -138,6 +138,150 @@ async fn telemetry_service_simple_config_end_to_end_test() {
 
     let ready_reports_info = service.get_ready_reports_info().await.unwrap();
     assert!(ready_reports_info.is_empty());
+
+    info!("Removing metrics config");
+    service.remove_metrics_config(&config.uuid).await.unwrap();
+
+    info!("Finishing service");
+    service.finish().unwrap();
+
+    info!("Successfully finished service");
+}
+
+/// The test verifies the ability of Metrics Report Generators, Aggregation Publishers and
+/// Conditional Triggers subscribed to Start Trigger to act when it fires, i.e. they are able to
+/// generate the report, perform the aggregation or evaluate the underlying condition,
+/// corresponingly.
+#[sdv_telemetry_test_utils::timeout(30_000)]
+#[tokio::test]
+async fn telemetry_service_act_on_start_trigger_test() {
+    setup_once();
+
+    info!("Connecting to service");
+    let service = TelemetryServiceHolder::get().unwrap();
+
+    info!("Initializing service");
+    let (report_ready_tx, mut report_ready_rx) = mpsc::unbounded_channel();
+    service
+        .init(
+            move |status| {
+                info!("Received status message {:?}: {}", status.code, status.message);
+            },
+            move |report_info| {
+                report_ready_tx.send(report_info).unwrap();
+            },
+        )
+        .await
+        .unwrap();
+
+    let config = MetricsConfig {
+        uuid: "9036ea58-6c8c-4b8a-a380-724fd95949f3".to_owned(),
+
+        triggers: vec![
+            Trigger {
+                name: "start_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_millis(10).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "data_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::DataTrigger(DataTrigger {
+                    publisher_name: "aggregation_publisher".to_owned(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "conditional_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::ConditionalTrigger(ConditionalTrigger {
+                    trigger_names: vec!["start_trigger".to_owned()],
+                    selector_node_index: Some(0),
+                    condition_type: Some(Condition_type::IsTrue(Default::default())),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+            Trigger {
+                name: "finish_trigger".to_owned(),
+                trigger_type: Some(Trigger_type::PeriodicTrigger(PeriodicTrigger {
+                    interval: Some(Duration::from_millis(15).into()).into(),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            },
+        ],
+
+        publishers: vec![Publisher {
+            name: "aggregation_publisher".to_owned(),
+            publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+                trigger_names: vec!["start_trigger".to_owned()],
+                message_builder: Some(ProtoMessageBuilder {
+                    message_type: Empty::descriptor().full_name().to_owned(),
+                    ..Default::default()
+                })
+                .into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }],
+
+        expression_nodes: vec![Node {
+            node_type: Some(Node_type::ConstantLeafNode(ConstantLeafNode {
+                node_value: Some(Node_value::BoolValue(true)),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }],
+
+        start_trigger_name: "start_trigger".to_owned(),
+        finish_trigger_name: "finish_trigger".to_owned(),
+        metrics_report_configs: vec![MetricsReportConfig {
+            name: "metrics_report_config".to_owned(),
+            trigger_names: vec![
+                "start_trigger".to_owned(),
+                "data_trigger".to_owned(),
+                "conditional_trigger".to_owned(),
+            ],
+            message_builder: Some(ProtoMessageBuilder {
+                message_type: Empty::descriptor().full_name().to_owned(),
+                ..Default::default()
+            })
+            .into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+
+    let serialized_config = config.write_to_bytes().unwrap();
+
+    info!("Adding config");
+    service.add_metrics_config(&serialized_config).await.unwrap();
+
+    info!("Activating config");
+    service.activate_metrics_config(&config.uuid).await.unwrap();
+
+    // There should be 3 Metrics Reports generated:
+    // * A report generated directly on firing event of Start Trigger. This verifies that
+    //   Metrics Report Generators are able to act immediately after subscribing to Start Triggers.
+    // * A report generated on Aggregation Publisher performing the aggregation. This verifies
+    //   that Aggregation Publishers are able to act immediately after subscribing to Start Trigger.
+    // * A report generated on Conditional Trigger evaluating to `true`. This verifies
+    //   that Conditional Triggers are able to act immediately after subscribing to Start Trigger.
+    info!("Waiting for metrics report ready notifications");
+    for _ in 0..3 {
+        let report_info = report_ready_rx.recv().await.unwrap();
+
+        info!("Report ready notification received, report UUID: {}", report_info.report_uuid);
+        let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
+        assert_eq!(metrics_report.metrics_config_uuid, config.uuid);
+    }
+
+    // Wait a bit to ensure no more reports are generated.
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(report_ready_rx.try_recv().is_err(), "Expected no more reports to be generated");
 
     info!("Removing metrics config");
     service.remove_metrics_config(&config.uuid).await.unwrap();

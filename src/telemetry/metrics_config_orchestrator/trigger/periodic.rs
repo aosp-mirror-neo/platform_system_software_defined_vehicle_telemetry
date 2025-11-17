@@ -65,6 +65,13 @@ impl Trigger for PeriodicTrigger {
     async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
         self.base.subscription_manager.unsubscribe(subscriber).await;
     }
+
+    async fn fire_manually(&self, context: Arc<NodeEvaluationContext>) {
+        let maybe_activation_id = self.base.subscription_manager.get_current_activation_id().await;
+        if let Some(activation_id) = maybe_activation_id {
+            self.base.fire_trigger(activation_id, context).await;
+        }
+    }
 }
 
 #[async_trait]
@@ -223,6 +230,44 @@ mod tests {
             TriggerSubscriber::MetricsConfigStart
         );
         assert!(subscription_manager.callback.lock().is_none());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn fire_manually_inactive_does_nothing() {
+        let (trigger, subscription_manager) =
+            create_valid_periodic_trigger_with_mock_subscription_manager();
+
+        trigger.fire_manually(Arc::new(NodeEvaluationContext::new(None))).await;
+        assert_eq!(subscription_manager.get_notify_count(), 0);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn fire_manually_notifies_subscriber() {
+        let (trigger, subscription_manager) =
+            create_valid_periodic_trigger_with_mock_subscription_manager();
+        let callback_listener = Arc::new(MockCallbackListener::new());
+
+        subscription_manager
+            .subscribe_for_test(
+                TriggerSubscriber::MetricsConfigStart,
+                callback_listener.create_callback(),
+            )
+            .await;
+
+        // Manually set activation_id to simulate an active state
+        subscription_manager.set_activation_id(ACTIVATION_ID).await;
+
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        trigger.fire_manually(Arc::clone(&context)).await;
+
+        let (activation_id, received_context) = callback_listener.wait_for_callback_fired().await;
+
+        assert_eq!(activation_id, ACTIVATION_ID);
+        assert!(Arc::ptr_eq(&received_context, &context));
+        assert_eq!(callback_listener.get_fired_count(), 1);
+        assert_eq!(subscription_manager.get_notify_count(), 1);
     }
 
     #[sdv_telemetry_test_utils::timeout]

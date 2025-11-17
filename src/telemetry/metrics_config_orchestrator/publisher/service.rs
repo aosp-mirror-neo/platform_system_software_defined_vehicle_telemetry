@@ -225,15 +225,6 @@ impl Publisher for ServicePublisher {
         self.base.reset_latest_message();
     }
 
-    async fn start_data_collection(&self) {
-        // Service Publishers are activated immediately when Metrics Config is initialized,
-        // so data collection start is noop
-    }
-    async fn stop_data_collection(&self) {
-        // Service Publishers are activated immediately when Metrics Config is initialized,
-        // so data collection stop is noop
-    }
-
     async fn subscribe(&self, data_trigger_name: &str, callback: CallbackFn) {
         if !self.is_subscribable() {
             panic!("Unable to subscribe to publisher {}: it's not subscribable", self.get_name());
