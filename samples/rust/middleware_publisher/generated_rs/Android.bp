@@ -29,5 +29,5 @@ genrule {
         "$(genDir) " +
         "$(out)" +
         " '$(locations :telemetry_catalog_protos)'" +
-        " -- --target-api pdk29",
+        " -- --ignore E10B --target-api pdk29",
 }
