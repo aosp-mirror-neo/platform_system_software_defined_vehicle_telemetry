@@ -5,6 +5,11 @@
 //! This file was generated using the following command:
 //! vsidl_rc_generator --catalog-path ${ANDROID_BUILD_TOP}/system/software_defined_vehicle/telemetry/samples/rust/middleware_publisher/catalog --output-path ${ANDROID_BUILD_TOP}/system/software_defined_vehicle/telemetry/samples/rust/middleware_publisher/catalog/vsidl_provider_targets/Android.bp --variant runtime-config-prebuilts     --filegroup telemetry_catalog_protos_with_bp_file
 
+// Pre-compiled file with VSIDL schemas for com.sdv.telemetry.sample.
+//
+// Usage: add the following line to com.sdv.telemetry.sample manifest declaration
+// for each service bundle that is using this shared file:
+// + vsidl_schemas_path: "etc/vsidl_provider/vsidl-config.binpb"
 prebuilt_etc {
     name: "com.sdv.telemetry.sample-vsidl-config.binpb",
     filename: "vsidl-config.binpb",
