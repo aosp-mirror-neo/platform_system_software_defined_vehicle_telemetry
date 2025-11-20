@@ -596,6 +596,10 @@ status_update "Output will be saved to: $output_dir"
 # Wait for the VM to finish booting before proceeding.
 wait_for_vm
 
+# Disable AuthZ to support simulating SDV Comms-based publishers. This must be
+# done after the VM is online.
+adb shell setprop sdv.authz.enable false
+
 if [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
     simulator_binary=sdv_ivi_telemetry_simulator
 
