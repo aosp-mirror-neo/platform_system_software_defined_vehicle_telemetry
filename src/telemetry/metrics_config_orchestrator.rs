@@ -257,6 +257,13 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         // Build graph of triggers and publishers dependencies for sorting them topologically
         let dependency_map = Self::build_dependency_map(config_proto)?;
 
+        // A barrier used to hold incoming data until those who need to receive this data have
+        // registered themselves, i.e. subscribed to the corresponding data sources. In particular,
+        // a message can be received by a Service Publisher before the corresponding Data Trigger
+        // has performed the subscription, which would lead to data loss.
+        let subscription_waiter =
+            MultiLevelCountdownLatch::builder().with_level(Level(0), 1).build();
+
         // Sort publisher and triggers topologically, iterate over sorted vector and create encapsulated objects.
         // Sorted order ensures that all dependencies of the entity are met by the time iterator reaches it.
         // Store topologically sorted list of publisher names in order to activate them in the topological order.
@@ -272,12 +279,14 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     triggers,
                 };
                 ordered_publisher_names.push(publisher_proto.name.clone());
-                self.publisher_factory.create(uuid, publisher_proto, &context).map_err(
-                    |factory_error| MetricsConfigOrchestratorError::InvalidPublisherDefinition {
-                        publisher_name: publisher_proto.name.clone(),
-                        factory_error,
-                    },
-                )
+                self.publisher_factory
+                    .create(uuid, publisher_proto, subscription_waiter.clone(), &context)
+                    .map_err(|factory_error| {
+                        MetricsConfigOrchestratorError::InvalidPublisherDefinition {
+                            publisher_name: publisher_proto.name.clone(),
+                            factory_error,
+                        }
+                    })
             },
             // Create a rust Trigger object using already created Publisher and Trigger objects to resolve dependencies.
             |trigger_proto, publishers, triggers| {
@@ -436,6 +445,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     )
                     .await;
             }
+
+            subscription_waiter.count_down(Level(0)).await;
         }
         .await;
 
@@ -1324,6 +1335,7 @@ mod tests {
             &self,
             metrics_config_uuid: MetricsConfigUuid,
             publisher_proto: &PublisherProto,
+            _subscription_waiter: MultiLevelCountdownLatch,
             _context: &PublisherFactoryCreateContext,
         ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
             if let Some(callback) = &self.create_callback {

@@ -441,6 +441,7 @@ mod tests {
     use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
+    use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
     use sdv_telemetry_utils::duration_utils::try_into_proto_duration;
     use std::collections::HashMap;
     use std::sync::OnceLock;
@@ -702,6 +703,7 @@ mod tests {
             Arc::clone(&factory.node_evaluation_context_factory),
             Arc::new(MockServiceAdapter::new()),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+            MultiLevelCountdownLatch::builder().build(),
         ));
 
         let err = factory
@@ -737,6 +739,7 @@ mod tests {
             Arc::clone(&factory.node_evaluation_context_factory),
             Arc::new(MockServiceAdapter::new()),
             Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+            MultiLevelCountdownLatch::builder().build(),
         ));
 
         let res = factory
