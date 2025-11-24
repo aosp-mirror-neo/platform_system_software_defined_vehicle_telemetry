@@ -36,6 +36,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
+        "libdowncast_rs",
         "libgoogletest_rust",
         "liblazy_static",
         "liblog_rust",

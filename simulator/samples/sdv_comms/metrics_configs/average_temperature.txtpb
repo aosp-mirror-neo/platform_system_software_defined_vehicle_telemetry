@@ -1,0 +1,70 @@
+# Copyright 2024 Google LLC
+#
+# Every 20 seconds, report the average temperature
+
+uuid: "47bd1c06-a606-42d7-9b83-4631e544413a"
+version: 1
+
+descriptor_protos {
+  message_type {
+    name: "TemperatureData"
+    field { type: TYPE_DOUBLE name: "average_temperature" number: 1 }
+  }
+}
+
+triggers {
+  name: "new_temperature_data"
+  data_trigger { publisher_name: "temperature_publisher" }
+}
+
+triggers {
+  name: "report_trigger"
+  periodic_trigger { interval { seconds: 20 nanos: 0 } }
+}
+
+publishers {
+  name: "temperature_publisher"
+  service_publisher { service_name: "com.google.sdv.telemetry.samples.DtTemperaturePublisher" }
+}
+
+publishers {
+  name: "average_temperature_aggregation"
+  aggregation_publisher {
+    trigger_names: "new_temperature_data"
+    reset_on_get: true
+    message_builder {
+      message_type: ".TemperatureData"
+      field_assignments {
+        field_name: "average_temperature"
+        avg_aggregation { expression_node_index: 0 }
+      }
+    }
+  }
+}
+
+# index 0
+expression_nodes {
+  field_leaf_node { publisher_name: "temperature_publisher" field_names: "temperature" }
+}
+
+# index 1
+expression_nodes {
+  field_leaf_node {
+    publisher_name: "average_temperature_aggregation"
+    field_names: "average_temperature"
+  }
+}
+
+metrics_report_configs {
+  name: "average_temperature_last_20s"
+  trigger_names: "report_trigger"
+  report_incomplete: false
+
+  message_builder {
+    message_type: ".TemperatureData"
+    field_assignments {
+      field_name: "average_temperature"
+      no_aggregation { expression_node_index: 1 }
+    }
+  }
+}

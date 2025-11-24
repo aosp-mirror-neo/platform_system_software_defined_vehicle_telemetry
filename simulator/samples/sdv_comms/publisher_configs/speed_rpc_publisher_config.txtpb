@@ -1,0 +1,16 @@
+# Copyright 2025 Google LLC
+
+service_name: "com.google.sdv.telemetry.samples.RpcSpeedPublisher"
+data_format_protos {
+  message_type {
+    name: "SpeedData"
+    field { name: "speed" number: 1 type: TYPE_INT32 json_name: "speed" }
+  }
+}
+data_format_message_name: ".SpeedData"
+data_generators {
+  loop_data: true
+  default_delay { seconds: 1 nanos: 0 }
+  csv_file { file_path: "/data/local/tmp/speed_rpc_publisher_data.csv" delimiter: "," }
+}
+publishing_strategy { sdv_comms_rpc {} }

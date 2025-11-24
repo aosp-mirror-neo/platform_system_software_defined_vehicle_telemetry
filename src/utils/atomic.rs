@@ -9,6 +9,7 @@ pub type SequenceNumberType = u64;
 
 /// An atomically incrementing sequence number. Produced values are guaranteed to not be re-used,
 /// unless the internal counter overflows.
+#[derive(Debug)]
 pub struct SequenceNumber {
     next: AtomicU64,
 }

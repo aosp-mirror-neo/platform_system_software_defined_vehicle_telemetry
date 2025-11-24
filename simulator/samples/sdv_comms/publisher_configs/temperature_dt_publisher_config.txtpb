@@ -1,0 +1,16 @@
+# Copyright 2025 Google LLC
+
+service_name: "com.google.sdv.telemetry.samples.DtTemperaturePublisher"
+data_format_protos {
+  message_type {
+    name: "TemperatureData"
+    field { name: "temperature" number: 1 type: TYPE_DOUBLE json_name: "temperature" }
+  }
+}
+data_format_message_name: ".TemperatureData"
+data_generators {
+  loop_data: true
+  default_delay { seconds: 1 nanos: 0 }
+  csv_file { file_path: "/data/local/tmp/temperature_dt_publisher_data.csv" delimiter: "," }
+}
+publishing_strategy { sdv_comms_data_tunnel { message_count: 200 message_size: 20 } }

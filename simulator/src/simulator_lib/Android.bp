@@ -31,11 +31,13 @@ rust_defaults {
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_simulator_proto",
+        "libsdv_telemetry_simulator_publishing_strategy",
         "libsdv_telemetry_utils",
         "libstrum",
         "libthiserror",
         "libtokio",
         "libtokio_stream",
+        "libtokio_util",
         // keep-sorted end
     ],
     proc_macros: [
