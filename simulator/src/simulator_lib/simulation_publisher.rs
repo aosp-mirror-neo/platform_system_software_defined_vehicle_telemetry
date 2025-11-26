@@ -2,7 +2,6 @@
 
 use log::{debug, error};
 use sdv_telemetry_simulator_publishing_strategy::PublishingStrategy;
-use std::slice;
 
 use crate::publisher_config::PublisherConfig;
 
@@ -24,13 +23,7 @@ impl SimulationPublisher {
 
         debug!("Registering publisher {service_name}.");
         self.publishing_strategy
-            .register(
-                &service_name,
-                self.config.message_descriptor.full_name(),
-                // TODO: b/368362607 - Once `PublisherInfo` supports multiple file descriptor
-                // protos, we need to pass all of them here.
-                slice::from_ref(self.config.message_descriptor.file_descriptor_proto()),
-            )
+            .register(&service_name, &self.config.message_name, &self.config.file_descriptor_protos)
             .await?;
         Ok(scopeguard::guard(self, move |mut publisher| {
             tokio::spawn(async move {

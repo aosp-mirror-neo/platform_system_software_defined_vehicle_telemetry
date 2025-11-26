@@ -14,7 +14,6 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
         "libanyhow",
         "libbinder_rs",
         "libchrono",

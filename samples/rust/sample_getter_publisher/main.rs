@@ -5,8 +5,9 @@
 mod random_integer_publisher;
 
 use log::info;
+use protobuf::descriptor::FileDescriptorSet;
 use protobuf::{Message, MessageFull};
-use sample_publisher_proto::sample_publisher::{self, SampleMessage};
+use sample_publisher_proto::sample_publisher::SampleMessage;
 use sdv_configurable_publisher_rust_wrapper::configurable_publisher_registry::{
     ConfigurablePublisherRegistry, ConfigurablePublisherRegistryError,
 };
@@ -31,12 +32,15 @@ async fn main() -> Result<(), ConfigurablePublisherRegistryError> {
     let publisher = RandomIntegerPublisher::new();
 
     info!("Registering publisher");
-    let file_descriptor = sample_publisher::file_descriptor();
-    let file_descriptor_proto = file_descriptor.proto();
     let message_descriptor = SampleMessage::descriptor();
+    let file_descriptor_set = FileDescriptorSet {
+        file: vec![message_descriptor.file_descriptor_proto().to_owned()],
+        ..Default::default()
+    };
+
     let publisher_info = PublisherInfo {
         service_name: "SampleService".to_owned(),
-        file_descriptor_proto: file_descriptor_proto.write_to_bytes().unwrap(),
+        file_descriptor_set: Some(file_descriptor_set.write_to_bytes().unwrap()),
         message_type_name: format!(".{}", message_descriptor.full_name()),
         supports_get: true,
     };

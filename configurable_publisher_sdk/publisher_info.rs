@@ -9,11 +9,12 @@ pub struct PublisherInfo {
     /// across SDV. Corresponds to AIDL `serviceName`.
     pub service_name: String,
 
-    /// Protobuf FileDescriptorProto bytes containing the schema for published messages.
-    /// Corresponds to AIDL `fileDescriptorProto`.
-    /// Note: AIDL constraint mentions this should be < 10Kb. This is a runtime
-    /// check, not enforced by the type system here.
-    pub file_descriptor_proto: Vec<u8>,
+    /// Protobuf FileDescriptorSet bytes containing the schema for published messages. Corresponds
+    /// to AIDL `fileDescriptorSet`.
+    ///
+    /// Note: AIDL constraint mentions this should be < 10Kb. This is a runtime check, not enforced
+    /// by the type system here.
+    pub file_descriptor_set: Option<Vec<u8>>,
 
     /// The fully qualified name of the root Protobuf message type being published.
     /// This type must be defined within the `file_descriptor_proto`.
@@ -31,12 +32,43 @@ impl PublisherInfo {
     /// expected by the AIDL layer
     pub(super) fn to_aidl_representation(&self) -> PublisherInfoAidl {
         PublisherInfoAidl {
-            // We clone the data to transfer ownership or provide a copy
-            // to the AIDL representation.
             serviceName: self.service_name.clone(),
-            fileDescriptorProto: self.file_descriptor_proto.clone(),
+            fileDescriptorSet: self.file_descriptor_set.clone(),
             messageTypeName: self.message_type_name.clone(),
             supportsGet: self.supports_get,
+            // Never set the deprecated `fileDescriptorProto` field.
+            fileDescriptorProto: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::expect_that;
+    use googletest::matchers::{elements_are, eq, none, some};
+
+    #[googletest::test]
+    fn to_aidl_representation_success() {
+        let publisher_info = PublisherInfo {
+            service_name: "test_service".to_string(),
+            file_descriptor_set: Some(vec![1, 2, 3]),
+            message_type_name: "test_message".to_string(),
+            supports_get: true,
+        };
+
+        let aidl_publisher_info = publisher_info.to_aidl_representation();
+
+        expect_that!(
+            aidl_publisher_info,
+            pat!(PublisherInfoAidl {
+                serviceName: eq("test_service"),
+                fileDescriptorSet: eq(some(elements_are![1, 2, 3])),
+                messageTypeName: eq("test_message"),
+                supportsGet: eq(true),
+                fileDescriptorProto: none(),
+            })
+        );
     }
 }
