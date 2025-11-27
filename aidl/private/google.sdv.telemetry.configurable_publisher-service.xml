@@ -1,0 +1,12 @@
+<!-- Copyright 2023 Google LLC -->
+
+<manifest version="1.0" type="device">
+    <hal format="aidl">
+        <name>google.sdv.telemetry.configurable_publisher</name>
+        <version>1</version>
+        <interface>
+            <name>IConfigurablePublisherRegistry</name>
+            <instance>default</instance>
+        </interface>
+    </hal>
+</manifest>
