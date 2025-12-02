@@ -1,5 +1,7 @@
 // Copyright 2023 Google LLC
+
 //! This module contains descriptors for well known protobuf types.
+
 use lazy_static::lazy_static;
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types;
@@ -22,9 +24,10 @@ lazy_static! {
     ];
 }
 
-/// Finds a message descriptor by its full name.
-pub fn find_message_by_full_name(
-    file_descriptors: &[FileDescriptor],
+/// Finds a message descriptor by its full name. If the name doesn't start with a dot, we prepend a
+/// dot to the name.
+pub fn find_message_by_full_name<'a>(
+    file_descriptors: impl IntoIterator<Item = &'a FileDescriptor>,
     full_name: &str,
 ) -> Option<MessageDescriptor> {
     let full_name = if full_name.starts_with('.') {
@@ -33,8 +36,54 @@ pub fn find_message_by_full_name(
         Cow::from(format!(".{full_name}"))
     };
 
-    // iterate through all file_descriptors, find MessageDescriptor for the given message_type
-    // message_by_full_name() method requires the name to start with dot, it returns a clone
-    // of the MessageDescriptor, so we can return it as-is without cloning again
-    file_descriptors.iter().find_map(|fd| fd.message_by_full_name(&full_name))
+    // Iterate through all `file_descriptors` and find a `MessageDescriptor` for the given
+    // `full_name`. `FileDescriptor::message_by_full_name` requires the name to start with dot.
+    file_descriptors.into_iter().find_map(|fd| fd.message_by_full_name(&full_name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::expect_that;
+    use googletest::matchers::{eq, none, pat, some};
+    use protobuf::{well_known_types::empty::Empty, MessageFull};
+    use sdv_telemetry_test_utils::parameterized_test;
+
+    parameterized_test!(
+        #[googletest::test]
+        find_message_by_full_name,
+
+        |file_descriptors, full_name, expected_full_name: Option<String>| {
+            let message_descriptor = find_message_by_full_name(file_descriptors, full_name);
+
+            match expected_full_name {
+                Some(expected_full_name) => {
+                    expect_that!(
+                        message_descriptor,
+                        // We cannot compare `MessageDescriptor`s directly, because
+                        // `MessageDescriptor::eq` is defined as pointer-equality, including the
+                        // message's file descriptor, not value-equality. Hence, we fall back to
+                        // just comparing the message names.
+                        some(pat!(&MessageDescriptor { full_name(): eq(&expected_full_name) }))
+                    );
+                },
+                None => {
+                    expect_that!(message_descriptor, none());
+                }
+            }
+        },
+
+        missing_message: (&[], ".google.protobuf.Empty", None),
+        leading_dot: (
+            &[Empty::descriptor().file_descriptor().to_owned()],
+            ".google.protobuf.Empty",
+            Some(Empty::descriptor().full_name().to_owned())
+        ),
+        no_leading_dot: (
+            &[Empty::descriptor().file_descriptor().to_owned()],
+            "google.protobuf.Empty",
+            Some(Empty::descriptor().full_name().to_owned())
+        ),
+    );
 }

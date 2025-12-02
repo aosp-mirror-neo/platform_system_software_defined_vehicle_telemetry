@@ -348,7 +348,7 @@ impl CommsStackAccessor {
             .with_context(|| "Invalid Descriptor Protos")?;
 
             return descriptor_utils::find_message_by_full_name(
-                &file_descriptors,
+                file_descriptors.iter().chain(WELL_KNOWN_FILE_DESCRIPTORS.iter()),
                 &publisher_metadata.message_full_name
             )
                 .map(|message_descriptor| (None, message_descriptor))
@@ -490,6 +490,8 @@ mod integration_tests {
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
     use parking_lot::Mutex;
+    use protobuf::descriptor::FileDescriptorProto;
+    use protobuf::well_known_types::empty::Empty;
     use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
     use protobuf::{reflect::ReflectValueRef, MessageDyn, MessageFull};
     use sdv_comms::dt;
@@ -707,33 +709,66 @@ mod integration_tests {
         assert!(accessor.get_metadata(&service_name).await.unwrap().is_none());
     }
 
-    #[sdv_telemetry_test_utils::timeout]
-    #[tokio::test]
-    async fn get_metadata_success() {
-        let ctx = test_utils::make_context(0).await;
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        get_metadata_success,
 
-        let service_name = test_utils::make_unique_service_name();
+        |message_full_name, file_descriptors: Vec<FileDescriptorProto>, expected_name, expected_proto| async move {
+            let ctx = test_utils::make_context(0).await;
 
-        let _publisher = test_utils::register_topic(
-            ctx,
-            &service_name,
-            MessageMetadata {
-                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
-                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+            let service_name = test_utils::make_unique_service_name();
 
-        let accessor = create_accessor(ctx);
-        let publisher_metadata = accessor.get_metadata(&service_name).await.unwrap().unwrap();
-        assert_eq!(publisher_metadata.message_descriptor.name(), "TestMessage");
-        assert_eq!(
-            publisher_metadata.message_descriptor.proto(),
-            TestMessage::descriptor().proto()
-        );
-    }
+            let _publisher = test_utils::register_topic(
+                ctx,
+                &service_name,
+                MessageMetadata { file_descriptors, message_full_name, ..Default::default() },
+            )
+            .await
+            .unwrap();
+
+            let accessor = create_accessor(ctx);
+            let publisher_metadata = accessor.get_metadata(&service_name).await;
+
+            expect_that!(
+                publisher_metadata,
+                ok(some(pat!(&ServicePublisherMetadata {
+                    message_descriptor: ref pat!(&MessageDescriptor {
+                        name(): expected_name,
+                        proto(): &expected_proto,
+                    })
+                })))
+            );
+        },
+
+        well_known_type_not_in_file_descriptors: (
+            ".google.protobuf.Empty".to_owned(),
+            vec![],
+            "Empty",
+            Empty::descriptor().proto().to_owned(),
+        ),
+
+        well_known_type_in_file_descriptors: (
+            ".google.protobuf.Empty".to_owned(),
+            vec![Empty::descriptor().file_descriptor().proto().to_owned()],
+            "Empty",
+            Empty::descriptor().proto().to_owned(),
+        ),
+
+        custom_message_without_dot: (
+            TestMessage::descriptor().full_name().to_owned(),
+            vec![test_message::file_descriptor().proto().to_owned()],
+            "TestMessage",
+            TestMessage::descriptor().proto().to_owned(),
+        ),
+        custom_message_with_dot: (
+            format!(".{}", TestMessage::descriptor().full_name()),
+            vec![test_message::file_descriptor().proto().to_owned()],
+            "TestMessage",
+            TestMessage::descriptor().proto().to_owned(),
+        ),
+    );
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
