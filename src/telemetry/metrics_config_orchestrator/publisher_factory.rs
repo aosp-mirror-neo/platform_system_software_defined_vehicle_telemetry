@@ -10,6 +10,7 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     ServicePublisher as ServicePublisherProto,
 };
 use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
+use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
@@ -33,6 +34,7 @@ pub(crate) trait PublisherFactory: Send + Sync {
         &self,
         metrics_config_uuid: MetricsConfigUuid,
         publisher_proto: &PublisherProto,
+        subscription_waiter: MultiLevelCountdownLatch,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError>;
 
@@ -105,6 +107,7 @@ pub(crate) struct PublisherFactoryImpl {
                 Arc<dyn NodeEvaluationContextFactory>,
                 Arc<dyn ServiceAdapter + Send + Sync>,
                 Arc<dyn StatusReporter>,
+                MultiLevelCountdownLatch,
             ) -> Box<dyn Publisher>
             + Send
             + Sync,
@@ -117,6 +120,7 @@ impl PublisherFactory for PublisherFactoryImpl {
         &self,
         metrics_config_uuid: MetricsConfigUuid,
         publisher_proto: &PublisherProto,
+        subscription_waiter: MultiLevelCountdownLatch,
         context: &PublisherFactoryCreateContext,
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
         Self::verify_name_set(publisher_proto)?;
@@ -134,6 +138,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                 Arc::clone(&self.node_evaluation_context_factory),
                 Arc::clone(&self.service_adapter),
                 Arc::clone(&self.status_reporter),
+                subscription_waiter,
             )
             .into()),
             Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
@@ -212,7 +217,8 @@ impl PublisherFactoryImpl {
                  sub_sampling_interval,
                  node_evaluation_context_factory,
                  service_adapter,
-                 status_reporter| {
+                 status_reporter,
+                 subscription_waiter| {
                     Box::new(ServicePublisher::new(
                         name,
                         configuration,
@@ -224,6 +230,7 @@ impl PublisherFactoryImpl {
                         node_evaluation_context_factory,
                         service_adapter,
                         status_reporter,
+                        subscription_waiter,
                     ))
                 },
             ),
@@ -494,7 +501,8 @@ mod tests {
                       sub_sampling_interval,
                       _node_evaluation_context_factory,
                       _service_adapter,
-                      _status_reporter| {
+                      _status_reporter,
+                      _subscription_waiter| {
                     assert!(data_holder_clone
                         .set(ServicePublisherData {
                             fetch_last_message,
@@ -532,13 +540,14 @@ mod tests {
             let triggers = triggers.map_or(HashMap::new(), |triggers| {
                 triggers.into_hash_map(|trigger| trigger.get_name().to_owned())
             });
+            let subscription_waiter = MultiLevelCountdownLatch::builder().build();
             let context = PublisherFactoryCreateContext {
                 file_descriptors: &file_descriptors,
                 nodes: &nodes,
                 node_types: &node_types,
                 triggers: &triggers,
             };
-            self.create(*CONFIG_UUID, publisher_proto, &context)
+            self.create(*CONFIG_UUID, publisher_proto, subscription_waiter, &context)
         }
 
         fn validate_using_default_context(
