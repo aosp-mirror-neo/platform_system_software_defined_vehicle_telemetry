@@ -15,8 +15,8 @@
 // External dependencies.
 use anyhow::Context;
 use async_trait::async_trait;
-use binder_tokio::TokioRuntime;
 use binder::BinderFeatures;
+use binder_tokio::TokioRuntime;
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{
     IConfigurablePublisher::IConfigurablePublisher,
@@ -31,11 +31,16 @@ use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval
+    AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
+    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
+    NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription,
+    SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
-use std::mem;
+use sdv_telemetry_utils::descriptor_utils::{find_message_by_full_name, WELL_KNOWN_FILE_DESCRIPTORS};
 use std::fmt::Debug;
+use std::mem;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
 
@@ -48,7 +53,7 @@ pub struct ConfigurablePublisherRegistry {
     /// Adapter to make calls into Binder library.
     binder_adapter: Box<dyn BinderAdapter<dyn IConfigurablePublisher>>,
     /// Sender of cancellation callbacks.
-    cancellation_sender: mpsc::UnboundedSender<Vec<Box<dyn FnOnce() + Send + Sync>>>,
+    cancellation_sender: mpsc::UnboundedSender<Vec<CancellationCallback>>,
     /// Hashmap to store configurable publishers that can be subscribed to and their metadata.
     publisher_entries: DashMap<String, PublisherEntry>,
 }
@@ -86,7 +91,7 @@ struct AvailabilityCallbackRegistrationImpl {
 
 /// Publisher registry entry.
 struct PublisherEntry {
-    cancellation_callbacks: Vec<Box<dyn FnOnce() + Send + Sync>>,
+    cancellation_callbacks: Vec<CancellationCallback>,
     _death_recipient: binder::DeathRecipient,
     message_descriptor: MessageDescriptor,
     publisher: binder::Strong<dyn IConfigurablePublisher>,
@@ -214,7 +219,7 @@ impl ConfigurablePublisherRegistry {
     /// Creates a new instance of the struct.
     pub fn new() -> Self {
         let (cancellation_sender, mut cancellation_receiver) =
-            mpsc::unbounded_channel::<Vec<Box<dyn FnOnce() + Send + Sync>>>();
+            mpsc::unbounded_channel::<Vec<CancellationCallback>>();
         tokio::spawn(async move {
             while let Some(cancellation_callbacks) = cancellation_receiver.recv().await {
                 for cancellation_callback in cancellation_callbacks.into_iter() {
@@ -430,14 +435,12 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
-    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
-        Box::new(|| unreachable!())
+    fn create_empty_message_handler() -> NewMessageCallback {
+        Box::new(|_| unreachable!())
     }
 
-    fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
-    {
-        Box::new(|_| unreachable!())
+    fn create_empty_cancellation_handler() -> CancellationCallback {
+        Box::new(|| unreachable!())
     }
 
     #[derive(Clone)]
@@ -758,7 +761,7 @@ mod tests {
                     fetch_last_message,
                     &SubSamplingInterval::ZERO,
                     create_empty_message_handler(),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -790,7 +793,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -812,7 +815,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -843,7 +846,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -877,7 +880,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();

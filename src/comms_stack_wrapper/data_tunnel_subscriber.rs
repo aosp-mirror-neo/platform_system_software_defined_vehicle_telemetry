@@ -28,9 +28,9 @@ use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
-    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
-    SubSamplingInterval,
+    CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
+    GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
 };
 use std::iter::Iterator;
 use std::pin::pin;
@@ -63,10 +63,8 @@ impl DataTunnelSubscriber {
         fetch_last_message: bool,
         message_descriptor: MessageDescriptor,
         sub_sampling_interval: &SubSamplingInterval,
-        mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        mut new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let message_stream = create_message_stream(
             self.ctx.clone().await,

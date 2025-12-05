@@ -29,8 +29,9 @@ use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
-    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
+    GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -118,10 +119,8 @@ impl SdvRpcClient {
         configuration: Option<&Any>,
         config_descriptor: MessageDescriptor,
         message_descriptor: MessageDescriptor,
-        mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        mut new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,

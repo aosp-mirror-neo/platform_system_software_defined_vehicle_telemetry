@@ -654,14 +654,12 @@ mod integration_tests {
         MessageDescriptorAndFullNameEq { expected }
     }
 
-    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
-        Box::new(|| unreachable!())
+    fn create_empty_message_handler() -> NewMessageCallback {
+        Box::new(|_| unreachable!())
     }
 
-    fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
-    {
-        Box::new(|_| unreachable!())
+    fn create_empty_cancellation_handler() -> CancellationCallback {
+        Box::new(|| unreachable!())
     }
 
     fn create_accessor(ctx: ContextRef) -> CommsStackAccessor {
@@ -923,7 +921,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -944,7 +942,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -982,7 +980,7 @@ mod integration_tests {
                     fetch_last_message,
                     &SubSamplingInterval::ZERO,
                     create_empty_message_handler(),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -1032,7 +1030,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1044,7 +1042,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1096,7 +1094,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx1.send(message).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1110,7 +1108,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx2.send(message).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1171,7 +1169,7 @@ mod integration_tests {
                 false,
                 &notification_interval,
                 Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1247,7 +1245,7 @@ mod integration_tests {
                     false,
                     &sub_sampling_interval,
                     Box::new(move |message| tx.send(message).unwrap()),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -1485,7 +1483,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(tx),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -2014,7 +2012,7 @@ mod integration_tests {
                     false,
                     &SubSamplingInterval::ZERO,
                     Box::new(tx),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();

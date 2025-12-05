@@ -16,10 +16,10 @@ use async_trait::async_trait;
 use log::error;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, CreateSubscriptionOutcome, FetchLastMessageOutcome,
-    GetMessageProviderOutcome as AccessorGetMessageProviderOutcome, ServicePublisherAccessor,
-    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
-    SubSamplingInterval,
+    AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome,
+    FetchLastMessageOutcome, GetMessageProviderOutcome as AccessorGetMessageProviderOutcome,
+    ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider,
+    ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
@@ -39,15 +39,12 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::ServiceErrorDetails::ServiceErrorDetails, StatusDetails::StatusDetails,
 };
 
+/// Callback that is called when a new message is available.
+pub type NewMessageCallback = Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>;
+
 type CallbackContainer = Arc<
     AsyncMutex<(
-        HashMap<
-            SequenceNumberType,
-            (
-                Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-                Box<dyn FnOnce() + Send + Sync>,
-            ),
-        >,
+        HashMap<SequenceNumberType, (NewMessageCallback, CancellationCallback)>,
         // Latest message that was sent to the callbacks.
         Option<Arc<dyn MessageDyn>>,
     )>,
@@ -71,8 +68,8 @@ pub(crate) trait ServiceAdapter: Send + Sync {
         configuration: Option<&Any>,
         fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
-        new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError>;
 
     /// Deactivate specified subscription.
@@ -217,8 +214,8 @@ impl ServiceAdapter for ServiceAdapterImpl {
         configuration: Option<&Any>,
         fetch_last_message: bool,
         sub_sampling_interval: &SubSamplingInterval,
-        mut new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        mut new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
         let maybe_subscription_type = if configuration.is_some() {
             let status_reporter = Arc::clone(&self.status_reporter);
@@ -577,13 +574,12 @@ pub(super) mod tests {
             Int32Value::descriptor().field_by_name("value").unwrap();
     }
 
-    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
-        Box::new(|| unreachable!())
+    fn create_empty_message_handler() -> NewMessageCallback {
+        Box::new(|_| unreachable!())
     }
 
-    fn create_empty_message_handler(
-    ) -> Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync> {
-        Box::new(|_| unreachable!())
+    fn create_empty_cancellation_handler() -> CancellationCallback {
+        Box::new(|| unreachable!())
     }
 
     fn create_service_adapter(
@@ -690,7 +686,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .err()
@@ -713,7 +709,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -737,7 +733,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -767,7 +763,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .err()
@@ -790,7 +786,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -819,7 +815,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -830,7 +826,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -868,7 +864,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -879,7 +875,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -917,7 +913,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -928,7 +924,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::MAX,
                 Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -974,7 +970,7 @@ pub(super) mod tests {
                     false,
                     &SubSamplingInterval::ZERO,
                     Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -1049,7 +1045,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1071,7 +1067,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap()
@@ -1095,7 +1091,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap()
@@ -1119,7 +1115,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap()
@@ -1132,7 +1128,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap()
@@ -1157,7 +1153,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap()
@@ -1170,7 +1166,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap()
@@ -1233,7 +1229,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1278,7 +1274,7 @@ pub(super) mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();

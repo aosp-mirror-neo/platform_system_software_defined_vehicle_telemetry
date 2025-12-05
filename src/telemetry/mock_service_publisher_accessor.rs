@@ -39,10 +39,7 @@ pub(crate) struct MockServicePublisherAccessor {
 
 struct MockServicePublisherAccessorData {
     /// The map of subscribed callbacks, keyed by service name and sub-sampling interval.
-    new_message_callbacks: HashMap<
-        (String, SubSamplingInterval),
-        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
-    >,
+    new_message_callbacks: HashMap<(String, SubSamplingInterval), NewMessageCallback>,
     /// Last passed cancellation callback.
     cancellation_callback: Option<CancellationCallback>,
     /// The last configuration message that was passed to create_subscription.
