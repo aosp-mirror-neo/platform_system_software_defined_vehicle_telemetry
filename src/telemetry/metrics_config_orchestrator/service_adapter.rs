@@ -18,8 +18,8 @@ use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome,
     FetchLastMessageOutcome, GetMessageProviderOutcome as AccessorGetMessageProviderOutcome,
-    ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider,
-    ServicePublisherSubscription, SubSamplingInterval,
+    MessageId, ServicePublisherAccessor, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
 };
 use sdv_telemetry_utils::atomic::{SequenceNumber, SequenceNumberType};
 use std::collections::hash_map::Entry;
@@ -40,7 +40,8 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 };
 
 /// Callback that is called when a new message is available.
-pub type NewMessageCallback = Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>;
+pub type NewMessageCallback =
+    Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>, Option<MessageId>) + Send + Sync>;
 
 type CallbackContainer = Arc<
     AsyncMutex<(
@@ -229,7 +230,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     fetch_last_message,
                     sub_sampling_interval,
                     Box::new(move |msg| match msg {
-                        Ok(msg) => new_message_callback(&msg.into()),
+                        Ok((msg, id)) => new_message_callback(&msg.into(), id),
                         Err(err) => {
                             status_reporter.report(
                                 err.get_status_code(),
@@ -290,7 +291,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     && matches!(fetch_last_message_outcome, FetchLastMessageOutcome::Enabled)
                 {
                     if let Some(latest_message) = latest_message {
-                        new_message_callback(latest_message);
+                        new_message_callback(latest_message, None);
                     }
                 }
 
@@ -317,9 +318,9 @@ impl ServiceAdapter for ServiceAdapterImpl {
                     None,
                     fetch_last_message,
                     sub_sampling_interval,
-                    Box::new(move |msg| match msg {
-                        Ok(msg) => {
-                            if new_message_tx.send(msg).is_err() {
+                    Box::new(move |msg,| match msg {
+                        Ok((msg, id)) => {
+                            if new_message_tx.send((msg, id)).is_err() {
                                 // This means that `receiver` was dropped - which should never
                                 // happen, since it is only dropped when unsubscribing.
                                 error!("Received message for service {service_name_clone}, but receiver has already been dropped!");
@@ -372,8 +373,11 @@ impl ServiceAdapter for ServiceAdapterImpl {
                         }
 
                         #[async_trait]
-                        impl AsyncEventHandler<Box<dyn MessageDyn>> for ServiceAdapterHandler {
-                            async fn handle(&mut self, message: Box<dyn MessageDyn>) {
+                        impl AsyncEventHandler<(Box<dyn MessageDyn>, Option<MessageId>)> for ServiceAdapterHandler {
+                            async fn handle(
+                                &mut self,
+                                (message, id): (Box<dyn MessageDyn>, Option<MessageId>),
+                            ) {
                                 let mut callback_container = self.callback_container.lock().await;
                                 let (ref mut callbacks, ref mut latest_message) =
                                     *callback_container;
@@ -383,7 +387,7 @@ impl ServiceAdapter for ServiceAdapterImpl {
                                 // they're allowed to mutate themselves.
                                 let msg = message.into();
                                 for (new_message_callback, _) in callbacks.values_mut() {
-                                    new_message_callback(&msg);
+                                    new_message_callback(&msg, id);
                                 }
                                 *latest_message = Some(msg);
                             }
@@ -575,7 +579,7 @@ pub(super) mod tests {
     }
 
     fn create_empty_message_handler() -> NewMessageCallback {
-        Box::new(|_| unreachable!())
+        Box::new(|_, _| unreachable!())
     }
 
     fn create_empty_cancellation_handler() -> CancellationCallback {
@@ -732,14 +736,18 @@ pub(super) mod tests {
                 Some(&Any::new()),
                 false,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
 
         // Notify about a new message and receive the message.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg.clone()));
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::ZERO,
+            Ok((msg.clone(), None)),
+        );
         let msg_received = rx.recv().await.unwrap();
 
         // Verify that the received message is the same as the one sent.
@@ -814,7 +822,7 @@ pub(super) mod tests {
                 None,
                 false,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx_clone.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
@@ -825,17 +833,25 @@ pub(super) mod tests {
                 None,
                 false,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
 
         // Notify about a new message from each service and receive the message.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg1.clone()));
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::ZERO,
+            Ok((msg1.clone(), None)),
+        );
         let msg1_received = rx.recv().await.unwrap();
 
-        accessor.notify_subscriber(SERVICE_NAME_2, &SubSamplingInterval::ZERO, Ok(msg2.clone()));
+        accessor.notify_subscriber(
+            SERVICE_NAME_2,
+            &SubSamplingInterval::ZERO,
+            Ok((msg2.clone(), None)),
+        );
         let msg2_received = rx.recv().await.unwrap();
 
         // Verify that the received messages are the same as the ones sent.
@@ -863,7 +879,7 @@ pub(super) mod tests {
                 None,
                 false,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx_clone.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
@@ -874,7 +890,7 @@ pub(super) mod tests {
                 None,
                 false,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
@@ -882,7 +898,11 @@ pub(super) mod tests {
 
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg.clone()));
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::ZERO,
+            Ok((msg.clone(), None)),
+        );
         let msg1_received = rx.recv().await.unwrap();
         let msg2_received = rx.recv().await.unwrap();
 
@@ -912,7 +932,7 @@ pub(super) mod tests {
                 None,
                 false,
                 &SubSamplingInterval::ZERO,
-                Box::new(move |msg| tx_clone.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx_clone.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
@@ -923,7 +943,7 @@ pub(super) mod tests {
                 None,
                 false,
                 &SubSamplingInterval::MAX,
-                Box::new(move |msg| tx.try_send(msg.clone_box()).unwrap()),
+                Box::new(move |msg, _| tx.try_send(msg.clone_box()).unwrap()),
                 create_empty_cancellation_handler(),
             )
             .await
@@ -931,8 +951,16 @@ pub(super) mod tests {
 
         // Notify about a new message from the service
         // and receive messages from the two subscriptions.
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::ZERO, Ok(msg.clone()));
-        accessor.notify_subscriber(SERVICE_NAME, &SubSamplingInterval::MAX, Ok(msg.clone()));
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::ZERO,
+            Ok((msg.clone(), None)),
+        );
+        accessor.notify_subscriber(
+            SERVICE_NAME,
+            &SubSamplingInterval::MAX,
+            Ok((msg.clone(), None)),
+        );
         let msg1_received = rx.recv().await.unwrap();
         let msg2_received = rx.recv().await.unwrap();
 
@@ -969,7 +997,7 @@ pub(super) mod tests {
                     None,
                     false,
                     &SubSamplingInterval::ZERO,
-                    Box::new(move |msg| tx.send(msg.clone_box()).unwrap()),
+                    Box::new(move |msg, _| tx.send(msg.clone_box()).unwrap()),
                     create_empty_cancellation_handler(),
                 )
                 .await
@@ -979,7 +1007,7 @@ pub(super) mod tests {
                 accessor.notify_subscriber(
                     SERVICE_NAME,
                     &SubSamplingInterval::ZERO,
-                    Ok(Box::new(Int32Value { value: i, ..Default::default() })),
+                    Ok((Box::new(Int32Value { value: i, ..Default::default() }), None)),
                 );
             }
             let mut values = vec![];
@@ -1411,7 +1439,7 @@ mod tests_with_mockall {
                     config,
                     fetch_last_message,
                     &SubSamplingInterval::ZERO,
-                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move |msg, _| panic!("Unexpected message: {msg:?}")),
                     Box::new(move || panic!("Unexpected cancellation")),
                 )
                 .await
@@ -1485,7 +1513,7 @@ mod tests_with_mockall {
                     None,
                     fetch_last_message,
                     &SubSamplingInterval::ZERO,
-                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move |msg, _| panic!("Unexpected message: {msg:?}")),
                     Box::new(move || panic!("Unexpected cancellation")),
                 )
                 .await
@@ -1568,7 +1596,7 @@ mod tests_with_mockall {
                     None,
                     fetch_last_message,
                     &SubSamplingInterval::ZERO,
-                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move |msg, _| panic!("Unexpected message: {msg:?}")),
                     Box::new(move || panic!("Unexpected cancellation")),
                 )
                 .await
@@ -1634,7 +1662,7 @@ mod tests_with_mockall {
                     None,
                     true,
                     &SubSamplingInterval::ZERO,
-                    Box::new(move |msg| panic!("Unexpected message: {msg:?}")),
+                    Box::new(move |msg, _| panic!("Unexpected message: {msg:?}")),
                     Box::new(move || panic!("Unexpected cancellation")),
                 )
                 .await
@@ -1680,10 +1708,10 @@ mod tests_with_mockall {
                       _sub_sampling_interval,
                       mut new_message_callback,
                       _cancellation_callback| {
-                    new_message_callback(Ok(Box::new(Int32Value {
-                        value: 123,
-                        ..Default::default()
-                    })));
+                    new_message_callback(Ok((
+                        Box::new(Int32Value { value: 123, ..Default::default() }),
+                        None,
+                    )));
 
                     Ok(CreateSubscriptionOutcome::Subscribed {
                         subscription: Box::new(MockServicePublisherSubscription::new()),
@@ -1702,7 +1730,7 @@ mod tests_with_mockall {
                     None,
                     true,
                     &SubSamplingInterval::ZERO,
-                    Box::new(move |msg| tx(msg.to_owned())),
+                    Box::new(move |msg, _| tx(msg.to_owned())),
                     Box::new(move || panic!("Unexpected cancellation")),
                 )
                 .await
@@ -1760,10 +1788,10 @@ mod tests_with_mockall {
                         _cancellation_callback| {
                         task::spawn(async move {
                             while let Some(value) = new_message_rx.next().await {
-                                new_message_callback(Ok(Box::new(Int32Value {
+                                new_message_callback(Ok((Box::new(Int32Value {
                                     value,
                                     ..Default::default()
-                                })));
+                                }), None)));
                             }
                         });
 
@@ -1791,7 +1819,7 @@ mod tests_with_mockall {
                         None,
                         expected_fetch_last_message,
                         &SubSamplingInterval::ZERO,
-                        Box::new(move |msg| subscriber_tx.send(msg.to_owned()).unwrap()),
+                        Box::new(move |msg, _| subscriber_tx.send(msg.to_owned()).unwrap()),
                         Box::new(move || panic!("Unexpected cancellation")),
                     )
                     .await
@@ -1947,10 +1975,10 @@ mod tests_with_mockall {
                           _sub_sampling_interval,
                           mut new_message_callback,
                           _cancellation_callback| {
-                        new_message_callback(Ok(Box::new(Int32Value {
-                            value: 123,
-                            ..Default::default()
-                        })));
+                        new_message_callback(Ok((
+                            Box::new(Int32Value { value: 123, ..Default::default() }),
+                            None,
+                        )));
 
                         Ok(CreateSubscriptionOutcome::Subscribed {
                             subscription: Box::new(MockServicePublisherSubscription::new()),
@@ -1975,7 +2003,7 @@ mod tests_with_mockall {
                             None,
                             fetch_last_message,
                             &SubSamplingInterval::ZERO,
-                            Box::new(move |msg| {
+                            Box::new(move |msg, _| {
                                 if fetch_last_message {
                                     message_tx(msg.to_owned());
                                 } else {

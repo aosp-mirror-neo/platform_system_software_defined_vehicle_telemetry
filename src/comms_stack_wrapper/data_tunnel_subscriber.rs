@@ -29,7 +29,7 @@ use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_telemetry_service_publisher_accessor::{
     CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
-    GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessorError,
+    GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
 };
 use std::iter::Iterator;
@@ -100,6 +100,8 @@ impl DataTunnelSubscriber {
                         return;
                     }
                     Some(Some(result)) => {
+                        let message_id = MessageId::new();
+
                         let messages = match result {
                             Ok(result) => result,
                             Err(err) => {
@@ -130,7 +132,9 @@ impl DataTunnelSubscriber {
                                 message_bytes,
                                 &message_descriptor,
                             )
+                            .map(|msg| (msg, message_id.into()))
                             .map_err(ServicePublisherAccessorError::MessageParsingFailed);
+
                             (new_message_callback)(message);
                         }
                     }

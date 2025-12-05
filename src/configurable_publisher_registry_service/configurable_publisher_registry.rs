@@ -38,7 +38,6 @@ use sdv_telemetry_service_publisher_accessor::{
     SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
-use sdv_telemetry_utils::descriptor_utils::{find_message_by_full_name, WELL_KNOWN_FILE_DESCRIPTORS};
 use std::fmt::Debug;
 use std::mem;
 use std::sync::{Arc, Weak};

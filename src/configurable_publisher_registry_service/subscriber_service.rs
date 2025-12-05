@@ -48,7 +48,7 @@ impl ISubscriberAsyncServer for SubscriberService {
                 ))
             },
             |msg| {
-                (self.new_message_callback.lock())(Ok(msg));
+                (self.new_message_callback.lock())(Ok((msg, None)));
                 Ok(())
             },
         )
@@ -109,7 +109,7 @@ mod tests {
         let value = Box::new(Int32Value { value: 42, ..Default::default() });
 
         wrapper.sendData(&value.write_to_bytes().unwrap()).await.unwrap();
-        let recv_val = rx.await.unwrap().downcast_box::<Int32Value>().unwrap();
+        let recv_val = rx.await.unwrap().0.downcast_box::<Int32Value>().unwrap();
 
         assert_eq!(recv_val, value);
     }

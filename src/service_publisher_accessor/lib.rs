@@ -24,7 +24,9 @@ use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
 use sdv_status_rs::SdvStatus;
 use std::fmt;
+use std::fmt::Display;
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// Errors related to Service Publisher Accessor
 #[derive(Debug, thiserror::Error)]
@@ -54,9 +56,29 @@ pub enum ServicePublisherAccessorError {
     ServiceNotSupported,
 }
 
+/// Unique identifier of a message, or of a group of messages if sent via Data Tunnel
+#[derive(Debug, Default, Copy, Clone, PartialEq, Eq, Hash)]
+pub struct MessageId(Uuid);
+
+impl MessageId {
+    /// Generates a new unique `MessageId`.
+    pub fn new() -> Self {
+        Self(Uuid::new_v4())
+    }
+}
+
+impl Display for MessageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Callback that is called when a new message is available.
-pub type NewMessageCallback =
-    Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>;
+pub type NewMessageCallback = Box<
+    dyn FnMut(Result<(Box<dyn MessageDyn>, Option<MessageId>), ServicePublisherAccessorError>)
+        + Send
+        + Sync,
+>;
 
 /// Callback that is called when a subscription is cancelled/ended by the
 /// underlying data provider.
@@ -215,5 +237,12 @@ mod tests {
             FetchLastMessageOutcome::new_supported(false),
             FetchLastMessageOutcome::Disabled
         );
+    }
+
+    #[test]
+    fn message_id_new_generates_unique_ids() {
+        let id1 = MessageId::new();
+        let id2 = MessageId::new();
+        assert_ne!(id1, id2);
     }
 }

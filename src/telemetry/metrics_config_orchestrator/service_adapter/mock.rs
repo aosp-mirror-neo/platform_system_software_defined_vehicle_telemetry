@@ -231,7 +231,7 @@ impl MockServiceAdapter {
     }
 
     pub(crate) async fn publish_new_message(&self, message: &Arc<dyn MessageDyn>) {
-        self.new_message_callback.lock().await.as_mut().unwrap()(message);
+        self.new_message_callback.lock().await.as_mut().unwrap()(message, None);
     }
 
     pub(crate) fn with_availability_callback(mut self) -> Self {

@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
-    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
+    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome, MessageId,
     NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription,
     SubSamplingInterval,
@@ -240,7 +240,7 @@ impl MockServicePublisherAccessor {
         &self,
         service_name: &str,
         sub_sampling_interval: &SubSamplingInterval,
-        message: Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>,
+        message: Result<(Box<dyn MessageDyn>, Option<MessageId>), ServicePublisherAccessorError>,
     ) {
         let mut data_lock = self.data.lock();
         data_lock

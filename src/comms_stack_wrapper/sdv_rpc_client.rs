@@ -30,7 +30,7 @@ use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
     CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
-    GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessorError,
+    GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
 use tokio::select;
@@ -156,6 +156,8 @@ impl SdvRpcClient {
                         return;
                     }
                     Some(Some(result)) => {
+                        let message_id = MessageId::new();
+
                         let buffer = match result
                             .context("RPC server stream produced an intermittent error")
                         {
@@ -176,6 +178,7 @@ impl SdvRpcClient {
                         let message = message_descriptor
                             .parse_from_bytes(&buffer)
                             .context("Failed to parse the protobuf message")
+                            .map(|msg| (msg, message_id.into()))
                             .map_err(ServicePublisherAccessorError::MessageParsingFailed);
                         (new_message_callback)(message);
                     }
