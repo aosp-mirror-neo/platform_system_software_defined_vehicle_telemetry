@@ -671,7 +671,7 @@ impl ServicePublisher {
         Ok(new_state)
     }
 
-    async fn on_new_message(&self, message: Arc<dyn MessageDyn>, _message_id: Option<MessageId>) {
+    async fn on_new_message(&self, message: Arc<dyn MessageDyn>, message_id: Option<MessageId>) {
         let message = Arc::new(ProtobufDynamicMessage::new(message));
 
         // Create context outside of the lock, so that the date/time is set as fast as possible,
@@ -692,6 +692,14 @@ impl ServicePublisher {
         };
 
         self.base.set_new_message(message, &context, callback_map);
+
+        if let Some(id) = message_id {
+            tracing::event!(
+                tracing::Level::INFO,
+                "Message processed by Service Publisher, message_id = {}",
+                id
+            );
+        }
     }
 
     fn on_subscription_cancelled(self: &Arc<Self>) {

@@ -33,6 +33,7 @@ use sdv_telemetry_service_publisher_accessor::{
     GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
+use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -77,6 +78,11 @@ impl SdvRpcClient {
 
         #[async_trait]
         impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            #[tracing::instrument(skip(self, configuration), fields(
+                publisher_type = "rpc",
+                await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+                    |e| e.duration()).as_nanos(),
+            ))]
             async fn get_latest_message(
                 &self,
                 configuration: Option<&Any>,
@@ -157,6 +163,11 @@ impl SdvRpcClient {
                     }
                     Some(Some(result)) => {
                         let message_id = MessageId::new();
+                        tracing::event!(
+                            tracing::Level::INFO,
+                            "New message by RPC Publisher, message_id = {}",
+                            message_id
+                        );
 
                         let buffer = match result
                             .context("RPC server stream produced an intermittent error")

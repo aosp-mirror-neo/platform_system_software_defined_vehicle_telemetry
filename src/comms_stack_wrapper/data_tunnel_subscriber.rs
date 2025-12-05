@@ -34,6 +34,7 @@ use sdv_telemetry_service_publisher_accessor::{
 };
 use std::iter::Iterator;
 use std::pin::pin;
+use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -101,6 +102,11 @@ impl DataTunnelSubscriber {
                     }
                     Some(Some(result)) => {
                         let message_id = MessageId::new();
+                        tracing::event!(
+                            tracing::Level::INFO,
+                            "New message(s) by DT Publisher, message_id = {}",
+                            message_id
+                        );
 
                         let messages = match result {
                             Ok(result) => result,
@@ -164,6 +170,11 @@ impl DataTunnelSubscriber {
 
         #[async_trait]
         impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            #[tracing::instrument(skip(self, _configuration), fields(
+                publisher_type = "dt",
+                await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+                    |e| e.duration()).as_nanos(),
+            ))]
             async fn get_latest_message(
                 &self,
                 _configuration: Option<&Any>,
