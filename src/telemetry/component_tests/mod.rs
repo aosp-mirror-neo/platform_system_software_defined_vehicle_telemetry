@@ -2,6 +2,7 @@
 
 #![cfg(test)]
 
+mod deactivate_publisher;
 mod fetch_last_message;
 mod immediate_message_from_publisher;
 

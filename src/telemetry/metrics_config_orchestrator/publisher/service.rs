@@ -343,7 +343,7 @@ impl ServicePublisher {
         };
 
         // Set the new state and release the mutex.
-        *state_lock = new_state;
+        Self::transition_state(&mut state_lock, new_state);
     }
 
     fn subscribe_to_availability_notifications(
@@ -456,43 +456,60 @@ impl ServicePublisher {
     }
 
     /// Moves callbacks from a pending state callback map if the new state supports
-    /// subscriptions or it is another allowed pending state.
-    fn maybe_swap_callback_map(
-        state: &mut ServicePublisherState,
-        new_state: &mut ServicePublisherState,
+    /// subscriptions or it is another allowed pending state, and performs the state transition.
+    fn transition_state(
+        state_lock: &mut AsyncMutexGuard<'_, ServicePublisherState>,
+        mut new_state: ServicePublisherState,
     ) {
-        match (state, new_state) {
-            (
-                ServicePublisherState::PendingActivation { .. },
-                ServicePublisherState::ActivationNotPossible
-                | ServicePublisherState::ActiveGetter { .. },
+        match (&mut **state_lock, &mut new_state) {
+            // Unexpected state changes producing panic:
+            // 1. State change to Inactive can only happen on publisher deactivation, which is not
+            //   handled using this method,
+            // 2. ActivationNotPossible is a terminal state, i.e. nothing is supposed to change it,
+            // 3. ActiveGetter is a terminal state, i.e. nothing is supposed to change it,
+            // 4. PendingService is a state in which an availability notification is being awaited.
+            //   ActivationNotPossible, on the other hand, is a state which can only ever take place
+            //   if the attempt to start awaiting for availability notifications has failed.
+            // 5. ActiveSubscribed can't be changed to ActiveGetter
+            (state, new_state @ ServicePublisherState::Inactive)
+            | (state @ ServicePublisherState::ActivationNotPossible, new_state)
+            | (state @ ServicePublisherState::ActiveGetter { .. }, new_state)
+            | (
+                state @ ServicePublisherState::PendingService { .. },
+                new_state @ ServicePublisherState::ActivationNotPossible,
             )
             | (
-                ServicePublisherState::PendingService { .. },
-                ServicePublisherState::ActiveGetter { .. },
-            ) => {}
-            (
-                ServicePublisherState::PendingActivation {
-                    callback_map: pending_callback_map, ..
-                },
-                ServicePublisherState::PendingService { callback_map, .. },
-            )
-            | (
-                ServicePublisherState::PendingActivation {
-                    callback_map: pending_callback_map, ..
-                },
-                ServicePublisherState::ActiveSubscribed { callback_map, .. },
-            )
-            | (
-                ServicePublisherState::PendingService {
-                    callback_map: pending_callback_map, ..
-                },
-                ServicePublisherState::ActiveSubscribed { callback_map, .. },
-            ) => mem::swap(callback_map, pending_callback_map),
-            (state, new_state) => {
+                state @ ServicePublisherState::ActiveSubscribed { .. },
+                new_state @ ServicePublisherState::ActiveGetter { .. },
+            ) => {
                 panic!("Unexpected state change from {state:?} to {new_state:?}")
             }
+
+            // Allowed state changes which do not require moving callback maps.
+            (ServicePublisherState::Inactive, _)
+            | (_, ServicePublisherState::ActivationNotPossible)
+            | (_, ServicePublisherState::ActiveGetter { .. }) => {}
+
+            // State changes which require moving callback maps.
+            // Note that ActiveSubscribed state can change to any of the three, including new
+            // ActiveSubscribed, if the subscription gets cancelled.
+            (
+                ServicePublisherState::PendingActivation { callback_map, .. }
+                | ServicePublisherState::PendingService { callback_map, .. }
+                | ServicePublisherState::ActiveSubscribed { callback_map, .. },
+                ServicePublisherState::PendingActivation {
+                    callback_map: pending_callback_map, ..
+                }
+                | ServicePublisherState::PendingService {
+                    callback_map: pending_callback_map, ..
+                }
+                | ServicePublisherState::ActiveSubscribed {
+                    callback_map: pending_callback_map, ..
+                },
+            ) => mem::swap(callback_map, pending_callback_map),
         }
+
+        let _ = mem::replace(&mut **state_lock, new_state);
     }
 
     /// Retries publisher activation.
@@ -525,10 +542,9 @@ impl ServicePublisher {
             }
             // Previous activation attempt failed, current retry was scheduled by a timer
             ServicePublisherState::PendingActivation { .. } => match self.try_activate().await {
-                Ok(Some(mut new_state)) => {
+                Ok(Some(new_state)) => {
                     // Service became available. Assign new state
-                    Self::maybe_swap_callback_map(&mut state_lock, &mut new_state);
-                    *state_lock = new_state;
+                    Self::transition_state(&mut state_lock, new_state);
                 }
                 Ok(None) => {
                     // Current activation retry didn't fail, but service is unavailable.
@@ -536,9 +552,8 @@ impl ServicePublisher {
                     warn_service_unavailable(&state_lock);
 
                     let maybe_new_state = self.subscribe_to_availability_notifications(true).await;
-                    if let Some(mut new_state) = maybe_new_state {
-                        Self::maybe_swap_callback_map(&mut state_lock, &mut new_state);
-                        *state_lock = new_state;
+                    if let Some(new_state) = maybe_new_state {
+                        Self::transition_state(&mut state_lock, new_state);
                     }
                 }
                 Err(err) => report_activation_error(err, &state_lock),
@@ -547,15 +562,14 @@ impl ServicePublisher {
             // Retrying due to receiving service availability notification
             ServicePublisherState::PendingService { availability_registration, .. } => {
                 match self.try_activate().await {
-                    Ok(Some(mut new_state)) => {
+                    Ok(Some(new_state)) => {
                         // Service became available.
                         // Assign new state and unsubscribe from availability notifications
                         let registration = availability_registration.lock().take().expect(
                             "Registration should be Some when activation retry is requested",
                         );
                         registration.unregister().await;
-                        Self::maybe_swap_callback_map(&mut state_lock, &mut new_state);
-                        *state_lock = new_state;
+                        Self::transition_state(&mut state_lock, new_state);
                     }
                     Ok(None) => {
                         // Service is not available despite receiving availability notification.
@@ -1312,6 +1326,92 @@ mod tests {
         );
         assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
         assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_subscription_on_cancelled_preserves_subscriptions() {
+        let service_adapter = Arc::new(MockServiceAdapter::new());
+        service_adapter.set_next_subscribe_successful();
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+
+        assert!(matches!(*publisher.state.lock().await,
+            ServicePublisherState::ActiveSubscribed { ref callback_map, .. }
+                if callback_map.contains_key(DATA_TRIGGER_NAME)
+        ));
+
+        let rx = service_adapter.set_next_subscribe_successful();
+        service_adapter.notify_cancelled();
+        rx.await.unwrap();
+
+        assert!(matches!(*publisher.state.lock().await,
+            ServicePublisherState::ActiveSubscribed { ref callback_map, .. }
+                if callback_map.contains_key(DATA_TRIGGER_NAME)
+        ));
+        assert_eq!(service_adapter.get_num_get_message_provider_calls(), 0);
+        assert_eq!(service_adapter.get_num_subscribe_calls(), 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_pending_activation_to_pending_service_preserves_subscriptions() {
+        let service_adapter = Arc::new(
+            MockServiceAdapter::new()
+                .with_next_error(anyhow!(ERROR_MESSAGE))
+                .with_availability_callback(),
+        );
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .with_status_reporter(Arc::new(StatusReporterImpl::new(|_| {})))
+            .with_activation_retry_interval(Duration::from_millis(3))
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+
+        assert!(matches!(*publisher.state.lock().await,
+            ServicePublisherState::PendingActivation { ref callback_map, .. }
+                if callback_map.contains_key(DATA_TRIGGER_NAME)
+        ));
+
+        // Wait for retry to trigger transition to PendingService
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        assert!(matches!(*publisher.state.lock().await,
+            ServicePublisherState::PendingService { ref callback_map, .. }
+                if callback_map.contains_key(DATA_TRIGGER_NAME)
+        ));
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_pending_service_to_active_subscribed_preserves_subscriptions() {
+        let service_adapter = Arc::new(MockServiceAdapter::new().with_availability_callback());
+        let publisher = ServicePublisherBuilder::new(Arc::clone(&service_adapter))
+            .with_connection_type(ConnectionType::Subscription)
+            .build_and_activate()
+            .await;
+
+        publisher.subscribe(DATA_TRIGGER_NAME, create_empty_fn_box()).await;
+
+        assert!(matches!(*publisher.state.lock().await,
+            ServicePublisherState::PendingService { ref callback_map, .. }
+                if callback_map.contains_key(DATA_TRIGGER_NAME)
+        ));
+
+        let rx = service_adapter.set_next_subscribe_successful();
+        service_adapter.call_availability_callback();
+        rx.await.unwrap();
+
+        assert!(matches!(*publisher.state.lock().await,
+            ServicePublisherState::ActiveSubscribed { ref callback_map, .. }
+                if callback_map.contains_key(DATA_TRIGGER_NAME)
+        ));
     }
 
     #[sdv_telemetry_test_utils::timeout]
