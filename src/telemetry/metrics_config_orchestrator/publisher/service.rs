@@ -9,6 +9,7 @@ use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, ServicePublisherAccessorError, SubSamplingInterval,
 };
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, operation_result::OperationResult,
 };
@@ -57,6 +58,7 @@ pub(crate) struct ServicePublisher {
     state: AsyncMutex<ServicePublisherState>,
     status_reporter: Arc<dyn StatusReporter>,
     sub_sampling_interval: SubSamplingInterval,
+    subscription_waiter: MultiLevelCountdownLatch,
     activation_retry_interval: Duration,
 }
 
@@ -304,6 +306,7 @@ impl ServicePublisher {
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         status_reporter: Arc<dyn StatusReporter>,
+        subscription_waiter: MultiLevelCountdownLatch,
     ) -> Self {
         Self {
             base: BasePublisher::new(name, metrics_config_uuid),
@@ -316,6 +319,7 @@ impl ServicePublisher {
             state: ServicePublisherState::Inactive.into(),
             status_reporter,
             sub_sampling_interval,
+            subscription_waiter,
             activation_retry_interval: RETRY_INTERVAL,
         }
     }
@@ -646,6 +650,9 @@ impl ServicePublisher {
             Arc::<ProtobufDynamicMessage>::clone(&message),
         ));
 
+        // Wait until all message receivers are subscribed, so that the message is not lost.
+        self.subscription_waiter.wait(Level(1)).await;
+
         // Lock state mutex and hold it to make sure the publisher is not deactivated.
         let mut state_lock = self.state.lock().await;
 
@@ -717,6 +724,7 @@ mod tests {
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
         service_adapter: Arc<dyn ServiceAdapter + Send + Sync>,
         status_reporter: Arc<dyn StatusReporter>,
+        subscription_waiter: MultiLevelCountdownLatch,
         activation_retry_interval: Option<Duration>,
     }
 
@@ -737,6 +745,7 @@ mod tests {
                 status_reporter: Arc::new(StatusReporterImpl::new(|err| {
                     panic!("Unexpected error: {err:?}")
                 })),
+                subscription_waiter: MultiLevelCountdownLatch::builder().build(),
                 activation_retry_interval: None,
             }
         }
@@ -773,6 +782,7 @@ mod tests {
                 self.node_evaluation_context_factory,
                 self.service_adapter,
                 self.status_reporter,
+                self.subscription_waiter,
             );
             if let Some(interval) = self.activation_retry_interval {
                 publisher.activation_retry_interval = interval;

@@ -20,7 +20,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
-        "google.sdv.vpm-aidl-V1-rust",
+        "google.sdv.vpm-V1-rust",
         "libbinder_rs",
         "libbinder_tokio_rs",
         "libfutures",

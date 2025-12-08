@@ -85,10 +85,10 @@ impl ResumedAtTracker {
 mod tests {
     use super::*;
 
-    use google_sdv_vpm_aidl::aidl::google::sdv::vpm::IPowerStateClientApi::{
+    use google_sdv_vpm::aidl::google::sdv::vpm::IPowerStateClientApi::{
         BnPowerStateClientApi, MockIPowerStateClientApi,
     };
-    use google_sdv_vpm_aidl::aidl::google::sdv::vpm::PowerStateReport::PowerStateReport;
+    use google_sdv_vpm::aidl::google::sdv::vpm::PowerStateReport::PowerStateReport;
 
     use binder::BinderFeatures;
     use googletest::matcher::MatcherBase;

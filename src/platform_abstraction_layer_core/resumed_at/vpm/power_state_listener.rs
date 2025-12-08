@@ -1,10 +1,10 @@
 // Copyright 2025 Google LLC
 
-use google_sdv_vpm_aidl::aidl::google::sdv::vpm::IPowerStateClientApi::IPowerStateClientApi;
-use google_sdv_vpm_aidl::aidl::google::sdv::vpm::IPowerStateReportListener::{
+use google_sdv_vpm::aidl::google::sdv::vpm::IPowerStateClientApi::IPowerStateClientApi;
+use google_sdv_vpm::aidl::google::sdv::vpm::IPowerStateReportListener::{
     BnPowerStateReportListener, IPowerStateReportListener, IPowerStateReportListenerAsyncServer,
 };
-use google_sdv_vpm_aidl::aidl::google::sdv::vpm::PowerStateReport::PowerStateReport;
+use google_sdv_vpm::aidl::google::sdv::vpm::PowerStateReport::PowerStateReport;
 
 use async_trait::async_trait;
 use binder_tokio::TokioRuntime;
