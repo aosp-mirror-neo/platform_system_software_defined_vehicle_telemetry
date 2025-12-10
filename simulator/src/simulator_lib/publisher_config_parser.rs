@@ -136,7 +136,8 @@ pub fn parse_publisher_config(file_path: &Path) -> Result<PublisherConfig, Simul
                 service_name: publisher_config_proto.service_name,
                 loop_data: data_generator.loop_data,
                 parsed_data,
-                message_descriptor,
+                message_name: message_descriptor.full_name().to_owned(),
+                file_descriptor_protos: publisher_config_proto.data_format_protos.to_owned(),
                 publishing_strategy,
             })
         }
@@ -253,13 +254,15 @@ mod tests {
     use super::*;
 
     use googletest::assert_that;
-    use googletest::matchers::{eq, err, ok, pat, result_of_ref};
-    use protobuf::well_known_types::empty::Empty;
+    use googletest::matchers::{container_eq, eq, err, ok, pat};
     use protobuf::{text_format, MessageFull};
     use sdv_telemetry_simulator_proto::simulation_publisher::{
         CSVFile, DataGenerator, SimulationPublisher,
     };
-    use sdv_telemetry_simulator_test_proto::test::{TestMessage, TestMessageWithWellKnownType};
+    use sdv_telemetry_simulator_test_proto::test::{
+        TestMessage, TestMessageWithDependencyInOtherFile, TestMessageWithWellKnownType,
+    };
+    use sdv_telemetry_simulator_test_proto::test_dep;
     use sdv_telemetry_test_utils::parameterized_test;
     use std::fs;
     use tempfile::tempdir;
@@ -268,14 +271,14 @@ mod tests {
         #[test]
         parse_publisher_data_format_protos_succeeds,
 
-        |message_name: &str, data_format_protos: &[&FileDescriptorProto], expected_message_descriptor: MessageDescriptor| {
+        |message_name: &str, data_format_protos: &[&FileDescriptorProto]| {
             let tmp_dir = tempdir().unwrap();
             let config_path = tmp_dir.path().join("config.txtpb");
             let data_path = tmp_dir.path().join("data.csv");
 
             let simulation_publisher = SimulationPublisher {
                 service_name: "test_service".to_owned(),
-                data_format_message_name: message_name.to_owned(),
+                data_format_message_name: format!(".{message_name}"),
                 data_format_protos: data_format_protos.iter().copied().cloned().collect(),
                 data_generators: vec![
                     DataGenerator {
@@ -302,18 +305,16 @@ mod tests {
                 result,
                 ok(pat!(PublisherConfig {
                     service_name: eq("test_service"),
-                    message_descriptor: result_of_ref!(
-                        |message_descriptor: &MessageDescriptor| message_descriptor.proto().to_owned(),
-                        eq(expected_message_descriptor.proto())
-                    ),
+                    message_name: eq(message_name),
+                    file_descriptor_protos: container_eq(data_format_protos.iter().copied().cloned().collect::<Vec<_>>()),
                 }))
             );
         },
 
-        message: (".TestMessage", &[TestMessage::descriptor().file_descriptor_proto()], TestMessage::descriptor()),
-        well_known_type: (".google.protobuf.Empty", &[], Empty::descriptor()),
-        message_with_well_known_type: (".TestMessageWithWellKnownType", &[TestMessageWithWellKnownType::descriptor().file_descriptor_proto()], TestMessageWithWellKnownType::descriptor()),
-
+        well_known_type: ("google.protobuf.Empty", &[]),
+        message: ("TestMessage", &[TestMessage::descriptor().file_descriptor_proto(), test_dep::file_descriptor().proto()]),
+        message_with_well_known_type: ("TestMessageWithWellKnownType", &[TestMessageWithWellKnownType::descriptor().file_descriptor_proto(), test_dep::file_descriptor().proto()]),
+        message_with_dependency_in_other_file: ("TestMessageWithDependencyInOtherFile", &[TestMessageWithDependencyInOtherFile::descriptor().file_descriptor_proto(), test_dep::file_descriptor().proto()]),
     );
 
     parameterized_test!(

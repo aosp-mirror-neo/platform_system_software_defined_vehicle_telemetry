@@ -13,7 +13,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     PublisherInfo::PublisherInfo,
 };
 use log::{info, warn};
-use protobuf::descriptor::FileDescriptorProto;
+use protobuf::descriptor::{FileDescriptorProto, FileDescriptorSet};
 use protobuf::reflect::{FileDescriptor, MessageDescriptor};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
@@ -21,7 +21,7 @@ use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval
 };
-use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
+use sdv_telemetry_utils::descriptor_utils::{find_message_by_full_name, WELL_KNOWN_FILE_DESCRIPTORS};
 use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
@@ -53,11 +53,13 @@ pub(crate) enum ConfigurablePublisherRegistryRegisterError {
         #[from]
         error: binder::StatusCode,
     },
-    #[error("Unable to parse publisher file descriptor proto: {error}")]
-    FileDescriptorProtoParseError {
+    #[error("Unable to parse publisher file descriptor proto/set: {error}")]
+    FileDescriptorParseError {
         #[from]
         error: protobuf::Error,
     },
+    #[error("Both `fileDescriptorProto` and `fileDescriptorSet` are set. Only one of them can be set. Prefer `fileDescriptorSet` over the deprecated `fileDescriptorProto`.")]
+    ConflictingFileDescriptorSources,
     #[error("Message type {message_type_name} is not defined in the file descriptor")]
     InvalidMessageTypeName { message_type_name: String },
     #[error("Service with name {service_name} is already registered")]
@@ -218,15 +220,38 @@ impl ConfigurablePublisherRegistry {
         publisher_info: &PublisherInfo,
         publisher: &binder::Strong<dyn IConfigurablePublisher>,
     ) -> Result<(), ConfigurablePublisherRegistryRegisterError> {
-        let publisher_info_proto: FileDescriptorProto =
-            protobuf::Message::parse_from_bytes(&publisher_info.fileDescriptorProto)?;
-        let file_descriptor =
-            FileDescriptor::new_dynamic(publisher_info_proto, &WELL_KNOWN_FILE_DESCRIPTORS)?;
-        let message_descriptor = file_descriptor
-            .message_by_full_name(&publisher_info.messageTypeName)
-            .ok_or_else(|| ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName {
+        let file_descriptor_protos = match (
+            &publisher_info.fileDescriptorSet,
+            &publisher_info.fileDescriptorProto,
+        ) {
+            (Some(file_descriptor_set_bytes), None) => {
+                FileDescriptorSet::parse_from_bytes(file_descriptor_set_bytes)?.file
+            }
+            (None, Some(file_descriptor_proto_bytes)) => {
+                warn!("Setting the `fileDescriptorProto` field is deprecated, prefer setting `fileDescriptorSet` instead.");
+                vec![FileDescriptorProto::parse_from_bytes(file_descriptor_proto_bytes)?]
+            }
+            (None, None) => {
+                vec![]
+            }
+            (Some(_), Some(_)) => {
+                return Err(
+                    ConfigurablePublisherRegistryRegisterError::ConflictingFileDescriptorSources,
+                );
+            }
+        };
+
+        let message_descriptor = find_message_by_full_name(
+            FileDescriptor::new_dynamic_fds(file_descriptor_protos, &WELL_KNOWN_FILE_DESCRIPTORS)?
+                .iter()
+                .chain(WELL_KNOWN_FILE_DESCRIPTORS.iter()),
+            &publisher_info.messageTypeName,
+        )
+        .ok_or_else(|| {
+            ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName {
                 message_type_name: publisher_info.messageTypeName.clone(),
-            })?;
+            }
+        })?;
 
         match self.publisher_entries.entry(publisher_info.serviceName.clone()) {
             DashMapEntry::Occupied(_) => {
@@ -382,13 +407,14 @@ mod tests {
     };
     use parking_lot::Mutex;
     use protobuf::reflect::ReflectValueRef;
-    use protobuf::well_known_types::{any::Any, wrappers::Int32Value};
+    use protobuf::well_known_types::{any::Any, empty::Empty, wrappers::Int32Value};
     use protobuf::{Message, MessageFull};
-    use sample_publisher_proto::sample_publisher;
     use sample_publisher_proto::sample_publisher::SampleMessage;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
     use sdv_telemetry_test_utils::parameterized_test;
+    use googletest::expect_that;
+    use googletest::matchers::{err, ok, eq, pat};
 
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
@@ -509,23 +535,32 @@ mod tests {
         }
     }
 
-    async fn create_configurable_publisher_registry(
-        configurable_publisher: MockConfigurablePublisher,
-    ) -> (Arc<ConfigurablePublisherRegistry>, MockBinderAdapter) {
+    async fn create_registry() -> (Arc<ConfigurablePublisherRegistry>, MockBinderAdapter) {
         let mut configurable_publisher_registry = ConfigurablePublisherRegistry::new();
         let binder_adapter = MockBinderAdapter::new();
         configurable_publisher_registry.binder_adapter = Box::new(binder_adapter.clone());
         let configurable_publisher_registry = Arc::new(configurable_publisher_registry);
 
-        let file_descriptor = sample_publisher::file_descriptor();
-        let file_descriptor_proto = file_descriptor.proto();
-        let descriptor = SampleMessage::descriptor();
+        (configurable_publisher_registry, binder_adapter)
+    }
+
+    async fn create_registry_and_register_publisher(
+        configurable_publisher: MockConfigurablePublisher,
+    ) -> (Arc<ConfigurablePublisherRegistry>, MockBinderAdapter) {
+        let (configurable_publisher_registry, binder_adapter) = create_registry().await;
+
+        let message_descriptor = SampleMessage::descriptor();
+        let file_descriptor_set = FileDescriptorSet {
+            file: vec![message_descriptor.file_descriptor_proto().to_owned()],
+            ..Default::default()
+        };
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
-            fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
-            messageTypeName: format!(".{}", descriptor.full_name()),
+            fileDescriptorSet: Some(file_descriptor_set.write_to_bytes().unwrap()),
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
+            fileDescriptorProto: None,
         };
 
         let binder_publisher =
@@ -549,12 +584,73 @@ mod tests {
         assert!(res.is_none());
     }
 
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        register_publisher_success,
+
+        |file_descriptor_set: FileDescriptorSet, message_type_name: String| async move {
+            let (configurable_publisher_registry, _) = create_registry().await;
+
+            let publisher_info = PublisherInfo {
+                serviceName: SERVICE_NAME.to_string(),
+                fileDescriptorSet: Some(file_descriptor_set.write_to_bytes().unwrap()),
+                messageTypeName: message_type_name,
+                supportsGet: false,
+                // Deprecated
+                fileDescriptorProto: None,
+            };
+
+            let configurable_publisher = BnConfigurablePublisher::new_binder(
+                MockConfigurablePublisher::new(false),
+                BinderFeatures::default(),
+            );
+
+            let result = Arc::clone(&configurable_publisher_registry)
+                .register_publisher(&publisher_info, &configurable_publisher)
+                .await;
+
+            expect_that!(result, ok(eq(&())));
+        },
+
+        well_known_type: (
+            FileDescriptorSet {
+                file: vec![Empty::descriptor().file_descriptor().proto().to_owned()],
+                ..Default::default()
+            },
+            Empty::descriptor().full_name().to_owned()
+        ),
+        well_known_type_without_file_descriptor_of_it_being_specified: (
+            FileDescriptorSet {
+                file: vec![],
+                ..Default::default()
+            },
+            Empty::descriptor().full_name().to_owned()
+        ),
+
+        custom_type_with_dot: (
+            FileDescriptorSet {
+                file: vec![SampleMessage::descriptor().file_descriptor().proto().to_owned()],
+                ..Default::default()
+            },
+            format!(".{}", SampleMessage::descriptor().full_name())
+        ),
+        custom_type_without_dot: (
+            FileDescriptorSet {
+                file: vec![SampleMessage::descriptor().file_descriptor().proto().to_owned()],
+                ..Default::default()
+            },
+            SampleMessage::descriptor().full_name().to_owned()
+        ),
+    );
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_success() {
         let configurable_publisher = MockConfigurablePublisher::new(true);
         let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher).await;
+            create_registry_and_register_publisher(configurable_publisher).await;
 
         let res =
             configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
@@ -580,7 +676,7 @@ mod tests {
     async fn get_message_provider_get_not_supported_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher).await;
+            create_registry_and_register_publisher(configurable_publisher).await;
 
         let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
 
@@ -598,7 +694,7 @@ mod tests {
         let configurable_publisher = MockConfigurablePublisher::new(true);
         configurable_publisher.next_latest_message.lock().replace(msg.write_to_bytes().unwrap());
         let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher.clone()).await;
+            create_registry_and_register_publisher(configurable_publisher.clone()).await;
 
         let outcome = configurable_publisher_registry.get_message_provider(SERVICE_NAME).await;
         let Ok(GetMessageProviderOutcome::Success(message_provider)) = outcome else {
@@ -630,7 +726,7 @@ mod tests {
     async fn register_publisher_death_notification_removes_entry() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, binder_adapter) =
-            create_configurable_publisher_registry(configurable_publisher).await;
+            create_registry_and_register_publisher(configurable_publisher).await;
 
         binder_adapter.callback.lock().as_ref().unwrap()();
 
@@ -645,7 +741,7 @@ mod tests {
         |fetch_last_message| async move {
             let configurable_publisher = MockConfigurablePublisher::new(false);
             let (configurable_publisher_registry, _) =
-                create_configurable_publisher_registry(configurable_publisher.clone()).await;
+                create_registry_and_register_publisher(configurable_publisher.clone()).await;
 
             let outcome = configurable_publisher_registry
                 .create_subscription(
@@ -699,7 +795,7 @@ mod tests {
     async fn unsubscribe_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher.clone()).await;
+            create_registry_and_register_publisher(configurable_publisher.clone()).await;
 
         let outcome = configurable_publisher_registry
             .create_subscription(
@@ -725,11 +821,12 @@ mod tests {
         assert_eq!(configurable_publisher.get_num_unsubscribe_calls(), 1);
     }
 
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unregister_success() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher.clone()).await;
+            create_registry_and_register_publisher(configurable_publisher.clone()).await;
 
         let outcome = configurable_publisher_registry
             .create_subscription(
@@ -763,7 +860,7 @@ mod tests {
     async fn unregister_incorrect_service_name_returns_ok() {
         let configurable_publisher = MockConfigurablePublisher::new(false);
         let (configurable_publisher_registry, _) =
-            create_configurable_publisher_registry(configurable_publisher).await;
+            create_registry_and_register_publisher(configurable_publisher).await;
 
         let outcome = configurable_publisher_registry
             .create_subscription(
@@ -790,6 +887,7 @@ mod tests {
         assert!(res.is_ok());
     }
 
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_availability_callback_success() {
         let registry = ConfigurablePublisherRegistry::new();
@@ -820,6 +918,7 @@ mod tests {
         assert!(Arc::ptr_eq(&callback2, &registered_callbacks[1].upgrade().unwrap()));
     }
 
+    #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn unregister_availability_callback_success() {
         let registry = ConfigurablePublisherRegistry::new();
@@ -858,6 +957,47 @@ mod tests {
         assert!(
             !registry.availability_callbacks.contains_key(SERVICE_NAME),
             "Service entry should be removed when no callbacks are left"
+        );
+    }
+
+    #[googletest::test]
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn register_publisher_conflicting_file_descriptor_sources_fails() {
+        let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
+        let configurable_publisher = MockConfigurablePublisher::new(false);
+
+        let message_descriptor = SampleMessage::descriptor();
+
+        let publisher_info = PublisherInfo {
+            serviceName: SERVICE_NAME.to_string(),
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
+            supportsGet: configurable_publisher.supports_get,
+
+            // Set both to trigger the error
+            fileDescriptorSet: Some(
+                FileDescriptorSet {
+                    file: vec![message_descriptor.file_descriptor_proto().to_owned()],
+                    ..Default::default()
+                }
+                .write_to_bytes()
+                .unwrap(),
+            ),
+            fileDescriptorProto: Some(
+                message_descriptor.file_descriptor_proto().write_to_bytes().unwrap(),
+            ),
+        };
+
+        let binder_publisher =
+            BnConfigurablePublisher::new_binder(configurable_publisher, BinderFeatures::default());
+
+        let result = Arc::clone(&configurable_publisher_registry)
+            .register_publisher(&publisher_info, &binder_publisher)
+            .await;
+
+        expect_that!(
+            result,
+            err(pat!(ConfigurablePublisherRegistryRegisterError::ConflictingFileDescriptorSources))
         );
     }
 }

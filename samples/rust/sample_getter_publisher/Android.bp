@@ -13,7 +13,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "google.sdv.telemetry.configurable_publisher-V2-rust",
         "libbinder_rs",
         "libbinder_tokio_rs",
         "libfutures",

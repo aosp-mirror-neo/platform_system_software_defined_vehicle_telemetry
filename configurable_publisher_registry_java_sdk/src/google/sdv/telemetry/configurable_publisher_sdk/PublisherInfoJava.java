@@ -11,10 +11,10 @@ public class PublisherInfoJava {
     private final String serviceName;
 
     /**
-     * Protobuf FileDescriptorProto bytes containing the schema for published messages. Note: There
+     * Protobuf FileDescriptorSet bytes containing the schema for published messages. Note: There
      * might be a size constraint (e.g., < 10Kb) enforced at runtime.
      */
-    private final byte[] fileDescriptorProto;
+    private final byte[] fileDescriptorSet;
 
     /**
      * The fully qualified name of the root Protobuf message type being published. This type must be
@@ -36,13 +36,10 @@ public class PublisherInfoJava {
      * @param messageTypeName The fully qualified name of the message type.
      * @param supportsGet True if the publisher supports the 'get' operation.
      */
-    public PublisherInfoJava(
-            String serviceName,
-            byte[] fileDescriptorProto,
-            String messageTypeName,
-            boolean supportsGet) {
+    public PublisherInfoJava(String serviceName, byte[] fileDescriptorSet, String messageTypeName,
+                             boolean supportsGet) {
         this.serviceName = serviceName;
-        this.fileDescriptorProto = fileDescriptorProto;
+        this.fileDescriptorSet = fileDescriptorSet;
         this.messageTypeName = messageTypeName;
         this.supportsGet = supportsGet;
     }
@@ -56,9 +53,11 @@ public class PublisherInfoJava {
         PublisherInfo aidlInfo = new PublisherInfo();
         // The data is copied to transfer ownership to the AIDL representation.
         aidlInfo.serviceName = this.serviceName;
-        aidlInfo.fileDescriptorProto = this.fileDescriptorProto.clone();
+        aidlInfo.fileDescriptorSet = this.fileDescriptorSet.clone();
         aidlInfo.messageTypeName = this.messageTypeName;
         aidlInfo.supportsGet = this.supportsGet;
+        // `fileDescriptorProto` is deprecated.
+        aidlInfo.fileDescriptorProto = null;
         return aidlInfo;
     }
 

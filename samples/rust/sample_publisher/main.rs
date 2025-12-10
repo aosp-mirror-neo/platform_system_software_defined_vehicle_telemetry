@@ -11,9 +11,10 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
     PublisherInfo::PublisherInfo, IConfigurablePublisherRegistry::BpConfigurablePublisherRegistry
 };
 use log::info;
+use protobuf::descriptor::FileDescriptorSet;
 use protobuf::{Message, MessageFull};
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
-use sample_publisher_proto::sample_publisher::{self, SampleMessage};
+use sample_publisher_proto::sample_publisher::SampleMessage;
 use std::sync::Arc;
 
 use random_integer_publisher::RandomIntegerPublisher;
@@ -46,14 +47,19 @@ async fn main() -> Result<(), binder::Status> {
         BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
 
     info!("Registering publisher");
-    let file_descriptor = sample_publisher::file_descriptor();
-    let file_descriptor_proto = file_descriptor.proto();
     let message_descriptor = SampleMessage::descriptor();
+    let file_descriptor_set = FileDescriptorSet {
+        file: vec![message_descriptor.file_descriptor_proto().to_owned()],
+        ..Default::default()
+    };
+
     let publisher_info = PublisherInfo {
         serviceName: "SampleService".to_owned(),
-        fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
+        fileDescriptorSet: Some(file_descriptor_set.write_to_bytes().unwrap()),
         messageTypeName: format!(".{}", message_descriptor.full_name()),
         supportsGet: false,
+        // Deprecated
+        fileDescriptorProto: None,
     };
 
     service.registerPublisher(&publisher_info, &binder_publisher)?;
