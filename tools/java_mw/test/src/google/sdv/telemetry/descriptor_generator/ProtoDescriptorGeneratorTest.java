@@ -6,6 +6,7 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.fail;
 
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto;
+import com.google.protobuf.DescriptorProtos.FileDescriptorSet;
 import com.google.protobuf.Descriptors.FileDescriptor;
 import com.google.protobuf.InvalidProtocolBufferException;
 import java.io.ByteArrayOutputStream;
@@ -37,15 +38,15 @@ public final class ProtoDescriptorGeneratorTest {
 
   @Test
   public void testGeneratedClass_hasValidDescriptor() throws Exception {
-    // This test validates the core functionality: ensuring the DESCRIPTOR byte array is present,
-    // is a valid protobuf descriptor, and contains the correct information.
+    // This test validates that the FILE_DESCRIPTOR_SET byte array is a valid FileDescriptorSet
+    // and that the necessary message types can be resolved from it.
     Class<?> generatedClass =
         Class.forName("com.google.android.sdv.telemetry.schemas.TestMessageSchema");
-    Field descriptorField = generatedClass.getField("DESCRIPTOR");
-    byte[] descriptorBytes = (byte[]) descriptorField.get(null);
+    Field descriptorSetField = generatedClass.getField("FILE_DESCRIPTOR_SET");
+    byte[] descriptorSetBytes = (byte[])descriptorSetField.get(null);
 
-    FileDescriptorProto fileDescriptorProto = FileDescriptorProto.parseFrom(descriptorBytes);
-
+    FileDescriptorSet fileDescriptorSet = FileDescriptorSet.parseFrom(descriptorSetBytes);
+    FileDescriptorProto fileDescriptorProto = fileDescriptorSet.getFile(0);
     assertThat(fileDescriptorProto.getName()).isEqualTo("TestMessageSchema.proto");
 
     FileDescriptor fileDescriptor =

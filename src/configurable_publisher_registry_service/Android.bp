@@ -13,7 +13,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "google.sdv.telemetry.configurable_publisher-V2-rust",
         "libanyhow",
         "libbinder_rs",
         "libbinder_tokio_rs",
@@ -48,6 +48,7 @@ rust_test {
     defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     rustlibs: [
         // keep-sorted start
+        "libgoogletest_rust",
         "librand",
         "libsample_publisher_proto",
         "libsdv_telemetry_test_utils",

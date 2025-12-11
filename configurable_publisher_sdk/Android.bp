@@ -11,7 +11,7 @@ rust_defaults {
     srcs: ["lib.rs"],
     rustlibs: [
         // keep-sorted start
-        "google.sdv.telemetry.configurable_publisher-V1-rust",
+        "google.sdv.telemetry.configurable_publisher-V2-rust",
         "libbinder_rs",
         "libfutures",
         "liblog_rust",

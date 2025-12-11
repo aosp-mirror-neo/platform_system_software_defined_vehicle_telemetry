@@ -3,6 +3,7 @@
 syntax = "proto3";
 
 import "google/protobuf/timestamp.proto";
+import "test_dep.proto";
 
 enum TestEnum {
   ZERO = 0;
@@ -16,4 +17,8 @@ message TestMessage {
 
 message TestMessageWithWellKnownType {
   .google.protobuf.Timestamp timestamp = 1;
+}
+
+message TestMessageWithDependencyInOtherFile {
+  DepMessage dep_message = 1;
 }

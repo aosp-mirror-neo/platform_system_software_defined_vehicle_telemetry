@@ -13,7 +13,7 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 };
 use binder::BinderFeatures;
 use std::sync::Arc;
-use protobuf::descriptor::FileDescriptorProto;
+use protobuf::descriptor::{FileDescriptorProto, FileDescriptorSet};
 use protobuf::Message;
 use sdv_telemetry_simulator_publishing_strategy::{
     PublishingStrategy, PublishingStrategyFactory, PublishingStrategyType,
@@ -85,23 +85,21 @@ impl PublishingStrategy for PublishingStrategyImpl {
         let binder_publisher =
             BnConfigurablePublisher::new_binder(publisher_wrapper, BinderFeatures::default());
 
+        let file_descriptor_set =
+            FileDescriptorSet { file: file_descriptor_protos.to_owned(), ..Default::default() };
         let publisher_info = PublisherInfo {
             serviceName: service_name.to_owned(),
-            // TODO: b/368362607 - Pass all file descriptor protos once `PublisherInfo` supports
-            // more than one file descriptor proto.
-            fileDescriptorProto: file_descriptor_protos
-                .first()
-                .map(|file_descriptor_proto| {
-                    file_descriptor_proto.write_to_bytes().with_context(|| {
-                        format!(
-                            "Failed to write file descriptor proto for publisher \"{service_name}\" to bytes",
-                        )
-                    })
-                })
-                .transpose()?
-                .unwrap_or_default(),
-            messageTypeName: format!(".{}", message_name),
+            fileDescriptorSet: Some(
+                file_descriptor_set.write_to_bytes().with_context(|| {
+                    format!(
+                        "Failed to write file descriptor proto for publisher \"{service_name}\" to bytes",
+                    )
+                })?
+            ),
+            messageTypeName: format!(".{message_name}"),
             supportsGet: true,
+            // Deprecated
+            fileDescriptorProto: None,
         };
 
         self.registry.registerPublisher(&publisher_info, &binder_publisher)?;

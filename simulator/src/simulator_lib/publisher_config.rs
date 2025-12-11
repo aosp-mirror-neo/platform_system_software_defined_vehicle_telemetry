@@ -1,6 +1,6 @@
 // Copyright 2024 Google LLC
 
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
+use protobuf::{descriptor::FileDescriptorProto, MessageDyn};
 use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyType;
 use std::{
     fmt,
@@ -15,7 +15,8 @@ pub struct PublisherConfig {
     pub service_name: String,
     pub loop_data: bool,
     pub parsed_data: Vec<ParsedDataEntry>,
-    pub message_descriptor: MessageDescriptor,
+    pub message_name: String,
+    pub file_descriptor_protos: Vec<FileDescriptorProto>,
     pub publishing_strategy: PublishingStrategyType,
 }
 

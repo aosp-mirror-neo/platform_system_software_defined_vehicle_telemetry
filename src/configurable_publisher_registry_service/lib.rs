@@ -43,12 +43,12 @@ fn to_binder_result<T>(
                     Some(message),
                 )
             }
-            ConfigurablePublisherRegistryRegisterError::FileDescriptorProtoParseError {
-                ..
-            } => binder::Status::new_service_specific_error_str(
-                StatusCodes::REGISTER_PUBLISHER_FAILED_FILE_DESCRIPTOR_PROTO_PARSE_ERROR.0,
-                Some(message),
-            ),
+            ConfigurablePublisherRegistryRegisterError::FileDescriptorParseError { .. } => {
+                binder::Status::new_service_specific_error_str(
+                    StatusCodes::REGISTER_PUBLISHER_FAILED_FILE_DESCRIPTOR_PROTO_PARSE_ERROR.0,
+                    Some(message),
+                )
+            }
             ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName { .. } => {
                 binder::Status::new_service_specific_error_str(
                     StatusCodes::REGISTER_PUBLISHER_FAILED_INVALID_MESSAGE_TYPE_NAME.0,
@@ -58,6 +58,12 @@ fn to_binder_result<T>(
             ConfigurablePublisherRegistryRegisterError::ServiceAlreadyRegistered { .. } => {
                 binder::Status::new_service_specific_error_str(
                     StatusCodes::REGISTER_PUBLISHER_FAILED_SERVICE_ALREADY_REGISTERED.0,
+                    Some(message),
+                )
+            }
+            ConfigurablePublisherRegistryRegisterError::ConflictingFileDescriptorSources => {
+                binder::Status::new_service_specific_error_str(
+                    StatusCodes::REGISTER_PUBLISHER_FAILED_CONFLICTING_FILE_DESCRIPTOR_SOURCES.0,
                     Some(message),
                 )
             }
@@ -111,6 +117,7 @@ mod tests {
         IConfigurablePublisherSubscription,
         BnConfigurablePublisherSubscription,
     };
+    use protobuf::descriptor::FileDescriptorSet;
     use protobuf::{Message, MessageFull};
     use rand::seq::SliceRandom;
     use rand::thread_rng;
@@ -120,6 +127,7 @@ mod tests {
     const SERVICE_NAME: &str = "CONFIGURABLE_PUB_SERVICE";
     const SERVICE_NAME2: &str = "CONFIGURABLE_PUB_SERVICE2";
     const SERVICE_NAME3: &str = "CONFIGURABLE_PUB_SERVICE3";
+    const SERVICE_NAME4: &str = "CONFIGURABLE_PUB_SERVICE4";
 
     struct MockConfigurablePublisher {
         /// Specifies whether the mock supports gets or returns unsupported error when called.
@@ -183,20 +191,21 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn register_publisher_success() {
+    async fn register_publisher_with_deprecated_file_descriptor_proto_success() {
         let service =
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let file_descriptor = sample_publisher::file_descriptor();
-        let file_descriptor_proto = file_descriptor.proto();
-        let descriptor = SampleMessage::descriptor();
+        let message_descriptor = SampleMessage::descriptor();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
-            fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
-            messageTypeName: format!(".{}", descriptor.full_name()),
+            fileDescriptorProto: Some(
+                message_descriptor.file_descriptor_proto().write_to_bytes().unwrap(),
+            ),
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
+            fileDescriptorSet: None,
         };
 
         let binder_publisher =
@@ -209,13 +218,45 @@ mod tests {
 
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
-    async fn invalid_file_descriptor_register_publisher_failed() {
+    async fn register_publisher_with_file_descriptor_set_success() {
         let service =
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let file_descriptor = sample_publisher::file_descriptor();
-        let file_descriptor_proto = file_descriptor.proto();
+        let message_descriptor = SampleMessage::descriptor();
+
+        let publisher_info = PublisherInfo {
+            serviceName: SERVICE_NAME4.to_string(),
+            fileDescriptorProto: None,
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
+            supportsGet: configurable_publisher.supports_get,
+            fileDescriptorSet: Some(
+                FileDescriptorSet {
+                    file: vec![message_descriptor.file_descriptor_proto().to_owned()],
+                    ..Default::default()
+                }
+                .write_to_bytes()
+                .unwrap(),
+            ),
+        };
+
+        let binder_publisher =
+            BnConfigurablePublisher::new_binder(configurable_publisher, BinderFeatures::default());
+
+        let result = service.registerPublisher(&publisher_info, &binder_publisher);
+        assert!(result.is_ok());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn invalid_file_descriptor_proto_register_publisher_failed() {
+        let service =
+            connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
+        let configurable_publisher = MockConfigurablePublisher::new(false);
+
+        let message_descriptor = SampleMessage::descriptor();
+
+        let file_descriptor_proto = message_descriptor.file_descriptor_proto();
 
         let mut invalid_file_descriptor_proto = file_descriptor_proto.write_to_bytes().unwrap();
         let slice = invalid_file_descriptor_proto.as_mut_slice();
@@ -226,9 +267,50 @@ mod tests {
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
-            fileDescriptorProto: invalid_file_descriptor_proto,
+            fileDescriptorProto: Some(invalid_file_descriptor_proto),
             messageTypeName: format!(".{}", descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
+            fileDescriptorSet: None,
+        };
+
+        let binder_publisher =
+            BnConfigurablePublisher::new_binder(configurable_publisher, BinderFeatures::default());
+
+        let err_binder = service.registerPublisher(&publisher_info, &binder_publisher).unwrap_err();
+
+        assert_eq!(
+            err_binder.service_specific_error(),
+            StatusCodes::REGISTER_PUBLISHER_FAILED_FILE_DESCRIPTOR_PROTO_PARSE_ERROR.0,
+            "Unexpected error: {err_binder:?}"
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn invalid_file_descriptor_set_register_publisher_failed() {
+        let service =
+            connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
+        let configurable_publisher = MockConfigurablePublisher::new(false);
+
+        let message_descriptor = SampleMessage::descriptor();
+
+        let file_descriptor_set = FileDescriptorSet {
+            file: vec![message_descriptor.file_descriptor_proto().to_owned()],
+            ..Default::default()
+        };
+
+        let mut invalid_file_descriptor_set = file_descriptor_set.write_to_bytes().unwrap();
+        let slice = invalid_file_descriptor_set.as_mut_slice();
+        let mut rng = thread_rng();
+        slice.shuffle(&mut rng);
+
+        let publisher_info = PublisherInfo {
+            serviceName: SERVICE_NAME.to_string(),
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
+            supportsGet: configurable_publisher.supports_get,
+
+            fileDescriptorSet: Some(invalid_file_descriptor_set),
+            fileDescriptorProto: None,
         };
 
         let binder_publisher =
@@ -255,9 +337,10 @@ mod tests {
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
-            fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
+            fileDescriptorProto: Some(file_descriptor_proto.write_to_bytes().unwrap()),
             messageTypeName: ".InvalidMessageTypeName".to_string(),
             supportsGet: configurable_publisher.supports_get,
+            fileDescriptorSet: None,
         };
 
         let binder_publisher =
@@ -285,9 +368,10 @@ mod tests {
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME2.to_string(),
-            fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
+            fileDescriptorProto: Some(file_descriptor_proto.write_to_bytes().unwrap()),
             messageTypeName: format!(".{}", descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
+            fileDescriptorSet: None,
         };
 
         let binder_publisher =
@@ -317,9 +401,10 @@ mod tests {
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME3.to_string(),
-            fileDescriptorProto: file_descriptor_proto.write_to_bytes().unwrap(),
+            fileDescriptorProto: Some(file_descriptor_proto.write_to_bytes().unwrap()),
             messageTypeName: format!(".{}", descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
+            fileDescriptorSet: None,
         };
 
         let binder_publisher =
@@ -330,5 +415,34 @@ mod tests {
 
         assert!(res1.is_ok());
         assert!(res2.is_ok());
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn register_publisher_conflicting_file_descriptor_sources_fails() {
+        let registry = Arc::new(ConfigurablePublisherRegistry::new());
+        let service = ConfigurablePublisherRegistryService::new(Arc::clone(&registry));
+
+        let publisher_info = PublisherInfo {
+            serviceName: "test_service".to_string(),
+            messageTypeName: "test_message".to_string(),
+            supportsGet: false,
+
+            // Conflicting sources
+            fileDescriptorSet: Some(vec![1, 2, 3]),
+            fileDescriptorProto: Some(vec![4, 5, 6]),
+        };
+        let publisher = BnConfigurablePublisher::new_binder(
+            MockConfigurablePublisher::new(false),
+            BinderFeatures::default(),
+        );
+
+        let result = service.registerPublisher(&publisher_info, &publisher).await;
+
+        let err = result.unwrap_err();
+        assert_eq!(
+            err.service_specific_error(),
+            StatusCodes::REGISTER_PUBLISHER_FAILED_CONFLICTING_FILE_DESCRIPTOR_SOURCES.0
+        );
     }
 }

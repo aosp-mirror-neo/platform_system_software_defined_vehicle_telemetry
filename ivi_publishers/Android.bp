@@ -29,7 +29,7 @@ android_library {
     ],
 
     static_libs: [
-        "google.sdv.telemetry.configurable_publisher-V1-java",
+        "google.sdv.telemetry.configurable_publisher-V2-java",
         "libprotobuf-java-lite",
         "androidx.annotation_annotation",
     ],
