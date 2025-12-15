@@ -322,8 +322,9 @@ async fn report_is_generated_when_publisher_publishes_immediately() {
                         .to_owned()
                         .into_option()
                         .map(|report_data| report_data.unpack::<Int64Value>()),
-                    some(ok(some(pat!(Int64Value { value: eq(&123) }))))
+                    some(ok(some(pat!(Int64Value { value: eq(&123), .. }))))
                 ),
+                ..
             }),
             ["aggregation_publisher_report", "service_name_report"]
         ),

@@ -168,12 +168,12 @@ Actual: ImplA {{ n: 123 }},
     which has field `n`, which isn't equal to 77
 ")))));
 
-        let result = verify_that!(a_123, downcast_ref::<dyn Trait, ImplB, _>(pat!(ImplB {})));
+        let result = verify_that!(a_123, downcast_ref::<dyn Trait, ImplB, _>(pat!(ImplB { .. })));
         expect_that!(
             result,
             err(displays_as(starts_with(format!(
                 "Value of: a_123
-Expected: can be downcast from {trait_tn} to {implb_tn}, which is ImplB {{}}
+Expected: can be downcast from {trait_tn} to {implb_tn}, which is ImplB {{ .. }}
 Actual: ImplA {{ n: 123 }},
   which cannot be downcast from {trait_tn} to {implb_tn}
 "

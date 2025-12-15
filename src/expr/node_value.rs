@@ -1086,14 +1086,14 @@ mod tests {
         add_floats: (&OP_ADD, NodeValue::Float(5.2), NodeValue::Double(20.1), ok(eq(&NodeValue::Double(25.3))),),
         add_none_left: (&OP_ADD, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         add_none_right: (&OP_ADD, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
-        add_non_numeric_left_fails: (&OP_ADD, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
-        add_non_numeric_right_fails: (&OP_ADD, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        add_non_numeric_left_fails: (&OP_ADD, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands { .. })),),
+        add_non_numeric_right_fails: (&OP_ADD, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands { .. })),),
 
         sub_integers: (&OP_SUBTRACT, NodeValue::Int32(5), NodeValue::Int32(20), ok(eq(&NodeValue::Int64(-15))),),
         sub_floats: (&OP_SUBTRACT, NodeValue::Float(5.2), NodeValue::Double(20.1), ok(eq(&NodeValue::Double(-14.9))),),
         sub_none_left: (&OP_SUBTRACT, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         sub_none_right: (&OP_SUBTRACT, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
-        sub_non_numeric_left_fails: (&OP_SUBTRACT, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
+        sub_non_numeric_left_fails: (&OP_SUBTRACT, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands { .. })),),
         sub_non_numeric_right_fails: (&OP_SUBTRACT, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
 
         multiply: (&OP_MULTIPLY, NodeValue::Int32(5), NodeValue::Float(0.5), ok(eq(&NodeValue::Double(2.5))),),
@@ -1103,7 +1103,7 @@ mod tests {
         multiply_non_numeric_right_fails: (&OP_MULTIPLY, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
 
         divide: (&OP_DIVIDE, NodeValue::Int32(5), NodeValue::Int32(2), ok(eq(&NodeValue::Double(2.5))),),
-        divide_by_zero_fails: (&OP_DIVIDE, NodeValue::Int32(5), NodeValue::Int32(0), err(pat!(NodeEvaluationError::DivideByZero)),),
+        divide_by_zero_fails: (&OP_DIVIDE, NodeValue::Int32(5), NodeValue::Int32(0), err(pat!(NodeEvaluationError::DivideByZero { .. })),),
         divide_none_left: (&OP_DIVIDE, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         divide_none_right: (&OP_DIVIDE, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
         divide_non_numeric_left_fails: (&OP_DIVIDE, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ArithmeticOperatorIncompatibleOperands)),),
@@ -1113,13 +1113,13 @@ mod tests {
         modulo_trunc_2: (&OP_MODULO_TRUNC, NodeValue::Int32(8), NodeValue::Int32(-3), ok(eq(&NodeValue::Int64(2))),),
         modulo_trunc_3: (&OP_MODULO_TRUNC, NodeValue::Int32(-8), NodeValue::Int32(3), ok(eq(&NodeValue::Int64(-2))),),
         modulo_trunc_4: (&OP_MODULO_TRUNC, NodeValue::Int32(-8), NodeValue::Int32(-3), ok(eq(&NodeValue::Int64(-2))),),
-        modulo_trunc_by_zero_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(5), NodeValue::Int32(0), err(pat!(NodeEvaluationError::DivideByZero)),),
+        modulo_trunc_by_zero_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(5), NodeValue::Int32(0), err(pat!(NodeEvaluationError::DivideByZero { .. })),),
         modulo_trunc_none_left: (&OP_MODULO_TRUNC, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         modulo_trunc_none_right: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
-        modulo_trunc_float_left_fails: (&OP_MODULO_TRUNC, NodeValue::Float(5.0), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
-        modulo_trunc_float_right_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::Float(5.0), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
-        modulo_trunc_non_numeric_left_fails: (&OP_MODULO_TRUNC, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
-        modulo_trunc_non_numeric_right_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands)),),
+        modulo_trunc_float_left_fails: (&OP_MODULO_TRUNC, NodeValue::Float(5.0), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands { .. })),),
+        modulo_trunc_float_right_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::Float(5.0), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands { .. })),),
+        modulo_trunc_non_numeric_left_fails: (&OP_MODULO_TRUNC, NodeValue::Bool(true), NodeValue::Int32(1), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands { .. })),),
+        modulo_trunc_non_numeric_right_fails: (&OP_MODULO_TRUNC, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ModuloOperatorIncompatibleOperands { .. })),),
 
         power_integers: (&OP_POWER, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Int64(4))),), // 2^2 = 4
         power_negative_integer_base: (&OP_POWER, NodeValue::Int32(-2), NodeValue::Int32(2), ok(eq(&NodeValue::Int64(4))),), // (-2)^2 = 4
@@ -1168,8 +1168,8 @@ mod tests {
         eq_list_msg_not_eq: (&OP_EQ, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE), Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(false))),),
         eq_list_none_left: (&OP_EQ, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
         eq_list_none_right: (&OP_EQ, NodeValue::Int64List(vec![42]), NodeValue::None, ok(eq(&NodeValue::None)),),
-        eq_list_incompatible_types: (&OP_EQ, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
-        eq_list_list: (&OP_EQ, NodeValue::BoolList(vec![true]), NodeValue::BoolList(vec![true]), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands)),),
+        eq_list_incompatible_types: (&OP_EQ, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands { .. })),),
+        eq_list_list: (&OP_EQ, NodeValue::BoolList(vec![true]), NodeValue::BoolList(vec![true]), err(pat!(NodeEvaluationError::ComparisonOperatorListIncompatibleOperands { .. })),),
 
         ne_1: (&OP_NOT_EQ, ONE, ONE_EPSILON, ok(eq(&NodeValue::Bool(false))),),
         ne_2: (&OP_NOT_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
@@ -1187,7 +1187,7 @@ mod tests {
         gt_4: (&OP_GT, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
         gt_5: (&OP_GT, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(false))),),
         gt_6: (&OP_GT, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
-        gt_7: (&OP_GT, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        gt_7: (&OP_GT, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands { .. })),),
         gt_none_left: (&OP_GT, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         gt_none_right: (&OP_GT, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
@@ -1196,7 +1196,7 @@ mod tests {
         gte_3: (&OP_GT_OR_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
         gte_4: (&OP_GT_OR_EQ, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(false))),),
         gte_5: (&OP_GT_OR_EQ, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
-        gte_6: (&OP_GT_OR_EQ, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        gte_6: (&OP_GT_OR_EQ, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands { .. })),),
         gte_none_left: (&OP_GT_OR_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         gte_none_right: (&OP_GT_OR_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
@@ -1206,7 +1206,7 @@ mod tests {
         lt_4: (&OP_LT, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
         lt_5: (&OP_LT, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(true))),),
         lt_6: (&OP_LT, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
-        lt_7: (&OP_LT, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        lt_7: (&OP_LT, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands { .. })),),
         lt_none_left: (&OP_LT, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         lt_none_right: (&OP_LT, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
@@ -1215,7 +1215,7 @@ mod tests {
         lte_3: (&OP_LT_OR_EQ, NodeValue::Int32(2), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(true))),),
         lte_4: (&OP_LT_OR_EQ, NodeValue::Int32(2), NodeValue::Float(5.5), ok(eq(&NodeValue::Bool(true))),),
         lte_5: (&OP_LT_OR_EQ, NodeValue::Float(5.5), NodeValue::Int32(2), ok(eq(&NodeValue::Bool(false))),),
-        lte_6: (&OP_LT_OR_EQ, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands)),),
+        lte_6: (&OP_LT_OR_EQ, NodeValue::Float(5.5), NodeValue::Bool(true), err(pat!(NodeEvaluationError::ComparisonOperatorIncomptaibleOperands { .. })),),
         lte_none_left: (&OP_LT_OR_EQ, NodeValue::None, NodeValue::Int32(1), ok(eq(&NodeValue::None)),),
         lte_none_right: (&OP_LT_OR_EQ, NodeValue::Int32(1), NodeValue::None, ok(eq(&NodeValue::None)),),
 
@@ -1236,10 +1236,10 @@ mod tests {
         contains_message_2: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(false))),),
         contains_none_left: (&OP_CONTAINS, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
         contains_none_right: (&OP_CONTAINS, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
-        contains_not_a_list: (&OP_CONTAINS, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
-        contains_incompatible_types_1: (&OP_CONTAINS, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
-        contains_incompatible_types_2: (&OP_CONTAINS, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
-        contains_incompatible_types_3: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        contains_not_a_list: (&OP_CONTAINS, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
+        contains_incompatible_types_1: (&OP_CONTAINS, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
+        contains_incompatible_types_2: (&OP_CONTAINS, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
+        contains_incompatible_types_3: (&OP_CONTAINS, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
 
         not_contains_bool_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
         not_contains_bool_2: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, true]), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
@@ -1258,10 +1258,10 @@ mod tests {
         not_contains_message_2: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Message(Arc::new(MockDynamicMessage::new(TestMessage::descriptor()))), ok(eq(&NodeValue::Bool(true))),),
         not_contains_none_left: (&OP_DOES_NOT_CONTAIN, NodeValue::None, NodeValue::Int32(2), ok(eq(&NodeValue::None)),),
         not_contains_none_right: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![2]), NodeValue::None, ok(eq(&NodeValue::None)),),
-        not_contains_not_a_list: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
-        not_contains_incompatible_types_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
-        not_contains_incompatible_types_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
-        not_contains_incompatible_types_3: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands)),),
+        not_contains_not_a_list: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32(2), NodeValue::Int32(2), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
+        not_contains_incompatible_types_1: (&OP_DOES_NOT_CONTAIN, NodeValue::BoolList(vec![true, true, false]), NodeValue::Float(5.5), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
+        not_contains_incompatible_types_2: (&OP_DOES_NOT_CONTAIN, NodeValue::Int32List(vec![1, 2, 3]), NodeValue::Float(2.0), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
+        not_contains_incompatible_types_3: (&OP_DOES_NOT_CONTAIN, NodeValue::MessageList(vec![Arc::<MockDynamicMessage>::clone(&*TEST_DYNAMIC_MESSAGE)]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::ContainsOperatorIncompatibleOperands { .. })),),
     );
 
     parameterized_test!(
@@ -1300,7 +1300,7 @@ mod tests {
         floor_5: (&OP_FLOOR, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(-1))),),
         floor_6: (&OP_FLOOR, NodeValue::Int64(-1), ok(eq(&NodeValue::Int64(-1))),),
         floor_none: (&OP_FLOOR, NodeValue::None, ok(eq(&NodeValue::None)),),
-        floor_non_numeric_fails: (&OP_FLOOR, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
+        floor_non_numeric_fails: (&OP_FLOOR, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands { .. })),),
 
         round_1: (&OP_ROUND, NodeValue::Double(0.1), ok(eq(&NodeValue::Int64(0))),),
         round_2: (&OP_ROUND, NodeValue::Float(2.9), ok(eq(&NodeValue::Int64(3))),),
@@ -1309,7 +1309,7 @@ mod tests {
         round_5: (&OP_ROUND, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(-1))),),
         round_6: (&OP_ROUND, NodeValue::Int64(-1), ok(eq(&NodeValue::Int64(-1))),),
         round_none: (&OP_ROUND, NodeValue::None, ok(eq(&NodeValue::None)),),
-        round_non_numeric_fails: (&OP_ROUND, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
+        round_non_numeric_fails: (&OP_ROUND, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands { .. })),),
 
         ceil_1: (&OP_CEIL, NodeValue::Double(0.1), ok(eq(&NodeValue::Int64(1))),),
         ceil_2: (&OP_CEIL, NodeValue::Float(2.9), ok(eq(&NodeValue::Int64(3))),),
@@ -1318,6 +1318,6 @@ mod tests {
         ceil_5: (&OP_CEIL, NodeValue::Double(-0.99), ok(eq(&NodeValue::Int64(0))),),
         ceil_6: (&OP_CEIL, NodeValue::Int64(-1), ok(eq(&NodeValue::Int64(-1))),),
         ceil_none: (&OP_ROUND, NodeValue::None, ok(eq(&NodeValue::None)),),
-        ceil_non_numeric_fails: (&OP_CEIL, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands)),),
+        ceil_non_numeric_fails: (&OP_CEIL, NodeValue::Bool(true), err(pat!(NodeEvaluationError::RoundingOperatorIncompatibleOperands { .. })),),
     );
 }

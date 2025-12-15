@@ -901,6 +901,7 @@ mod tests {
                 let status = test_environment.error_receiver.clone().await;
                 assert_that!(status.as_ref(), pat!(&TelemetryServiceStatus {
                     code: eq(error_code),
+                    ..
                 }));
             }
             assert_eq!(test_environment.get_num_initialize_config_calls(), 0);
@@ -1019,6 +1020,7 @@ mod tests {
                 let status = test_environment.error_receiver.clone().await;
                 assert_that!(status.as_ref(), pat!(&TelemetryServiceStatus {
                     code: eq(error_code),
+                    ..
                 }));
             }
             assert_eq!(test_environment.get_num_initialize_config_calls(), 0);
@@ -1200,7 +1202,7 @@ mod tests {
 
         assert_that!(
             result,
-            err(pat!(MetricsConfigManagerError::InvalidConfigUuid { uuid: eq(INVALID_UUID) })),
+            err(pat!(MetricsConfigManagerError::InvalidConfigUuid { uuid: eq(INVALID_UUID), .. })),
         );
         assert!(!file_path.is_file());
     }
@@ -1356,7 +1358,10 @@ mod tests {
         let result = test_environment.manager.activate_metrics_config(&UUID.to_string()).await;
         assert_that!(
             result,
-            err(pat!(MetricsConfigManagerError::InvalidConfigUuid { uuid: eq(&UUID.to_string()) }))
+            err(pat!(MetricsConfigManagerError::InvalidConfigUuid {
+                uuid: eq(&UUID.to_string()),
+                ..
+            }))
         );
     }
 

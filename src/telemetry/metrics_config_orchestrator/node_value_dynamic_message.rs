@@ -248,6 +248,7 @@ mod tests {
             err(pat!(NodeEvaluationError::FieldNotFound {
                 field_name: eq(NON_EXISTENT_FIELD),
                 message_name: eq(TestMessage::descriptor().name()),
+                ..
             }))
         );
     }
@@ -381,6 +382,7 @@ mod tests {
             err(pat!(ProtobufConversionError {
                 field_name: eq(INT_FIELD_NAME),
                 error: pat!(NodeEvaluationError::ValueToProtoConversionError { .. }),
+                ..
             }))
         );
     }
@@ -399,6 +401,7 @@ mod tests {
             err(pat!(ProtobufConversionError {
                 field_name: eq(REPEATED_BOOL_FIELD_NAME),
                 error: pat!(NodeEvaluationError::ValueToProtoConversionError { .. }),
+                ..
             }))
         );
     }
