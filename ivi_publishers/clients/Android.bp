@@ -33,7 +33,6 @@ rust_defaults {
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_rust_wrapper",
-        "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_utils",
         "libstats_publisher_descriptor_proto_rust",
         "libtokio",

@@ -4,7 +4,7 @@ use protobuf::{text_format::print_to_string_pretty, MessageDyn};
 use sdv_telemetry_proto_rust::metrics_configuration::publisher::Publisher_type as PublisherTypeProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
-use sdv_telemetry_sample_utils::proto_reader;
+use sdv_telemetry_utils::proto_reader;
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
