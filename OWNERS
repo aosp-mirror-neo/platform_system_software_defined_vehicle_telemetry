@@ -1,9 +1,8 @@
 # Bug component: 1236360
 # go/android-codereviews#buganizer-component-links-in-owners
 
-bhatiau@google.com
 cmfcmf@google.com
 samicolon@google.com
 kefaa@google.com
 vgasparyan@google.com
-cschwarze@google.com
+cschwarze@google.com #{LAST_RESORT_SUGGESTION}
