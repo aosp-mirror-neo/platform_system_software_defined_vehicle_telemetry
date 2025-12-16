@@ -44,3 +44,15 @@ rust_defaults {
         "-D clippy::match_bool",
     ],
 }
+
+// Defaults for a `genrule` that converts a Metrics Config in textproto format
+// (specified in `srcs`) to binary proto format (specified in `out`).
+genrule_defaults {
+    name: "sdv_telemetry_textproto_to_binary_metrics_config_defaults",
+    tools: ["aprotoc"],
+    tool_files: [
+        ":libprotobuf-internal-protos",
+        ":sdv_telemetry_proto_srcs",
+    ],
+    cmd: "$(location aprotoc) --encode=google.sdv.telemetry.MetricsConfig -I ./tools/src/external/protobuf/src -I ./tools/src ./tools/src/system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto < $(in) > $(out)",
+}

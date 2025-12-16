@@ -18,6 +18,13 @@ rust_test {
     },
     srcs: [
         "integration_tests.rs",
+        // keep-sorted start
+        ":sdv_telemetry_test_data_aggregation_config_binpb",
+        ":sdv_telemetry_test_data_middleware_config_binpb",
+        ":sdv_telemetry_test_data_same_trigger_config_binpb",
+        ":sdv_telemetry_test_data_simple_config_binpb",
+        ":sdv_telemetry_test_data_someip_config_binpb",
+        // keep-sorted end
     ],
     // Use a custom test config template as per
     // https://source.android.com/docs/core/tests/vts/setup11, because we need
@@ -47,7 +54,6 @@ rust_test {
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_rust_wrapper",
         "libsdv_telemetry_sample_middleware_proto",
-        "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_test_proto",
         "libsdv_telemetry_test_utils",
         "libsdv_telemetry_utils",
@@ -81,6 +87,9 @@ rust_binary {
     name: "sdv_telemetry_cross_partition_client",
     srcs: [
         "sdv_telemetry_cross_partition_client.rs",
+        // keep-sorted start
+        ":sdv_telemetry_test_data_cross_partition_test_config_binpb",
+        // keep-sorted end
     ],
     rustlibs: [
         // keep-sorted start
@@ -92,17 +101,10 @@ rust_binary {
         "libprotobuf",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_rust_wrapper",
-        "libsdv_telemetry_sample_utils",
         "libsdv_telemetry_test_utils",
         "libtokio",
         // keep-sorted end
     ],
     ld_flags: ["-Wl,--no-as-needed"],
-    product_specific: true,
-}
-
-prebuilt_etc {
-    name: "telemetry_test_config.textproto",
-    src: "cross_partition_test_config.textproto",
     product_specific: true,
 }

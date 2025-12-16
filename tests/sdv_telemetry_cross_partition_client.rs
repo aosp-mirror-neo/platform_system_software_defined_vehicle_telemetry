@@ -3,15 +3,13 @@
 //! Binary for testing Telemetry service cross partitions
 
 use log::info;
-
 use protobuf::Message;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
-use sdv_telemetry_sample_utils::proto_reader;
-use std::path::Path;
 use tokio::sync::mpsc;
 
-const CONFIG_PATH: &str = "/product/etc/telemetry_test_config.textproto";
+const METRICS_CONFIG: &[u8] =
+    include_bytes!(concat!(env!("OUT_DIR"), "/cross_partition_test_config.binpb"));
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -33,12 +31,10 @@ async fn main() -> anyhow::Result<()> {
         .await
         .unwrap();
 
-    let serialized_config =
-        proto_reader::read_as_bytes::<MetricsConfig>(Path::new(CONFIG_PATH)).unwrap();
-    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
+    let config = MetricsConfig::parse_from_bytes(METRICS_CONFIG).unwrap();
 
     info!("Adding config");
-    service.add_metrics_config(&serialized_config).await.unwrap();
+    service.add_metrics_config(METRICS_CONFIG).await.unwrap();
 
     info!("Activating config");
     service.activate_metrics_config(&config.uuid).await.unwrap();
