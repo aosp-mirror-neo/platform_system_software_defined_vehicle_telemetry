@@ -48,10 +48,9 @@ mod tests {
 
     #[test]
     fn serialized_bytes_match_textproto_file_contents() {
-        let serialized_legacy_textproto_config = read_as_bytes::<MetricsConfig>(Path::new(
-            "config_without_service_publishers.textproto",
-        ))
-        .unwrap();
+        let serialized_legacy_textproto_config =
+            read_as_bytes::<MetricsConfig>(Path::new("config_without_service_publishers.txtpb"))
+                .unwrap();
         let config = MetricsConfig::parse_from_bytes(&serialized_legacy_textproto_config).unwrap();
 
         assert_eq!(&config.uuid, "d3456cf0-8fde-436a-9f29-c12f16d10c10");
