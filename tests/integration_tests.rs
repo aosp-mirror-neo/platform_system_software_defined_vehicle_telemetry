@@ -1190,6 +1190,7 @@ fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
     Ok(result)
 }
 
+// TODO: b/469068987 - Remove this test.
 #[test]
 fn check_textprotos_are_valid() -> anyhow::Result<()> {
     setup_once();
@@ -1210,21 +1211,6 @@ fn check_textprotos_are_valid() -> anyhow::Result<()> {
     assert_eq!(
         expected_paths,
         vec![
-            "./samples/sample_protos/average_speed.textproto",
-            "./samples/sample_protos/average_speed_vector.textproto",
-            "./samples/sample_protos/config_without_service_publishers.textproto",
-            "./samples/sample_protos/configurable_publisher.textproto",
-            "./samples/sample_protos/configurable_publisher_getter.textproto",
-            "./samples/sample_protos/crash_reports.textproto",
-            "./samples/sample_protos/data_tunnel_publisher.textproto",
-            "./samples/sample_protos/data_tunnel_publisher_aggregation.textproto",
-            "./samples/sample_protos/error_publisher.textproto",
-            "./samples/sample_protos/error_publisher_java_sdk.textproto",
-            "./samples/sample_protos/frequent_reports.textproto",
-            "./samples/sample_protos/journey_summary.textproto",
-            "./samples/sample_protos/processing_frequent_data.textproto",
-            "./samples/sample_protos/sdv_configurable_publisher.textproto",
-            "./samples/sample_protos/sudden_tire_pressure_drop.textproto",
             "./tests/aggregation_config.textproto",
             "./tests/config.textproto",
             "./tests/cross_partition_test_config.textproto",

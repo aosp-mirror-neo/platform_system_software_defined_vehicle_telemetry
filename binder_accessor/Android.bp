@@ -15,8 +15,12 @@ cc_library {
     ],
     header_libs: ["jni_headers"],
     stl: "c++_shared",
-    visibility: [
-        "//system/software_defined_vehicle/telemetry/samples/java",
-        "//system/software_defined_vehicle/telemetry/samples/java/telemetry_app",
+}
+
+java_library {
+    name: "telemetry_binder_accessor",
+    srcs: [
+        "BinderServiceAccessor.java",
     ],
+    sdk_version: "system_current",
 }

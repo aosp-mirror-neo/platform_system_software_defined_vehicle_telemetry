@@ -1,5 +1,12 @@
 // Copyright 2024 Google LLC
 {
+  "imports": [
+    // keep-sorted start block=yes
+    {
+      "path": "system/software_defined_vehicle/samples/telemetry"
+    }
+    // keep-sorted end
+  ],
   "sdv_telemetry_tests_presubmit": [
     // keep-sorted start block=yes
     {
@@ -39,9 +46,6 @@
       "name": "sdv_mt_telemetry_unit_platform_abstraction_layer_test"
     },
     {
-      "name": "sdv_mt_telemetry_unit_sample_utils_test"
-    },
-    {
       "name": "sdv_mt_telemetry_unit_service_publisher_accessor_test"
     },
     {
@@ -67,12 +71,6 @@
     },
     {
       "name": "sdv_mt_telemetry_unit_utils_test"
-    },
-    {
-      "name": "sdv_telemetry_sample_getter_publisher_unit_tests"
-    },
-    {
-      "name": "sdv_telemetry_sample_publisher_unit_tests"
     },
     {
       "name": "sdv_telemetry_scenario_generator_unit_tests"
