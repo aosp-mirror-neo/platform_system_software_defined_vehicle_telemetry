@@ -274,20 +274,11 @@ mod integration_tests {
         let messages = message_stream.collect::<Vec<_>>().await;
         assert_that!(
             &messages,
-            elements_are!(
-                ok(pat!(&Messages {
-                    message_count: eq(2),
-                    message_size: eq(u32_into_usize(MESSAGE_SIZE)),
-                    buffer: ref container_eq(vec![0; 2 * u32_into_usize(MESSAGE_SIZE)]),
-                })),
-                // TODO: b/446861694 - I am not sure why this happens, but it also doesn't break
-                // anything.
-                ok(pat!(&Messages {
-                    message_count: eq(0),
-                    message_size: eq(u32_into_usize(MESSAGE_SIZE)),
-                    buffer: ref container_eq(vec![]),
-                })),
-            )
+            elements_are!(ok(pat!(&Messages {
+                message_count: eq(2),
+                message_size: eq(u32_into_usize(MESSAGE_SIZE)),
+                buffer: ref container_eq(vec![0; 2 * u32_into_usize(MESSAGE_SIZE)]),
+            })))
         );
     }
 }
