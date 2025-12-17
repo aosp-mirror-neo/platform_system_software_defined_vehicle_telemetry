@@ -3,10 +3,12 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_binary {
     name: "sdv_telemetry_dt_publisher_for_fetch_last_message_e2e_test",
+    visibility: ["//device/google/sdv"],
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["publisher.rs"],
     rustlibs: [
@@ -32,6 +34,7 @@ rust_binary {
 
 rust_protobuf {
     name: "libsdv_telemetry_dt_publisher_for_fetch_last_message_e2e_test_proto",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     crate_name: "sdv_telemetry_dt_publisher_for_fetch_last_message_e2e_test_proto",
     protos: [
         "publisher.proto",

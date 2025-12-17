@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_defaults {
@@ -45,6 +46,7 @@ rust_defaults {
 
 rust_binary {
     name: "sdv_telemetry_service_agent",
+    visibility: ["//device/google/sdv"],
     defaults: ["sdv_telemetry_service_agent_defaults"],
     features: [
         "comms_stack",
@@ -63,6 +65,7 @@ rust_binary {
 
 rust_binary {
     name: "sdv_ivi_telemetry_service_agent",
+    visibility: ["//device/google/sdv"],
     defaults: ["sdv_telemetry_service_agent_defaults"],
     features: [
         "platform_abstraction_layer_ivi",

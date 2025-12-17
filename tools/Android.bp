@@ -1,5 +1,11 @@
 // Copyright 2024 Google LLC
 
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
+}
+
 sh_binary_host {
     name: "sdv_telemetry_get_proto_file_descriptors",
     src: "get_proto_file_descriptors.sh",

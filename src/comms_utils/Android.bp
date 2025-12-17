@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_defaults {
@@ -27,6 +28,12 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_comms_utils",
+    visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
     defaults: ["libsdv_telemetry_comms_utils_defaults"],
     crate_name: "sdv_telemetry_comms_utils",
 }

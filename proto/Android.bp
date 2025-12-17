@@ -1,12 +1,20 @@
 // Copyright 2023 Google LLC
 
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
+}
+
 filegroup {
     name: "sdv_telemetry_proto_srcs",
+    visibility: ["//visibility:public"],
     srcs: ["metrics_configuration/*.proto"],
 }
 
 cc_library {
     name: "libsdv_telemetry_proto_cpp",
+    visibility: ["//system/software_defined_vehicle/telemetry/clientlib:__subpackages__"],
     defaults: [
         "sdv_telemetry@cc_defaults",
     ],
@@ -24,6 +32,7 @@ cc_library {
 
 python_library_host {
     name: "libsdv_telemetry_proto_python",
+    visibility: ["//visibility:public"],
     srcs: [":sdv_telemetry_proto_srcs"],
     proto: {
         canonical_path_from_root: true,
@@ -36,6 +45,7 @@ python_library_host {
 
 rust_protobuf {
     name: "libsdv_telemetry_proto_rust",
+    visibility: ["//visibility:public"],
     crate_name: "sdv_telemetry_proto_rust",
     protos: [":sdv_telemetry_proto_srcs"],
     proto_flags: [
@@ -46,11 +56,11 @@ rust_protobuf {
     product_available: true,
     vendor_available: true,
     system_ext_specific: true,
-    visibility: ["//visibility:public"],
 }
 
 java_library {
     name: "libsdv_telemetry_proto_java",
+    visibility: ["//visibility:public"],
     sdk_version: "system_current",
     srcs: [
         ":sdv_telemetry_proto_srcs",
@@ -64,5 +74,4 @@ java_library {
     static_libs: [
         "libprotobuf-java-lite",
     ],
-    visibility: ["//visibility:public"],
 }
