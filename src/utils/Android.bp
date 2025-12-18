@@ -13,6 +13,7 @@ rust_defaults {
     ],
     rustlibs: [
         // keep-sorted start
+        "libanyhow",
         "libfutures",
         "liblazy_static",
         "liblog_rust",
@@ -43,7 +44,13 @@ rust_test {
     rustlibs: [
         // keep-sorted start
         "libgoogletest_rust",
+        "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    data: [
+        // keep-sorted start
+        ":sdv_telemetry_config_without_service_publishers_proto",
         // keep-sorted end
     ],
     test_suites: [

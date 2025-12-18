@@ -2,15 +2,13 @@
 
 #![cfg(test)]
 
-use anyhow::anyhow;
 use futures::{future, stream, Stream, StreamExt};
 use googletest::matchers::{eq, ok, pat, result_of};
 use googletest::verify_that;
 use log::{debug, info};
 use protobuf::reflect::{FileDescriptor, ReflectValueRef};
 use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-use protobuf::EnumOrUnknown;
-use protobuf::{Message, MessageDyn, MessageFull};
+use protobuf::{EnumOrUnknown, Message, MessageDyn, MessageFull};
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::sd::UnitType;
 use sdv_comms::ContextRef;
@@ -35,21 +33,16 @@ use sdv_telemetry_rust_wrapper::{
 use sdv_telemetry_sample_middleware_proto::tire::{
     GetTireStatusRequest, GetTireStatusResponse, Location as TireLocation, TirePressure,
 };
-use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_test_proto::test_message;
 use sdv_telemetry_test_proto::test_message::TestMessage;
 use sdv_telemetry_test_utils::unique_dt_topic_name;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
-use std::ffi::OsStr;
-use std::fs;
-use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::{Arc, Once};
 use std::time::Duration;
 use tokio::sync::{mpsc, OnceCell};
 
-const CONFIG_PATH: &str = "tests/config.textproto";
 const LOG_TAG: &str = validated_log_tag("TelemetryIntegrTests");
 const VSOMEIP_SERVER_BINARY: &str = "/vendor/bin/sdv_vsomeip_group_tester";
 const VSOMEIP_CONFIG_FILE: &str = "/vendor/etc/vsomeip/group_tester.json";
@@ -111,12 +104,11 @@ async fn telemetry_service_simple_config_end_to_end_test() {
         .await
         .unwrap();
 
-    let serialized_config =
-        proto_reader::read_as_bytes::<MetricsConfig>(Path::new(CONFIG_PATH)).unwrap();
-    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
+    let serialized_config = include_bytes!(concat!(env!("OUT_DIR"), "/simple_config.binpb"));
+    let config = MetricsConfig::parse_from_bytes(serialized_config).unwrap();
 
     info!("Adding config");
-    service.add_metrics_config(&serialized_config).await.unwrap();
+    service.add_metrics_config(serialized_config).await.unwrap();
 
     info!("Activating config");
     service.activate_metrics_config(&config.uuid).await.unwrap();
@@ -437,14 +429,11 @@ async fn telemetry_service_same_trigger_config() {
         .await
         .unwrap();
 
-    let serialized_config = proto_reader::read_as_bytes::<MetricsConfig>(Path::new(
-        "tests/same_trigger_config.textproto",
-    ))
-    .unwrap();
-    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
+    let serialized_config = include_bytes!(concat!(env!("OUT_DIR"), "/same_trigger_config.binpb"));
+    let config = MetricsConfig::parse_from_bytes(serialized_config).unwrap();
 
     info!("Adding config");
-    service.add_metrics_config(&serialized_config).await.unwrap();
+    service.add_metrics_config(serialized_config).await.unwrap();
 
     info!("Activating config");
     service.activate_metrics_config(&config.uuid).await.unwrap();
@@ -862,11 +851,8 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
         .unwrap();
 
     info!("Adding metrics config");
-    let config = proto_reader::read_as_bytes::<MetricsConfig>(Path::new(
-        "tests/aggregation_config.textproto",
-    ))
-    .unwrap();
-    let mut config = MetricsConfig::parse_from_bytes(&config).unwrap();
+    let config = include_bytes!(concat!(env!("OUT_DIR"), "/aggregation_config.binpb"));
+    let mut config = MetricsConfig::parse_from_bytes(config).unwrap();
     assert!(config.publishers[0].has_service_publisher());
     assert_eq!(config.publishers[0].service_publisher().service_name, "<placeholder>");
     config.publishers[0].mut_service_publisher().service_name = service_name;
@@ -983,10 +969,9 @@ async fn telemetry_service_someip() {
         .await
         .unwrap();
 
-    let serialized_config =
-        proto_reader::read_as_bytes::<MetricsConfig>(Path::new("tests/someip.textproto")).unwrap();
-    let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
-    service.add_metrics_config(&serialized_config).await.unwrap();
+    let serialized_config = include_bytes!(concat!(env!("OUT_DIR"), "/someip_config.binpb"));
+    let config = MetricsConfig::parse_from_bytes(serialized_config).unwrap();
+    service.add_metrics_config(serialized_config).await.unwrap();
     service.activate_metrics_config(&config.uuid).await.unwrap();
 
     let mut server =
@@ -1117,13 +1102,9 @@ async fn telemetry_service_middleware() {
         .unwrap();
 
     info!("Adding metrics config");
-    let config = proto_reader::read_as_bytes::<MetricsConfig>(Path::new(
-        "tests/middleware_config.textproto",
-    ))
-    .unwrap();
-    let config = MetricsConfig::parse_from_bytes(&config).unwrap();
-    let serialized_config = config.write_to_bytes().unwrap();
-    let config_uuid = service.add_metrics_config(&serialized_config).await.unwrap();
+    let serialized_config = include_bytes!(concat!(env!("OUT_DIR"), "/middleware_config.binpb"));
+    let config = MetricsConfig::parse_from_bytes(serialized_config).unwrap();
+    let config_uuid = service.add_metrics_config(serialized_config).await.unwrap();
 
     info!("Activating metrics config");
     service.activate_metrics_config(&config_uuid).await.unwrap();
@@ -1172,58 +1153,4 @@ async fn telemetry_service_middleware() {
     ];
 
     assert_eq!(result, [0, 1, 2, 3, 4, 5, 6, 7]);
-}
-
-fn read_files_recursively(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
-    let mut result = vec![];
-    if dir.is_dir() {
-        for entry in fs::read_dir(dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                result.append(&mut read_files_recursively(&path)?);
-            } else {
-                result.push(entry.path());
-            }
-        }
-    }
-    Ok(result)
-}
-
-// TODO: b/469068987 - Remove this test.
-#[test]
-fn check_textprotos_are_valid() -> anyhow::Result<()> {
-    setup_once();
-
-    let paths = read_files_recursively(Path::new("."))?
-        .into_iter()
-        .filter(|path| path.extension() == Some(OsStr::new("textproto")))
-        .collect::<Vec<_>>();
-
-    let mut expected_paths = paths
-        .iter()
-        .map(|path| path.to_str().ok_or(anyhow!("Invalid path")))
-        .collect::<anyhow::Result<Vec<_>>>()?;
-    expected_paths.sort();
-
-    // This assert is here to verify that the test is actually doing something.
-    // Add new `.textproto` files to the assert below if it fails.
-    assert_eq!(
-        expected_paths,
-        vec![
-            "./tests/aggregation_config.textproto",
-            "./tests/config.textproto",
-            "./tests/cross_partition_test_config.textproto",
-            "./tests/middleware_config.textproto",
-            "./tests/same_trigger_config.textproto",
-            "./tests/someip.textproto",
-        ]
-    );
-
-    for path in paths {
-        eprintln!("Attempting to parse: {}", path.display());
-        let _proto = proto_reader::read_as_message::<MetricsConfig>(&path)?;
-    }
-
-    Ok(())
 }

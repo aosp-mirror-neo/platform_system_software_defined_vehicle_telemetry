@@ -17,8 +17,8 @@ use sdv_telemetry_rust_wrapper::StatusDetails::{
     ServicePublisherErrorDetails,
 };
 use sdv_telemetry_rust_wrapper::{self as rust_to_c, TelemetryServiceStatusCodes};
-use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_utils::logging::{init_logger_for_samples_or_tests, validated_log_tag};
+use sdv_telemetry_utils::proto_reader;
 use stats_publisher_descriptor_proto_rust::atoms::Atom;
 use stats_publisher_descriptor_proto_rust::stats_publisher_descriptor::AtomReportList;
 use stats_publisher_descriptor_proto_rust::stats_publisher_descriptor::AtomReportWrapper;

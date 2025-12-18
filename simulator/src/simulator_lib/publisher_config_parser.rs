@@ -5,7 +5,6 @@ use protobuf::{
     descriptor::FileDescriptorProto,
     reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor, RuntimeType},
 };
-use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_publisher::{
     data_generator::Data_source,
     publishing_strategy::ConfigurablePublisherRegistry as ConfigurablePublisherRegistryProto,
@@ -14,6 +13,7 @@ use sdv_telemetry_simulator_proto::simulation_publisher::{
     PublishingStrategy as PublishingStrategyProto, SimulationPublisher,
 };
 use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyType;
+use sdv_telemetry_utils::proto_reader;
 use sdv_telemetry_utils::{
     descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
 };

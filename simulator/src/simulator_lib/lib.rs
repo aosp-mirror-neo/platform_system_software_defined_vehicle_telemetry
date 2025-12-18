@@ -21,7 +21,6 @@ use futures::{future, stream, StreamExt, TryStreamExt};
 use log::{error, info};
 use protobuf::well_known_types::duration::Duration as DurationProto;
 use sdv_telemetry_rust_wrapper::{ReportInfo, TelemetryServiceHolder, TelemetryServiceStatus};
-use sdv_telemetry_sample_utils::proto_reader;
 use sdv_telemetry_simulator_proto::simulation_actions::{
     metrics_config_action::ActionType as MetricsConfigActionTypeProto,
     simulation_action::Action as SimulationActionTypeProto,
@@ -29,6 +28,7 @@ use sdv_telemetry_simulator_proto::simulation_actions::{
     SimulationActions as SimulationActionsProto,
 };
 use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyFactory;
+use sdv_telemetry_utils::proto_reader;
 use sdv_telemetry_utils::{
     collection_extension::HashMapExtension, duration_utils::try_into_duration,
 };

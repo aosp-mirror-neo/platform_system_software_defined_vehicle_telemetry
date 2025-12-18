@@ -1,0 +1,48 @@
+// Copyright 2025 Google LLC
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["sdv_license"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_simple_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["simple_config.txtpb"],
+    out: ["simple_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_same_trigger_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["same_trigger_config.txtpb"],
+    out: ["same_trigger_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_aggregation_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["aggregation_config.txtpb"],
+    out: ["aggregation_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_someip_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["someip_config.txtpb"],
+    out: ["someip_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_middleware_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["middleware_config.txtpb"],
+    out: ["middleware_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_cross_partition_test_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["cross_partition_test_config.txtpb"],
+    out: ["cross_partition_test_config.binpb"],
+}
