@@ -119,10 +119,9 @@ mod tests {
     };
     use protobuf::descriptor::FileDescriptorSet;
     use protobuf::{Message, MessageFull};
+    use protobuf::well_known_types::wrappers::Int64Value;
     use rand::seq::SliceRandom;
     use rand::thread_rng;
-    use sample_publisher_proto::sample_publisher;
-    use sample_publisher_proto::sample_publisher::SampleMessage;
 
     const SERVICE_NAME: &str = "CONFIGURABLE_PUB_SERVICE";
     const SERVICE_NAME2: &str = "CONFIGURABLE_PUB_SERVICE2";
@@ -196,7 +195,7 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let message_descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
@@ -223,7 +222,7 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let message_descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME4.to_string(),
@@ -254,7 +253,7 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let message_descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
 
         let file_descriptor_proto = message_descriptor.file_descriptor_proto();
 
@@ -263,7 +262,7 @@ mod tests {
         let mut rng = thread_rng();
         slice.shuffle(&mut rng);
 
-        let descriptor = SampleMessage::descriptor();
+        let descriptor = Int64Value::descriptor();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
@@ -292,7 +291,7 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let message_descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
 
         let file_descriptor_set = FileDescriptorSet {
             file: vec![message_descriptor.file_descriptor_proto().to_owned()],
@@ -332,12 +331,11 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let file_descriptor = sample_publisher::file_descriptor();
-        let file_descriptor_proto = file_descriptor.proto();
-
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),
-            fileDescriptorProto: Some(file_descriptor_proto.write_to_bytes().unwrap()),
+            fileDescriptorProto: Some(
+                Int64Value::descriptor().file_descriptor_proto().write_to_bytes().unwrap(),
+            ),
             messageTypeName: ".InvalidMessageTypeName".to_string(),
             supportsGet: configurable_publisher.supports_get,
             fileDescriptorSet: None,
@@ -362,14 +360,13 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let file_descriptor = sample_publisher::file_descriptor();
-        let file_descriptor_proto = file_descriptor.proto();
-        let descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
+        let file_descriptor_proto = message_descriptor.file_descriptor_proto();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME2.to_string(),
             fileDescriptorProto: Some(file_descriptor_proto.write_to_bytes().unwrap()),
-            messageTypeName: format!(".{}", descriptor.full_name()),
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
             fileDescriptorSet: None,
         };
@@ -395,14 +392,13 @@ mod tests {
             connect_to_service().expect("Failed to connect to IConfigurablePublisherRegistry");
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let file_descriptor = sample_publisher::file_descriptor();
-        let file_descriptor_proto = file_descriptor.proto();
-        let descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
+        let file_descriptor_proto = message_descriptor.file_descriptor_proto();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME3.to_string(),
             fileDescriptorProto: Some(file_descriptor_proto.write_to_bytes().unwrap()),
-            messageTypeName: format!(".{}", descriptor.full_name()),
+            messageTypeName: format!(".{}", message_descriptor.full_name()),
             supportsGet: configurable_publisher.supports_get,
             fileDescriptorSet: None,
         };

@@ -407,9 +407,8 @@ mod tests {
     };
     use parking_lot::Mutex;
     use protobuf::reflect::ReflectValueRef;
-    use protobuf::well_known_types::{any::Any, empty::Empty, wrappers::Int32Value};
+    use protobuf::well_known_types::{any::Any, empty::Empty, wrappers::Int32Value, wrappers::Int64Value};
     use protobuf::{Message, MessageFull};
-    use sample_publisher_proto::sample_publisher::SampleMessage;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::{Arc, Weak};
     use sdv_telemetry_test_utils::parameterized_test;
@@ -549,7 +548,7 @@ mod tests {
     ) -> (Arc<ConfigurablePublisherRegistry>, MockBinderAdapter) {
         let (configurable_publisher_registry, binder_adapter) = create_registry().await;
 
-        let message_descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
         let file_descriptor_set = FileDescriptorSet {
             file: vec![message_descriptor.file_descriptor_proto().to_owned()],
             ..Default::default()
@@ -631,17 +630,17 @@ mod tests {
 
         custom_type_with_dot: (
             FileDescriptorSet {
-                file: vec![SampleMessage::descriptor().file_descriptor().proto().to_owned()],
+                file: vec![Int64Value::descriptor().file_descriptor().proto().to_owned()],
                 ..Default::default()
             },
-            format!(".{}", SampleMessage::descriptor().full_name())
+            format!(".{}", Int64Value::descriptor().full_name())
         ),
         custom_type_without_dot: (
             FileDescriptorSet {
-                file: vec![SampleMessage::descriptor().file_descriptor().proto().to_owned()],
+                file: vec![Int64Value::descriptor().file_descriptor().proto().to_owned()],
                 ..Default::default()
             },
-            SampleMessage::descriptor().full_name().to_owned()
+            Int64Value::descriptor().full_name().to_owned()
         ),
     );
 
@@ -655,7 +654,7 @@ mod tests {
         let res =
             configurable_publisher_registry.get_metadata(SERVICE_NAME).await.unwrap().unwrap();
 
-        assert_eq!(res.message_descriptor.proto(), SampleMessage::descriptor().proto());
+        assert_eq!(res.message_descriptor.proto(), Int64Value::descriptor().proto());
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -690,7 +689,7 @@ mod tests {
     #[tokio::test]
     async fn get_message_provider_success() {
         let config = Int32Value { value: 42, ..Default::default() };
-        let msg = SampleMessage { sample_data: 442, ..Default::default() };
+        let msg = Int64Value { value: 442, ..Default::default() };
         let configurable_publisher = MockConfigurablePublisher::new(true);
         configurable_publisher.next_latest_message.lock().replace(msg.write_to_bytes().unwrap());
         let (configurable_publisher_registry, _) =
@@ -714,11 +713,8 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(last_config, config);
-        let field_descriptor = res.descriptor_dyn().field_by_name("sample_data").unwrap();
-        assert_eq!(
-            field_descriptor.get_singular(&*res).unwrap(),
-            ReflectValueRef::I32(msg.sample_data)
-        );
+        let field_descriptor = res.descriptor_dyn().field_by_name("value").unwrap();
+        assert_eq!(field_descriptor.get_singular(&*res).unwrap(), ReflectValueRef::I64(msg.value));
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -967,7 +963,7 @@ mod tests {
         let configurable_publisher_registry = Arc::new(ConfigurablePublisherRegistry::new());
         let configurable_publisher = MockConfigurablePublisher::new(false);
 
-        let message_descriptor = SampleMessage::descriptor();
+        let message_descriptor = Int64Value::descriptor();
 
         let publisher_info = PublisherInfo {
             serviceName: SERVICE_NAME.to_string(),

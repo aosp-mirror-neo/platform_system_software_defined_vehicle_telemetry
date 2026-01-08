@@ -50,7 +50,8 @@ rust_test {
     ],
     data: [
         // keep-sorted start
-        ":sdv_telemetry_config_without_service_publishers_proto",
+        ":sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
+        "test_data/config_without_service_publishers.txtpb",
         // keep-sorted end
     ],
     test_suites: [

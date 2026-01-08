@@ -1,0 +1,43 @@
+# Copyright 2024 Google LLC
+
+uuid: "d3456cf0-8fde-436a-9f29-c12f16d10c10"
+version: 1
+descriptor_protos {
+  name: "multi_config_test.proto"
+  package: "android.automotive.telemetry.messages"
+
+  message_type {
+    name: "VehicleConnectivityReport"
+    field {
+      label: LABEL_OPTIONAL
+      type: TYPE_INT32
+      name: "vector_vehicle_connection_status"
+
+      number: 1
+    }
+  }
+}
+
+expression_nodes { constant_leaf_node { int32_value: 0 } }
+
+triggers {
+  name: "start_trigger"
+  periodic_trigger { interval { seconds: 3 } }
+}
+triggers {
+  name: "period_3s"
+  periodic_trigger { interval { seconds: 3 } }
+}
+
+start_trigger_name: "start_trigger"
+metrics_report_configs {
+  name: "multi_config_report"
+  trigger_names: "period_3s"
+  message_builder {
+    message_type: ".android.automotive.telemetry.messages.VehicleConnectivityReport"
+    field_assignments {
+      field_name: "vector_vehicle_connection_status"
+      no_aggregation { expression_node_index: 0 }
+    }
+  }
+}
