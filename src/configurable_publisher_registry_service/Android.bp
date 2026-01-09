@@ -50,7 +50,6 @@ rust_test {
         // keep-sorted start
         "libgoogletest_rust",
         "librand",
-        "libsample_publisher_proto",
         "libsdv_telemetry_test_utils",
         // keep-sorted end
     ],

@@ -1,0 +1,9 @@
+// Copyright 2026 Google LLC
+
+genrule {
+    name: "sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
+    visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["config_without_service_publishers.txtpb"],
+    out: ["config_without_service_publishers.binpb"],
+}

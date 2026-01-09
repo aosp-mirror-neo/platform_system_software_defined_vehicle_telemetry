@@ -14,7 +14,3 @@ filegroup {
         // keep-sorted end
     ],
 }
-
-build = [
-    "sdv-binary-pdk.bp",
-]

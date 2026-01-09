@@ -92,6 +92,7 @@ mod tests {
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::str::FromStr;
     use std::time::Duration;
+    use tokio::time::sleep;
 
     use crate::tests::{discover_service, make_context};
 
@@ -136,6 +137,10 @@ mod tests {
         )
         .await
         .unwrap();
+
+        // Give the `SubscriberStream` some time to actually subscribe before publishing messages.
+        // Otherwise, we run into test flakiness: b/473988762.
+        sleep(Duration::from_millis(200)).await;
 
         for message in &expected_messages {
             strategy.publish(&message.write_to_bytes().unwrap()).unwrap();
