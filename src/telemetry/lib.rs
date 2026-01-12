@@ -92,6 +92,7 @@ fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) 
 /// This struct is defined to implement ITelemetryService AIDL interface.
 pub struct SdvTelemetryService {
     data: Arc<SdvTelemetryServiceData>,
+    dump_manager: Arc<sdv_dump::DumpManager>,
 }
 
 struct SdvTelemetryServiceData {
@@ -103,16 +104,25 @@ struct SdvTelemetryServiceData {
     status_listener: Arc<dyn StatusListener>,
 }
 
-impl binder::Interface for SdvTelemetryService {}
+impl binder::Interface for SdvTelemetryService {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        args: &[&std::ffi::CStr],
+    ) -> Result<(), binder::StatusCode> {
+        self.dump_manager.dump(writer, args)
+    }
+}
 
 impl SdvTelemetryService {
     /// Instantiates an instance of SdvTelemetryService
-    #[instrument(skip(service_publisher_manager))]
+    #[instrument(skip(service_publisher_manager, dump_manager))]
     pub async fn new(
         root_path: &str,
         config_store_size: usize,
         service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
         pal: Arc<dyn PlatformAbstractionLayer>,
+        dump_manager: Arc<sdv_dump::DumpManager>,
     ) -> Option<Self> {
         let (active_dir_path, inactive_dir_path) = if !root_path.is_empty() {
             (
@@ -146,6 +156,7 @@ impl SdvTelemetryService {
             move |report| report_listener.on_report_ready(report),
             status_reporter,
             Box::new(MetricsConfigOrchestratorFactoryImpl),
+            Arc::clone(&dump_manager),
         )
         .await;
 
@@ -157,12 +168,14 @@ impl SdvTelemetryService {
             }
         };
 
+        dump_manager.set_agent_state("Initialized.");
         Some(SdvTelemetryService {
             data: Arc::new(SdvTelemetryServiceData {
                 metrics_config_manager: config_manager,
                 metrics_report_listener: report_listener_clone,
                 status_listener,
             }),
+            dump_manager,
         })
     }
 }
@@ -868,6 +881,7 @@ mod tests {
                 MAX_PERSISTENT_CONFIGURATION_SIZE_MB,
                 Arc::new(MockServicePublisherAccessor::new()),
                 new_stub_pal(),
+                Arc::new(sdv_dump::DumpManager::new("Test Dump Manager")),
             )
             .await
             .unwrap();

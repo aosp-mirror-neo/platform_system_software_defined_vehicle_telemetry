@@ -161,6 +161,7 @@ pub(super) struct MetricsConfigOrchestratorImpl {
     node_factory: Box<dyn NodeFactory>,
     publisher_factory: Box<dyn PublisherFactory>,
     trigger_factory: Box<dyn TriggerFactory>,
+    dump_manager: Arc<sdv_dump::DumpManager>,
 
     /// Used to fetch data from service publishers
     service_publisher_manager: Arc<dyn ServicePublisherAccessor>,
@@ -185,6 +186,20 @@ pub(super) struct MetricsConfig {
     start_trigger: Option<Arc<dyn Trigger>>,
     end_trigger: Option<Arc<dyn Trigger>>,
     finish_trigger: Option<Arc<dyn Trigger>>,
+}
+
+impl sdv_dump::DumpStateReporter for MetricsConfig {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        writeln!(writer, "UUID: {}", self.uuid)?;
+        writeln!(writer, "State: {:?}", *self.state.blocking_lock())?;
+        writeln!(writer, "Publishers: {:?}", self.publishers.keys())?;
+        writeln!(writer, "Number of report generators: {}", self.metrics_report_generators.len())?;
+        Ok(())
+    }
 }
 
 /// Lifecycle state of the metrics config.
@@ -389,6 +404,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
             end_trigger: end_trigger.cloned(),
             finish_trigger: finish_trigger.cloned(),
         });
+        self.dump_manager.add_reporter("MetricsConfig", &config);
 
         // Store MetricsConfig with encapsulated objects.
         {
@@ -606,6 +622,7 @@ impl MetricsConfigOrchestratorImpl {
             + 'static,
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
         status_reporter: Arc<dyn StatusReporter>,
+        dump_manager: Arc<sdv_dump::DumpManager>,
     ) -> Self {
         let message_builder_factory = Arc::new(MessageBuilderFactoryImpl::new());
         let service_adapter = Arc::new(ServiceAdapterImpl::new(
@@ -633,6 +650,7 @@ impl MetricsConfigOrchestratorImpl {
                 node_evaluation_context_factory,
                 Arc::clone(&status_reporter),
             )),
+            dump_manager,
             finish_trigger_fired_callback: Arc::new(finish_trigger_fired_callback),
             report_ready_callback: Arc::new(report_ready_callback),
             service_publisher_manager,
@@ -1449,6 +1467,7 @@ mod tests {
                 service_publisher_manager: Arc::new(
                     MockServicePublisherAccessor::new().with_next_descriptor(Empty::descriptor()),
                 ),
+                dump_manager: Arc::new(sdv_dump::DumpManager::new("Mocked Dump Manager")),
             }
         }
 

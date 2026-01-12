@@ -21,6 +21,7 @@ const ROOT_DIR: &str = "/data/vendor/";
 pub async fn register_services(
     service_publisher_manager_impl: Arc<ServicePublisherManager>,
     pal: Arc<dyn PlatformAbstractionLayer>,
+    dump_manager: Arc<sdv_dump::DumpManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
     let value = watcher.read(|_, value| value.trim().to_owned()).ok();
@@ -35,6 +36,7 @@ pub async fn register_services(
         configured_size * SIZE_MB,
         service_publisher_manager_impl,
         pal,
+        dump_manager,
     )
     .await
     else {

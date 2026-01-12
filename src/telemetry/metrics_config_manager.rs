@@ -121,6 +121,7 @@ impl MetricsConfigManagerImpl {
         report_ready_callback: impl Fn(MetricsReport) + Send + Sync + 'static,
         status_reporter: Arc<dyn StatusReporter>,
         orchestrator_factory: Box<dyn MetricsConfigOrchestratorFactory>,
+        dump_manager: Arc<sdv_dump::DumpManager>,
     ) -> Result<Arc<Self>, MetricsConfigManagerError> {
         let report_ready_callback = Box::new(report_ready_callback);
 
@@ -132,6 +133,7 @@ impl MetricsConfigManagerImpl {
                     pal,
                     report_ready_callback,
                     Arc::clone(&status_reporter),
+                    dump_manager,
                 );
 
                 MetricsConfigManagerImpl {
@@ -628,6 +630,7 @@ mod tests {
             _pal: Arc<dyn PlatformAbstractionLayer>,
             _report_ready_callback: Box<dyn Fn(MetricsReport) + Send + Sync + 'static>,
             _status_reporter: Arc<dyn StatusReporter>,
+            _dump_manager: Arc<sdv_dump::DumpManager>,
         ) -> Arc<dyn MetricsConfigOrchestrator + Send + Sync> {
             Arc::clone(&self.orchestrator) as Arc<dyn MetricsConfigOrchestrator + Send + Sync>
         }
@@ -751,6 +754,7 @@ mod tests {
                 Box::new(MockMetricsConfigOrchestratorFactory {
                     orchestrator: Arc::clone(&metrics_config_orchestrator),
                 }),
+                Arc::new(sdv_dump::DumpManager::new("Test Dump Manager")),
             )
             .await
             .unwrap();
@@ -1168,6 +1172,7 @@ mod tests {
             |_| {},
             Arc::new(StatusReporterImpl::new(move |_| {})),
             Box::new(MetricsConfigOrchestratorFactoryImpl {}),
+            Arc::new(sdv_dump::DumpManager::new("Test Dump Manager")),
         )
         .await
         .unwrap();
