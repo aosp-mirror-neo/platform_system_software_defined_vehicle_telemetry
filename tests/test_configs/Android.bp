@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//system/software_defined_vehicle/telemetry/tests:__subpackages__"],
 }
 
 genrule {

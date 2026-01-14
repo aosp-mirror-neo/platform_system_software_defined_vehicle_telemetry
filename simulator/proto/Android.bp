@@ -3,15 +3,18 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 filegroup {
     name: "sdv_telemetry_simulator_proto_srcs",
+    visibility: ["//visibility:public"],
     srcs: ["*.proto"],
 }
 
 rust_protobuf {
     name: "libsdv_telemetry_simulator_proto",
+    visibility: ["//visibility:public"],
     crate_name: "sdv_telemetry_simulator_proto",
     proto_flags: [
         "-I external/protobuf/src",
@@ -24,6 +27,7 @@ rust_protobuf {
 
 python_library_host {
     name: "libsdv_telemetry_simulator_proto_python",
+    visibility: ["//visibility:public"],
     srcs: [":sdv_telemetry_simulator_proto_srcs"],
     proto: {
         canonical_path_from_root: true,

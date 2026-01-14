@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 sysprop_library {
@@ -42,6 +43,7 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_platform_abstraction_layer_core",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     defaults: ["libsdv_telemetry_platform_abstraction_layer_core_defaults"],
     crate_name: "sdv_telemetry_platform_abstraction_layer_core",
     vendor_available: true,

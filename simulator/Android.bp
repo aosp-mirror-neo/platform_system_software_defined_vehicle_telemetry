@@ -3,10 +3,12 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_defaults {
     name: "sdv_telemetry_simulator@rust_defaults",
+    defaults_visibility: ["//system/software_defined_vehicle/telemetry/simulator:__subpackages__"],
     defaults: ["sdv_telemetry@rust_defaults"],
     flags: [
         // keep-sorted start

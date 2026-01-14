@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 filegroup {
@@ -21,6 +22,7 @@ filegroup {
 
 android_library {
     name: "telemetry_ivi_stats_publisher_lib",
+    visibility: ["//system/software_defined_vehicle/telemetry/ivi_publishers/stats_publisher/tests:__subpackages__"],
     platform_apis: true,
     assets: ["stats_publisher/assets/*"],
     srcs: [

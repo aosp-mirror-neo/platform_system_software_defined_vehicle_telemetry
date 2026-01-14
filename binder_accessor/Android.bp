@@ -3,10 +3,17 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 cc_library {
     name: "libbinder_accessor",
+    visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
     srcs: ["binder_access.cpp"],
     vendor_available: true,
     shared_libs: [
@@ -19,6 +26,12 @@ cc_library {
 
 java_library {
     name: "telemetry_binder_accessor",
+    visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
     srcs: [
         "BinderServiceAccessor.java",
     ],

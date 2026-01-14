@@ -3,14 +3,5 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
-}
-
-filegroup {
-    name: "sdv_telemetry_metrics_config_textprotos",
-    srcs: [
-        // keep-sorted start
-        "samples/**/*.textproto",
-        "tests/**/*.textproto",
-        // keep-sorted end
-    ],
+    default_visibility: ["//visibility:private"],
 }

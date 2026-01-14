@@ -3,11 +3,13 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 filegroup {
     name: "sdv_telemetry_integration_test_config_template",
     srcs: ["integration_tests_config_template.config"],
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
 }
 
 rust_test {
@@ -71,11 +73,6 @@ rust_test {
         "general-tests",
         // keep-sorted end
     ],
-    data: [
-        // keep-sorted start
-        ":sdv_telemetry_metrics_config_textprotos",
-        // keep-sorted end
-    ],
     ld_flags: ["-Wl,--no-as-needed"],
     auto_gen_config: true,
     // Requires root so the test can perform Binder calls.
@@ -85,6 +82,7 @@ rust_test {
 
 rust_binary {
     name: "sdv_telemetry_cross_partition_client",
+    visibility: ["//device/google/sdv"],
     srcs: [
         "sdv_telemetry_cross_partition_client.rs",
         // keep-sorted start

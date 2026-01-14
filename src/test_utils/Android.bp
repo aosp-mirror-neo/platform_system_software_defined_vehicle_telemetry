@@ -3,10 +3,12 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_protobuf {
     name: "libsdv_telemetry_test_proto",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     crate_name: "sdv_telemetry_test_proto",
     protos: ["test_message.proto"],
     proto_flags: [
@@ -19,6 +21,7 @@ rust_protobuf {
 
 rust_protobuf {
     name: "libsdv_telemetry_test_proto_bool_value",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     crate_name: "sdv_telemetry_test_proto_bool_value",
     protos: [
         "test_bool_value_1.proto",
@@ -59,6 +62,7 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_test_utils",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     defaults: ["libsdv_telemetry_test_utils_defaults"],
     crate_name: "sdv_telemetry_test_utils",
 }

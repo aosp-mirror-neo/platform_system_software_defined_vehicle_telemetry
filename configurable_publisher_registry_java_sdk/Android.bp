@@ -3,11 +3,13 @@
 package {
     default_applicable_licenses: ["sdv_license"],
     default_team: "trendy_team_automotive",
+    default_visibility: ["//visibility:private"],
 }
 
 // TODO: b/440415770 Change this to a java_sdk_library
 java_library {
     name: "libsdvconfigurablepublisher-java",
+    visibility: ["//visibility:public"],
     srcs: ["src/**/*.java"],
     sdk_version: "system_current",
     static_libs: [

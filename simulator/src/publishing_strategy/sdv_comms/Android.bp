@@ -1,7 +1,9 @@
 // Copyright 2025 Google LLC
 
 package {
+    default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_defaults {
@@ -38,6 +40,7 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_simulator_publishing_strategy_sdv_comms",
+    visibility: ["//system/software_defined_vehicle/telemetry/simulator:__subpackages__"],
     defaults: ["libsdv_telemetry_simulator_publishing_strategy_sdv_comms_defaults"],
     crate_name: "sdv_telemetry_simulator_publishing_strategy_sdv_comms",
 }

@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 cc_library {
@@ -29,7 +30,6 @@ rust_bindgen {
         // keep-sorted end
     ],
     vendor_available: true,
-    visibility: ["//system/software_defined_vehicle/telemetry"],
 }
 
 rust_test {
@@ -74,6 +74,7 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_time_wrapper",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper",
     vendor_available: true,

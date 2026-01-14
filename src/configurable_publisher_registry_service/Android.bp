@@ -3,6 +3,7 @@
 package {
     default_team: "trendy_team_connectivity_telemetry",
     default_applicable_licenses: ["sdv_license"],
+    default_visibility: ["//visibility:private"],
 }
 
 rust_defaults {
@@ -39,6 +40,7 @@ rust_defaults {
 
 rust_library {
     name: "libsdv_telemetry_configurable_publisher",
+    visibility: ["//visibility:public"],
     defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
     crate_name: "sdv_telemetry_configurable_publisher",
 }
