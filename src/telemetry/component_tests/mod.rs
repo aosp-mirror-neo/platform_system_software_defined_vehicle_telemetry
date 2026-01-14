@@ -78,6 +78,7 @@ async fn create_manager(
         report_ready_callback,
         status_reporter,
         Box::new(MetricsConfigOrchestratorFactoryImpl),
+        Arc::new(sdv_dump::DumpManager::new("Component Tests Dump Manager")),
     )
     .await
     .unwrap();
