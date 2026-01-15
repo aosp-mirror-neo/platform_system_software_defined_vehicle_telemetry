@@ -39,7 +39,7 @@ atest --build "${TEST_TARGETS[@]}"
 # In addition to building the tests, also build all other Telemetry targets.
 # This is because some of our targets do not have tests (e.g., the samples), but
 # we want to make sure that they at least build successfully.
-(cd "${ANDROID_BUILD_TOP}" && mmm "system/software_defined_vehicle/telemetry")
+(cd "${ANDROID_BUILD_TOP}" && mmm "system/software_defined_vehicle/telemetry" && mmm "system/software_defined_vehicle/samples/telemetry")
 
 # Restart CVD for changes to take effect
 log "Resetting VM instances..."

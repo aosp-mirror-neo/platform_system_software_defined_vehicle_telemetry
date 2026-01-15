@@ -21,6 +21,7 @@ pub(crate) trait MetricsConfigOrchestratorFactory: Send + Sync {
         pal: Arc<dyn PlatformAbstractionLayer>,
         report_ready_callback: Box<dyn Fn(MetricsReport) + Send + Sync + 'static>,
         status_reporter: Arc<dyn StatusReporter>,
+        dump_manager: Arc<sdv_dump::DumpManager>,
     ) -> Arc<dyn MetricsConfigOrchestrator + Send + Sync>;
 }
 
@@ -34,9 +35,10 @@ impl MetricsConfigOrchestratorFactory for MetricsConfigOrchestratorFactoryImpl {
         pal: Arc<dyn PlatformAbstractionLayer>,
         report_ready_callback: Box<dyn Fn(MetricsReport) + Send + Sync + 'static>,
         status_reporter: Arc<dyn StatusReporter>,
+        dump_manager: Arc<sdv_dump::DumpManager>,
     ) -> Arc<dyn MetricsConfigOrchestrator + Send + Sync> {
         let manager_reference_clone = Weak::clone(&manager_reference);
-        Arc::new(MetricsConfigOrchestratorImpl::new(
+        let mc_orchestrator = Arc::new(MetricsConfigOrchestratorImpl::new(
             service_publisher_manager,
             pal,
             move |config_uuid, _context, compute_order, countdown_latch| {
@@ -64,6 +66,8 @@ impl MetricsConfigOrchestratorFactory for MetricsConfigOrchestratorFactoryImpl {
             },
             report_ready_callback,
             status_reporter,
-        ))
+            dump_manager,
+        ));
+        mc_orchestrator
     }
 }

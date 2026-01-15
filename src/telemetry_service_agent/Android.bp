@@ -20,6 +20,7 @@ rust_defaults {
         "libbinder_tokio_rs",
         "liblog_rust",
         "librustutils",
+        "libsdv_dump",
         "libsdv_log_rust",
         "libsdv_telemetry",
         "libsdv_telemetry_configurable_publisher",
