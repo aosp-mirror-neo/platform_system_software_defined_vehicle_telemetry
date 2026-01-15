@@ -1,5 +1,17 @@
 #!/bin/bash
-# Copyright 2024 Google LLC
+# Copyright (C) 2026 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 # Simple tool to convert a `.proto` file into a file descriptor set and a file
 # descriptor proto. Pass the path to the `.proto` file as the argument, and this
@@ -73,8 +85,32 @@ convert_proto \
       "textproto:$(pwd)/descriptor.textproto"
 
 # Add copyright to generated files
-sed -i '1i # Copyright 2024 Google LLC\n' "$(pwd)/descriptor_set.textproto"
-sed -i '1i # Copyright 2024 Google LLC\n' "$(pwd)/descriptor.textproto"
+sed -i '1i # Copyright (C) 2026 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.\n' "$(pwd)/descriptor_set.textproto"
+sed -i '1i # Copyright (C) 2026 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.\n' "$(pwd)/descriptor.textproto"
 
 # Remove colons that are not supported by Rust's textproto implementation.
 txtpbfmt -skip_all_colons $(pwd)/descriptor_set.textproto
