@@ -15,7 +15,7 @@ pub use status::{
 
 use crate::rust_to_c::ServiceHolder;
 use callbacks::call_api_with_status_callback;
-use log::{error, info};
+use log::info;
 use sdv_telemetry_bindgen as rust_to_c;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
 use std::ffi::{c_void, CStr};
