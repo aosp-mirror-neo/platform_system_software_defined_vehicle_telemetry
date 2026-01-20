@@ -54,7 +54,7 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
     StatusDetails::StatusDetails,
 };
 
-const RETRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
 pub(crate) enum ConnectionType {
     Subscription,
