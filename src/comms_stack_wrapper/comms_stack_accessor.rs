@@ -143,7 +143,7 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         info!("Subscribing to comms stack service '{service_name}'.");
 
-        let Some(metadata) = self.get_or_parse_metadata(service_name).await? else {
+        let Some(metadata) = self.get_or_parse_metadata(service_name.clone()).await? else {
             return Ok(CreateSubscriptionOutcome::NotRegistered {
                 new_message_callback,
                 cancellation_callback,
@@ -151,6 +151,21 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         };
 
         let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
+
+        // Ensure that we cleanup cached metadata on cancellation (= the service we subscribe to
+        // stopping), before notifying the rest of the system of the cancellation. This is important
+        // because otherwise, the `ServicePublisher` doesn't use availability callback
+        // notifications, but polling.
+        //
+        // The availability callback registered in `Self::get_or_parse_metadata`, which also cleans
+        // up metadata when a service is stopping, is not sufficient, because we might receive the
+        // notification of the service having stopped only after the cancellation callback runs, and
+        // therefore, only after the Telemetry Service tries to re-subscribe.
+        let cached_metadata_clone = Arc::clone(&self.cached_metadata);
+        let cancellation_callback = Box::new(move || {
+            cached_metadata_clone.remove(&service_name);
+            cancellation_callback();
+        });
 
         match metadata.service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => {
@@ -496,8 +511,8 @@ mod integration_tests {
     use googletest::description::Description;
     use googletest::matcher::{Matcher, MatcherBase, MatcherResult};
     use googletest::matchers::{
-        all, contains_substring, displays_as, each, eq, err, is_false, none, ok, pat, result_of,
-        result_of_ref, some,
+        all, contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
+        result_of, result_of_ref, some,
     };
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
@@ -2113,4 +2128,64 @@ mod integration_tests {
             )
         }),
     );
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn metadata_cache_is_invalidated_before_cancellation_callback_runs() {
+        // Start binder thread pool to receive notification from Service Discovery
+        binder::ProcessState::start_thread_pool();
+
+        let ctx = test_utils::make_context(0).await;
+        let service_name = test_utils::make_unique_service_name();
+        let parsed_service_name = ServiceName::parse(&service_name).unwrap();
+        let accessor = Arc::new(create_accessor(ctx));
+
+        let (tx, rx) = oneshot_callback();
+
+        let accessor_clone = Arc::clone(&accessor);
+        let parsed_service_name_clone = parsed_service_name.clone();
+        let cancellation_callback = Box::new(move || {
+            // Check that metadata is cleared from cache
+            expect_that!(
+                accessor_clone.cached_metadata.contains_key(&parsed_service_name_clone),
+                is_false()
+            );
+            tx(());
+        });
+
+        let publisher =
+            test_utils::register_topic(ctx, &service_name, MESSAGE_METADATA_INT32.clone())
+                .await
+                .unwrap();
+
+        // Populate the cache.
+        expect_that!(
+            accessor.get_metadata(&service_name).await,
+            ok(some(pat!(ServicePublisherMetadata { .. })))
+        );
+        expect_that!(accessor.cached_metadata.contains_key(&parsed_service_name), is_true());
+
+        let outcome = accessor
+            .create_subscription(
+                &service_name,
+                None,
+                false,
+                &SubSamplingInterval::ZERO,
+                create_empty_message_handler(),
+                cancellation_callback,
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(outcome, CreateSubscriptionOutcome::Subscribed { .. }));
+
+        // Drop the publisher to simulate the service stopping.
+        drop(publisher);
+
+        // Wait for the cancellation callback to run.
+        rx.await;
+
+        expect_that!(accessor.get_metadata(&service_name).await, ok(none()));
+    }
 }
