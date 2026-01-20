@@ -18,7 +18,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
-use log::info;
+use log::debug;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::MessageDyn;
@@ -111,7 +111,7 @@ impl DataTunnelSubscriber {
                             }
                         };
 
-                        info!(
+                        debug!(
                             "Received {} messages from service unit '{}'.",
                             messages.iter().len(),
                             Self::to_debug_string(&unit_identifier)
