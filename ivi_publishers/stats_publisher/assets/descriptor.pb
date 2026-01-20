@@ -1,11 +1,0 @@
-
-_system/software_defined_vehicle/telemetry/ivi_publishers/proto/stats_publisher_descriptor.proto(google.sdv.telemetry.java.statspublisher"X
-
-AtomReport
-data (Rdata6
-elapsed_timestamp_nanos (RelapsedTimestampNanos"^
-AtomReportListL
-report (24.google.sdv.telemetry.java.statspublisher.AtomReportRreport"'
-AtomReportWrapper
-data (RdataBE
-(google.sdv.telemetry.java.statspublisherBStatsPublisherReportProtobproto3
