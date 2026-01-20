@@ -22,7 +22,7 @@ mod trigger_factory;
 
 // External dependencies.
 use async_trait::async_trait;
-use log::{debug, error};
+use log::debug;
 use parking_lot::Mutex;
 use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
