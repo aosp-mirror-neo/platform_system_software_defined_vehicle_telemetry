@@ -558,7 +558,7 @@ impl TelemetryServiceHolder {
 mod test {
     use super::*;
     use googletest::assert_that;
-    use googletest::matchers::{all, eq, field, none, pat, some};
+    use googletest::matchers::{eq, none, pat, some};
     use std::ffi::CString;
 
     const UUID: &str = "uuid";
