@@ -12,10 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+filegroup {
+    name: "sdv_telemetry_utils_test_data",
+    visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
+    srcs: [
+        // keep-sorted start
+        ":sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
+        ":sdv_telemetry_utils_test_data_config_without_service_publishers_txtpb",
+        // keep-sorted end
+    ],
+}
+
 genrule {
     name: "sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
     visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
     defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
     srcs: ["config_without_service_publishers.txtpb"],
     out: ["config_without_service_publishers.binpb"],
+}
+
+// For some reason, directly referencing
+// `config_without_service_publishers.txtpb` doesn't work. So we have this no-op
+// genrule that simply copies the file. This makes the .vendor and .product
+// variations of our test pass.
+genrule {
+    name: "sdv_telemetry_utils_test_data_config_without_service_publishers_txtpb",
+    visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
+    srcs: ["config_without_service_publishers.txtpb"],
+    out: ["config_without_service_publishers_out.txtpb"],
+    cmd: "cp $(in) $(out)",
 }

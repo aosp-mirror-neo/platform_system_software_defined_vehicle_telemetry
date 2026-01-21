@@ -65,14 +65,10 @@ rust_test {
         "libgoogletest_rust",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_utils",
+        "libtempfile",
         // keep-sorted end
     ],
-    data: [
-        // keep-sorted start
-        ":sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
-        "test_data/config_without_service_publishers.txtpb",
-        // keep-sorted end
-    ],
+    data: [":sdv_telemetry_utils_test_data"],
     test_suites: [
         // keep-sorted start
         "automotive-sdv-tests",
