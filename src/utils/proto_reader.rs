@@ -54,16 +54,30 @@ mod tests {
 
     use protobuf::{Message, MessageField};
     use sdv_telemetry_proto_rust::metrics_configuration::MetricsConfig;
+    use std::io::Write;
     use std::time::Duration;
+    use tempfile::NamedTempFile;
 
     use crate::duration_utils::try_into_proto_duration;
 
     #[test]
     fn serialized_bytes_match_textproto_file_contents() {
-        let serialized_config = read_as_bytes::<MetricsConfig>(Path::new(
-            "test_data/config_without_service_publishers.txtpb",
-        ))
-        .unwrap();
+        // Create a file on the device with the contents of the
+        // `config_without_service_publishers.txtpb` textproto. Pushing the file to the device
+        // doesn't appear to work for some reason. See b/447183593 for more context.
+        let textproto_config_file = {
+            let mut textproto_config_file = NamedTempFile::with_suffix(".txtpb").unwrap();
+            textproto_config_file
+                .write_all(include_bytes!(concat!(
+                    env!("OUT_DIR"),
+                    "/config_without_service_publishers_out.txtpb"
+                )))
+                .unwrap();
+            textproto_config_file
+        };
+
+        let serialized_config =
+            read_as_bytes::<MetricsConfig>(textproto_config_file.path()).unwrap();
         let config = MetricsConfig::parse_from_bytes(&serialized_config).unwrap();
 
         {
