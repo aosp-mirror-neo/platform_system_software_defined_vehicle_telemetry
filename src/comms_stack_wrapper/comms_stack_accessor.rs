@@ -511,7 +511,7 @@ mod integration_tests {
     use googletest::description::Description;
     use googletest::matcher::{Matcher, MatcherBase, MatcherResult};
     use googletest::matchers::{
-        all, contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
+        contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
         result_of, result_of_ref, some,
     };
     use googletest::{assert_that, expect_that};
