@@ -166,7 +166,11 @@ impl ServicePublisherAccessor for ConfigurablePublisherRegistry {
         };
 
         let listener_wrapper = BnSubscriber::new_async_binder(
-            SubscriberService::new(message_descriptor, new_message_callback),
+            SubscriberService::new(
+                service_name.to_owned(),
+                message_descriptor,
+                new_message_callback,
+            ),
             TokioRuntime(tokio::runtime::Handle::current()),
             BinderFeatures::default(),
         );
