@@ -423,19 +423,23 @@ def get_device_count_for_test(
 ) -> int:
     """Parses the test's XML config to determine the required device count."""
     config_path = sdv_catbox_config_dir / f"{test_name}.xml"
-    if config_path.exists():
-        tree = ET.parse(config_path)
-        template = tree.find(".//template-include[@name='device-config']")
-        if template is not None:
-            device_config = template.get("default", "")
-            if "one-device" in device_config:
-                return 1
-            if "two-devices" in device_config:
-                return 2
-            if "three-devices" in device_config:
-                return 3
+    if not config_path.exists():
+        raise Exception(f"Unable to determine device count for test '{test_name}': config path {config_path} does not exist.")
 
-    raise Exception(f"Unable to determine device count for test: {test_name}")
+    tree = ET.parse(config_path)
+    template = tree.find(".//template-include[@name='device-config']")
+    if template is None:
+        raise Exception(f"Unable to determine device count for test '{test_name}': unexpected XML structure.")
+
+    device_config = template.get("default", "")
+    if "one-device" in device_config:
+        return 1
+    if "two-devices" in device_config:
+        return 2
+    if "three-devices" in device_config:
+        return 3
+
+    raise Exception(f"Unable to determine device count for test '{test_name}': unsupported device config '{device_config}'.")
 
 def get_atest_name_for_test(
     test_name: str, sdv_catbox_config_dir: Path
@@ -538,10 +542,12 @@ def main() -> None:
     )
     catbox_binary = catbox_dir / "tools/catbox-tradefed"
 
-    sdv_e2e_test_repo = (
-        android_build_top / "vendor/google_testing/software_defined_vehicle"
+    platform_testing_repo = (
+        android_build_top / "platform_testing"
     )
-    sdv_catbox_config_dir = sdv_e2e_test_repo / "tools/sdv_catbox/res/config"
+    sdv_catbox_config_dir = (
+        platform_testing_repo / "libraries/sdv/sdv_catbox/res/config"
+    )
 
     # TODO: We do not currently support running tests that require both IVI and
     # Core VMs.
