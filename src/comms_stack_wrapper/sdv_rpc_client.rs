@@ -18,6 +18,7 @@ use anyhow::{anyhow, bail, Context};
 use async_trait::async_trait;
 use futures::future::{self, BoxFuture};
 use futures::StreamExt;
+use log::debug;
 use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::{any::Any, empty::Empty};
 use protobuf::{Message, MessageDyn};
@@ -33,6 +34,8 @@ use sdv_telemetry_service_publisher_accessor::{
 };
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
+
+use crate::unit_identifier_to_string;
 
 const CREATE_SUBSCRIPTION_METHOD: &str = "CreateSubscription";
 const GET_LATEST_MESSAGE_METHOD: &str = "GetLatestMessage";
@@ -165,6 +168,11 @@ impl SdvRpcClient {
                                 continue;
                             }
                         };
+
+                        debug!(
+                            "Received 1 message from service unit '{}'.",
+                            unit_identifier_to_string(&unit_identifier)
+                        );
 
                         let message = message_descriptor
                             .parse_from_bytes(&buffer)

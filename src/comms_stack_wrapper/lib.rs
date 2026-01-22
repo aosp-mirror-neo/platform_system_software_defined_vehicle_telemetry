@@ -14,6 +14,8 @@
 
 //! Telemetry Service Wrapper for Comms Stack.
 
+use sdv_comms::id::UnitIdentifier;
+
 pub mod comms_stack_accessor;
 pub mod data_tunnel_publisher;
 
@@ -23,3 +25,7 @@ mod sdv_rpc_client;
 
 #[cfg(all(test, integration_tests))]
 mod test_utils;
+
+pub(crate) fn unit_identifier_to_string(unit_identifier: &UnitIdentifier) -> String {
+    format!("{}|{}", unit_identifier.get_sid(), unit_identifier.get_unit_name())
+}

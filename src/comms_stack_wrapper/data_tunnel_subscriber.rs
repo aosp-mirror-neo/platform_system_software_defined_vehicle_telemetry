@@ -38,6 +38,7 @@ use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_message_stream::create_message_stream;
+use crate::unit_identifier_to_string;
 
 /// Struct for storing all data tunnel subscriptions that implements `ServicePublisherManager`.
 pub struct DataTunnelSubscriber {
@@ -114,7 +115,7 @@ impl DataTunnelSubscriber {
                         debug!(
                             "Received {} messages from service unit '{}'.",
                             messages.iter().len(),
-                            Self::to_debug_string(&unit_identifier)
+                            unit_identifier_to_string(&unit_identifier)
                         );
 
                         let messages: Box<dyn Iterator<Item = _>> = {
@@ -230,10 +231,6 @@ impl DataTunnelSubscriber {
             .parse_from(&mut is)
             .with_context(|| "Failed to parse the protobuf message.")?;
         Ok(message)
-    }
-
-    fn to_debug_string(unit_identifier: &UnitIdentifier) -> String {
-        format!("{}|{}", unit_identifier.get_sid(), unit_identifier.get_unit_name())
     }
 }
 

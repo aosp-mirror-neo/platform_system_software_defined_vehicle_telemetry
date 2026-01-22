@@ -17,9 +17,11 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
+use log::debug;
 
 /// Implementation of ISubscriber interface that calls associated callback on a new message.
 pub struct SubscriberService {
+    service_name: String,
     message_descriptor: MessageDescriptor,
     new_message_callback: Mutex<
         Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
@@ -31,6 +33,11 @@ impl binder::Interface for SubscriberService {}
 #[async_trait]
 impl ISubscriberAsyncServer for SubscriberService {
     async fn sendData(&self, data: &[u8]) -> binder::Result<()> {
+        debug!(
+            "Received 1 message from configurable publisher registry service '{}'.",
+            self.service_name,
+        );
+
         self.message_descriptor.parse_from_bytes(data).map_or_else(
             |err| {
                 let binder_msg = format!("Unable to parse message bytes: {err:?}");
@@ -52,12 +59,13 @@ impl ISubscriberAsyncServer for SubscriberService {
 
 impl SubscriberService {
     pub fn new(
+        service_name: String,
         message_descriptor: MessageDescriptor,
         new_message_callback: Box<
             dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
         >,
     ) -> Self {
-        Self { message_descriptor, new_message_callback: new_message_callback.into() }
+        Self { service_name, message_descriptor, new_message_callback: new_message_callback.into() }
     }
 }
 
@@ -73,7 +81,11 @@ mod tests {
     #[tokio::test]
     async fn subscriber_wrapper_send_data_invalid_message_fails() {
         let (tx, rx) = oneshot_callback();
-        let wrapper = SubscriberService::new(Int32Value::descriptor(), Box::new(tx));
+        let wrapper = SubscriberService::new(
+            "service_name".to_owned(),
+            Int32Value::descriptor(),
+            Box::new(tx),
+        );
 
         let err_binder = wrapper.sendData(&[0xFF]).await.unwrap_err();
         let err_callback = rx.await.unwrap_err();
@@ -93,7 +105,11 @@ mod tests {
     #[tokio::test]
     async fn subscriber_wrapper_send_data_success() {
         let (tx, rx) = oneshot_callback();
-        let wrapper = SubscriberService::new(Int32Value::descriptor(), Box::new(tx));
+        let wrapper = SubscriberService::new(
+            "service_name".to_owned(),
+            Int32Value::descriptor(),
+            Box::new(tx),
+        );
         let value = Box::new(Int32Value { value: 42, ..Default::default() });
 
         wrapper.sendData(&value.write_to_bytes().unwrap()).await.unwrap();
