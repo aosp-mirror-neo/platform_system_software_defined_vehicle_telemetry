@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use protobuf::{reflect::FieldDescriptor, well_known_types::any::Any, MessageFull};
+use protobuf::{
+    reflect::FieldDescriptor, reflect::MessageDescriptor, well_known_types::any::Any, MessageFull,
+};
 use sdv_telemetry_expr::node::Node;
 use sdv_telemetry_expr::node_value_type::{NodeValueType, NodeValueTypeExtension};
 use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto;
@@ -180,26 +182,44 @@ impl ValueAggregatorFactoryImpl {
             // MessageBuilder can convert integers to floating points, so assigning an
             // integer to a float field is valid. But the reverse is not true.
             (NodeValueType::Float, NodeValueType::Int)
-            | (NodeValueType::FloatList, NodeValueType::IntList)
-            // If the actual type not known yet, it's valid to assign it to any message field.
-            | (NodeValueType::Message { .. }, NodeValueType::Message { descriptor: None })
-            | (
-                NodeValueType::MessageList { .. },
-                NodeValueType::MessageList { descriptor: None },
-            ) => true,
+            | (NodeValueType::FloatList, NodeValueType::IntList) => true,
 
-            // If the expected type is protobuf Any, it's valid to assign any message or message list field.
             (
-                NodeValueType::Message { descriptor: Some(descriptor) },
-                NodeValueType::Message { .. },
+                NodeValueType::Message { descriptor: expected_descriptor },
+                NodeValueType::Message { descriptor: actual_descriptor },
             )
             | (
-                NodeValueType::MessageList { descriptor: Some(descriptor) },
-                NodeValueType::MessageList { .. },
-            ) if descriptor == &Any::descriptor() => true,
+                NodeValueType::MessageList { descriptor: expected_descriptor },
+                NodeValueType::MessageList { descriptor: actual_descriptor },
+            ) => match (expected_descriptor, actual_descriptor) {
+                (_, None) => {
+                    // If the actual descriptor is not known yet, it's valid to assign it to any
+                    // message field.
+                    true
+                }
+                (Some(expected_descriptor), Some(actual_descriptor)) => {
+                    // Either the message descriptors must be equal...
+                    Self::is_message_descriptor_equal(expected_descriptor, actual_descriptor)
+                    // ... or the expected descriptor must be Any, which allows assignment of any
+                    // actual descriptor.
+                    || Self::is_message_descriptor_equal(expected_descriptor, &Any::descriptor())
+                }
+                (None, Some(_)) => false,
+            },
 
             _ => expected == actual,
         }
+    }
+
+    fn is_message_descriptor_equal(a: &MessageDescriptor, b: &MessageDescriptor) -> bool {
+        // We want to ensure that both `MessageDescriptor`s describe the same message. We MUST NOT
+        // compare the `MessageDescriptor`s directly, because they are only equal if the message is
+        // defined in the exact same file and position within that file.
+        //
+        // Instead, we need to compare the `DescriptorProto`s (returned by
+        // `MessageDescriptor::proto`), which describe the actual message formats, irrespective of
+        // the file they are in, as well as the "full name" (= package name + message name).
+        a.proto() == b.proto() && a.full_name() == b.full_name()
     }
 }
 
@@ -375,13 +395,22 @@ pub(crate) mod mock;
 mod tests {
     use super::*;
 
-    use protobuf::well_known_types::timestamp::Timestamp;
+    use protobuf::reflect::FileDescriptor;
+    use protobuf::well_known_types::{timestamp::Timestamp, wrappers::BoolValue};
+    use std::sync::LazyLock;
+    use protobuf::Message;
     use sdv_telemetry_expr::node_value::NodeValue;
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
     use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::field_assignment::{
         AvgAggregation, CountAggregation, DeltaAggregation, MaxAggregation, MinAggregation,
         NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
     };
+    use sdv_telemetry_test_proto_bool_value::{
+        test_bool_value_1::BoolValue as TestBoolValue1,
+        test_bool_value_2::BoolValue as TestBoolValue2,
+    };
+    use googletest::matchers::eq;
+    use googletest::expect_that;
     use sdv_telemetry_test_utils::parameterized_test;
 
     // See all valid field names in src/utils/test_utils/test_message.proto
@@ -911,5 +940,110 @@ mod tests {
             AggregatedFieldValueProto::StdDevAggregation(create_std_dev_aggregation_proto(Some(0))),
             Box::new(|res| matches!(res, Err(ValueAggregatorFactoryError::IncompatibleFieldAssignment { .. }))),
         ),
+    );
+
+    // A copy of the `Any` message descriptor, but with slightly adjusted source code info of its
+    // file descriptor.
+    static ANY_DESCRIPTOR_CLONE: LazyLock<MessageDescriptor> = LazyLock::new(|| {
+        let mut file_descriptor_proto = Any::descriptor().file_descriptor_proto().clone();
+        file_descriptor_proto.source_code_info.as_mut().unwrap().location.push(
+            protobuf::descriptor::source_code_info::Location {
+                leading_comments: Some("bla bla".to_owned()),
+                ..Default::default()
+            },
+        );
+
+        let file_descriptor = FileDescriptor::new_dynamic(file_descriptor_proto, &[]).unwrap();
+        file_descriptor.message_by_package_relative_name(Any::NAME).unwrap()
+    });
+
+    parameterized_test!(
+        #[googletest::test]
+        #[test]
+        is_compatible,
+
+        |base: &NodeValueType, actual: &NodeValueType, expected: bool| {
+            let is_compatible = ValueAggregatorFactoryImpl::is_compatible(base, actual);
+
+            expect_that!(is_compatible, eq(expected));
+        },
+
+        bool_bool: (&NodeValueType::Bool, &NodeValueType::Bool, true),
+        int_int: (&NodeValueType::Int, &NodeValueType::Int, true),
+        float_float: (&NodeValueType::Float, &NodeValueType::Float, true),
+        string_string: (&NodeValueType::String, &NodeValueType::String, true),
+        byte_list_byte_list: (&NodeValueType::ByteList, &NodeValueType::ByteList, true),
+        bool_list_bool_list: (&NodeValueType::BoolList, &NodeValueType::BoolList, true),
+        int_list_int_list: (&NodeValueType::IntList, &NodeValueType::IntList, true),
+        float_list_float_list: (&NodeValueType::FloatList, &NodeValueType::FloatList, true),
+
+        // Compatible numeric conversions
+        float_int: (&NodeValueType::Float, &NodeValueType::Int, true),
+        float_list_int_list: (&NodeValueType::FloatList, &NodeValueType::IntList, true),
+
+        // Incompatible numeric conversions
+        int_float: (&NodeValueType::Int, &NodeValueType::Float, false),
+        int_list_float_list: (&NodeValueType::IntList, &NodeValueType::FloatList, false),
+
+        // Incompatible mixed types
+        int_bool: (&NodeValueType::Int, &NodeValueType::Bool, false),
+        bool_int: (&NodeValueType::Bool, &NodeValueType::Int, false),
+        float_string: (&NodeValueType::Float, &NodeValueType::String, false),
+        string_float: (&NodeValueType::String, &NodeValueType::Float, false),
+        bool_string: (&NodeValueType::Bool, &NodeValueType::String, false),
+        string_bool: (&NodeValueType::String, &NodeValueType::Bool, false),
+
+        // List vs. single
+        int_list_int: (&NodeValueType::IntList, &NodeValueType::Int, false),
+        int_int_list: (&NodeValueType::Int, &NodeValueType::IntList, false),
+        float_list_float: (&NodeValueType::FloatList, &NodeValueType::Float, false),
+        float_float_list: (&NodeValueType::Float, &NodeValueType::FloatList, false),
+        bool_list_bool: (&NodeValueType::BoolList, &NodeValueType::Bool, false),
+        bool_bool_list: (&NodeValueType::Bool, &NodeValueType::BoolList, false),
+        message_message_list: (&NodeValueType::Message { descriptor: None }, &NodeValueType::MessageList { descriptor: None }, false),
+        message_list_message: (&NodeValueType::MessageList { descriptor: None }, &NodeValueType::Message { descriptor: None }, false),
+
+        // Message types
+        message_message_none: (&NodeValueType::Message { descriptor: None }, &NodeValueType::Message { descriptor: None }, true),
+        message_message_same: (&NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) }, &NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) }, true),
+        message_message_different: (&NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) }, &NodeValueType::Message { descriptor: Some(TestMessage::descriptor()) }, false),
+
+        // Check that assigning works, even if the messages are defined in different proto files, as
+        // long as they are compatible.
+        message_same_definition_but_different_file: (&NodeValueType::Message { descriptor: Some(TestBoolValue1::descriptor()) }, &NodeValueType::Message { descriptor: Some(TestBoolValue2::descriptor()) }, true),
+        message_same_definition_but_different_file_different_package: (&NodeValueType::Message { descriptor: Some(BoolValue::descriptor()) }, &NodeValueType::Message { descriptor: Some(TestBoolValue2::descriptor()) }, false),
+
+        message_any_message: (&NodeValueType::Message { descriptor: Some(Any::descriptor()) }, &NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) }, true),
+        // You can assign whatever message you want to an Any message.
+        message_any_message_any: (&NodeValueType::Message { descriptor: Some(Any::descriptor()) }, &NodeValueType::Message { descriptor: Some(Any::descriptor()) }, true),
+        message_any_message_none: (&NodeValueType::Message { descriptor: Some(Any::descriptor()) }, &NodeValueType::Message { descriptor: None }, true),
+
+        message_any_message2: (&NodeValueType::Message { descriptor: Some(ANY_DESCRIPTOR_CLONE.to_owned()) }, &NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) }, true),
+        // You can assign whatever message you want to an Any message.
+        message_any_message_any2: (&NodeValueType::Message { descriptor: Some(ANY_DESCRIPTOR_CLONE.to_owned()) }, &NodeValueType::Message { descriptor: Some(ANY_DESCRIPTOR_CLONE.to_owned()) }, true),
+        message_any_message_none2: (&NodeValueType::Message { descriptor: Some(ANY_DESCRIPTOR_CLONE.to_owned()) }, &NodeValueType::Message { descriptor: None }, true),
+
+        // You cannot assign Any to a field that is not Any itself.
+        message_message_any2: (&NodeValueType::Message { descriptor: Some(Timestamp::descriptor()) }, &NodeValueType::Message { descriptor: Some(Any::descriptor()) }, false),
+
+        message_any_message_any3: (&NodeValueType::Message { descriptor: Some(ANY_DESCRIPTOR_CLONE.to_owned()) }, &NodeValueType::Message { descriptor: Some(Any::descriptor()) }, true),
+        message_any_message_any4: (&NodeValueType::Message { descriptor: Some(Any::descriptor()) }, &NodeValueType::Message { descriptor: Some(ANY_DESCRIPTOR_CLONE.to_owned()) }, true),
+
+        message_list_message_list_none: (&NodeValueType::MessageList { descriptor: None }, &NodeValueType::MessageList { descriptor: None }, true),
+        message_list_message_list_same: (&NodeValueType::MessageList { descriptor: Some(Timestamp::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(Timestamp::descriptor()) }, true),
+        message_list_message_list_different: (&NodeValueType::MessageList { descriptor: Some(Timestamp::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(TestMessage::descriptor()) }, false),
+
+        // Check that assigning works, even if the messages are defined in different proto files, as
+        // long as they are compatible.
+        message_list_same_definition_but_different_file: (&NodeValueType::MessageList { descriptor: Some(TestBoolValue1::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(TestBoolValue2::descriptor()) }, true),
+        message_list_same_definition_but_different_file_different_package: (&NodeValueType::MessageList { descriptor: Some(BoolValue::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(TestBoolValue2::descriptor()) }, false),
+
+        message_list_any_message_list: (&NodeValueType::MessageList { descriptor: Some(Any::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(Timestamp::descriptor()) }, true),
+        // You can assign whatever message you want to an Any message.
+        message_list_any_message_list_any: (&NodeValueType::MessageList { descriptor: Some(Any::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(Any::descriptor()) }, true),
+        message_list_any_message_list_none: (&NodeValueType::MessageList { descriptor: Some(Any::descriptor()) }, &NodeValueType::MessageList { descriptor: None }, true),
+
+        // You cannot assign Any to a field that is not Any itself.
+        message_list_message_list_any: (&NodeValueType::MessageList { descriptor: Some(Timestamp::descriptor()) }, &NodeValueType::MessageList { descriptor: Some(Any::descriptor()) }, false),
     );
 }

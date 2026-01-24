@@ -85,6 +85,7 @@ rust_test {
         "libsdv_telemetry_platform_abstraction_layer_with_test_utils",
         "libsdv_telemetry_proto_rust",
         "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_proto_bool_value",
         "libsdv_telemetry_test_utils",
         "libsdv_telemetry_utils",
         "libtempfile",
