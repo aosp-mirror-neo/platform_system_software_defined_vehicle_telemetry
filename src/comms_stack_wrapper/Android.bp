@@ -1,0 +1,146 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_visibility: ["//visibility:private"],
+}
+
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_defaults
+rust_defaults {
+    name: "telemetry_dt_wrapper_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: ["lib.rs"],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "libasync_stream",
+        "libdashmap",
+        "libfutures",
+        "liblog_rust",
+        "liblogger",
+        "libparking_lot",
+        "libprotobuf",
+        "libsdv_comms_rs",
+        "libsdv_config_provider",
+        "libsdv_proto_reflection_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_service_publisher_accessor",
+        "libsdv_telemetry_utils",
+        "libthiserror",
+        "libtokio",
+        "libtokio_util",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        // keep-sorted end
+    ],
+    ld_flags: ["-Wl,--no-as-needed"],
+    vendor_available: true,
+}
+
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper
+rust_library {
+    name: "libsdv_telemetry_dt_wrapper",
+    visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
+    crate_name: "sdv_telemetry_dt_wrapper",
+    defaults: ["telemetry_dt_wrapper_defaults"],
+}
+
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_tests_defaults
+rust_defaults {
+    name: "telemetry_dt_wrapper_tests_defaults",
+    defaults: ["telemetry_dt_wrapper_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "liblazy_static",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    target: {
+        host: {
+            data_libs: [
+                // keep-sorted start
+                "libbase",
+                "libbinder",
+                "libbinder_ndk",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
+            ],
+        },
+    },
+    auto_gen_config: true,
+}
+
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_unit_tests
+rust_test {
+    name: "sdv_mt_telemetry_unit_comms_stack_wrapper_test",
+    defaults: ["telemetry_dt_wrapper_tests_defaults"],
+    cfgs: ["unit_tests"],
+    test_options: {
+        unit_test: true,
+    },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}
+
+// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_integration_tests
+rust_test {
+    name: "sdv_mt_telemetry_integration_comms_stack_wrapper_test",
+    defaults: ["telemetry_dt_wrapper_tests_defaults"],
+    cfgs: ["integration_tests"],
+    // Use a custom test config template as per
+    // https://source.android.com/docs/core/tests/vts/setup11, because we need
+    // to ensure that the integration tests are run serially (so that they can
+    // use `fork`), not in parallel, by adding the `--test-threads=1` flag to
+    // the test execution.
+    test_config_template: ":sdv_telemetry_integration_test_config_template",
+    test_options: {
+        unit_test: false,
+    },
+    rustlibs: [
+        // keep-sorted start
+        "libbinder_rs",
+        "libnix",
+        "librand",
+        "libscopeguard",
+        "libsdv_telemetry_test_proto",
+        "libsdv_telemetry_test_proto_bool_value",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    // Requires root so the test can perform Binder calls to the data tunnel
+    // agent.
+    require_root: true,
+}

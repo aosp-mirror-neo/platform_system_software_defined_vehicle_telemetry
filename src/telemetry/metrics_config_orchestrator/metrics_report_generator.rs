@@ -1,0 +1,643 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use async_trait::async_trait;
+use log::debug;
+use protobuf::well_known_types::{any::Any, timestamp::Timestamp};
+use sdv_telemetry_expr::dynamic_message::DynamicMessage;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
+use sdv_telemetry_proto_rust::metrics_configuration::{
+    metrics_report::ReportReason, MetricsReport, MetricsReportConfig,
+};
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
+use sdv_telemetry_utils::value_holder::ValueHolder;
+use std::fmt::Display;
+use std::marker::{Send, Sync};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
+use uuid::Uuid;
+
+use crate::metrics_config_orchestrator::message_builder::{MessageBuilder, MessageBuilderError};
+use crate::metrics_config_orchestrator::{
+    error_status_codes::ErrorStatusCodes,
+    node_evaluation_context_factory::NodeEvaluationContextFactory, trigger::TriggerSubscriber,
+    Trigger,
+};
+use crate::metrics_config_uuid::MetricsConfigUuid;
+use crate::status_reporter::StatusReporter;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::MetricsReportGeneratorErrorDetails::MetricsReportGeneratorErrorDetails,
+    StatusDetails::StatusDetails,
+};
+
+#[async_trait]
+#[cfg_attr(test, sdv_telemetry_utils::with_super_trait(downcast_rs::DowncastSync))]
+pub(crate) trait MetricsReportGenerator: Send + Sync {
+    async fn activate(self: Arc<Self>);
+    async fn deactivate(&self, reason: ReportReason);
+}
+
+#[cfg(test)]
+downcast_rs::impl_downcast!(sync MetricsReportGenerator);
+
+pub(crate) struct MetricsReportGeneratorImpl {
+    config_activation_timestamp: Timestamp,
+    config_uuid: MetricsConfigUuid,
+    config_version: u32,
+    is_active: AsyncMutex<bool>,
+    message_builder: Arc<dyn MessageBuilder>,
+    name: String,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    report_incomplete: bool,
+    report_initial: bool,
+    report_number: AtomicI32,
+    subscriber: TriggerSubscriber,
+    triggers: Vec<Arc<dyn Trigger>>,
+
+    status_reporter: Arc<dyn StatusReporter>,
+    report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
+}
+
+#[async_trait]
+impl MetricsReportGenerator for MetricsReportGeneratorImpl {
+    async fn activate(self: Arc<Self>) {
+        let mut is_active = self.is_active.lock().await;
+        assert!(!*is_active, "Unable to activate metrics report generator: it's already active");
+
+        if self.report_initial {
+            debug!("Generating Initial Metrics Report");
+            let res = Arc::clone(&self.message_builder)
+                .build(&Arc::new(self.node_evaluation_context_factory.create()));
+            self.generate_report(res, ReportReason::INITIAL, None).await;
+        }
+
+        // Subscribing to triggers one by one. In theory, it should be possible to also spawn
+        // subscription tasks in parallel as an optimization.
+        for trigger in &self.triggers {
+            let self_clone = Arc::clone(&self);
+            let trigger_name_clone = trigger.get_name().to_owned();
+            Arc::clone(trigger)
+                .subscribe(
+                    &self.subscriber,
+                    Box::new(move |context, compute_order, countdown_latch| {
+                        self_clone.on_trigger_fired(
+                            &trigger_name_clone,
+                            &context,
+                            compute_order,
+                            countdown_latch,
+                        )
+                    }),
+                )
+                .await;
+        }
+        *is_active = true;
+    }
+
+    async fn deactivate(&self, reason: ReportReason) {
+        let mut is_active = self.is_active.lock().await;
+        assert!(*is_active, "Unable to deactivate metrics report generator: it's already inactive");
+
+        // Unsubscribing from triggers one by one. In theory, it should be possible to also
+        // spawn activation tasks in parallel as an optimization.
+        for trigger in &self.triggers {
+            trigger.unsubscribe(&self.subscriber).await;
+        }
+
+        if self.report_incomplete {
+            let res = Arc::clone(&self.message_builder)
+                .build(&Arc::new(self.node_evaluation_context_factory.create()));
+            self.generate_report(res, reason, None).await;
+        }
+
+        *is_active = false;
+    }
+}
+
+impl MetricsReportGeneratorImpl {
+    #[expect(clippy::too_many_arguments)]
+    pub(super) fn new(
+        metrics_report_config: &MetricsReportConfig,
+        config_activation_timestamp: Timestamp,
+        config_uuid: MetricsConfigUuid,
+        config_version: u32,
+        message_builder: Arc<dyn MessageBuilder>,
+        triggers: Vec<Arc<dyn Trigger>>,
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+        status_reporter: Arc<dyn StatusReporter>,
+        report_ready_callback: Arc<dyn Fn(MetricsReport) + Send + Sync>,
+    ) -> Self {
+        let subscriber =
+            TriggerSubscriber::MetricsReportGenerator { name: metrics_report_config.name.clone() };
+        Self {
+            config_activation_timestamp,
+            config_uuid,
+            config_version,
+            is_active: false.into(),
+            message_builder,
+            name: metrics_report_config.name.clone(),
+            report_incomplete: metrics_report_config.report_incomplete,
+            report_initial: metrics_report_config.report_initial,
+            report_number: 1.into(),
+            subscriber,
+            triggers,
+            node_evaluation_context_factory,
+
+            status_reporter,
+            report_ready_callback,
+        }
+    }
+
+    async fn generate_report(
+        &self,
+        build_result: ValueHolder<
+            'static,
+            (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
+        >,
+        report_reason: ReportReason,
+        trigger_name: Option<&str>,
+    ) {
+        let (build_result, builder_errors) = build_result.into_future().await;
+
+        let error_ids = builder_errors
+            .into_iter()
+            .map(|err| self.report_error(err, |err| err.field_name))
+            .collect::<Vec<_>>();
+
+        let Some(report_data) = build_result else {
+            return;
+        };
+        let report_data = match report_data.to_protobuf() {
+            Ok(report_data) => report_data,
+            Err(err) => {
+                self.report_error(err, |err| err.field_name);
+                return;
+            }
+        };
+
+        let mut report = MetricsReport::new();
+        report.config_activation_timestamp = Some(self.config_activation_timestamp.clone()).into();
+        report.error_ids = error_ids;
+        report.metrics_config_uuid = self.config_uuid.to_string();
+        report.metrics_config_version = self.config_version;
+        report.report_config_name.clone_from(&self.name);
+        report.report_data = Some(Any::pack_dyn(report_data.as_ref()).unwrap()).into();
+        report.report_number = self.report_number.fetch_add(1, Ordering::AcqRel);
+        report.report_timestamp = Some(Timestamp::now()).into();
+        report.report_reason = report_reason.into();
+        report.report_uuid = Uuid::new_v4().to_string();
+
+        debug!(
+            "Metrics Report {} #{} was generated with reason {:?} on trigger {} for metrics config {}, report UUID: {}",
+            report.report_config_name,
+            report.report_number,
+            report_reason,
+            trigger_name.unwrap_or("[none]"),
+            report.metrics_config_uuid,
+            report.report_uuid,
+        );
+
+        (self.report_ready_callback)(report);
+    }
+
+    fn report_error<T: ErrorStatusCodes + Display>(
+        &self,
+        err: T,
+        field_name_provider: impl FnOnce(T) -> String,
+    ) -> i64 {
+        self.status_reporter.report(
+            err.get_status_code(),
+            format!("Metrics config {} metrics report generation for '{}' failed due to message builder error: {}", self.config_uuid, self.name, err),
+            StatusDetails::MetricsReportGeneratorErrorDetails(
+                MetricsReportGeneratorErrorDetails {
+                    metricsConfigUUID: self.config_uuid.to_string(),
+                    metricsReportName: self.name.clone(),
+                    fieldName: field_name_provider(err),
+                },
+        ))
+    }
+
+    fn on_trigger_fired(
+        self: &Arc<Self>,
+        trigger_name: &str,
+        context: &Arc<NodeEvaluationContext>,
+        compute_order: Level,
+        countdown_latch: MultiLevelCountdownLatch,
+    ) {
+        let self_clone = Arc::clone(self);
+        let context_clone = Arc::clone(context);
+        let trigger_name_clone = trigger_name.to_owned();
+        tokio::spawn(async move {
+            // Wait until other objects (such as aggregation publishers) finish their computations
+            // caused be same trigger firing
+            countdown_latch.wait(compute_order).await;
+
+            // Build the message and generate the report
+            let res = Arc::clone(&self_clone.message_builder).build(&context_clone);
+            self_clone.generate_report(res, ReportReason::REGULAR, Some(&trigger_name_clone)).await;
+
+            // Notify that metrics report generator finished its computation
+            countdown_latch.count_down(compute_order).await;
+        });
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    use futures::FutureExt;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
+    use lazy_static::lazy_static;
+    use sdv_telemetry_expr::node_error::NodeEvaluationError;
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
+    use sdv_telemetry_test_proto::test_message::TestMessage;
+    use sdv_telemetry_test_utils::oneshot_callback;
+    use std::{future, sync::atomic::AtomicU32, thread, time::Duration};
+    use tokio::sync::mpsc;
+
+    use crate::metrics_config_orchestrator::message_builder::{
+        mock::MockMessageBuilder, MessageBuilderError, MessageBuilderErrorType,
+    };
+    use crate::metrics_config_orchestrator::{
+        node_evaluation_context_factory::NodeEvaluationContextFactoryImpl,
+        protobuf_dynamic_message::ProtobufDynamicMessage, trigger::mock::MockTrigger,
+    };
+    use crate::StatusReporterImpl;
+
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+    }
+
+    const CONFIG_VERSION: u32 = 42;
+    const REPORT_CONFIG_NAME: &str = "name";
+    const FIELD_NAME: &str = "field_name";
+
+    fn create_report_config_proto(report_initial: bool) -> MetricsReportConfig {
+        let mut config = MetricsReportConfig::new();
+        REPORT_CONFIG_NAME.clone_into(&mut config.name);
+        config.report_incomplete = true;
+        config.report_initial = report_initial;
+        config
+    }
+
+    fn create_default_generator() -> MetricsReportGeneratorImpl {
+        create_generator(Arc::new(MockMessageBuilder::new()), false)
+    }
+
+    fn create_generator(
+        message_builder: Arc<MockMessageBuilder>,
+        report_initial: bool,
+    ) -> MetricsReportGeneratorImpl {
+        MetricsReportGeneratorImpl::new(
+            &create_report_config_proto(report_initial),
+            Timestamp::now(),
+            *CONFIG_UUID,
+            CONFIG_VERSION,
+            message_builder,
+            vec![],
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::new(StatusReporterImpl::new(|err| {
+                panic!("Unexpected error: {err:?}");
+            })),
+            Arc::new(|_| {}),
+        )
+    }
+
+    fn create_trigger() -> MockTrigger {
+        MockTrigger::new_for_subscriber(
+            String::default(),
+            *CONFIG_UUID,
+            TriggerSubscriber::MetricsReportGenerator { name: REPORT_CONFIG_NAME.to_owned() },
+        )
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn activate_already_active_panics() {
+        let generator = Arc::new(create_default_generator());
+
+        Arc::clone(&generator).activate().await;
+        Arc::clone(&generator).activate().await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_subscribes_to_trigger() {
+        let mut trigger = create_trigger();
+        let num_fired = Arc::new(AtomicU32::new(0));
+        let num_fired_clone = Arc::clone(&num_fired);
+        trigger.subscribe_callback.replace(Box::new(move |_| {
+            num_fired_clone.fetch_add(1, Ordering::AcqRel);
+        }));
+
+        let mut generator = create_default_generator();
+        generator.triggers.push(Arc::new(trigger));
+
+        Arc::new(generator).activate().await;
+
+        assert_eq!(num_fired.load(Ordering::Acquire), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_with_report_initial_creates_report() {
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let mut generator = create_generator(Arc::clone(&message_builder), true);
+        let (tx, mut rx) = mpsc::channel(2);
+        generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
+        let generator = Arc::new(generator);
+
+        // Activate the generator.
+        Arc::clone(&generator).activate().await;
+
+        // Wait for report to be delivered.
+        let report = rx.recv().await.unwrap();
+
+        // Verify the report.
+        assert_eq!(
+            report.config_activation_timestamp.unwrap(),
+            generator.config_activation_timestamp
+        );
+        assert!(report.error_ids.is_empty(), "Unexpected error ids: {:?}", report.error_ids);
+        assert_eq!(report.metrics_config_uuid, CONFIG_UUID.to_string());
+        assert_eq!(report.metrics_config_version, CONFIG_VERSION);
+        assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
+        assert_eq!(report.report_number, 1);
+        assert!(
+            // Less than 1 hour old.
+            Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
+        );
+        assert!(matches!(report.report_reason.unwrap(), ReportReason::INITIAL));
+        assert!(!Uuid::try_parse(&report.report_uuid).unwrap().is_nil());
+
+        // as built by MockMessageBuilder
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_creates_reports() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
+        let (tx, mut rx) = mpsc::channel(2);
+        generator.report_ready_callback = Arc::new(move |report| tx.try_send(report).unwrap());
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+        let generator = Arc::new(generator);
+
+        // Activate the generator.
+        Arc::clone(&generator).activate().await;
+
+        // Fire twice to make sure report number is incremented.
+        trigger.fire().await;
+        trigger.fire().await;
+
+        // Wait for reports to be delivered.
+        rx.recv().await.unwrap();
+        let report = rx.recv().await.unwrap();
+
+        // Verify the report.
+        assert_eq!(
+            report.config_activation_timestamp.unwrap(),
+            generator.config_activation_timestamp
+        );
+        assert!(report.error_ids.is_empty(), "Unexpected error ids: {:?}", report.error_ids);
+        assert_eq!(report.metrics_config_uuid, CONFIG_UUID.to_string());
+        assert_eq!(report.metrics_config_version, CONFIG_VERSION);
+        assert_eq!(report.report_config_name, REPORT_CONFIG_NAME);
+        assert_eq!(report.report_number, 2);
+        assert!(
+            // Less than 1 hour old.
+            Timestamp::now().seconds - report.report_timestamp.as_ref().unwrap().seconds < 60 * 60
+        );
+        assert!(matches!(report.report_reason.unwrap(), ReportReason::REGULAR));
+        assert!(!Uuid::try_parse(&report.report_uuid).unwrap().is_nil());
+
+        // as built by MockMessageBuilder
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 1);
+
+        // verify no other reports were generated
+        assert_eq!(message_builder.get_num_build_calls(), 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_reports_builder_error() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_error(MessageBuilderError {
+            field_name: FIELD_NAME.to_owned(),
+            error: MessageBuilderErrorType::ExpressionEvaluationError {
+                e: NodeEvaluationError::DivideByZero,
+            },
+        });
+
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
+        let (tx, rx) = oneshot_callback();
+        generator.status_reporter = Arc::new(StatusReporterImpl::new(tx));
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+        let generator = Arc::new(generator);
+
+        Arc::clone(&generator).activate().await;
+
+        trigger.fire().await;
+
+        // Wait for error status to be delivered.
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                id: 0,
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_EXPRESSION_NODE_EVALUATION_ERROR,
+                message,
+                details: StatusDetails::MetricsReportGeneratorErrorDetails(
+                    MetricsReportGeneratorErrorDetails { metricsConfigUUID, metricsReportName, fieldName }
+                ),
+            }
+            if message.contains("failed due to message builder error") && *metricsConfigUUID == CONFIG_UUID.to_string() && metricsReportName == REPORT_CONFIG_NAME && fieldName == FIELD_NAME),
+            "Unexpected status: {status:?}"
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_creates_reports_with_trigger_context() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = MockMessageBuilder::new();
+        message_builder.set_result_callback(|context| {
+            (
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    repeated_i64s: vec![i64::try_from(context.root_id()).unwrap()],
+                    ..Default::default()
+                }))) as Box<dyn DynamicMessage>),
+                vec![],
+            )
+                .into()
+        });
+        let mut generator = create_generator(Arc::new(message_builder), false);
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+
+        // Activate the generator.
+        Arc::new(generator).activate().await;
+
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        trigger.fire_with_context(Arc::clone(&context)).await;
+
+        // Wait for the report to be delivered.
+        let report = rx.await;
+
+        // Verify the report.
+        let test_message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(test_message.repeated_i64s, vec![i64::try_from(context.root_id()).unwrap()]);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_creates_reports_from_async_result() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_async_result(
+            future::ready((
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 2,
+                    ..Default::default()
+                }))) as Box<dyn DynamicMessage>),
+                vec![],
+            ))
+            .boxed(),
+        );
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+
+        Arc::new(generator).activate().await;
+        trigger.fire().await;
+        let report = rx.await;
+
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 2);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_trigger_fired_creates_partial_reports() {
+        let trigger = Arc::new(create_trigger());
+
+        let message_builder = Arc::new(MockMessageBuilder::new());
+        message_builder.set_next_async_result(
+            future::ready((
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 2,
+                    ..Default::default()
+                }))) as Box<dyn DynamicMessage>),
+                vec![MessageBuilderError {
+                    field_name: FIELD_NAME.to_owned(),
+                    error: MessageBuilderErrorType::ExpressionEvaluationError {
+                        e: NodeEvaluationError::ConstantValueNotSet,
+                    },
+                }],
+            ))
+            .boxed(),
+        );
+        let mut generator = create_generator(Arc::clone(&message_builder), false);
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
+        generator.status_reporter = Arc::new(StatusReporterImpl::new(|_| {}));
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+
+        Arc::new(generator).activate().await;
+        trigger.fire().await;
+        let report = rx.await;
+
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 2);
+        // message builder error was assigned an id = 0
+        assert_eq!(report.error_ids, vec![0]);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn report_ready_callback_doesnt_block_trigger_fire() {
+        let trigger = Arc::new(create_trigger());
+
+        let mut generator = create_default_generator();
+        generator.report_ready_callback = Arc::new(|_| thread::sleep(Duration::MAX));
+        generator.triggers.push(Arc::<MockTrigger>::clone(&trigger));
+        Arc::new(generator).activate().await;
+
+        trigger.fire().await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn deactivate_already_inactive_panics() {
+        let generator = Arc::new(create_default_generator());
+
+        generator.deactivate(ReportReason::INCOMPLETE_DEACTIVATED).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn deactivate_unsubscribes_from_trigger() {
+        let mut trigger = create_trigger();
+        let num_fired = Arc::new(AtomicU32::new(0));
+        let num_fired_clone = Arc::clone(&num_fired);
+        trigger.set_unsubscribe_callback(move |_| {
+            num_fired_clone.fetch_add(1, Ordering::AcqRel);
+        });
+
+        let mut generator = create_default_generator();
+        generator.triggers.push(Arc::new(trigger));
+        let generator = Arc::new(generator);
+
+        Arc::clone(&generator).activate().await;
+        generator.deactivate(ReportReason::INCOMPLETE_DEACTIVATED).await;
+
+        assert_eq!(num_fired.load(Ordering::Acquire), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn deactivate_generates_incomplete_report() {
+        let mut generator = create_default_generator();
+        generator.report_incomplete = true;
+        let (tx, rx) = oneshot_callback();
+        generator.report_ready_callback = Arc::new(tx);
+        let generator = Arc::new(generator);
+
+        Arc::clone(&generator).activate().await;
+        generator.deactivate(ReportReason::INCOMPLETE_DEACTIVATED).await;
+        let report = rx.await;
+
+        assert_eq!(report.report_reason, ReportReason::INCOMPLETE_DEACTIVATED.into());
+        let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
+        assert_eq!(message.int_field, 1);
+    }
+}

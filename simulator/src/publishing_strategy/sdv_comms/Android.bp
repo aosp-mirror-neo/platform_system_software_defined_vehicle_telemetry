@@ -1,0 +1,91 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_visibility: ["//visibility:private"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_simulator_publishing_strategy_sdv_comms_defaults",
+    defaults: ["sdv_telemetry_simulator@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libanyhow",
+        "libfutures",
+        "libparking_lot",
+        "libprotobuf",
+        "librand",
+        "libsdv_comms_rs",
+        "libsdv_proto_reflection_rs",
+        "libsdv_status_rs",
+        "libsdv_telemetry_comms_utils",
+        "libsdv_telemetry_dt_wrapper",
+        "libsdv_telemetry_simulator_publishing_strategy",
+        "libsdv_telemetry_utils",
+        "libtokio",
+        "libtokio_stream",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_simulator_publishing_strategy_sdv_comms",
+    visibility: ["//system/software_defined_vehicle/telemetry/simulator:__subpackages__"],
+    defaults: ["libsdv_telemetry_simulator_publishing_strategy_sdv_comms_defaults"],
+    crate_name: "sdv_telemetry_simulator_publishing_strategy_sdv_comms",
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_integration_simulator_publishing_strategy_sdv_comms_test",
+    defaults: ["libsdv_telemetry_simulator_publishing_strategy_sdv_comms_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libfutures",
+        "libgoogletest_rust",
+        "libitertools",
+        "libmockall",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    flags: [
+        // keep-sorted start
+        "-A clippy::borrowed_box",
+        "-A clippy::panic",
+        "-A clippy::unwrap_used",
+        // keep-sorted end
+    ],
+    ld_flags: ["-Wl,--no-as-needed"],
+    test_config_template: ":sdv_telemetry_integration_test_config_template",
+    test_options: {
+        unit_test: false,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+}

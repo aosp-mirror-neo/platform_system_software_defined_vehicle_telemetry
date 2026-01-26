@@ -1,0 +1,89 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_visibility: ["//visibility:private"],
+}
+
+cc_defaults {
+    name: "sdv_telemetry@cc_defaults",
+    defaults_visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
+    defaults: [
+        "sdv@cc_defaults",
+        "sdv_tracing@cc_defaults",
+    ],
+    cflags: [
+        "-Wno-unused-private-field",
+    ],
+}
+
+rust_defaults {
+    name: "sdv_telemetry@rust_defaults",
+    defaults_visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
+    defaults: [
+        "sdv@rust_defaults",
+        "sdv_tracing@rust_defaults",
+    ],
+    flags: [
+        // Disallows function signatures using `&Option<T>`. Instead use
+        // `Option<&T>` or `Option<T>` (if `T: Copy`). `&Option<T>` requires the
+        // caller to own `T`, whereas `Option<&T>` does not require the caller
+        // to own it, which provides greater flexibility (see also ag/28707195).
+        "-D clippy::ref_option",
+        // By enforcing this lint, we make it a lot more obvious when a conversion
+        // is potentially lossy, because lossless conversions are no longer
+        // allowed to be written as `a as XX`.
+        "-D clippy::cast_lossless",
+        // By enabling this lint, we make it easier to understand whether
+        // something being cloned is actually just cloning a pointer, or cloning
+        // the actual object.
+        "-D clippy::clone_on_ref_ptr",
+        // We prefer `if let ... {} else {}` over a `match` with two arms (note:
+        // this lint will not apply if the `match` statement has very simple
+        // arms).
+        "-D clippy::single_match_else",
+        // Similarly, we prefer `if ... {} else {}` over a `match` for bools.
+        "-D clippy::match_bool",
+    ],
+}
+
+// Defaults for a `genrule` that converts a Metrics Config in textproto format
+// (specified in `srcs`) to binary proto format (specified in `out`).
+genrule_defaults {
+    name: "sdv_telemetry_textproto_to_binary_metrics_config_defaults",
+    defaults_visibility: [
+        // keep-sorted start
+        "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
+        "//system/software_defined_vehicle/telemetry:__subpackages__",
+        // keep-sorted end
+    ],
+    tools: ["aprotoc"],
+    tool_files: [
+        ":libprotobuf-internal-protos",
+        ":sdv_telemetry_proto_srcs",
+    ],
+    cmd: "$(location aprotoc) --encode=google.sdv.telemetry.MetricsConfig -I ./tools/src/external/protobuf/src -I ./tools/src ./tools/src/system/software_defined_vehicle/telemetry/proto/metrics_configuration/metrics_configuration.proto < $(in) > $(out)",
+}

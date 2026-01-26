@@ -1,0 +1,238 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+//! This module implements code extensions for HashMaps and Vector
+
+use std::collections::hash_map::{Entry, OccupiedEntry};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::Hash;
+
+/// Additional HashMap functions that are either not available in the standard library, or hidden
+/// behind experiment flags.
+pub trait HashMapExtension<K: Eq + Hash, V> {
+    /// Creates topologically sorted vector of keys using Kahn's algorithm based on dependency
+    /// information stored in a HashMap.
+    ///
+    /// # Arguments
+    ///
+    /// * `dependency_selector` - A function that accepts HashMap value and returns keys that are
+    ///   dependent on the corresponding entry.
+    fn to_topological_sorted_vec<F: Fn(&V) -> &[K]>(
+        &self,
+        dependency_selector: F,
+    ) -> Option<Vec<&K>>;
+
+    /// Returns list of keys which the given key is dependent on
+    ///
+    /// # Arguments
+    ///
+    /// * `key` key to determine dependencies
+    /// * `dependency_selector` - A function that accepts HashMap value and returns keys that are
+    ///   dependent on the corresponding entry.
+    fn get_key_dependencies<'a, F: Fn(&V) -> &[K]>(
+        &'a self,
+        key: &'a K,
+        dependency_selector: F,
+    ) -> HashSet<&'a K>;
+
+    /// Tries to insert a key-value pair into the map, and returns a mutable reference to the value
+    /// in the entry.
+    /// If the map already had this key present, nothing is updated, and Err that contains the
+    /// existing entry is returned.
+    fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, OccupiedEntry<K, V>>;
+}
+
+/// Additional Vec functions that are either not available in the standard library, or hidden
+/// behind experiment flags.
+pub trait VecExtension<T> {
+    /// Consumes vector and returns a HashMap with vector elements as values.
+    ///
+    /// # Arguments
+    ///
+    /// * `key_provider` - A function that accepts vector element and returns the key that will
+    ///   correspond to the element in HashMap.
+    fn into_hash_map<K: Eq + Hash, F: Fn(&T) -> K>(self, key_provider: F) -> HashMap<K, T>;
+}
+
+impl<K: Eq + Hash, V> HashMapExtension<K, V> for HashMap<K, V> {
+    fn to_topological_sorted_vec<F: Fn(&V) -> &[K]>(
+        &self,
+        dependency_selector: F,
+    ) -> Option<Vec<&K>> {
+        let mut in_degrees: HashMap<&K, usize> = HashMap::new();
+        let mut sorted_order: Vec<&K> = Vec::new();
+        let mut queue: VecDeque<&K> = VecDeque::new();
+
+        // Initialize in-degrees for all dependencies.
+        for value in self.values() {
+            for dependency in dependency_selector(value) {
+                *in_degrees.entry(dependency).or_insert(0) += 1;
+            }
+        }
+
+        // Enqueue keys with no dependencies.
+        for key in self.keys() {
+            if !in_degrees.contains_key(key) {
+                queue.push_back(key);
+            }
+        }
+
+        // Process keys in the queue.
+        while let Some(key) = queue.pop_front() {
+            sorted_order.push(key);
+            if let Some(value) = self.get(key) {
+                for dependency in dependency_selector(value) {
+                    let in_degree = in_degrees.get_mut(dependency).unwrap();
+                    *in_degree -= 1;
+                    if *in_degree == 0 {
+                        queue.push_back(dependency);
+                    }
+                }
+            }
+        }
+
+        // if every vertex appears in sorted list, sort is successful.
+        if sorted_order.len() >= self.len() {
+            Some(sorted_order)
+        } else {
+            None
+        }
+    }
+
+    fn get_key_dependencies<'a, F: Fn(&V) -> &[K]>(
+        &'a self,
+        key: &'a K,
+        dependency_selector: F,
+    ) -> HashSet<&'a K> {
+        let mut processed_keys = HashSet::new();
+        let mut queue: VecDeque<&K> = VecDeque::new();
+        queue.push_back(key);
+        processed_keys.insert(key);
+
+        while let Some(key) = queue.pop_front() {
+            if let Some(value) = self.get(key) {
+                for dependency in dependency_selector(value) {
+                    if processed_keys.insert(dependency) {
+                        queue.push_back(dependency);
+                    }
+                }
+            }
+        }
+
+        processed_keys
+    }
+
+    fn try_insert_value(&mut self, key: K, value: V) -> Result<&mut V, OccupiedEntry<K, V>> {
+        match self.entry(key) {
+            Entry::Occupied(o) => Err(o),
+            Entry::Vacant(v) => Ok(v.insert(value)),
+        }
+    }
+}
+
+impl<T> VecExtension<T> for Vec<T> {
+    /// Converts `self` into a HashMap with keys generated by `key_provider`. For
+    /// duplicate keys, later values in `self` will overwrite previous values.
+    fn into_hash_map<K: Eq + Hash, F: Fn(&T) -> K>(self, key_provider: F) -> HashMap<K, T> {
+        self.into_iter().map(|val| (key_provider(&val), val)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::collections::HashMap;
+
+    #[test]
+    fn simple_into_hash_map() {
+        let vec = vec![1, 2, 3, 4];
+        let map = vec.into_hash_map(|val| format!("key-{val}"));
+        assert_eq!(map.len(), 4);
+        assert_eq!(map.get("key-1"), Some(&1));
+        assert_eq!(map.get("key-2"), Some(&2));
+        assert_eq!(map.get("key-3"), Some(&3));
+        assert_eq!(map.get("key-4"), Some(&4));
+    }
+
+    #[test]
+    fn duplicate_key_into_hash_map() {
+        let vec = vec![1, 2, 3, 4];
+        let map = vec.into_hash_map(|_| "fixed-key");
+        assert_eq!(map.len(), 1);
+        assert_eq!(map.get("fixed-key"), Some(&4));
+    }
+
+    #[test]
+    fn empty_into_hash_map() {
+        let vec = vec![];
+        let map = vec.into_hash_map(|_: &i32| unreachable!());
+        assert_eq!(map.len(), 0);
+    }
+
+    #[test]
+    fn try_insert_value() {
+        let mut map = HashMap::new();
+        map.try_insert_value("key".to_owned(), 1).unwrap();
+        assert_eq!(map.get("key"), Some(&1));
+
+        let occupied_entry = map.try_insert_value("key".to_owned(), 2).unwrap_err();
+        assert_eq!(occupied_entry.key(), "key");
+        assert_eq!(occupied_entry.get(), &1);
+        assert_eq!(map.get("key"), Some(&1));
+        assert_eq!(map.len(), 1);
+    }
+
+    #[test]
+    fn get_key_dependencies_empty() {
+        let dependencies = HashMap::<i32, Vec<i32>>::new();
+        let key = 0;
+        assert_eq!(dependencies.get_key_dependencies(&key, |adj| adj), [0].iter().collect());
+    }
+
+    #[test]
+    fn get_key_dependencies_two_components() {
+        /*
+           A -> C -> D -> E   G <-> F
+           \       ^
+            \     /
+             -> B
+        */
+
+        let mut dependencies = HashMap::new();
+        dependencies.insert("A", vec!["B", "C"]);
+        dependencies.insert("B", vec!["D"]);
+        dependencies.insert("C", vec!["D"]);
+        dependencies.insert("D", vec!["E"]);
+        dependencies.insert("G", vec!["F"]);
+        dependencies.insert("F", vec!["G"]);
+
+        assert_eq!(
+            dependencies.get_key_dependencies(&"A", |adj| adj),
+            ["A", "B", "C", "D", "E"].iter().collect()
+        );
+        assert_eq!(
+            dependencies.get_key_dependencies(&"B", |adj| adj),
+            ["B", "D", "E"].iter().collect()
+        );
+        assert_eq!(
+            dependencies.get_key_dependencies(&"C", |adj| adj),
+            ["C", "D", "E"].iter().collect()
+        );
+        assert_eq!(dependencies.get_key_dependencies(&"D", |adj| adj), ["D", "E"].iter().collect());
+        assert_eq!(dependencies.get_key_dependencies(&"E", |adj| adj), ["E"].iter().collect());
+        assert_eq!(dependencies.get_key_dependencies(&"F", |adj| adj), ["F", "G"].iter().collect());
+        assert_eq!(dependencies.get_key_dependencies(&"G", |adj| adj), ["F", "G"].iter().collect());
+    }
+}

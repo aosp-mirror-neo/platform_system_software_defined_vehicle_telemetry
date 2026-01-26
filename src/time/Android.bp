@@ -1,0 +1,112 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_visibility: ["//visibility:private"],
+}
+
+cc_library {
+    name: "libsdv_telemetry_time",
+    defaults: ["sdv_telemetry@cc_defaults"],
+    srcs: ["get_time.cc"],
+    shared_libs: [
+        // keep-sorted start
+        "libbase",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_bindgen {
+    name: "libsdv_telemetry_time_bindgen",
+    crate_name: "sdv_telemetry_time_bindgen",
+    wrapper_src: "time_wrapper.h",
+    cpp_std: "gnu++17",
+    source_stem: "bindings",
+    shared_libs: [
+        // keep-sorted start
+        "libsdv_telemetry_time",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_unit_time_bindgen_test",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    crate_name: "sdv_telemetry_time_bindgen_tests",
+    srcs: [
+        ":libsdv_telemetry_time_bindgen",
+    ],
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+
+    // Disable all lints because the generated code is not guaranteed to be
+    // lint-free.
+    clippy_lints: "none",
+    lints: "none",
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_time_wrapper_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "time_wrapper.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "libsdv_telemetry_time_bindgen",
+        // keep-sorted end
+    ],
+}
+
+rust_library {
+    name: "libsdv_telemetry_time_wrapper",
+    visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
+    defaults: ["libsdv_telemetry_time_wrapper_defaults"],
+    crate_name: "sdv_telemetry_time_wrapper",
+    vendor_available: true,
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_unit_time_wrapper_test",
+    defaults: ["libsdv_telemetry_time_wrapper_defaults"],
+    crate_name: "sdv_telemetry_time_wrapper_tests",
+    test_options: {
+        unit_test: true,
+    },
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    auto_gen_config: true,
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}

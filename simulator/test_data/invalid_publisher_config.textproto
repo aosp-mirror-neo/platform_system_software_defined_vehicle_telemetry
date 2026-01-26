@@ -1,0 +1,29 @@
+# Copyright (C) 2026 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Incorrect line, field should be called service_name.
+publisher_name: "TestPublisher"
+
+data_format_protos {
+  message_type {
+    name: "TestMessage"
+    field { name: "test_field" number: 1 type: TYPE_INT32 }
+  }
+}
+data_format_message_name: "TestMessage"
+data_generators {
+  loop_data: true
+  default_delay { seconds: 1 nanos: 0 }
+  csv_file { file_path: "test_data.csv" delimiter: "," }
+}

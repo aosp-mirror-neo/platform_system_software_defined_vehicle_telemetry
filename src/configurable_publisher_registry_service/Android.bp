@@ -1,0 +1,98 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_visibility: ["//visibility:private"],
+}
+
+rust_defaults {
+    name: "libsdv_telemetry_configurable_publisher_defaults",
+    defaults: ["sdv_telemetry@rust_defaults"],
+    srcs: [
+        "lib.rs",
+    ],
+    rustlibs: [
+        // keep-sorted start
+        "google.sdv.telemetry.configurable_publisher-V2-rust",
+        "libanyhow",
+        "libbinder_rs",
+        "libbinder_tokio_rs",
+        "libdashmap",
+        "liblog_rust",
+        "libparking_lot",
+        "libprotobuf",
+        "libsdv_telemetry_binder_utils",
+        "libsdv_telemetry_service_publisher_accessor",
+        "libsdv_telemetry_utils",
+        "libthiserror",
+        "libtokio",
+        // keep-sorted end
+    ],
+    proc_macros: [
+        // keep-sorted start
+        "libasync_trait",
+        "libclap_derive",
+        // keep-sorted end
+    ],
+    vendor_available: true,
+}
+
+rust_library {
+    name: "libsdv_telemetry_configurable_publisher",
+    visibility: ["//visibility:public"],
+    defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
+    crate_name: "sdv_telemetry_configurable_publisher",
+}
+
+rust_test {
+    name: "sdv_mt_telemetry_unit_telemetry_configurable_publisher_test",
+    defaults: ["libsdv_telemetry_configurable_publisher_defaults"],
+    rustlibs: [
+        // keep-sorted start
+        "libgoogletest_rust",
+        "librand",
+        "libsdv_telemetry_test_utils",
+        // keep-sorted end
+    ],
+    test_suites: [
+        // keep-sorted start
+        "automotive-sdv-tests",
+        "general-tests",
+        // keep-sorted end
+    ],
+    target: {
+        host: {
+            data_libs: [
+                // keep-sorted start
+                "libbase",
+                "libbinder",
+                "libbinder_ndk",
+                "libc++",
+                "libcutils",
+                "liblog",
+                "libutils",
+                // keep-sorted end
+            ],
+        },
+    },
+    auto_gen_config: true,
+    test_options: {
+        unit_test: true,
+    },
+    // Requires root so the test can create required directories in
+    // /data/local/tests/
+    require_root: true,
+}

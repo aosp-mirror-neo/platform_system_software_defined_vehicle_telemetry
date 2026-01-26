@@ -1,0 +1,146 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use async_trait::async_trait;
+use core::pin::pin;
+use futures::{Stream, StreamExt};
+use tokio_util::sync::CancellationToken;
+
+/// Receives and processes events asynchronously in a background task.
+pub(super) struct AsyncEventProcessor {
+    _cancellation_drop_guard: tokio_util::sync::DropGuard,
+}
+
+#[async_trait]
+pub(super) trait AsyncEventHandler<TEvent> {
+    async fn handle(&mut self, event: TEvent);
+}
+
+impl AsyncEventProcessor {
+    /// Creates a processor that asynchronously processes incoming events in a background task
+    /// using the provided callback.
+    ///
+    /// The background task is cancelled and the receiver is dropped when the processor is dropped.
+    pub(super) fn new<TEvent: Send + 'static>(
+        receiver: impl Stream<Item = TEvent> + Send + 'static,
+        mut handler: impl AsyncEventHandler<TEvent> + Send + 'static,
+    ) -> Self {
+        let cancellation_token = CancellationToken::new();
+        let cancellation_token_clone = cancellation_token.clone();
+        tokio::spawn(async move {
+            let mut receiver = pin!(receiver);
+            loop {
+                tokio::select! {
+                    // Discard pending messages if the processor was dropped.
+                    biased;
+                    _ = cancellation_token_clone.cancelled() => break,
+                    maybe_event = receiver.next() => {
+                        if let Some(event) = maybe_event {
+                            handler.handle(event).await;
+                        } else {
+                            // Sender was dropped, so there will be no more events.
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+
+        Self { _cancellation_drop_guard: cancellation_token.drop_guard() }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::Arc;
+    use tokio::sync::mpsc;
+    use tokio_stream::wrappers::{ReceiverStream, UnboundedReceiverStream};
+
+    #[derive(Clone)]
+    struct TestEventHandler {
+        event_count: Arc<AtomicU32>,
+    }
+
+    #[async_trait]
+    impl AsyncEventHandler<()> for TestEventHandler {
+        async fn handle(&mut self, _event: ()) {
+            self.event_count.fetch_add(1, Ordering::AcqRel);
+        }
+    }
+
+    impl TestEventHandler {
+        fn new() -> Self {
+            Self { event_count: Arc::new(0.into()) }
+        }
+
+        fn get_event_count(&self) -> u32 {
+            self.event_count.load(Ordering::Acquire)
+        }
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn process_events_success() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let handler = TestEventHandler::new();
+        let _processor =
+            AsyncEventProcessor::new(UnboundedReceiverStream::new(rx), handler.clone());
+
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        tx.send(()).unwrap();
+        tokio::task::yield_now().await;
+
+        assert_eq!(handler.get_event_count(), 3);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn process_events_with_bounded_receiver_success() {
+        let (tx, rx) = mpsc::channel(2);
+        let handler = TestEventHandler::new();
+        let _processor = AsyncEventProcessor::new(ReceiverStream::new(rx), handler.clone());
+
+        tx.send(()).await.unwrap();
+        tx.send(()).await.unwrap();
+        tx.send(()).await.unwrap();
+        tokio::task::yield_now().await;
+
+        assert_eq!(handler.get_event_count(), 3);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn drop_success() {
+        let (tx, rx) = mpsc::unbounded_channel();
+        let handler = TestEventHandler::new();
+
+        {
+            let _processor =
+                AsyncEventProcessor::new(UnboundedReceiverStream::new(rx), handler.clone());
+            // `processor` is dropped here, so the background task should be cancelled.
+        }
+        // Before task is cancelled, send should be successful, but the event should not get processed.
+        tx.send(()).unwrap();
+        // Yield to process task cancellation.
+        tokio::task::yield_now().await;
+
+        // After task cancellation send should fail.
+        assert!(tx.send(()).is_err());
+        assert_eq!(handler.get_event_count(), 0);
+    }
+}

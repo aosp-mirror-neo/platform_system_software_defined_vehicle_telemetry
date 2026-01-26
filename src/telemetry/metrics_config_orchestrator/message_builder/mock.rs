@@ -1,0 +1,122 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use super::*;
+
+use futures::future::BoxFuture;
+use parking_lot::Mutex;
+use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
+use sdv_telemetry_test_proto::test_message::TestMessage;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
+
+use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
+
+/// The builder will build a TestMessage defined in `src/test_utils/test_message.proto`
+pub(crate) struct MockMessageBuilder {
+    next_error: Mutex<Option<MessageBuilderError>>,
+    next_async_result: Mutex<
+        Option<BoxFuture<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>>,
+    >,
+    num_build_calls: AtomicU32,
+    num_reset_calls: AtomicU32,
+    result_callback: Mutex<
+        Option<
+            Box<
+                dyn Fn(
+                        &Arc<NodeEvaluationContext>,
+                    ) -> ValueHolder<
+                        'static,
+                        (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>),
+                    > + Send
+                    + Sync,
+            >,
+        >,
+    >,
+}
+
+impl MessageBuilder for MockMessageBuilder {
+    fn build(
+        self: Arc<Self>,
+        context: &Arc<NodeEvaluationContext>,
+    ) -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)> {
+        self.num_build_calls.fetch_add(1, Ordering::AcqRel);
+
+        if let Some(error) = self.next_error.lock().take() {
+            return (None, vec![error]).into();
+        }
+
+        if let Some(async_result) = self.next_async_result.lock().take() {
+            async_result.into()
+        } else if let Some(result_callback) = self.result_callback.lock().as_ref() {
+            result_callback(context)
+        } else {
+            ValueHolder::Synchronous((
+                Some(Box::new(ProtobufDynamicMessage::new(Arc::new(TestMessage {
+                    int_field: 1,
+                    ..Default::default()
+                })))),
+                vec![],
+            ))
+        }
+    }
+
+    fn reset(&self) {
+        self.num_reset_calls.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+impl MockMessageBuilder {
+    pub(crate) fn new() -> Self {
+        Self {
+            next_error: None.into(),
+            next_async_result: None.into(),
+            num_build_calls: 0.into(),
+            num_reset_calls: 0.into(),
+            result_callback: None.into(),
+        }
+    }
+
+    pub(crate) fn get_num_reset_calls(&self) -> u32 {
+        self.num_reset_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn get_num_build_calls(&self) -> u32 {
+        self.num_build_calls.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn set_next_error(&self, error: MessageBuilderError) {
+        self.next_error.lock().replace(error);
+    }
+
+    pub(crate) fn set_next_async_result(
+        &self,
+        future: BoxFuture<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>,
+    ) {
+        self.next_async_result.lock().replace(future);
+    }
+
+    pub(crate) fn set_result_callback(
+        &self,
+        callback: impl Fn(
+                &Arc<NodeEvaluationContext>,
+            )
+                -> ValueHolder<'static, (Option<Box<dyn DynamicMessage>>, Vec<MessageBuilderError>)>
+            + Send
+            + Sync
+            + 'static,
+    ) {
+        self.result_callback.lock().replace(Box::new(callback));
+    }
+}

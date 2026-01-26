@@ -1,0 +1,61 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package {
+    default_team: "trendy_team_connectivity_telemetry",
+    default_applicable_licenses: ["Android-Apache-2.0"],
+    default_visibility: ["//system/software_defined_vehicle/telemetry/tests:__subpackages__"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_simple_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["simple_config.txtpb"],
+    out: ["simple_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_same_trigger_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["same_trigger_config.txtpb"],
+    out: ["same_trigger_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_aggregation_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["aggregation_config.txtpb"],
+    out: ["aggregation_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_someip_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["someip_config.txtpb"],
+    out: ["someip_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_middleware_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["middleware_config.txtpb"],
+    out: ["middleware_config.binpb"],
+}
+
+genrule {
+    name: "sdv_telemetry_test_data_cross_partition_test_config_binpb",
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["cross_partition_test_config.txtpb"],
+    out: ["cross_partition_test_config.binpb"],
+}

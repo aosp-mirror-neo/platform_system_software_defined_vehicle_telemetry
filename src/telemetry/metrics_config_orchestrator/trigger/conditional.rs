@@ -1,0 +1,805 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use async_trait::async_trait;
+use log::error;
+use sdv_telemetry_expr::{
+    node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
+    node_value::NodeValue,
+};
+use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
+use sdv_telemetry_utils::operation_result::OperationResult;
+use std::sync::{Arc, Weak};
+use std::time::Duration;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::UnboundedReceiverStream;
+
+use super::base::{BaseTrigger, TriggerState};
+use super::{Trigger, TriggerCallbackFn, TriggerSubscriber};
+use crate::metrics_config_orchestrator::async_event_processor::{
+    AsyncEventHandler, AsyncEventProcessor,
+};
+use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
+use crate::metrics_config_orchestrator::trigger::condition_checker::{
+    ConditionChecker, ConstantConditionChecker, EdgeConditionChecker,
+    PreviousValueRelationalConditionChecker,
+};
+use crate::metrics_config_orchestrator::{
+    error_status_codes::ErrorStatusCodes,
+    node_evaluation_context_factory::NodeEvaluationContextFactory,
+};
+use crate::metrics_config_uuid::MetricsConfigUuid;
+use crate::status_reporter::StatusReporter;
+
+use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+    StatusDetails::ConditionalTriggerErrorDetails::ConditionalTriggerErrorDetails,
+    StatusDetails::StatusDetails,
+};
+
+#[derive(Clone)]
+#[cfg_attr(test, derive(Debug, Default, Eq, PartialEq))]
+pub(crate) struct EdgeOptions {
+    pub(crate) min_duration: Duration,
+    pub(crate) require_exact: bool,
+}
+
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
+pub(crate) enum ConditionType {
+    /// Compares values using the LT relational operator.
+    RisingEdge(EdgeOptions),
+    /// Compares values using the GT relational operator.
+    FallingEdge(EdgeOptions),
+    /// Compares values using the LT and GT relational operators.
+    BothEdges {
+        rising_options: EdgeOptions,
+        falling_options: EdgeOptions,
+    },
+    /// Compares values using the NOT_EQ relational operator.
+    AllChanges,
+    IsTrue,
+    IsFalse,
+}
+
+pub(crate) struct ConditionalTrigger {
+    base: BaseTrigger,
+    condition_type: ConditionType,
+    node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+    selector_expression: Arc<Node>,
+    status_reporter: Arc<dyn StatusReporter>,
+    subscriber: TriggerSubscriber,
+    triggers: Vec<Arc<dyn Trigger>>,
+}
+
+#[async_trait]
+impl Trigger for ConditionalTrigger {
+    fn get_name(&self) -> &str {
+        self.base.get_name()
+    }
+
+    fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid {
+        self.base.get_metrics_config_uuid()
+    }
+
+    async fn subscribe(
+        self: Arc<Self>,
+        subscriber: &TriggerSubscriber,
+        on_fired_callback: TriggerCallbackFn,
+    ) {
+        self.base.subscription_manager.subscribe(subscriber.clone(), on_fired_callback).await;
+    }
+
+    async fn unsubscribe(&self, subscriber: &TriggerSubscriber) {
+        self.base.subscription_manager.unsubscribe(subscriber).await;
+    }
+
+    async fn fire_manually(&self, context: Arc<NodeEvaluationContext>) {
+        let maybe_activation_id = self.base.subscription_manager.get_current_activation_id().await;
+        if let Some(activation_id) = maybe_activation_id {
+            self.base.fire_trigger(activation_id, context).await;
+        }
+    }
+}
+
+#[async_trait]
+impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalTrigger {
+    async fn activate(self: Arc<Self>, activation_id: ActivationId) {
+        // Lock state mutex and hold it until the state transition is complete.
+        let mut state_lock = self.base.state.lock().await;
+        assert!(
+            matches!(*state_lock, TriggerState::Inactive),
+            "Unable to activate trigger {}: it's in {} state",
+            self.get_name(),
+            state_lock
+        );
+
+        let (sender, receiver) = mpsc::unbounded_channel();
+        for trigger in &self.triggers {
+            let self_reference = Arc::downgrade(&self);
+            let sender_clone = sender.clone();
+            Arc::clone(trigger)
+                .subscribe(
+                    &self.subscriber,
+                    Box::new(move |context, compute_order, countdown_latch| {
+                        // Synchronously evaluate selector expression and enqueue the result.
+                        let self_clone = &self_reference.upgrade().expect(
+                            "Callback should only be called when conditional trigger is active",
+                        );
+                        // TODO: b/426508179 - it's currently not perfectly correct that conditional
+                        // triggers do not wait until aggregation publishers with the same parent
+                        // trigger perform their aggregations.
+                        // As we don't want to potentially block the execution by waiting for
+                        // countdown_latch.wait(compute_order), conditional trigger computation
+                        // should be refactored to be performed in a separate task, but still
+                        // considering that AsyncEventProcessor is specifically used to avoid random
+                        // order of tokio tasks execution
+                        let evaluation_result =
+                            self_clone.selector_expression.evaluate(Arc::clone(&context));
+                        sender_clone
+                            .send((evaluation_result, context, compute_order, countdown_latch))
+                            .expect("Callback should only receive messages when subscribed")
+                    }),
+                )
+                .await;
+        }
+
+        let condition_checker = match &self.condition_type {
+            ConditionType::RisingEdge(rising_options) => {
+                let weak_conditional_trigger = Arc::downgrade(&self);
+                Box::new(EdgeConditionChecker::new_rising_edge(
+                    rising_options.clone(),
+                    move |context| {
+                        let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
+                            return;
+                        };
+                        tokio::spawn(async move {
+                            conditional_trigger.base.fire_trigger(activation_id, context).await;
+                        });
+                    },
+                    Arc::clone(&self.node_evaluation_context_factory),
+                )) as Box<dyn ConditionChecker>
+            }
+            ConditionType::FallingEdge(falling_options) => {
+                let weak_conditional_trigger = Arc::downgrade(&self);
+                Box::new(EdgeConditionChecker::new_falling_edge(
+                    falling_options.clone(),
+                    move |context| {
+                        let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
+                            return;
+                        };
+                        tokio::spawn(async move {
+                            conditional_trigger.base.fire_trigger(activation_id, context).await;
+                        });
+                    },
+                    Arc::clone(&self.node_evaluation_context_factory),
+                )) as Box<dyn ConditionChecker>
+            }
+            ConditionType::BothEdges { rising_options, falling_options } => {
+                let weak_conditional_trigger = Arc::downgrade(&self);
+                Box::new(EdgeConditionChecker::new_both_edges(
+                    rising_options.clone(),
+                    falling_options.clone(),
+                    move |context| {
+                        let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
+                            return;
+                        };
+                        tokio::spawn(async move {
+                            conditional_trigger.base.fire_trigger(activation_id, context).await;
+                        });
+                    },
+                    Arc::clone(&self.node_evaluation_context_factory),
+                )) as Box<dyn ConditionChecker>
+            }
+            ConditionType::AllChanges => {
+                Box::new(PreviousValueRelationalConditionChecker::new_all_changes())
+                    as Box<dyn ConditionChecker>
+            }
+            ConditionType::IsTrue => Box::new(ConstantConditionChecker::new_is_true_or_non_zero())
+                as Box<dyn ConditionChecker>,
+            ConditionType::IsFalse => Box::new(ConstantConditionChecker::new_is_false_or_zero())
+                as Box<dyn ConditionChecker>,
+        };
+
+        struct ConditionalTriggerHandler {
+            activation_id: ActivationId,
+            conditional_trigger: Weak<ConditionalTrigger>,
+            condition_checker: Box<dyn ConditionChecker>,
+        }
+
+        #[async_trait]
+        impl
+            AsyncEventHandler<(
+                OperationResult<'static, NodeValue, NodeEvaluationError>,
+                Arc<NodeEvaluationContext>,
+                Level,
+                MultiLevelCountdownLatch,
+            )> for ConditionalTriggerHandler
+        {
+            async fn handle(
+                &mut self,
+                (evaluation_result, context, compute_order, countdown_latch): (
+                    OperationResult<'static, NodeValue, NodeEvaluationError>,
+                    Arc<NodeEvaluationContext>,
+                    Level,
+                    MultiLevelCountdownLatch,
+                ),
+            ) {
+                if let Some(conditional_trigger) = self.conditional_trigger.upgrade() {
+                    conditional_trigger
+                        .on_new_message(
+                            self.activation_id,
+                            evaluation_result,
+                            context,
+                            self.condition_checker.as_mut(),
+                        )
+                        .await;
+                };
+                countdown_latch.count_down(compute_order).await;
+            }
+        }
+
+        let event_processor = AsyncEventProcessor::new(
+            UnboundedReceiverStream::new(receiver),
+            ConditionalTriggerHandler {
+                activation_id,
+                conditional_trigger: Arc::downgrade(&self),
+                condition_checker,
+            },
+        );
+
+        // Set the new state and release the mutex.
+        *state_lock = TriggerState::Active { _event_processor: event_processor };
+    }
+
+    async fn deactivate(&self) {
+        // Lock state mutex and hold it until the state transition is complete.
+        let mut state_lock = self.base.state.lock().await;
+        assert!(
+            matches!(*state_lock, TriggerState::Active { .. }),
+            "Unable to deactivate trigger {}: it's in {} state",
+            self.get_name(),
+            state_lock
+        );
+
+        for trigger in &self.triggers {
+            trigger.unsubscribe(&self.subscriber).await;
+        }
+
+        // Set the new state and release the mutex.
+        *state_lock = TriggerState::Inactive;
+    }
+}
+
+impl ConditionalTrigger {
+    pub(crate) fn new(
+        name: String,
+        condition_type: ConditionType,
+        metrics_config_uuid: MetricsConfigUuid,
+        selector_expression: Arc<Node>,
+        triggers: Vec<Arc<dyn Trigger>>,
+
+        // Dependencies
+        node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
+        status_reporter: Arc<dyn StatusReporter>,
+    ) -> Arc<Self> {
+        Arc::new_cyclic(|me: &Weak<Self>| Self {
+            base: BaseTrigger::new(
+                name.clone(),
+                metrics_config_uuid,
+                Weak::clone(me) as Weak<dyn Activatable<_, _>>,
+            ),
+            condition_type,
+            node_evaluation_context_factory,
+            selector_expression,
+            status_reporter,
+            subscriber: TriggerSubscriber::ConditionalTrigger { name },
+            triggers,
+        })
+    }
+
+    /// A callback to handle a new message generated from the selector expression as a result of
+    /// a fire event from conditional trigger's associated parent trigger.
+    async fn on_new_message(
+        &self,
+        activation_id: ActivationId,
+        evaluation_result: OperationResult<'static, NodeValue, NodeEvaluationError>,
+        context: Arc<NodeEvaluationContext>,
+        condition_checker: &mut dyn ConditionChecker,
+    ) {
+        let node_value = match evaluation_result.into_future().await {
+            Ok(node_value) => node_value,
+            Err(err) => {
+                let trigger_name = self.get_name().to_owned();
+                let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
+                self.status_reporter.report(err.get_status_code(),
+                    format!("Metrics config {metrics_config_uuid} conditional trigger '{trigger_name}' failed to evaluate condition: {err}"),
+                    StatusDetails::ConditionalTriggerErrorDetails(ConditionalTriggerErrorDetails {
+                        metricsConfigUUID: metrics_config_uuid.to_string(),
+                        triggerName: trigger_name,
+                    }));
+                return;
+            }
+        };
+
+        let condition_result = match condition_checker.check(node_value) {
+            Ok(condition_result) => condition_result,
+            Err(err) => {
+                error!("Failed to perform comparison for trigger {}: {err:#}", self.get_name());
+                return;
+            }
+        };
+
+        if condition_result {
+            self.base.fire_trigger(activation_id, context).await;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use anyhow::anyhow;
+    use futures::FutureExt;
+    use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
+        TelemetryServiceStatus::TelemetryServiceStatus,
+        TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
+    };
+    use googletest::matchers::{eq, none, result_of_ref, some};
+    use googletest::{assert_that, expect_that};
+    use lazy_static::lazy_static;
+    use protobuf::reflect::ReflectEqMode;
+    use protobuf::well_known_types::wrappers::{BoolValue, Int32Value};
+    use protobuf::MessageDyn;
+    use sdv_telemetry_expr::{
+        dynamic_message::DynamicMessage, mock::MockMessageProvider, node::Node,
+        node_error::MessageProviderError,
+    };
+    use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
+    use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
+    use sdv_telemetry_test_utils::oneshot_callback;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
+    use sdv_telemetry_utils::conversions::u32_into_usize;
+    use std::collections::HashMap;
+    use std::future;
+
+    use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
+    use crate::metrics_config_orchestrator::trigger::mock::{
+        MockCallbackListener, MockSubscriptionManager, MockTrigger,
+    };
+    use crate::StatusReporterImpl;
+
+    const TRIGGER_NAME: &str = "trigger";
+    const PARENT_TRIGGER_NAME: &str = "parent_trigger";
+    const PUBLISHER_NAME: &str = "publisher";
+    const ACTIVATION_ID: ActivationId = ActivationId::new(3);
+    const ERROR_MESSAGE: &str = "Error 42";
+
+    lazy_static! {
+        static ref CONFIG_UUID: MetricsConfigUuid =
+            "01bf0754-df95-46bb-bb35-522b6af66600".parse().unwrap();
+        static ref FALSE_MSG: Arc<dyn MessageDyn> =
+            Arc::new(BoolValue { value: false, ..Default::default() });
+        static ref TRUE_MSG: Arc<dyn MessageDyn> =
+            Arc::new(BoolValue { value: true, ..Default::default() });
+        static ref INT_0_MSG: Arc<dyn MessageDyn> =
+            Arc::new(Int32Value { value: 0, ..Default::default() });
+        static ref INT_1_MSG: Arc<dyn MessageDyn> =
+            Arc::new(Int32Value { value: 1, ..Default::default() });
+        static ref INT_2_MSG: Arc<dyn MessageDyn> =
+            Arc::new(Int32Value { value: 2, ..Default::default() });
+    }
+
+    fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {
+        Node::FieldLeaf {
+            publisher_name: PUBLISHER_NAME.to_owned(),
+            fields: vec![field_name],
+            message_provider,
+        }
+    }
+
+    fn create_valid_conditional_trigger(
+        condition_type: ConditionType,
+        parent_trigger: Option<Arc<MockTrigger>>,
+    ) -> (Arc<ConditionalTrigger>, Arc<MockMessageProvider>, Arc<MockTrigger>) {
+        let parent_trigger = parent_trigger.unwrap_or_else(|| {
+            Arc::new(MockTrigger::new_for_subscriber(
+                PARENT_TRIGGER_NAME.to_owned(),
+                *CONFIG_UUID,
+                TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+            ))
+        });
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = ConditionalTrigger::new(
+            TRIGGER_NAME.to_owned(),
+            condition_type,
+            *CONFIG_UUID,
+            Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+        );
+
+        (trigger, message_provider, parent_trigger)
+    }
+
+    fn create_valid_conditional_trigger_with_mock_subscription_manager(
+        condition_type: ConditionType,
+        parent_trigger: Option<Arc<MockTrigger>>,
+    ) -> (
+        Arc<ConditionalTrigger>,
+        Arc<MockMessageProvider>,
+        Arc<MockTrigger>,
+        MockSubscriptionManager,
+    ) {
+        let (trigger, message_provider, parent_trigger) =
+            create_valid_conditional_trigger(condition_type, parent_trigger);
+
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        let subscription_manager = MockSubscriptionManager::new();
+        trigger.base.subscription_manager = Box::new(subscription_manager.clone());
+
+        (Arc::new(trigger), message_provider, parent_trigger, subscription_manager)
+    }
+
+    async fn setup_active_conditional_trigger(
+        condition_type: ConditionType,
+    ) -> (
+        Arc<ConditionalTrigger>,
+        Arc<MockMessageProvider>,
+        Arc<MockTrigger>,
+        Arc<MockCallbackListener<(ActivationId, Arc<NodeEvaluationContext>)>>,
+    ) {
+        let (trigger, message_provider, parent_trigger, subscription_manager) =
+            create_valid_conditional_trigger_with_mock_subscription_manager(condition_type, None);
+
+        let callback_listener = Arc::new(MockCallbackListener::new());
+        subscription_manager
+            .subscribe_for_test(
+                TriggerSubscriber::MetricsConfigStart,
+                callback_listener.create_callback(),
+            )
+            .await;
+
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
+
+        (trigger, message_provider, parent_trigger, callback_listener)
+    }
+
+    #[test]
+    fn default_edge_options_are_equivalent_to_no_options() {
+        assert_eq!(
+            EdgeOptions::default(),
+            EdgeOptions { min_duration: Duration::ZERO, require_exact: false }
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_subscribes_to_parents() {
+        let parent_trigger1 = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            *CONFIG_UUID,
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let parent_trigger2 = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            *CONFIG_UUID,
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = ConditionalTrigger::new(
+            TRIGGER_NAME.to_owned(),
+            ConditionType::AllChanges,
+            *CONFIG_UUID,
+            Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            vec![
+                Arc::<MockTrigger>::clone(&parent_trigger1),
+                Arc::<MockTrigger>::clone(&parent_trigger2),
+            ],
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+        );
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        let subscription_manager = MockSubscriptionManager::new();
+        trigger.base.subscription_manager = Box::new(subscription_manager.clone());
+        let trigger = Arc::new(trigger);
+
+        let callback_listener = Arc::new(MockCallbackListener::new());
+        subscription_manager
+            .subscribe_for_test(
+                TriggerSubscriber::MetricsConfigStart,
+                callback_listener.create_callback(),
+            )
+            .await;
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
+
+        let msg1 = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 1,
+            ..Default::default()
+        })));
+        let msg2 = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 2,
+            ..Default::default()
+        })));
+
+        // Set the first message and fire the first parent trigger.
+        message_provider.set_next_sync_result(Ok(Some(msg1)));
+        parent_trigger1.fire().await;
+
+        // Set a different message and fire the second parent trigger.
+        message_provider.set_next_sync_result(Ok(Some(msg2)));
+        parent_trigger2.fire().await;
+
+        // Wait for trigger to fire once.
+        callback_listener.wait_for_callback_fired().await;
+
+        // Verify that the trigger fired once.
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn fire_manually_inactive_does_nothing() {
+        let (trigger, _, _, subscription_manager) =
+            create_valid_conditional_trigger_with_mock_subscription_manager(
+                ConditionType::IsTrue,
+                None,
+            );
+
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        trigger.fire_manually(context).await;
+
+        assert_eq!(subscription_manager.get_notify_count(), 0);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn fire_manually_notifies_subscriber() {
+        let (trigger, _message_provider, _parent_trigger, subscription_manager) =
+            create_valid_conditional_trigger_with_mock_subscription_manager(
+                ConditionType::IsTrue,
+                None,
+            );
+        let callback_listener = Arc::new(MockCallbackListener::new());
+
+        subscription_manager
+            .subscribe_for_test(
+                TriggerSubscriber::MetricsConfigStart,
+                callback_listener.create_callback(),
+            )
+            .await;
+
+        // Manually set activation_id to simulate an active state
+        subscription_manager.set_activation_id(ACTIVATION_ID).await;
+
+        let context = Arc::new(NodeEvaluationContext::new(None));
+        trigger.fire_manually(Arc::clone(&context)).await;
+
+        let (activation_id, received_context) = callback_listener.wait_for_callback_fired().await;
+
+        assert_eq!(activation_id, ACTIVATION_ID);
+        assert!(Arc::ptr_eq(&received_context, &context));
+        assert_eq!(callback_listener.get_fired_count(), 1);
+        assert_eq!(subscription_manager.get_notify_count(), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn shares_context_across_subscribers() {
+        let parent_trigger = Arc::new(MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            *CONFIG_UUID,
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        ));
+        let parent_context = Arc::new(NodeEvaluationContext::new(None));
+        let message_provider = Arc::new(MockMessageProvider::new());
+        let trigger = ConditionalTrigger::new(
+            TRIGGER_NAME.to_owned(),
+            ConditionType::IsTrue,
+            *CONFIG_UUID,
+            Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
+            vec![Arc::<MockTrigger>::clone(&parent_trigger)],
+            Arc::new(NodeEvaluationContextFactoryImpl::new(new_stub_pal())),
+            Arc::new(StatusReporterImpl::new(|err| panic!("Unexpected error: {err:?}"))),
+        );
+
+        let callback_listener1 = Arc::new(MockCallbackListener::new());
+        let callback_listener2 = Arc::new(MockCallbackListener::new());
+
+        Arc::clone(&trigger)
+            .subscribe(&TriggerSubscriber::MetricsConfigStart, callback_listener1.create_callback())
+            .await;
+        Arc::clone(&trigger)
+            .subscribe(&TriggerSubscriber::MetricsConfigEnd, callback_listener2.create_callback())
+            .await;
+
+        let msg = Arc::new(ProtobufDynamicMessage::new(Arc::new(Int32Value {
+            value: 1,
+            ..Default::default()
+        })));
+        message_provider.set_next_sync_result(Ok(Some(msg)));
+        parent_trigger.fire_with_context(Arc::clone(&parent_context)).await;
+
+        let child_context1 = callback_listener1.wait_for_callback_fired().await;
+        let child_context2 = callback_listener2.wait_for_callback_fired().await;
+
+        assert_eq!(callback_listener1.get_fired_count(), 1);
+        assert_eq!(callback_listener2.get_fired_count(), 1);
+        assert!(Arc::ptr_eq(&parent_context, &child_context1));
+        assert!(Arc::ptr_eq(&parent_context, &child_context2));
+    }
+
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        activate,
+
+        |condition_type, messages: &[Option<&Arc<dyn MessageDyn>>], expected| async move {
+            let (_trigger, message_provider, parent_trigger, callback_listener) =
+                setup_active_conditional_trigger(condition_type).await;
+
+            let mut ctx_to_msg_map = HashMap::new();
+            for msg in messages.iter() {
+                message_provider.set_next_sync_result(Ok(msg.map(|msg| Arc::new(ProtobufDynamicMessage::new(Arc::clone(msg))) as Arc<dyn DynamicMessage>)));
+
+                let context = NodeEvaluationContext::new(None);
+                if let Some(msg) = msg {
+                    assert_that!(ctx_to_msg_map.insert(context.root_id(), msg.as_ref()), none());
+                }
+                parent_trigger.fire_with_context(context.into()).await;
+            }
+
+            for msg in expected.iter() {
+                expect_that!(
+                    callback_listener.wait_for_callback_fired().await,
+                    (
+                        eq(&ACTIVATION_ID),
+                        result_of_ref!(
+                            |context: &Arc<NodeEvaluationContext>| ctx_to_msg_map
+                                .get(&context.root_id())
+                                .cloned(),
+                            some(msg_dyn_eq(msg.as_ref(), &ReflectEqMode::default()))
+                        )
+                    )
+                );
+            }
+            expect_that!(u32_into_usize(callback_listener.get_fired_count()), eq(expected.len()));
+        },
+
+        all_changes:      (ConditionType::AllChanges, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        all_changes_none: (ConditionType::AllChanges, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+
+        both_edges: (ConditionType::BothEdges { rising_options: EdgeOptions::default(), falling_options: EdgeOptions::default() }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
+        rising_edge: (ConditionType::RisingEdge(EdgeOptions::default()), &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        falling_edge: (ConditionType::FallingEdge(EdgeOptions::default()), &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+
+        is_true_bool_1:    (ConditionType::IsTrue, &[Some(&*TRUE_MSG)], &[&*TRUE_MSG],),
+        is_true_bool_2:    (ConditionType::IsTrue, &[Some(&*FALSE_MSG), Some(&*TRUE_MSG), Some(&*FALSE_MSG), Some(&*TRUE_MSG)], &[&*TRUE_MSG, &*TRUE_MSG],),
+        is_true_numeric_1: (ConditionType::IsTrue, &[Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+        is_true_numeric_2: (ConditionType::IsTrue, &[Some(&*INT_0_MSG), Some(&*INT_1_MSG), Some(&*INT_0_MSG), Some(&*INT_1_MSG)], &[&*INT_1_MSG, &*INT_1_MSG],),
+        is_true_none:      (ConditionType::IsTrue, &[None, Some(&*TRUE_MSG), None, Some(&*INT_1_MSG)], &[&*TRUE_MSG, &*INT_1_MSG],),
+
+        is_false_bool_1:    (ConditionType::IsFalse, &[Some(&*FALSE_MSG)], &[&*FALSE_MSG],),
+        is_false_bool_2:    (ConditionType::IsFalse, &[Some(&*TRUE_MSG), Some(&*FALSE_MSG), Some(&*TRUE_MSG), Some(&*FALSE_MSG)], &[&*FALSE_MSG, &*FALSE_MSG],),
+        is_false_numeric_1: (ConditionType::IsFalse, &[Some(&*INT_0_MSG)], &[&*INT_0_MSG],),
+        is_false_numeric_2: (ConditionType::IsFalse, &[Some(&*INT_1_MSG), Some(&*INT_0_MSG), Some(&*INT_1_MSG), Some(&*INT_0_MSG)], &[&*INT_0_MSG, &*INT_0_MSG],),
+        is_false_none:      (ConditionType::IsFalse, &[None, Some(&*FALSE_MSG), None, Some(&*INT_0_MSG)], &[&*FALSE_MSG, &*INT_0_MSG],),
+    );
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn activate_handles_async_expression_result() {
+        let (_trigger, message_provider, parent_trigger, callback_listener) =
+            setup_active_conditional_trigger(ConditionType::IsTrue).await;
+
+        let msg = Arc::new(Int32Value { value: 1, ..Default::default() });
+        message_provider.set_next_async_result(
+            future::ready(Ok(Some(
+                Arc::new(ProtobufDynamicMessage::new(msg)) as Arc<dyn DynamicMessage>
+            )))
+            .boxed(),
+        );
+        parent_trigger.fire().await;
+        callback_listener.wait_for_callback_fired().await;
+
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn activate_active_panics() {
+        let (trigger, _, _, _) = setup_active_conditional_trigger(ConditionType::AllChanges).await;
+
+        // Activate the trigger again.
+        trigger.activate(ActivationId::new(1)).await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn deactivate_unsubscribes_from_parents() {
+        let mut parent_trigger = MockTrigger::new_for_subscriber(
+            PARENT_TRIGGER_NAME.to_owned(),
+            *CONFIG_UUID,
+            TriggerSubscriber::ConditionalTrigger { name: TRIGGER_NAME.to_owned() },
+        );
+        let callback_listener = Arc::new(MockCallbackListener::new());
+        let callback_listener_clone = Arc::clone(&callback_listener);
+        parent_trigger
+            .set_unsubscribe_callback(move |_| callback_listener_clone.on_callback_fired(()));
+        let (trigger, _, _, _) = create_valid_conditional_trigger_with_mock_subscription_manager(
+            ConditionType::AllChanges,
+            Some(Arc::new(parent_trigger)),
+        );
+
+        // Activate the trigger.
+        Arc::clone(&trigger).activate(ActivationId::new(1)).await;
+
+        // Deactivate the trigger.
+        trigger.deactivate().await;
+
+        // Verify that the trigger was unsubscribed from once.
+        assert_eq!(callback_listener.get_fired_count(), 1);
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    #[should_panic]
+    async fn deactivate_inactive_panics() {
+        let (trigger, _, _, _) = create_valid_conditional_trigger_with_mock_subscription_manager(
+            ConditionType::AllChanges,
+            None,
+        );
+
+        // Deactivate the trigger.
+        trigger.deactivate().await;
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn on_new_message_reports_error() {
+        let (trigger, message_provider, parent_trigger) =
+            create_valid_conditional_trigger(ConditionType::AllChanges, None);
+
+        let (tx, rx) = oneshot_callback();
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        trigger.status_reporter = Arc::new(StatusReporterImpl::new(tx));
+        let trigger = Arc::new(trigger);
+
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
+
+        message_provider.set_next_sync_result(Err(MessageProviderError::MessageRetrievalError {
+            e: ServicePublisherAccessorError::MessageRetrievalFailed(anyhow!(ERROR_MESSAGE)),
+        }));
+
+        parent_trigger.fire().await;
+
+        // Wait for error status to be delivered
+        let status = rx.await;
+        assert!(
+            matches!(&status, TelemetryServiceStatus {
+                id: 0,
+                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR,
+                message,
+                details: StatusDetails::ConditionalTriggerErrorDetails(
+                    ConditionalTriggerErrorDetails { metricsConfigUUID, triggerName }
+                ),
+            }
+            if message.contains("failed to evaluate condition") && message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && triggerName == TRIGGER_NAME),
+            "Unexpected status: {status:?}"
+        );
+    }
+}

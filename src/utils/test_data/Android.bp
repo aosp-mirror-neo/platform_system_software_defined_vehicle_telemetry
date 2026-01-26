@@ -1,0 +1,44 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+filegroup {
+    name: "sdv_telemetry_utils_test_data",
+    visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
+    srcs: [
+        // keep-sorted start
+        ":sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
+        ":sdv_telemetry_utils_test_data_config_without_service_publishers_txtpb",
+        // keep-sorted end
+    ],
+}
+
+genrule {
+    name: "sdv_telemetry_utils_test_data_config_without_service_publishers_binpb",
+    visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
+    defaults: ["sdv_telemetry_textproto_to_binary_metrics_config_defaults"],
+    srcs: ["config_without_service_publishers.txtpb"],
+    out: ["config_without_service_publishers.binpb"],
+}
+
+// For some reason, directly referencing
+// `config_without_service_publishers.txtpb` doesn't work. So we have this no-op
+// genrule that simply copies the file. This makes the .vendor and .product
+// variations of our test pass.
+genrule {
+    name: "sdv_telemetry_utils_test_data_config_without_service_publishers_txtpb",
+    visibility: ["//system/software_defined_vehicle/telemetry/src/utils:__subpackages__"],
+    srcs: ["config_without_service_publishers.txtpb"],
+    out: ["config_without_service_publishers_out.txtpb"],
+    cmd: "cp $(in) $(out)",
+}

@@ -1,0 +1,435 @@
+// Copyright (C) 2026 The Android Open Source Project
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use protobuf::{
+    reflect::{MessageDescriptor, ReflectValueBox, RuntimeType},
+    MessageDyn,
+};
+use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
+use std::{
+    collections::{HashMap, HashSet},
+    ffi::{OsStr, OsString},
+    time::Duration,
+};
+
+use crate::{
+    publisher_config::ParsedDataEntry,
+    publisher_config_parser::{FieldNode, MessageDescriptorTree},
+    SimulatorError,
+};
+
+pub const DELAY_FIELD_NAME: &str = "_delay_before_publishing";
+
+pub fn parse_descriptor_protos(
+    config: &MetricsConfig,
+    metrics_config_file_name: &OsStr,
+) -> Result<FileDescriptorsAndWkts, SimulatorError> {
+    let file_descriptors = FileDescriptorsAndWkts::try_from(config.descriptor_protos.to_vec())
+        .map_err(|error| SimulatorError::FailedToParseFile {
+            file_name: metrics_config_file_name.to_owned(),
+            error_message: format!("Failed to parse descriptor_protos: {error}"),
+        })?;
+
+    let message_names = config
+        .metrics_report_configs
+        .iter()
+        .map(|report_config| report_config.message_builder.message_type.to_owned())
+        .collect::<HashSet<String>>();
+    for message_name in message_names {
+        if file_descriptors.find_message_by_full_name(&message_name).is_none() {
+            return Err(SimulatorError::MissingDescriptorProto {
+                file_name: metrics_config_file_name.to_owned(),
+                message_name,
+            });
+        }
+    }
+
+    Ok(file_descriptors)
+}
+
+pub fn decode_report(
+    report: &MetricsReport,
+    message_descriptor: &MessageDescriptor,
+) -> Result<Box<dyn MessageDyn>, SimulatorError> {
+    // unpack_dyn returns a Result<Option<Box<dyn MessageDyn>>> where the result returns an error if
+    // the content of the Any messages matches the message descriptor but it fails to parse the
+    // message and the option is None if the Any message does not match the message descriptor.
+    report
+        .report_data
+        .unpack_dyn(message_descriptor)
+        .map_err(|error| SimulatorError::FailedToDecodeReport {
+            report_config_name: report.report_config_name.clone(),
+            error,
+        })?
+        .ok_or_else(|| SimulatorError::ProgrammingError {
+            error_message: format!(
+                "Could not decode report for report config \"{}\" with descriptor proto \"{}\"",
+                report.report_config_name.clone(),
+                message_descriptor.name()
+            ),
+        })
+}
+
+pub struct CsvToProtoMessagesParser {
+    headers: Vec<String>,
+    file_name: OsString,
+    default_delay: Duration,
+    message_descriptor_tree: MessageDescriptorTree,
+}
+
+impl CsvToProtoMessagesParser {
+    pub fn new(
+        headers: Vec<String>,
+        file_name: &OsStr,
+        default_delay: Duration,
+        mut message_descriptor_tree: MessageDescriptorTree,
+    ) -> Self {
+        trim_message_descriptor_tree(&headers, &mut message_descriptor_tree);
+        Self { headers, file_name: file_name.to_owned(), default_delay, message_descriptor_tree }
+    }
+
+    pub fn parse(&self, records: Vec<Vec<String>>) -> Result<Vec<ParsedDataEntry>, SimulatorError> {
+        let mut parsed_data = Vec::<ParsedDataEntry>::new();
+        for (record_num, record) in records.into_iter().enumerate() {
+            let mut delay = self.default_delay;
+            let fields = self.map_field_names_values_to(record);
+            let delay_value = &fields.get(DELAY_FIELD_NAME).ok_or_else(||
+                    // `CsvToProtoMessagesParser::parse` expects `headers` to always contain
+                    // `DELAY_FIELD_NAME`. This should be checked by the previous CSV validation
+                    // step.
+                    SimulatorError::ProgrammingError {
+                    error_message: format!("Field {DELAY_FIELD_NAME} not found in record."),
+                })?;
+            if !delay_value.is_empty() {
+                delay = self.parse_delay(delay_value)?;
+            }
+
+            let mut message: Box<dyn MessageDyn> =
+                self.message_descriptor_tree.root.message_descriptor.new_instance();
+            for node in &self.message_descriptor_tree.root.children {
+                self.set_message_field(node, message.as_mut(), &fields, record_num + 1)?;
+            }
+
+            let message_bytes =
+                message.write_to_bytes_dyn().map_err(|error| SimulatorError::Error {
+                    error_message: format!(
+                        "Failed to write parsed proto message {message:?} to bytes: {error}"
+                    ),
+                })?;
+            parsed_data.push(ParsedDataEntry { message, message_bytes, delay });
+        }
+        Ok(parsed_data)
+    }
+
+    fn map_field_names_values_to(&self, record: Vec<String>) -> HashMap<&str, String> {
+        self.headers.iter().map(String::as_str).zip(record).collect::<HashMap<&str, String>>()
+    }
+
+    fn parse_delay(&self, value: &str) -> Result<Duration, SimulatorError> {
+        let duration_int =
+            value.parse::<u64>().map_err(|error| SimulatorError::FailedToParseFile {
+                file_name: self.file_name.clone(),
+                error_message: format!(
+                    "Could not parse \"{DELAY_FIELD_NAME}\" value \"{value}\" as u64: {error}"
+                ),
+            })?;
+        Ok(Duration::from_millis(duration_int))
+    }
+
+    fn set_message_field(
+        &self,
+        node: &FieldNode,
+        message: &mut dyn MessageDyn,
+        fields_map: &HashMap<&str, String>,
+        record_num: usize,
+    ) -> Result<bool, SimulatorError> {
+        if let Some(internal_node_info) = &node.message_field_info {
+            let mut child_message: Box<dyn MessageDyn> =
+                internal_node_info.message_descriptor.new_instance();
+            let mut any_field_was_set = false;
+            for child_node in &internal_node_info.children {
+                any_field_was_set = self.set_message_field(
+                    child_node,
+                    child_message.as_mut(),
+                    fields_map,
+                    record_num,
+                )? || any_field_was_set;
+            }
+            if any_field_was_set {
+                node.field_descriptor
+                    .set_singular_field(message, ReflectValueBox::Message(child_message));
+                return Ok(true);
+            }
+            Ok(false)
+        } else {
+            if !fields_map.contains_key(node.csv_field_name.as_str()) {
+                // Ignore this field because it has an unsupported type.
+                return Ok(false);
+            }
+            let csv_value = &fields_map[node.csv_field_name.as_str()];
+            if csv_value.is_empty() {
+                return Ok(false);
+            }
+            let value = parse_value(
+                csv_value,
+                node.field_descriptor.singular_runtime_type(),
+                |value_type: &str| {
+                    SimulatorError::FailedToParseFile {
+                file_name: self.file_name.clone(),
+                error_message: format!(
+                    "Could not parse field \"{}\" for record #{record_num}: Could not parse \"{csv_value}\" as {}",
+                    node.csv_field_name,
+                    value_type.to_owned()
+                ),
+            }
+                },
+            )?;
+            node.field_descriptor.set_singular_field(message, value);
+            Ok(true)
+        }
+    }
+}
+
+/// Removes every child node for which the csv file does not contain any data.
+fn trim_message_descriptor_tree(
+    headers: &Vec<String>,
+    message_descriptor_tree: &mut MessageDescriptorTree,
+) {
+    for child in &mut message_descriptor_tree.root.children {
+        remove_unused_child_nodes(child, headers);
+    }
+}
+
+/// Returns true if data is available for itself or one of its children. Removes
+/// any child nodes with no data available.
+fn remove_unused_child_nodes(node: &mut FieldNode, headers: &Vec<String>) -> bool {
+    if headers.contains(&node.csv_field_name) {
+        return true;
+    }
+    if let Some(ref mut message_field_info) = &mut node.message_field_info {
+        message_field_info
+            .children
+            .retain_mut(|child_node| remove_unused_child_nodes(child_node, headers));
+        return !message_field_info.children.is_empty();
+    }
+    false
+}
+
+fn parse_value(
+    value: &str,
+    run_time_type: RuntimeType,
+    value_parsing_error: impl FnOnce(&str) -> SimulatorError,
+) -> Result<ReflectValueBox, SimulatorError> {
+    match run_time_type {
+        RuntimeType::I32 => {
+            Ok(ReflectValueBox::I32(value.parse::<i32>().map_err(|_| value_parsing_error("i32"))?))
+        }
+        RuntimeType::I64 => {
+            Ok(ReflectValueBox::I64(value.parse::<i64>().map_err(|_| value_parsing_error("i64"))?))
+        }
+        RuntimeType::U32 => {
+            Ok(ReflectValueBox::U32(value.parse::<u32>().map_err(|_| value_parsing_error("u32"))?))
+        }
+        RuntimeType::U64 => {
+            Ok(ReflectValueBox::U64(value.parse::<u64>().map_err(|_| value_parsing_error("u64"))?))
+        }
+        RuntimeType::F32 => {
+            Ok(ReflectValueBox::F32(value.parse::<f32>().map_err(|_| value_parsing_error("f32"))?))
+        }
+        RuntimeType::F64 => {
+            Ok(ReflectValueBox::F64(value.parse::<f64>().map_err(|_| value_parsing_error("f64"))?))
+        }
+        RuntimeType::Bool => Ok(ReflectValueBox::Bool(
+            value.parse::<bool>().map_err(|_| value_parsing_error("bool"))?,
+        )),
+        RuntimeType::String => Ok(ReflectValueBox::String(value.to_owned())),
+        RuntimeType::VecU8 => Err(SimulatorError::NotImplemented {
+            feature: "Byte array type in simulation publishers".to_owned(),
+        }),
+        RuntimeType::Enum(enum_descriptor) => match enum_descriptor.value_by_name(value) {
+            Some(enum_value) => Ok(enum_value.into()),
+            None => Err(value_parsing_error(&format!("enum '{}'", enum_descriptor.full_name()))),
+        },
+        RuntimeType::Message(_) => Err(SimulatorError::NotImplemented {
+            feature: "Message types in simulation publishers".to_owned(),
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use googletest::expect_that;
+    use googletest::matchers::{eq, pat, some};
+    use protobuf::well_known_types::empty::Empty;
+    use protobuf::{EnumFull, MessageField, MessageFull};
+    use sdv_telemetry_proto_rust::metrics_configuration::{
+        MetricsReportConfig, ProtoMessageBuilder,
+    };
+    use sdv_telemetry_simulator_test_proto::test::TestEnum;
+    use sdv_telemetry_simulator_test_proto::test::TestMessage;
+    use sdv_telemetry_simulator_test_proto::test_dep;
+    use sdv_telemetry_test_utils::parameterized_test;
+
+    parameterized_test!(
+        #[test]
+        test_parse_value,
+
+        |run_time_type, value, expected_output| {
+            let result = parse_value(
+                value,
+                run_time_type,
+                |_| SimulatorError::Error { error_message: "".to_owned() },
+            ).unwrap();
+            assert_eq!(result, expected_output);
+        },
+
+        type_i32: (RuntimeType::I32,"123", ReflectValueBox::I32(123),),
+        type_i64: (RuntimeType::I64, "123", ReflectValueBox::I64(123),),
+        type_u32: (RuntimeType::U32, "123", ReflectValueBox::U32(123),),
+        type_u64: (RuntimeType::U64, "123", ReflectValueBox::U64(123),),
+        type_f32: (RuntimeType::F32, "123", ReflectValueBox::F32(123.0),),
+        type_f64: (RuntimeType::F64, "123", ReflectValueBox::F64(123.0),),
+        type_bool: (RuntimeType::Bool, "false", ReflectValueBox::Bool(false),),
+        type_string: (RuntimeType::String, "a string", ReflectValueBox::String("a string".to_owned()),),
+        type_enum: (RuntimeType::Enum(TestEnum::enum_descriptor()), "ONE", ReflectValueBox::Enum(TestEnum::enum_descriptor(), 1),),
+    );
+
+    parameterized_test!(
+        #[googletest::test]
+        #[test]
+        parse_descriptor_protos,
+        |config: MetricsConfig, expected_message_descriptor_names: &[String]| {
+            let result = parse_descriptor_protos(&config, OsStr::new("file_name"));
+
+            let file_descriptors = result.unwrap();
+
+            for expected_message_descriptor_name in expected_message_descriptor_names {
+                expect_that!(
+                    file_descriptors.find_message_by_full_name(expected_message_descriptor_name),
+                    some(pat!(&MessageDescriptor { full_name(): eq(expected_message_descriptor_name) })),
+                    "File descriptors should include message '{expected_message_descriptor_name}'."
+                );
+            }
+
+        },
+
+        no_descriptors: (
+            MetricsConfig {
+                ..Default::default()
+            },
+            &[],
+        ),
+
+        // Metrics Config defines file descriptor protos, but doesn't use them in any of the
+        // reports.
+        unused_descriptors: (
+            MetricsConfig {
+                descriptor_protos: vec![
+                    Empty::descriptor().file_descriptor().proto().to_owned(),
+                ],
+                ..Default::default()
+            },
+            &[],
+        ),
+
+        no_descriptors_but_report_references_well_known_descriptor: (
+            MetricsConfig {
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["google.protobuf.Empty".to_owned()],
+        ),
+
+        descriptor_is_used_in_multiple_reports: (
+            MetricsConfig {
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["google.protobuf.Empty".to_owned()],
+        ),
+
+        custom_message: (
+            MetricsConfig {
+                descriptor_protos: vec![
+                    TestMessage::descriptor().file_descriptor().proto().to_owned(),
+                    test_dep::file_descriptor().proto().to_owned(),
+                ],
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".TestMessage".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["TestMessage".to_owned()],
+        ),
+
+        multiple_descriptors: (
+            MetricsConfig {
+                descriptor_protos: vec![
+                    TestMessage::descriptor().file_descriptor().proto().to_owned(),
+                    test_dep::file_descriptor().proto().to_owned(),
+                ],
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".TestMessage".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["TestMessage".to_owned(), "google.protobuf.Empty".to_owned()],
+        )
+    );
+}
