@@ -13,15 +13,14 @@
 // limitations under the License.
 
 use async_trait::async_trait;
-use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_expr::node_factory::DescriptorProvider;
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    publisher::Publisher_type as PublisherTypeProto, Publisher as PublisherProto,
+    source::Source_type as SourceTypeProto, Source as SourceProto,
 };
 use sdv_telemetry_service_publisher_accessor::{
     ServicePublisherAccessor, ServicePublisherAccessorError,
 };
-use sdv_telemetry_utils::descriptor_utils;
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -31,8 +30,8 @@ use crate::metrics_config_orchestrator::descriptor_provider::DescriptorProviderI
 pub(crate) trait DescriptorProviderFactory: Send + Sync {
     async fn create(
         &self,
-        fds: &[FileDescriptor],
-        publishers: &[PublisherProto],
+        fds: &FileDescriptorsAndWkts,
+        publishers: &[SourceProto],
         service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError>;
 }
@@ -59,36 +58,33 @@ pub(crate) struct DescriptorProviderFactoryImpl;
 impl DescriptorProviderFactory for DescriptorProviderFactoryImpl {
     async fn create(
         &self,
-        fds: &[FileDescriptor],
-        publishers: &[PublisherProto],
+        fds: &FileDescriptorsAndWkts,
+        publishers: &[SourceProto],
         service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         let mut publisher_message_descriptor = HashMap::new();
         for publisher in publishers {
-            let descriptor = match &publisher.publisher_type {
-                Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) => {
+            let descriptor = match &publisher.source_type {
+                Some(SourceTypeProto::DataSource(service_publisher_proto)) => {
                     service_publisher_manager
-                        .get_metadata(&service_publisher_proto.service_name)
+                        .get_metadata(&service_publisher_proto.source_identifier)
                         .await?
                         .map(|metadata| metadata.message_descriptor)
                 }
-                Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => {
+                Some(SourceTypeProto::Aggregator(aggregation_publisher_proto)) => {
                     let message_builder = aggregation_publisher_proto
                         .message_builder
                         .as_ref()
                         .ok_or(DescriptorProviderFactoryError::InvalidAggregationPublisher {
                             pub_name: publisher.name.clone(),
                         })?;
-                    let descriptor = descriptor_utils::find_message_by_full_name(
-                        fds,
-                        &message_builder.message_type,
-                    )
-                    .ok_or(
-                        DescriptorProviderFactoryError::MissingMessageDescriptor {
-                            pub_name: publisher.name.clone(),
-                            msg_type: message_builder.message_type.clone(),
-                        },
-                    )?;
+                    let descriptor =
+                        fds.find_message_by_full_name(&message_builder.message_type).ok_or(
+                            DescriptorProviderFactoryError::MissingMessageDescriptor {
+                                pub_name: publisher.name.clone(),
+                                msg_type: message_builder.message_type.clone(),
+                            },
+                        )?;
                     Some(descriptor)
                 }
                 // Skip unknown publisher types.
@@ -111,7 +107,8 @@ mod tests {
     use protobuf::reflect::MessageDescriptor;
     use protobuf::MessageFull;
     use sdv_telemetry_proto_rust::metrics_configuration::{
-        publisher::Publisher_type as PublisherTypeProto, AggregationPublisher, ProtoMessageBuilder,
+        source::Source_type as SourceTypeProto, Aggregator, ProtoMessageBuilder,
+        Source as SourceProto,
     };
     use sdv_telemetry_test_proto::test_message::{TestMessage, TestNestedMessage};
 
@@ -136,30 +133,24 @@ mod tests {
         Arc::new(MockServicePublisherAccessor::new().with_next_descriptor(next_descriptor))
     }
 
-    fn create_aggregation_publisher_with_no_proto_message_builder(
-        pub_name: &str,
-    ) -> PublisherProto {
-        let mut publisher = PublisherProto::new();
+    fn create_aggregation_publisher_with_no_proto_message_builder(pub_name: &str) -> SourceProto {
+        let mut publisher = SourceProto::new();
         publisher.name = pub_name.to_string();
-        publisher.publisher_type =
-            Some(PublisherTypeProto::AggregationPublisher(AggregationPublisher::new()));
+        publisher.source_type = Some(SourceTypeProto::Aggregator(Aggregator::new()));
         publisher
     }
 
-    fn create_aggregation_publisher_with_msg_type(
-        pub_name: &str,
-        msg_type: &str,
-    ) -> PublisherProto {
+    fn create_aggregation_publisher_with_msg_type(pub_name: &str, msg_type: &str) -> SourceProto {
         let mut msg_builder = ProtoMessageBuilder::new();
         msg_builder.message_type = msg_type.to_string();
 
-        let mut aggr_publisher = AggregationPublisher::new();
+        let mut aggr_publisher = Aggregator::new();
         aggr_publisher.message_builder = protobuf::MessageField::some(msg_builder);
-        let pub_type = PublisherTypeProto::AggregationPublisher(aggr_publisher);
+        let pub_type = SourceTypeProto::Aggregator(aggr_publisher);
 
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         publisher.name = pub_name.to_string();
-        publisher.publisher_type = Some(pub_type);
+        publisher.source_type = Some(pub_type);
         publisher
     }
 
@@ -169,9 +160,9 @@ mod tests {
         let service_publisher_manager =
             Arc::new(MockServicePublisherAccessor::new().with_next_error(anyhow!("Error")));
 
-        let mut publisher = PublisherProto::new();
-        let service_publisher = publisher.mut_service_publisher();
-        SERVICE_NAME.clone_into(&mut service_publisher.service_name);
+        let mut publisher = SourceProto::new();
+        let service_publisher = publisher.mut_data_source();
+        SERVICE_NAME.clone_into(&mut service_publisher.source_identifier);
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let err = descriptor_provider_factory
@@ -232,9 +223,9 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_descriptor_service_publisher_success() {
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         PUBLISHER_1.clone_into(&mut publisher.name);
-        publisher.mut_service_publisher();
+        publisher.mut_data_source();
 
         let descriptor_provider_factory = DescriptorProviderFactoryImpl;
         let descriptor_provider = descriptor_provider_factory

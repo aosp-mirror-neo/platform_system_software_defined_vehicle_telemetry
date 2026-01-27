@@ -35,9 +35,10 @@ use sdv_telemetry_proto_rust::expression::{
     constant_leaf_node::Node_value, node::Node_type, CombinationNode, ConstantLeafNode, Node,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    conditional_trigger::Condition_type, metrics_report::ReportReason, publisher::Publisher_type,
-    trigger::Trigger_type, AggregationPublisher, ConditionalTrigger, DataTrigger, MetricsConfig,
-    MetricsReportConfig, PeriodicTrigger, ProtoMessageBuilder, Publisher, Trigger,
+    conditional_trigger::Condition_type, metrics_report::ReportReason, source::Source_type,
+    trigger::Trigger_type, Aggregator as AggregationPublisher, ConditionalTrigger, DataTrigger,
+    MetricsConfig, MetricsReportConfig, PeriodicTrigger, ProtoMessageBuilder, Source as Publisher,
+    Trigger,
 };
 use sdv_telemetry_rust_wrapper::{
     ConditionalTriggerErrorDetails, StatusDetails, TelemetryServiceHolder,
@@ -193,7 +194,7 @@ async fn telemetry_service_act_on_start_trigger_test() {
             Trigger {
                 name: "data_trigger".to_owned(),
                 trigger_type: Some(Trigger_type::DataTrigger(DataTrigger {
-                    publisher_name: "aggregation_publisher".to_owned(),
+                    source_name: "aggregation_publisher".to_owned(),
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -218,9 +219,9 @@ async fn telemetry_service_act_on_start_trigger_test() {
             },
         ],
 
-        publishers: vec![Publisher {
+        sources: vec![Publisher {
             name: "aggregation_publisher".to_owned(),
-            publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+            source_type: Some(Source_type::Aggregator(AggregationPublisher {
                 trigger_names: vec!["start_trigger".to_owned()],
                 message_builder: Some(ProtoMessageBuilder {
                     message_type: Empty::descriptor().full_name().to_owned(),
@@ -241,7 +242,7 @@ async fn telemetry_service_act_on_start_trigger_test() {
         }],
 
         start_trigger_name: "start_trigger".to_owned(),
-        finish_trigger_name: "finish_trigger".to_owned(),
+        deactivate_trigger_name: "finish_trigger".to_owned(),
         metrics_report_configs: vec![MetricsReportConfig {
             name: "metrics_report_config".to_owned(),
             trigger_names: vec![
@@ -334,7 +335,7 @@ async fn telemetry_service_start_trigger_makes_end_trigger_fire_test() {
             Trigger {
                 name: "end_trigger".to_owned(),
                 trigger_type: Some(Trigger_type::DataTrigger(DataTrigger {
-                    publisher_name: "aggregation_publisher".to_owned(),
+                    source_name: "aggregation_publisher".to_owned(),
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -349,9 +350,9 @@ async fn telemetry_service_start_trigger_makes_end_trigger_fire_test() {
             },
         ],
 
-        publishers: vec![Publisher {
+        sources: vec![Publisher {
             name: "aggregation_publisher".to_owned(),
-            publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+            source_type: Some(Source_type::Aggregator(AggregationPublisher {
                 trigger_names: vec!["start_trigger".to_owned()],
                 message_builder: Some(ProtoMessageBuilder {
                     message_type: Empty::descriptor().full_name().to_owned(),
@@ -364,8 +365,8 @@ async fn telemetry_service_start_trigger_makes_end_trigger_fire_test() {
         }],
 
         start_trigger_name: "start_trigger".to_owned(),
-        end_trigger_name: "end_trigger".to_owned(),
-        finish_trigger_name: "finish_trigger".to_owned(),
+        stop_trigger_name: "end_trigger".to_owned(),
+        deactivate_trigger_name: "finish_trigger".to_owned(),
         metrics_report_configs: vec![MetricsReportConfig {
             name: "metrics_report_config".to_owned(),
             report_incomplete: true,
@@ -397,7 +398,7 @@ async fn telemetry_service_start_trigger_makes_end_trigger_fire_test() {
     // when the config is already inactive, so no report should be present for Finish Trigger.
     let metrics_report = service.get_metrics_report(&report_info.report_uuid).await.unwrap();
     assert_eq!(metrics_report.metrics_config_uuid, config.uuid);
-    assert_eq!(metrics_report.report_reason, ReportReason::INCOMPLETE_END.into());
+    assert_eq!(metrics_report.report_reason, ReportReason::INCOMPLETE_STOPPED.into());
 
     // Wait a bit to ensure no more reports are generated.
     tokio::time::sleep(Duration::from_secs(1)).await;
@@ -537,7 +538,7 @@ async fn telemetry_service_status_reporting_test() {
             },
         ],
 
-        finish_trigger_name: "finish_trigger".to_owned(),
+        deactivate_trigger_name: "finish_trigger".to_owned(),
         metrics_report_configs: vec![MetricsReportConfig {
             name: "some_metrics_report_config".to_owned(),
             trigger_names: vec!["conditional_trigger".to_owned()],
@@ -636,10 +637,10 @@ async fn telemetry_service_no_aggregation_publisher_race_condition_during_metric
             },
         ],
 
-        publishers: (0..NUM_PUBLISHERS)
+        sources: (0..NUM_PUBLISHERS)
             .map(|i| Publisher {
                 name: format!("publisher_{i}"),
-                publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+                source_type: Some(Source_type::Aggregator(AggregationPublisher {
                     trigger_names: vec!["periodic_trigger".to_owned()],
                     message_builder: Some(ProtoMessageBuilder {
                         message_type: Empty::descriptor().full_name().to_owned(),
@@ -652,7 +653,7 @@ async fn telemetry_service_no_aggregation_publisher_race_condition_during_metric
             })
             .collect::<Vec<_>>(),
 
-        finish_trigger_name: "finish_trigger".to_owned(),
+        deactivate_trigger_name: "finish_trigger".to_owned(),
         metrics_report_configs: vec![MetricsReportConfig {
             name: "some_metrics_report_config".to_owned(),
             report_incomplete: true,
@@ -717,10 +718,10 @@ async fn telemetry_service_no_conditional_trigger_race_condition_during_metrics_
         }))
         .collect::<Vec<_>>(),
 
-        publishers: (0..NUM_ENTITIES)
+        sources: (0..NUM_ENTITIES)
             .map(|i| Publisher {
                 name: format!("publisher_{i}"),
-                publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+                source_type: Some(Source_type::Aggregator(AggregationPublisher {
                     trigger_names: vec![format!("conditional_trigger_{i}")],
                     message_builder: Some(ProtoMessageBuilder {
                         message_type: Empty::descriptor().full_name().to_owned(),
@@ -741,7 +742,7 @@ async fn telemetry_service_no_conditional_trigger_race_condition_during_metrics_
             ..Default::default()
         }],
 
-        finish_trigger_name: "finish_trigger".to_owned(),
+        deactivate_trigger_name: "finish_trigger".to_owned(),
         metrics_report_configs: vec![MetricsReportConfig {
             name: "some_metrics_report_config".to_owned(),
             report_incomplete: true,
@@ -865,9 +866,9 @@ async fn run_vector_aggregation_test(publisher: DataTunnelPublisher, service_nam
     info!("Adding metrics config");
     let config = include_bytes!(concat!(env!("OUT_DIR"), "/aggregation_config.binpb"));
     let mut config = MetricsConfig::parse_from_bytes(config).unwrap();
-    assert!(config.publishers[0].has_service_publisher());
-    assert_eq!(config.publishers[0].service_publisher().service_name, "<placeholder>");
-    config.publishers[0].mut_service_publisher().service_name = service_name;
+    assert!(config.sources[0].has_data_source());
+    assert_eq!(config.sources[0].data_source().source_identifier, "<placeholder>");
+    config.sources[0].mut_data_source().source_identifier = service_name;
     let serialized_config = config.write_to_bytes().unwrap();
 
     let config_uuid = service.add_metrics_config(&serialized_config).await.unwrap();

@@ -63,16 +63,16 @@ fn report_incomplete(report_reason: ReportReason) -> bool {
             false
         }
         ReportReason::INCOMPLETE_SHUTDOWN
-        | ReportReason::INCOMPLETE_END
-        | ReportReason::INCOMPLETE_FINISHED => true,
+        | ReportReason::INCOMPLETE_STOPPED
+        | ReportReason::INCOMPLETE_DEACTIVATED => true,
     }
 }
 
 fn format_report_reason(report_reason: ReportReason) -> String {
     match report_reason {
         ReportReason::INCOMPLETE_SHUTDOWN => "telemetry service shut down".to_owned(),
-        ReportReason::INCOMPLETE_END => "end trigger was triggered".to_owned(),
-        ReportReason::INCOMPLETE_FINISHED => {
+        ReportReason::INCOMPLETE_STOPPED => "end trigger was triggered".to_owned(),
+        ReportReason::INCOMPLETE_DEACTIVATED => {
             "either finish trigger was triggered or the config was deactvated/removed \
             by the simulation actions"
                 .to_owned()
@@ -161,7 +161,7 @@ Report content
     fn test_report_log_entry_incomplete_end() {
         let report_number = 3;
         let date_time = date_time_from_y_m_d_h_m_s_milli(2024, 7, 22, 9, 59, 8, 578);
-        let reason = ReportReason::INCOMPLETE_END;
+        let reason = ReportReason::INCOMPLETE_STOPPED;
         let report_content = "Report content";
         let actual_output = report_log_entry(report_number, &date_time, reason, report_content);
 
@@ -179,7 +179,7 @@ Report content
     fn test_report_log_entry_incomplete_finished() {
         let report_number = 4;
         let date_time = date_time_from_y_m_d_h_m_s_milli(2024, 7, 22, 9, 59, 8, 578);
-        let reason = ReportReason::INCOMPLETE_FINISHED;
+        let reason = ReportReason::INCOMPLETE_DEACTIVATED;
         let report_content = "Report content";
         let actual_output = report_log_entry(report_number, &date_time, reason, report_content);
 

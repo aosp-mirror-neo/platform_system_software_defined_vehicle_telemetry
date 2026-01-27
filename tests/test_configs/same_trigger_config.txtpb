@@ -31,9 +31,9 @@ triggers {
   name: "finish_trigger"
   periodic_trigger { interval { nanos: 100000000 } }
 }
-publishers {
+sources {
   name: "aggregation"
-  aggregation_publisher {
+  aggregator {
     trigger_names: "finish_trigger"
     message_builder {
       message_type: ".aaos.sdv.telemetry.adhoc.aggregation"
@@ -47,7 +47,7 @@ publishers {
 # Expression Node 0
 expression_nodes { constant_leaf_node { int32_value: 42 } }
 # Expression Node 1
-expression_nodes { field_leaf_node { publisher_name: "aggregation" field_names: "int_field" } }
+expression_nodes { field_leaf_node { source_name: "aggregation" field_names: "int_field" } }
 metrics_report_configs {
   name: "report"
   trigger_names: "finish_trigger"
@@ -59,4 +59,4 @@ metrics_report_configs {
     }
   }
 }
-finish_trigger_name: "finish_trigger"
+deactivate_trigger_name: "finish_trigger"

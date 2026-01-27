@@ -22,8 +22,8 @@ pub(crate) struct MockDescriptorProviderFactory {}
 impl DescriptorProviderFactory for MockDescriptorProviderFactory {
     async fn create(
         &self,
-        _fds: &[FileDescriptor],
-        _publishers: &[PublisherProto],
+        _fds: &FileDescriptorsAndWkts,
+        _publishers: &[SourceProto],
         _service_publisher_manager: &Arc<dyn ServicePublisherAccessor>,
     ) -> Result<Box<dyn DescriptorProvider>, DescriptorProviderFactoryError> {
         Ok(Box::new(MockDescriptorProvider::new()))

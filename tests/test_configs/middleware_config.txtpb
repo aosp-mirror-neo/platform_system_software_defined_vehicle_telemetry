@@ -33,39 +33,39 @@ descriptor_protos {
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_front_left_dt_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-left"
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-left"
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_front_right_dt_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-right"
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-right"
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_rear_left_dt_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-left"
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-left"
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_rear_right_dt_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-right"
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-right"
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_front_left_rpc_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
-    connection_type: GETTER
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
+    connection_type: ON_DEMAND
     configuration {
       type_url: "type.googleapis.com/com.sdv.telemetry.sample.GetTireStatusRequest"
       value: "\x08\x00"
@@ -73,11 +73,11 @@ publishers {
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_front_right_rpc_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
-    connection_type: GETTER
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
+    connection_type: ON_DEMAND
     configuration {
       type_url: "type.googleapis.com/com.sdv.telemetry.sample.GetTireStatusRequest"
       value: "\x08\x01"
@@ -85,10 +85,10 @@ publishers {
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_rear_left_rpc_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
     connection_type: SUBSCRIPTION
     configuration {
       type_url: "type.googleapis.com/com.sdv.telemetry.sample.GetTireStatusRequest"
@@ -97,10 +97,10 @@ publishers {
   }
 }
 
-publishers {
+sources {
   name: "tire_pressure_rear_right_rpc_publisher"
-  service_publisher {
-    service_name: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
+  data_source {
+    source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
     connection_type: SUBSCRIPTION
     configuration {
       type_url: "type.googleapis.com/com.sdv.telemetry.sample.GetTireStatusRequest"
@@ -110,56 +110,35 @@ publishers {
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_front_left_dt_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_front_left_dt_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_front_right_dt_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_front_right_dt_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { publisher_name: "tire_pressure_rear_left_dt_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_rear_left_dt_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_rear_right_dt_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_rear_right_dt_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_front_left_rpc_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_front_left_rpc_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_front_right_rpc_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_front_right_rpc_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_rear_left_rpc_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_rear_left_rpc_publisher" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node {
-    publisher_name: "tire_pressure_rear_right_rpc_publisher"
-    field_names: "pressure"
-  }
+  field_leaf_node { source_name: "tire_pressure_rear_right_rpc_publisher" field_names: "pressure" }
 }
 
 triggers {
@@ -172,7 +151,7 @@ triggers {
   periodic_trigger { interval { seconds: 4 } }
 }
 
-finish_trigger_name: "finish_trigger"
+deactivate_trigger_name: "finish_trigger"
 
 metrics_report_configs {
   name: "Report"

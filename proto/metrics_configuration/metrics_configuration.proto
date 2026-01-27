@@ -42,8 +42,8 @@ message MetricsConfig {
   repeated Trigger triggers = 5;
 
   // Optional.
-  // Publishers that are available in the Metrics Configuration.
-  repeated Publisher publishers = 6;
+  // Sources that are available in the Metrics Configuration.
+  repeated Source sources = 6;
 
   // Optional.
   // Expression nodes that are available in the Metrics Configuration.
@@ -59,20 +59,19 @@ message MetricsConfig {
   string start_trigger_name = 9;
 
   // Optional.
-  // The name of the trigger that ends data collection.
-  // If end trigger is set, start trigger must be set.
-  string end_trigger_name = 10;
+  // The name of the trigger that stops data collection.
+  // If stop trigger is set, start trigger must be set.
+  string stop_trigger_name = 10;
 
   // Optional.
-  // The name of the trigger that finishes metrics configuration.
-  // A finished metrics configuration is deactivated.
-  string finish_trigger_name = 11;
+  // The name of the trigger that deactivates metrics configuration.
+  string deactivate_trigger_name = 11;
 }
 
 // Emits trigger events.
 message Trigger {
   // Required.
-  // The name of the trigger. Must be unique across all publishers and triggers
+  // The name of the trigger. Must be unique across all sources and triggers
   // in the Metrics Configuration. Must not be an empty string.
   string name = 1;
 
@@ -83,13 +82,13 @@ message Trigger {
   }
 }
 
-// Listens to the publisher and triggers when it publishes a new message.
-// The published message is stored in the activation context under publisher
+// Listens to the source when it publishes a new message.
+// The published message is stored in the activation context under source
 // name and is available down the activation chain.
 message DataTrigger {
   // Required.
-  // The name of the publisher to listen to.
-  string publisher_name = 1;
+  // The name of the source to listen to.
+  string source_name = 1;
 }
 
 // Triggers periodically.
@@ -107,9 +106,9 @@ message ConditionalTrigger {
   repeated string trigger_names = 1;
 
   // Required.
-  // The index of the root node of the expression that uses data from publishers
-  // and returns a value. If `change_type` is not ALL_CHANGES, the value must be of
-  // numeric type or a boolean. If a message from a publisher is not present in
+  // The index of the root node of the expression that uses data from sources
+  // and returns a value. If change_type is not ALL_CHANGES, the value must be of
+  // numeric type or a boolean. If a message from a source is not present in
   // the activation context, the context will be populated with the latest
   // published message.
   optional uint32 selector_node_index = 2;
@@ -169,23 +168,23 @@ message ConditionalTrigger {
 }
 
 // Publishes messages and stores the latest published message.
-message Publisher {
+message Source {
   // Required.
-  // The name of the publisher. Must be unique across all publishers and
+  // The name of the source. Must be unique across all sources and
   // triggers in the Metrics Configuration. Must not be an empty string.
   string name = 1;
 
-  oneof publisher_type {
-    ServicePublisher service_publisher = 2;
-    AggregationPublisher aggregation_publisher = 3;
+  oneof source_type {
+    DataSource data_source = 2;
+    Aggregator aggregator = 3;
   }
 }
 
 // Publishes messages from a customizable external service.
-message ServicePublisher {
+message DataSource {
   // Required.
-  // Unique service name.
-  string service_name = 1;
+  // Unique source identifier.
+  string source_identifier = 1;
 
   // Defines connection behavior of Service Publisher.
   enum ConnectionType {
@@ -193,12 +192,12 @@ message ServicePublisher {
     // Maps to SUBSCRIPTION connection type.
     CONNECTION_TYPE_UNSPECIFIED = 0;
 
-    // Service Publisher subscribes to the underlying service.
+    // DataSource subscribes to the underlying service.
     SUBSCRIPTION = 1;
 
-    // Service Publisher gets the latest published message on demand.
-    // Data Triggers cannot listen to Service Publishers with connection type Getter.
-    GETTER = 2;
+    // DataSource gets the latest published message on demand.
+    // Data Triggers cannot listen to DataSources with connection type `ON_DEMAND`.
+    ON_DEMAND = 2;
   }
 
   // Optional.
@@ -216,10 +215,10 @@ message ServicePublisher {
   // milliseconds. Values less than 0 are not allowed.
   //
   // Behaves differently depending on the `ConnectionType`:
-  // - Subscription publishers: Will only be notified of new messages with the
+  // - Subscription sources: Will only be notified of new messages with the
   //   provided interval. When more than one message arrived in the sub-sampling
   //   interval, all but the latest message are discarded.
-  // - Getter publishers: No effect.
+  // - OnDemand sources: No effect.
   //
   // - TODO: b/373332101 - Not yet implemented for configurable publishers.
   // - TODO: b/373332617 - Not yet implemented for getter publishers.
@@ -233,13 +232,13 @@ message ServicePublisher {
 
 // When triggered uses message builder to create a new message according
 // to its underlying aggregated field assignments and publishes it.
-message AggregationPublisher {
+message Aggregator {
   // Required.
   // The names of the triggers that specify when a new message is published.
   repeated string trigger_names = 1;
 
   // Optional.
-  // Specifies whether the aggregated value is reset when the publisher data is
+  // Specifies whether the aggregated value is reset when the source data is
   // read into activation context.
   bool reset_on_get = 2;
 
@@ -263,13 +262,13 @@ message MetricsReportConfig {
 
   // Optional.
   // Specifies whether to send the report using the latest published messages
-  // on Telemetry Service shutdown or when the data collection is ended or
-  // finished.
+  // on Telemetry Service shutdown or when the data collection is stopped or
+  // the metrics configuration is deactivated.
   bool report_incomplete = 3;
 
   // Required.
   // The message builder that creates a metrics report to the
-  // OEM application. If a message from a publisher is not present in
+  // OEM application. If a message from a source is not present in
   // the activation context, the context will be populated with the latest
   // published message.
   ProtoMessageBuilder message_builder = 4;
@@ -300,11 +299,11 @@ message MetricsReport {
     REGULAR = 1;
     // Report generated because the Telemetry Service was shutting down.
     INCOMPLETE_SHUTDOWN = 2;
-    // Report generated because Metrics Configuration data collection ended.
-    INCOMPLETE_END = 3;
+    // Report generated because Metrics Configuration data collection stopped.
+    INCOMPLETE_STOPPED = 3;
     // Report generated because Metrics Configuration data collection
-    // was finished.
-    INCOMPLETE_FINISHED = 4;
+    // was deactivated.
+    INCOMPLETE_DEACTIVATED = 4;
     // Report generated because the report_initial flag was set to true
     INITIAL = 5;
   }

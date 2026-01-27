@@ -15,7 +15,7 @@
 use log::warn;
 use protobuf::{
     descriptor::FileDescriptorProto,
-    reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor, RuntimeType},
+    reflect::{FieldDescriptor, MessageDescriptor, RuntimeType},
 };
 use sdv_telemetry_simulator_proto::simulation_publisher::{
     data_generator::Data_source,
@@ -25,9 +25,8 @@ use sdv_telemetry_simulator_proto::simulation_publisher::{
     PublishingStrategy as PublishingStrategyProto, SimulationPublisher,
 };
 use sdv_telemetry_simulator_publishing_strategy::PublishingStrategyType;
-use sdv_telemetry_utils::proto_reader;
 use sdv_telemetry_utils::{
-    descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS, duration_utils::try_into_duration,
+    descriptor_utils::FileDescriptorsAndWkts, duration_utils::try_into_duration, proto_reader,
 };
 use std::ffi::OsStr;
 use std::{collections::HashSet, path::Path};
@@ -241,24 +240,16 @@ fn get_message_descriptor(
     message_name: &str,
     file_name: &OsStr,
 ) -> Result<MessageDescriptor, SimulatorError> {
-    let file_descriptors = FileDescriptor::new_dynamic_fds(
-        file_descriptor_protos.to_vec(),
-        &WELL_KNOWN_FILE_DESCRIPTORS,
-    )
-    .map_err(|error| SimulatorError::FailedToParseFile {
-        file_name: file_name.to_owned(),
-        error_message: error.to_string(),
-    })?;
-
-    for file_descriptor in file_descriptors.iter().chain(WELL_KNOWN_FILE_DESCRIPTORS.iter()) {
-        if let Some(message_descriptor) = file_descriptor.message_by_full_name(message_name) {
-            return Ok(message_descriptor);
-        }
-    }
-    Err(SimulatorError::MissingDescriptorProto {
-        file_name: file_name.to_owned(),
-        message_name: message_name.to_owned(),
-    })
+    FileDescriptorsAndWkts::try_from(file_descriptor_protos.to_vec())
+        .map_err(|error| SimulatorError::FailedToParseFile {
+            file_name: file_name.to_owned(),
+            error_message: error.to_string(),
+        })?
+        .find_message_by_full_name(message_name)
+        .ok_or_else(|| SimulatorError::MissingDescriptorProto {
+            file_name: file_name.to_owned(),
+            message_name: message_name.to_owned(),
+        })
 }
 
 #[cfg(test)]

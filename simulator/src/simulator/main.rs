@@ -86,9 +86,9 @@ mod tests {
         metrics_report::ReportReason,
         proto_message_builder::field_assignment::Aggregated_field_value,
         proto_message_builder::field_assignment::NoAggregation,
-        proto_message_builder::FieldAssignment, publisher::Publisher_type, trigger::Trigger_type,
-        DataTrigger, MetricsConfig, MetricsReport, MetricsReportConfig, PeriodicTrigger,
-        ProtoMessageBuilder, Publisher, ServicePublisher, Trigger,
+        proto_message_builder::FieldAssignment, source::Source_type, trigger::Trigger_type,
+        DataSource, DataTrigger, MetricsConfig, MetricsReport, MetricsReportConfig,
+        PeriodicTrigger, ProtoMessageBuilder, Source, Trigger,
     };
     use sdv_telemetry_simulator_proto::simulation_publisher::{
         data_generator::Data_source, publishing_strategy, CSVFile, DataGenerator,
@@ -108,16 +108,16 @@ mod tests {
             descriptor_protos: vec![Int32Value::descriptor().file_descriptor_proto().to_owned()],
             expression_nodes: vec![Node {
                 node_type: Some(Node_type::FieldLeafNode(FieldLeafNode {
-                    publisher_name: "publisher".to_owned(),
+                    source_name: "publisher".to_owned(),
                     field_names: vec!["value".to_owned()],
                     ..Default::default()
                 })),
                 ..Default::default()
             }],
-            publishers: vec![Publisher {
+            sources: vec![Source {
                 name: "publisher".to_owned(),
-                publisher_type: Some(Publisher_type::ServicePublisher(ServicePublisher {
-                    service_name: SERVICE_NAME.to_owned(),
+                source_type: Some(Source_type::DataSource(DataSource {
+                    source_identifier: SERVICE_NAME.to_owned(),
                     ..Default::default()
                 })),
                 ..Default::default()
@@ -126,7 +126,7 @@ mod tests {
                 Trigger {
                     name: "data_trigger".to_owned(),
                     trigger_type: Some(Trigger_type::DataTrigger(DataTrigger {
-                        publisher_name: "publisher".to_owned(),
+                        source_name: "publisher".to_owned(),
                         ..Default::default()
                     })),
                     ..Default::default()
@@ -140,7 +140,7 @@ mod tests {
                     ..Default::default()
                 },
             ],
-            finish_trigger_name: "finish_trigger".to_owned(),
+            deactivate_trigger_name: "finish_trigger".to_owned(),
             metrics_report_configs: vec![MetricsReportConfig {
                 name: "report_config".to_owned(),
                 trigger_names: vec!["data_trigger".to_owned()],

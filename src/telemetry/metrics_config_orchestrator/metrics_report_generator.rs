@@ -600,7 +600,7 @@ mod test {
     async fn deactivate_already_inactive_panics() {
         let generator = Arc::new(create_default_generator());
 
-        generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
+        generator.deactivate(ReportReason::INCOMPLETE_DEACTIVATED).await;
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -618,7 +618,7 @@ mod test {
         let generator = Arc::new(generator);
 
         Arc::clone(&generator).activate().await;
-        generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
+        generator.deactivate(ReportReason::INCOMPLETE_DEACTIVATED).await;
 
         assert_eq!(num_fired.load(Ordering::Acquire), 1);
     }
@@ -633,10 +633,10 @@ mod test {
         let generator = Arc::new(generator);
 
         Arc::clone(&generator).activate().await;
-        generator.deactivate(ReportReason::INCOMPLETE_FINISHED).await;
+        generator.deactivate(ReportReason::INCOMPLETE_DEACTIVATED).await;
         let report = rx.await;
 
-        assert_eq!(report.report_reason, ReportReason::INCOMPLETE_FINISHED.into());
+        assert_eq!(report.report_reason, ReportReason::INCOMPLETE_DEACTIVATED.into());
         let message = report.report_data.unpack::<TestMessage>().unwrap().unwrap();
         assert_eq!(message.int_field, 1);
     }

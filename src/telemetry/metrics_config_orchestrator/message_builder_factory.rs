@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use protobuf::reflect::{FieldDescriptor, FileDescriptor, MessageDescriptor};
+use protobuf::reflect::{FieldDescriptor, MessageDescriptor};
 use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::{
     proto_message_builder::field_assignment::Aggregated_field_value as AggregatedFieldValueProto,
     ProtoMessageBuilder,
 };
 use sdv_telemetry_utils::collection_extension::HashMapExtension;
-use sdv_telemetry_utils::descriptor_utils;
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -47,13 +47,13 @@ pub(crate) trait MessageBuilderFactory: Send + Sync {
 }
 
 pub(crate) struct MessageBuilderFactoryCreateContext<'a> {
-    pub file_descriptors: &'a [FileDescriptor],
+    pub file_descriptors: &'a FileDescriptorsAndWkts,
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
 }
 
 pub(crate) struct MessageBuilderFactoryValidateContext<'a> {
-    pub file_descriptors: &'a [FileDescriptor],
+    pub file_descriptors: &'a FileDescriptorsAndWkts,
     pub node_types: &'a [Option<NodeValueType>],
 }
 
@@ -78,7 +78,7 @@ pub(crate) enum MessageBuilderFactoryError {
 impl<'a> MessageBuilderFactoryCreateContext<'a> {
     /// Constructor for the context used by factory's create() method
     pub(crate) fn new(
-        file_descriptors: &'a [FileDescriptor],
+        file_descriptors: &'a FileDescriptorsAndWkts,
         nodes: &'a [Arc<Node>],
         node_types: &'a [Option<NodeValueType>],
     ) -> Self {
@@ -89,7 +89,7 @@ impl<'a> MessageBuilderFactoryCreateContext<'a> {
 impl<'a> MessageBuilderFactoryValidateContext<'a> {
     /// Constructor for the context used by factory's validate() method
     pub(crate) fn new(
-        file_descriptors: &'a [FileDescriptor],
+        file_descriptors: &'a FileDescriptorsAndWkts,
         node_types: &'a [Option<NodeValueType>],
     ) -> Self {
         Self { file_descriptors, node_types }
@@ -187,10 +187,10 @@ impl MessageBuilderFactoryImpl {
     }
 
     fn get_message_descriptor(
-        file_descriptors: &[FileDescriptor],
+        file_descriptors: &FileDescriptorsAndWkts,
         message_type: &str,
     ) -> Result<MessageDescriptor, MessageBuilderFactoryError> {
-        descriptor_utils::find_message_by_full_name(file_descriptors, message_type).ok_or(
+        file_descriptors.find_message_by_full_name(message_type).ok_or(
             MessageBuilderFactoryError::MessageNotFound { message_type: message_type.to_string() },
         )
     }
@@ -247,8 +247,8 @@ mod tests {
         field_assignment::NoAggregation, FieldAssignment,
     };
 
+    use self::mock::get_test_file_descriptors;
     use crate::metrics_config_orchestrator::message_builder::value_aggregator_factory::mock::MockValueAggregatorFactory;
-    use mock::get_test_file_descriptors;
 
     // Package and message name are in to src/test_utils/test_message.proto
     const INT_FIELD_NAME: &str = "int_field";
@@ -258,10 +258,6 @@ mod tests {
         MessageBuilderFactoryImpl {
             value_aggregator_factory: Box::new(MockValueAggregatorFactory::new()),
         }
-    }
-
-    fn create_test_file_descriptors() -> Vec<FileDescriptor> {
-        get_test_file_descriptors().to_vec()
     }
 
     fn create_field_assignment_proto(field_name: &str) -> FieldAssignment {
@@ -284,8 +280,8 @@ mod tests {
     #[test]
     fn validate_ok() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
@@ -297,8 +293,8 @@ mod tests {
     #[test]
     fn validate_name_without_leading_dot_ok() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME.strip_prefix('.').unwrap(),
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
@@ -310,8 +306,8 @@ mod tests {
     #[test]
     fn validate_no_aggregated_field_value_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![{
@@ -333,8 +329,8 @@ mod tests {
     #[test]
     fn validate_message_not_found_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             // not a valid message in test_message.proto
             ".com.example.foo.BarMessage",
@@ -352,8 +348,8 @@ mod tests {
     #[test]
     fn validate_duplicate_field_assignment_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![
@@ -374,8 +370,8 @@ mod tests {
     #[test]
     fn validate_field_name_not_found_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![
@@ -400,8 +396,8 @@ mod tests {
         let factory = MessageBuilderFactoryImpl {
             value_aggregator_factory: Box::new(value_aggregator_factory),
         };
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryValidateContext::new(&fds, &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryValidateContext::new(fds, &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
@@ -418,8 +414,8 @@ mod tests {
     #[test]
     fn create_ok() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
@@ -431,8 +427,8 @@ mod tests {
     #[test]
     fn create_name_without_leading_dot_ok() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME.strip_prefix('.').unwrap(),
             vec![create_field_assignment_proto(INT_FIELD_NAME)],
@@ -444,8 +440,8 @@ mod tests {
     #[test]
     fn create_no_aggregated_field_value_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![{
@@ -468,8 +464,8 @@ mod tests {
     #[test]
     fn create_message_not_found_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             // not a valid message in test_message.proto
             ".com.example.foo.BarMessage",
@@ -488,8 +484,8 @@ mod tests {
     #[test]
     fn create_duplicate_field_assignment_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![
@@ -511,8 +507,8 @@ mod tests {
     #[test]
     fn create_field_name_not_found_fails() {
         let factory = create_message_builder_factory();
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![
@@ -538,8 +534,8 @@ mod tests {
         let factory = MessageBuilderFactoryImpl {
             value_aggregator_factory: Box::new(value_aggregator_factory),
         };
-        let fds = create_test_file_descriptors();
-        let context = MessageBuilderFactoryCreateContext::new(&fds, &[], &[]);
+        let fds = get_test_file_descriptors();
+        let context = MessageBuilderFactoryCreateContext::new(fds, &[], &[]);
         let proto_message_builder = create_proto_message_builder(
             TEST_MESSAGE_FULL_NAME,
             vec![create_field_assignment_proto(INT_FIELD_NAME)],

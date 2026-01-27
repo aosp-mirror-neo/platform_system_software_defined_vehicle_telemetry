@@ -22,12 +22,6 @@ use thiserror::Error;
 #[non_exhaustive]
 pub enum SimulatorError {
     #[error(
-        "Descriptor proto message {message_name} found more than once in metrics config \"{}\"",
-        .file_name.display()
-    )]
-    DuplicateDescriptorProtoMessage { message_name: String, file_name: OsString },
-
-    #[error(
         "Metrics config \"{}\" could not be added because is has the same UUID as already \
         added metrics config \"{}\"",
         file_name.display(), duplicate_file_name.display()

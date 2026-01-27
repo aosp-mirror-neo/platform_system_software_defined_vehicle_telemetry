@@ -26,14 +26,14 @@ descriptor_protos {
   }
 }
 
-publishers {
+sources {
   name: "dt_publisher"
-  service_publisher { service_name: "<placeholder>" }
+  data_source { source_identifier: "<placeholder>" }
 }
 
-publishers {
+sources {
   name: "agg_publisher"
-  aggregation_publisher {
+  aggregator {
     trigger_names: "data_trigger"
     message_builder {
       message_type: ".android.automotive.telemetry.messages.Report"
@@ -45,9 +45,9 @@ publishers {
   }
 }
 
-expression_nodes { field_leaf_node { publisher_name: "dt_publisher" field_names: "int_field" } }
+expression_nodes { field_leaf_node { source_name: "dt_publisher" field_names: "int_field" } }
 
-expression_nodes { field_leaf_node { publisher_name: "agg_publisher" field_names: "int_vector" } }
+expression_nodes { field_leaf_node { source_name: "agg_publisher" field_names: "int_vector" } }
 
 triggers {
   name: "finish_trigger"
@@ -61,10 +61,10 @@ triggers {
 
 triggers {
   name: "data_trigger"
-  data_trigger { publisher_name: "dt_publisher" }
+  data_trigger { source_name: "dt_publisher" }
 }
 
-finish_trigger_name: "finish_trigger"
+deactivate_trigger_name: "finish_trigger"
 
 metrics_report_configs {
   name: "Report"

@@ -13,16 +13,16 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use protobuf::{reflect::FileDescriptor, well_known_types::any::Any, EnumOrUnknown};
+use protobuf::{well_known_types::any::Any, EnumOrUnknown};
 use sdv_telemetry_expr::node::Node;
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    publisher::Publisher_type as PublisherTypeProto,
-    service_publisher::ConnectionType as ConnectionTypeProto,
-    AggregationPublisher as AggregationPublisherProto, Publisher as PublisherProto,
-    ServicePublisher as ServicePublisherProto,
+    data_source::ConnectionType as ConnectionTypeProto, source::Source_type as SourceTypeProto,
+    Aggregator as AggregationPublisherProto, DataSource as ServicePublisherProto,
+    Source as PublisherProto,
 };
 use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
 use sdv_telemetry_utils::countdown_latch::MultiLevelCountdownLatch;
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc};
 
@@ -63,14 +63,14 @@ pub(crate) trait PublisherFactory: Send + Sync {
 downcast_rs::impl_downcast!(PublisherFactory);
 
 pub(crate) struct PublisherFactoryCreateContext<'a> {
-    pub file_descriptors: &'a [FileDescriptor],
+    pub file_descriptors: &'a FileDescriptorsAndWkts,
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
     pub triggers: &'a HashMap<String, Arc<dyn Trigger>>,
 }
 
 pub(crate) struct PublisherFactoryValidateContext<'a> {
-    pub file_descriptors: &'a [FileDescriptor],
+    pub file_descriptors: &'a FileDescriptorsAndWkts,
     pub node_types: &'a [Option<NodeValueType>],
 }
 
@@ -137,15 +137,15 @@ impl PublisherFactory for PublisherFactoryImpl {
     ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
         Self::verify_name_set(publisher_proto)?;
         let publisher_name = publisher_proto.name.clone();
-        match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => Ok((self
+        match &publisher_proto.source_type {
+            Some(SourceTypeProto::DataSource(service_publisher)) => Ok((self
                 .service_publisher_new_func)(
                 publisher_name,
                 service_publisher.fetch_last_message,
                 service_publisher.configuration.as_ref().cloned(),
                 Self::get_connection_type(service_publisher.connection_type)?,
                 metrics_config_uuid,
-                service_publisher.service_name.clone(),
+                service_publisher.source_identifier.clone(),
                 Self::get_sub_sampling_interval(service_publisher)?,
                 Arc::clone(&self.node_evaluation_context_factory),
                 Arc::clone(&self.service_adapter),
@@ -153,7 +153,7 @@ impl PublisherFactory for PublisherFactoryImpl {
                 subscription_waiter,
             )
             .into()),
-            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher_proto)) => Ok(self
+            Some(SourceTypeProto::Aggregator(aggregation_publisher_proto)) => Ok(self
                 .create_aggregation_publisher(
                     publisher_name,
                     metrics_config_uuid,
@@ -171,12 +171,12 @@ impl PublisherFactory for PublisherFactoryImpl {
         context: &PublisherFactoryValidateContext,
     ) -> Result<(), PublisherFactoryError> {
         Self::verify_name_set(publisher_proto)?;
-        match &publisher_proto.publisher_type {
-            Some(PublisherTypeProto::ServicePublisher(service_publisher)) => {
+        match &publisher_proto.source_type {
+            Some(SourceTypeProto::DataSource(service_publisher)) => {
                 Self::get_sub_sampling_interval(service_publisher)?;
                 Self::get_connection_type(service_publisher.connection_type)?;
             }
-            Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) => {
+            Some(SourceTypeProto::Aggregator(aggregation_publisher)) => {
                 self.message_builder_factory.validate(
                     &aggregation_publisher.message_builder,
                     &MessageBuilderFactoryValidateContext {
@@ -293,7 +293,7 @@ impl PublisherFactoryImpl {
         let connection_type = match connection_type_proto {
             ConnectionTypeProto::CONNECTION_TYPE_UNSPECIFIED
             | ConnectionTypeProto::SUBSCRIPTION => ConnectionType::Subscription,
-            ConnectionTypeProto::GETTER => ConnectionType::Getter,
+            ConnectionTypeProto::ON_DEMAND => ConnectionType::Getter,
         };
 
         Ok(connection_type)
@@ -331,7 +331,7 @@ mod tests {
     use protobuf::well_known_types::{any::Any, empty::Empty};
     use protobuf::{Message, MessageDyn, MessageField};
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
-    use sdv_telemetry_proto_rust::metrics_configuration::Publisher as PublisherProto;
+    use sdv_telemetry_proto_rust::metrics_configuration::Source as PublisherProto;
     use sdv_telemetry_service_publisher_accessor::{
         AvailabilityCallbackRegistration, ServicePublisherAccessorError,
     };
@@ -432,38 +432,38 @@ mod tests {
 
     fn create_service_publisher_with_invalid_connection_type() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
-        publisher.mut_service_publisher().connection_type = EnumOrUnknown::from_i32(-1);
+        publisher.mut_data_source().connection_type = EnumOrUnknown::from_i32(-1);
         publisher
     }
 
     fn create_service_publisher_with_unspecified_connection_type() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
-        publisher.mut_service_publisher();
+        publisher.mut_data_source();
         publisher
     }
 
     fn create_service_publisher_with_negative_sub_sampling_interval() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
-        publisher.mut_service_publisher().sub_sampling_interval =
+        publisher.mut_data_source().sub_sampling_interval =
             Some(DurationProto { seconds: -1, ..Default::default() }).into();
         publisher
     }
 
     fn create_service_publisher_with_too_big_sub_sampling_interval() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
-        publisher.mut_service_publisher().sub_sampling_interval =
+        publisher.mut_data_source().sub_sampling_interval =
             Some(DurationProto { seconds: i64::MAX, ..Default::default() }).into();
         publisher
     }
 
     fn create_valid_service_publisher() -> PublisherProto {
         let mut publisher = create_publisher(PUBLISHER_NAME);
-        let service_publisher = publisher.mut_service_publisher();
+        let service_publisher = publisher.mut_data_source();
         service_publisher.configuration =
             MessageField::some(Any::pack(Empty::default_instance()).unwrap());
         service_publisher.connection_type = ConnectionTypeProto::SUBSCRIPTION.into();
         service_publisher.fetch_last_message = true;
-        SERVICE_NAME.clone_into(&mut service_publisher.service_name);
+        SERVICE_NAME.clone_into(&mut service_publisher.source_identifier);
         service_publisher.sub_sampling_interval =
             Some(DurationProto { seconds: 1, ..Default::default() }).into();
         publisher
@@ -471,7 +471,7 @@ mod tests {
 
     fn create_valid_aggregation_publisher() -> (PublisherProto, Arc<dyn Trigger>) {
         let mut publisher = create_publisher(PUBLISHER_NAME);
-        let aggregation_proto = publisher.mut_aggregation_publisher();
+        let aggregation_proto = publisher.mut_aggregator();
         aggregation_proto.trigger_names.push(TRIGGER_NAME.to_owned());
         aggregation_proto.reset_on_get = true;
 
@@ -546,7 +546,7 @@ mod tests {
             publisher_proto: &PublisherProto,
             triggers: Option<Vec<Arc<dyn Trigger>>>,
         ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
-            let file_descriptors = vec![];
+            let file_descriptors = FileDescriptorsAndWkts::try_from(vec![]).unwrap();
             let nodes = vec![];
             let node_types = vec![];
             let triggers = triggers.map_or(HashMap::new(), |triggers| {
@@ -566,7 +566,7 @@ mod tests {
             &self,
             publisher_proto: &PublisherProto,
         ) -> Result<(), PublisherFactoryError> {
-            let file_descriptors = vec![];
+            let file_descriptors = FileDescriptorsAndWkts::try_from(vec![]).unwrap();
             let node_types = vec![];
             let context = PublisherFactoryValidateContext {
                 file_descriptors: &file_descriptors,

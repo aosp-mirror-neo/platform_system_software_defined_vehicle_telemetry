@@ -146,7 +146,7 @@ impl FieldLeafNodeExtension for FieldLeafNode {
         &self,
         descriptor_provider: &dyn DescriptorProvider,
     ) -> Result<Option<NodeValueType>, NodeEvaluationError> {
-        let maybe_descriptor = descriptor_provider.get_descriptor(&self.publisher_name)?;
+        let maybe_descriptor = descriptor_provider.get_descriptor(&self.source_name)?;
 
         if self.field_names.is_empty() {
             Ok(Some(NodeValueType::Message { descriptor: maybe_descriptor.cloned() }))

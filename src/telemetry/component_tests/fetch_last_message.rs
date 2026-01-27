@@ -53,10 +53,10 @@ fn create_metrics_config(
         r#"
 uuid: "{uuid}"
 
-publishers {{
+sources {{
     name: "manual_publisher"
-    service_publisher {{
-        service_name: "{MANUAL_TRIGGER_SERVICE_NAME}"
+    data_source {{
+        source_identifier: "{MANUAL_TRIGGER_SERVICE_NAME}"
         connection_type: SUBSCRIPTION
         fetch_last_message: false
     }}
@@ -64,22 +64,22 @@ publishers {{
 
 triggers {{
     name: "manual_trigger"
-    data_trigger {{ publisher_name: "manual_publisher" }}
+    data_trigger {{ source_name: "manual_publisher" }}
 }}
 
-publishers {{
+sources {{
     name: "a_publisher"
-    service_publisher {{
-        service_name: "{SERVICE_NAME}"
+    data_source {{
+        source_identifier: "{SERVICE_NAME}"
         connection_type: SUBSCRIPTION
         fetch_last_message: {fetch_last_message}
     }}
 }}
 
 # index 0
-expression_nodes {{ field_leaf_node {{ publisher_name: "a_publisher" field_names: "value" }} }}
+expression_nodes {{ field_leaf_node {{ source_name: "a_publisher" field_names: "value" }} }}
 
-finish_trigger_name: "manual_trigger"
+deactivate_trigger_name: "manual_trigger"
 
 metrics_report_configs {{
     name: "Report"

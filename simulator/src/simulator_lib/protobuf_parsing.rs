@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use protobuf::{
-    reflect::{FileDescriptor, MessageDescriptor, ReflectValueBox, RuntimeType},
+    reflect::{MessageDescriptor, ReflectValueBox, RuntimeType},
     MessageDyn,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
-use sdv_telemetry_utils::descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS;
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::{
     collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
@@ -32,49 +32,31 @@ use crate::{
 
 pub const DELAY_FIELD_NAME: &str = "_delay_before_publishing";
 
-pub fn parse_message_descriptors(
+pub fn parse_descriptor_protos(
     config: &MetricsConfig,
     metrics_config_file_name: &OsStr,
-) -> Result<HashMap<String, MessageDescriptor>, SimulatorError> {
-    let decoding_message_descriptor_names: HashSet<String> = config
+) -> Result<FileDescriptorsAndWkts, SimulatorError> {
+    let file_descriptors = FileDescriptorsAndWkts::try_from(config.descriptor_protos.to_vec())
+        .map_err(|error| SimulatorError::FailedToParseFile {
+            file_name: metrics_config_file_name.to_owned(),
+            error_message: format!("Failed to parse descriptor_protos: {error}"),
+        })?;
+
+    let message_names = config
         .metrics_report_configs
         .iter()
-        // Get the message descriptor name without the leading dot.
-        .map(|report_config| report_config.message_builder.message_type.clone().split_off(1))
-        .collect();
-
-    let mut message_descriptors = HashMap::<String, MessageDescriptor>::new();
-    let file_descriptors = FileDescriptor::new_dynamic_fds(
-        config.descriptor_protos.to_vec(),
-        &WELL_KNOWN_FILE_DESCRIPTORS,
-    )
-    .map_err(|error| SimulatorError::FailedToParseFile {
-        file_name: metrics_config_file_name.to_owned(),
-        error_message: format!("Failed to parse descriptor_protos: {error}"),
-    })?;
-    for file_descriptor in &file_descriptors {
-        for message in file_descriptor.messages() {
-            if message_descriptors.contains_key(message.full_name()) {
-                return Err(SimulatorError::DuplicateDescriptorProtoMessage {
-                    message_name: message.full_name().to_owned(),
-                    file_name: metrics_config_file_name.to_owned(),
-                });
-            }
-            if decoding_message_descriptor_names.contains(message.full_name()) {
-                message_descriptors.insert(message.full_name().to_owned(), message.clone());
-            }
-        }
-    }
-
-    for message_name in &decoding_message_descriptor_names {
-        if !message_descriptors.contains_key(message_name) {
+        .map(|report_config| report_config.message_builder.message_type.to_owned())
+        .collect::<HashSet<String>>();
+    for message_name in message_names {
+        if file_descriptors.find_message_by_full_name(&message_name).is_none() {
             return Err(SimulatorError::MissingDescriptorProto {
                 file_name: metrics_config_file_name.to_owned(),
-                message_name: message_name.clone(),
+                message_name,
             });
         }
     }
-    Ok(message_descriptors)
+
+    Ok(file_descriptors)
 }
 
 pub fn decode_report(
@@ -289,8 +271,17 @@ fn parse_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use protobuf::EnumFull;
+
+    use googletest::expect_that;
+    use googletest::matchers::{eq, pat, some};
+    use protobuf::well_known_types::empty::Empty;
+    use protobuf::{EnumFull, MessageField, MessageFull};
+    use sdv_telemetry_proto_rust::metrics_configuration::{
+        MetricsReportConfig, ProtoMessageBuilder,
+    };
     use sdv_telemetry_simulator_test_proto::test::TestEnum;
+    use sdv_telemetry_simulator_test_proto::test::TestMessage;
+    use sdv_telemetry_simulator_test_proto::test_dep;
     use sdv_telemetry_test_utils::parameterized_test;
 
     parameterized_test!(
@@ -315,5 +306,130 @@ mod tests {
         type_bool: (RuntimeType::Bool, "false", ReflectValueBox::Bool(false),),
         type_string: (RuntimeType::String, "a string", ReflectValueBox::String("a string".to_owned()),),
         type_enum: (RuntimeType::Enum(TestEnum::enum_descriptor()), "ONE", ReflectValueBox::Enum(TestEnum::enum_descriptor(), 1),),
+    );
+
+    parameterized_test!(
+        #[googletest::test]
+        #[test]
+        parse_descriptor_protos,
+        |config: MetricsConfig, expected_message_descriptor_names: &[String]| {
+            let result = parse_descriptor_protos(&config, OsStr::new("file_name"));
+
+            let file_descriptors = result.unwrap();
+
+            for expected_message_descriptor_name in expected_message_descriptor_names {
+                expect_that!(
+                    file_descriptors.find_message_by_full_name(expected_message_descriptor_name),
+                    some(pat!(&MessageDescriptor { full_name(): eq(expected_message_descriptor_name) })),
+                    "File descriptors should include message '{expected_message_descriptor_name}'."
+                );
+            }
+
+        },
+
+        no_descriptors: (
+            MetricsConfig {
+                ..Default::default()
+            },
+            &[],
+        ),
+
+        // Metrics Config defines file descriptor protos, but doesn't use them in any of the
+        // reports.
+        unused_descriptors: (
+            MetricsConfig {
+                descriptor_protos: vec![
+                    Empty::descriptor().file_descriptor().proto().to_owned(),
+                ],
+                ..Default::default()
+            },
+            &[],
+        ),
+
+        no_descriptors_but_report_references_well_known_descriptor: (
+            MetricsConfig {
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["google.protobuf.Empty".to_owned()],
+        ),
+
+        descriptor_is_used_in_multiple_reports: (
+            MetricsConfig {
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["google.protobuf.Empty".to_owned()],
+        ),
+
+        custom_message: (
+            MetricsConfig {
+                descriptor_protos: vec![
+                    TestMessage::descriptor().file_descriptor().proto().to_owned(),
+                    test_dep::file_descriptor().proto().to_owned(),
+                ],
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".TestMessage".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["TestMessage".to_owned()],
+        ),
+
+        multiple_descriptors: (
+            MetricsConfig {
+                descriptor_protos: vec![
+                    TestMessage::descriptor().file_descriptor().proto().to_owned(),
+                    test_dep::file_descriptor().proto().to_owned(),
+                ],
+                metrics_report_configs: vec![
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".TestMessage".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                    MetricsReportConfig {
+                        message_builder: MessageField::some(ProtoMessageBuilder {
+                            message_type: ".google.protobuf.Empty".to_owned(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                ],
+                ..Default::default()
+            },
+            &["TestMessage".to_owned(), "google.protobuf.Empty".to_owned()],
+        )
     );
 }

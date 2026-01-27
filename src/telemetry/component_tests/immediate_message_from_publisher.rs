@@ -25,12 +25,11 @@ use protobuf::well_known_types::{
 use protobuf::{Message, MessageField, MessageFull};
 use sdv_telemetry_proto_rust::expression::{node::Node_type, FieldLeafNode, Node};
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    proto_message_builder::field_assignment::Aggregated_field_value,
+    data_source::ConnectionType, proto_message_builder::field_assignment::Aggregated_field_value,
     proto_message_builder::field_assignment::NoAggregation, proto_message_builder::FieldAssignment,
-    publisher::Publisher_type, service_publisher::ConnectionType, trigger::Trigger_type,
-    AggregationPublisher, DataTrigger, MetricsConfig as MetricsConfigProto,
-    MetricsReport as MetricsReportProto, MetricsReportConfig, ProtoMessageBuilder, Publisher,
-    ServicePublisher, Trigger,
+    source::Source_type, trigger::Trigger_type, Aggregator, DataSource, DataTrigger,
+    MetricsConfig as MetricsConfigProto, MetricsReport as MetricsReportProto, MetricsReportConfig,
+    ProtoMessageBuilder, Source, Trigger,
 };
 use sdv_telemetry_service_publisher_accessor::{
     CreateSubscriptionOutcome, FetchLastMessageOutcome, MockServicePublisherAccessor,
@@ -51,7 +50,7 @@ const AGGREGATION_PUBLISHER_NAME: &str = "aggregation_publisher";
 fn make_metrics_config() -> MetricsConfigProto {
     MetricsConfigProto {
         uuid: CONFIG_UUID.to_owned(),
-        publishers: vec![
+        sources: vec![
             make_service_publisher(SERVICE_NAME),
             make_service_publisher(OTHER_SERVICE_NAME),
             // Aggregation publisher runs under a service publisher data trigger and performs
@@ -75,16 +74,16 @@ fn make_metrics_config() -> MetricsConfigProto {
             make_report_config(AGGREGATION_PUBLISHER_NAME, 1),
         ],
         // Fires never
-        finish_trigger_name: make_data_trigger_name(OTHER_SERVICE_NAME),
+        deactivate_trigger_name: make_data_trigger_name(OTHER_SERVICE_NAME),
         ..Default::default()
     }
 }
 
-fn make_service_publisher(name: &str) -> Publisher {
-    Publisher {
+fn make_service_publisher(name: &str) -> Source {
+    Source {
         name: name.to_owned(),
-        publisher_type: Some(Publisher_type::ServicePublisher(ServicePublisher {
-            service_name: name.to_owned(),
+        source_type: Some(Source_type::DataSource(DataSource {
+            source_identifier: name.to_owned(),
             connection_type: ConnectionType::SUBSCRIPTION.into(),
             fetch_last_message: false,
             ..Default::default()
@@ -93,10 +92,10 @@ fn make_service_publisher(name: &str) -> Publisher {
     }
 }
 
-fn make_aggregation_publisher(name: &str, service_publisher: &str, node_index: u32) -> Publisher {
-    Publisher {
+fn make_aggregation_publisher(name: &str, service_publisher: &str, node_index: u32) -> Source {
+    Source {
         name: name.to_owned(),
-        publisher_type: Some(Publisher_type::AggregationPublisher(AggregationPublisher {
+        source_type: Some(Source_type::Aggregator(Aggregator {
             trigger_names: vec![make_data_trigger_name(service_publisher).to_owned()],
             message_builder: Some(make_message_builder(node_index)).into(),
             ..Default::default()
@@ -113,7 +112,7 @@ fn make_data_trigger(publisher_name: &str) -> Trigger {
     Trigger {
         name: make_data_trigger_name(publisher_name),
         trigger_type: Some(Trigger_type::DataTrigger(DataTrigger {
-            publisher_name: publisher_name.to_owned(),
+            source_name: publisher_name.to_owned(),
             ..Default::default()
         })),
         ..Default::default()
@@ -123,7 +122,7 @@ fn make_data_trigger(publisher_name: &str) -> Trigger {
 fn make_expression_node(publisher_name: &str) -> Node {
     Node {
         node_type: Some(Node_type::FieldLeafNode(FieldLeafNode {
-            publisher_name: publisher_name.to_owned(),
+            source_name: publisher_name.to_owned(),
             field_names: vec!["value".to_owned()],
             ..Default::default()
         })),

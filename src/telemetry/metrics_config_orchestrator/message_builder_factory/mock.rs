@@ -14,10 +14,10 @@
 
 use lazy_static::lazy_static;
 use parking_lot::Mutex;
-use protobuf::reflect::FileDescriptor;
 use sdv_telemetry_expr::{node::Node, node_value::NodeValue, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::ProtoMessageBuilder;
 use sdv_telemetry_test_proto::test_message;
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::sync::Arc;
 
 use super::{
@@ -27,8 +27,9 @@ use super::{
 use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
 
 lazy_static! {
-    static ref FILE_DESCRIPTORS: Vec<FileDescriptor> =
-        vec![test_message::file_descriptor().clone()];
+    static ref FILE_DESCRIPTORS: FileDescriptorsAndWkts =
+        FileDescriptorsAndWkts::try_from(vec![test_message::file_descriptor().proto().to_owned()])
+            .unwrap();
     static ref NODES: Vec<Arc<Node>> = {
         let node = Arc::new(Node::ConstantLeaf { value: NodeValue::None });
         vec![node; 3]
@@ -99,7 +100,7 @@ impl MessageBuilderFactory for MockMessageBuilderFactory {
 }
 
 /// Return the file descriptor for `src/test_utils/test_message.proto` for tests.
-pub(crate) fn get_test_file_descriptors<'a>() -> &'a [FileDescriptor] {
+pub(crate) fn get_test_file_descriptors() -> &'static FileDescriptorsAndWkts {
     &FILE_DESCRIPTORS
 }
 

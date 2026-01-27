@@ -14,6 +14,7 @@
 
 use protobuf::reflect::MessageDescriptor;
 use sdv_telemetry_proto_rust::metrics_configuration::MetricsReport;
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::{
     collections::{HashMap, HashSet},
     ffi::{OsStr, OsString},
@@ -81,7 +82,7 @@ pub struct MetricsConfigInfo {
     pub file_name: OsString,
     pub serialized_config: Vec<u8>,
     pub status: MetricsConfigStatus,
-    pub descriptor_protos: HashMap<String, MessageDescriptor>,
+    pub file_descriptors: FileDescriptorsAndWkts,
     pub report_configs: HashMap<String, ReportConfigStatus>,
     pub service_publisher_names: HashSet<String>,
 }
@@ -90,13 +91,13 @@ impl MetricsConfigInfo {
     pub fn new(
         file_name: &OsStr,
         serialized_config: Vec<u8>,
-        descriptor_protos: HashMap<String, MessageDescriptor>,
+        file_descriptors: FileDescriptorsAndWkts,
     ) -> Self {
         MetricsConfigInfo {
             file_name: file_name.to_owned(),
             status: MetricsConfigStatus::New,
             serialized_config,
-            descriptor_protos,
+            file_descriptors,
             report_configs: HashMap::new(),
             service_publisher_names: HashSet::new(),
         }
@@ -105,7 +106,7 @@ impl MetricsConfigInfo {
     pub fn get_report_config_info(
         &mut self,
         report: &MetricsReport,
-    ) -> Result<(&mut ReportConfigStatus, &MessageDescriptor), SimulatorError> {
+    ) -> Result<(&mut ReportConfigStatus, MessageDescriptor), SimulatorError> {
         let report_config_status = self
             .report_configs
             .get_mut(&report.report_config_name)
@@ -117,8 +118,8 @@ impl MetricsConfigInfo {
             })?;
 
         let message_descriptor =
-            self.descriptor_protos
-                .get(&report_config_status.descriptor_proto_name[1..])
+            self.file_descriptors
+                .find_message_by_full_name(&report_config_status.descriptor_proto_name)
                 .ok_or_else(|| SimulatorError::ProgrammingError {
                     error_message: format!(
                     "descriptor_protos for metrics config \"{}\" missing descriptor proto \"{}\"",

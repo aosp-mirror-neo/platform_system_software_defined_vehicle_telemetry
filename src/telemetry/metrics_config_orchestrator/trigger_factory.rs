@@ -20,10 +20,9 @@ use sdv_telemetry_proto_rust::metrics_configuration::{
     conditional_trigger::ConditionTypeRisingEdge,
     conditional_trigger::Condition_type as ConditionTypeProto,
     conditional_trigger::EdgeOptions as EdgeOptionsProto,
-    publisher::Publisher_type as PublisherTypeProto,
-    service_publisher::ConnectionType as ConnectionTypeProto,
+    data_source::ConnectionType as ConnectionTypeProto, source::Source_type as SourceTypeProto,
     trigger::Trigger_type as TriggerTypeProto, ConditionalTrigger as ConditionalTriggerProto,
-    PeriodicTrigger as PeriodicTriggerProto, Publisher as PublisherProto, Trigger as TriggerProto,
+    PeriodicTrigger as PeriodicTriggerProto, Source as PublisherProto, Trigger as TriggerProto,
 };
 use sdv_telemetry_utils::duration_utils::try_into_duration;
 use std::{collections::HashMap, fmt::Debug, sync::Arc, time::Duration};
@@ -146,7 +145,7 @@ impl TriggerFactory for TriggerFactoryImpl {
             .ok_or_else(|| TriggerFactoryError::UnspecifiedTriggerType)?;
         Ok(match trigger_type {
             TriggerTypeProto::DataTrigger(data_trigger) => {
-                let publisher = &context.publishers[&data_trigger.publisher_name];
+                let publisher = &context.publishers[&data_trigger.source_name];
 
                 if !publisher.is_subscribable() {
                     return Err(TriggerFactoryError::UnableToListenToGetterPublisher {
@@ -214,14 +213,13 @@ impl TriggerFactory for TriggerFactoryImpl {
             .ok_or_else(|| TriggerFactoryError::UnspecifiedTriggerType)?;
         match trigger_type {
             TriggerTypeProto::DataTrigger(data_trigger) => {
-                let publisher = &context.publishers[&data_trigger.publisher_name];
+                let publisher = &context.publishers[&data_trigger.source_name];
 
-                if let Some(PublisherTypeProto::ServicePublisher(service_publisher)) =
-                    &publisher.publisher_type
+                if let Some(SourceTypeProto::DataSource(service_publisher)) = &publisher.source_type
                 {
                     if let Ok(connection_type) = service_publisher.connection_type.enum_value() {
                         match connection_type {
-                            ConnectionTypeProto::GETTER => {
+                            ConnectionTypeProto::ON_DEMAND => {
                                 return Err(TriggerFactoryError::UnableToListenToGetterPublisher {
                                     publisher_name: publisher.name.clone(),
                                 })
@@ -448,7 +446,7 @@ mod tests {
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::{
         conditional_trigger::Condition_type as ConditionTypeProto,
-        ServicePublisher as ServicePublisherProto,
+        DataSource as ServicePublisherProto,
     };
     use sdv_telemetry_service_publisher_accessor::SubSamplingInterval;
     use sdv_telemetry_test_utils::parameterized_test;
@@ -512,7 +510,7 @@ mod tests {
     fn create_valid_data_trigger() -> TriggerProto {
         let mut trigger = new_trigger(TRIGGER_NAME);
         let data_trigger = trigger.mut_data_trigger();
-        PUBLISHER_NAME.clone_into(&mut data_trigger.publisher_name);
+        PUBLISHER_NAME.clone_into(&mut data_trigger.source_name);
         trigger
     }
 
@@ -1216,8 +1214,8 @@ mod tests {
         let trigger = create_valid_data_trigger();
         let publisher = PublisherProto {
             name: PUBLISHER_NAME.to_string(),
-            publisher_type: Some(PublisherTypeProto::ServicePublisher(ServicePublisherProto {
-                connection_type: ConnectionTypeProto::GETTER.into(),
+            source_type: Some(SourceTypeProto::DataSource(ServicePublisherProto {
+                connection_type: ConnectionTypeProto::ON_DEMAND.into(),
                 ..Default::default()
             })),
             ..Default::default()
@@ -1240,7 +1238,7 @@ mod tests {
         let trigger = create_valid_data_trigger();
         let publisher = PublisherProto {
             name: PUBLISHER_NAME.to_string(),
-            publisher_type: Some(PublisherTypeProto::ServicePublisher(ServicePublisherProto {
+            source_type: Some(SourceTypeProto::DataSource(ServicePublisherProto {
                 connection_type: ConnectionTypeProto::SUBSCRIPTION.into(),
                 ..Default::default()
             })),

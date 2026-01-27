@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use protobuf::{text_format::print_to_string_pretty, MessageDyn};
-use sdv_telemetry_proto_rust::metrics_configuration::publisher::Publisher_type as PublisherTypeProto;
+use sdv_telemetry_proto_rust::metrics_configuration::source::Source_type as SourceTypeProto;
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsConfig, MetricsReport};
 use sdv_telemetry_rust_wrapper::TelemetryServiceHolder;
 use sdv_telemetry_utils::proto_reader;
@@ -28,7 +28,7 @@ use crate::{
     io::{create_report_log, write_report_to_file},
     metrics_config_info::{MetricsConfigInfo, MetricsConfigStatus, ReportConfigStatus},
     output_strings::report_log_entry,
-    protobuf_parsing::{decode_report, parse_message_descriptors},
+    protobuf_parsing::{decode_report, parse_descriptor_protos},
     SimulatorError,
 };
 
@@ -76,10 +76,10 @@ impl MetricsConfigsTracker {
             });
         };
 
-        let message_descriptors = parse_message_descriptors(&config, file_name)?;
+        let file_descriptors = parse_descriptor_protos(&config, file_name)?;
 
         let mut config_info =
-            MetricsConfigInfo::new(file_name, serialized_config, message_descriptors);
+            MetricsConfigInfo::new(file_name, serialized_config, file_descriptors);
 
         for report_config in &config.metrics_report_configs {
             let report_log_path = self.output_directory.join(format!(
@@ -98,13 +98,13 @@ impl MetricsConfigsTracker {
             );
         }
 
-        for publisher in &config.publishers {
-            if let Some(PublisherTypeProto::ServicePublisher(service_publisher_proto)) =
-                &publisher.publisher_type
+        for publisher in &config.sources {
+            if let Some(SourceTypeProto::DataSource(service_publisher_proto)) =
+                &publisher.source_type
             {
                 config_info
                     .service_publisher_names
-                    .insert(service_publisher_proto.service_name.clone());
+                    .insert(service_publisher_proto.source_identifier.clone());
             }
         }
 
@@ -254,7 +254,7 @@ impl MetricsConfigsTracker {
             report_file_names.push(output_file_name);
         }
 
-        let report_content = decode_report(&report, message_descriptor)?;
+        let report_content = decode_report(&report, &message_descriptor)?;
         let readable_report = create_readable_report(&report, report_content.clone_box())?;
         report_config.append_report_log(readable_report)?;
         report_config.num_reports += 1;

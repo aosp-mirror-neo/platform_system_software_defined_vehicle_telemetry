@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
 use sdv_telemetry_expr::{node::Node, node_value_type::NodeValueType};
 use sdv_telemetry_proto_rust::metrics_configuration::{MetricsReport, MetricsReportConfig};
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -56,7 +56,7 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
     pub config_activation_timestamp: &'a Timestamp,
     pub config_uuid: &'a MetricsConfigUuid,
     pub config_version: u32,
-    pub file_descriptors: &'a [FileDescriptor],
+    pub file_descriptors: &'a FileDescriptorsAndWkts,
     pub nodes: &'a [Arc<Node>],
     pub node_types: &'a [Option<NodeValueType>],
     pub report_ready_callback: &'a Arc<dyn Fn(MetricsReport) + Send + Sync>,
@@ -65,7 +65,7 @@ pub(crate) struct MetricsReportGeneratorFactoryCreateContext<'a> {
 
 pub(crate) struct MetricsReportGeneratorFactoryValidateContext<'a> {
     pub node_types: &'a [Option<NodeValueType>],
-    pub file_descriptors: &'a [FileDescriptor],
+    pub file_descriptors: &'a FileDescriptorsAndWkts,
     pub trigger_protos: &'a HashMap<String, ()>,
 }
 

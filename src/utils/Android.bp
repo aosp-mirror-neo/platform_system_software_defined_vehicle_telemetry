@@ -28,7 +28,6 @@ rust_defaults {
         // keep-sorted start
         "libanyhow",
         "libfutures",
-        "liblazy_static",
         "liblog_rust",
         "liblogger",
         "libprotobuf",
@@ -64,6 +63,7 @@ rust_test {
         // keep-sorted start
         "libgoogletest_rust",
         "libsdv_telemetry_proto_rust",
+        "libsdv_telemetry_test_proto",
         "libsdv_telemetry_test_utils",
         "libtempfile",
         // keep-sorted end

@@ -20,7 +20,7 @@ use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, info};
-use protobuf::reflect::{FileDescriptor, MessageDescriptor};
+use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageFull};
 use sdv_comms::sd::{
@@ -38,7 +38,7 @@ use sdv_telemetry_service_publisher_accessor::{
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
-use sdv_telemetry_utils::{descriptor_utils, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS};
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -368,23 +368,20 @@ impl CommsStackAccessor {
                 .with_context(|| "Failed to parse publisher app metadata")?;
 
             // Build the provided proto file descriptors.
-            let file_descriptors = FileDescriptor::new_dynamic_fds(
-                publisher_metadata.file_descriptors,
-                &WELL_KNOWN_FILE_DESCRIPTORS,
-            )
-            .with_context(|| "Invalid Descriptor Protos")?;
+            let file_descriptors_len = publisher_metadata.file_descriptors.len();
+            let file_descriptors =
+                FileDescriptorsAndWkts::try_from(publisher_metadata.file_descriptors)
+                    .with_context(|| "Invalid Descriptor Protos")?;
 
-            return descriptor_utils::find_message_by_full_name(
-                file_descriptors.iter().chain(WELL_KNOWN_FILE_DESCRIPTORS.iter()),
+            return file_descriptors.find_message_by_full_name(
                 &publisher_metadata.message_full_name
             )
                 .map(|message_descriptor| (None, message_descriptor))
                 .ok_or_else(|| {
-                anyhow!(
-                    "Message named \"{}\" not found in file descriptors ({} file descriptors provided)",
-                    publisher_metadata.message_full_name,
-                    file_descriptors.len()
-                )
+                    anyhow!(
+                        "Message named \"{}\" not found in file descriptors ({file_descriptors_len} file descriptors provided)",
+                        publisher_metadata.message_full_name,
+                    )
             });
         }
 

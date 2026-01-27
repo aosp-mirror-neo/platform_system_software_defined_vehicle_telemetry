@@ -36,7 +36,6 @@ mod trigger_factory;
 use async_trait::async_trait;
 use log::debug;
 use parking_lot::Mutex;
-use protobuf::reflect::FileDescriptor;
 use protobuf::well_known_types::timestamp::Timestamp;
 use sdv_telemetry_expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use sdv_telemetry_expr::{
@@ -49,15 +48,14 @@ use sdv_telemetry_proto_rust::metrics_configuration::proto_message_builder::fiel
     MinAggregation, NoAggregation, StdDevAggregation, SumAggregation, VectorAggregation,
 };
 use sdv_telemetry_proto_rust::metrics_configuration::{
-    metrics_report::ReportReason, publisher::Publisher_type as PublisherTypeProto,
+    metrics_report::ReportReason, source::Source_type as SourceTypeProto,
     trigger::Trigger_type as TriggerTypeProto, MetricsConfig as MetricsConfigProto, MetricsReport,
-    Publisher as PublisherProto, Trigger as TriggerProto,
+    Source as SourceProto, Trigger as TriggerProto,
 };
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessor;
+use sdv_telemetry_utils::collection_extension::HashMapExtension;
 use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
-use sdv_telemetry_utils::{
-    collection_extension::HashMapExtension, descriptor_utils::WELL_KNOWN_FILE_DESCRIPTORS,
-};
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::collections::{HashMap, HashSet};
 use std::marker::Sync;
 use std::sync::Arc;
@@ -237,7 +235,7 @@ pub(super) struct OrderedPublisherNames {
 }
 
 enum DependencyContainer<'a> {
-    Publisher { publisher_proto: &'a PublisherProto },
+    Publisher { source_proto: &'a SourceProto },
     Trigger { trigger_proto: &'a TriggerProto },
 }
 
@@ -260,18 +258,14 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         })?;
 
         // Build the provided proto file descriptors
-        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let mut file_descriptors = FileDescriptor::new_dynamic_fds(
-            cloned_descriptor_protos,
-            &WELL_KNOWN_FILE_DESCRIPTORS,
-        )?;
-        file_descriptors.append(&mut WELL_KNOWN_FILE_DESCRIPTORS.clone());
+        let file_descriptors =
+            FileDescriptorsAndWkts::try_from(config_proto.descriptor_protos.to_vec())?;
 
         // Create expression nodes.
         let message_provider = Arc::new(MessageProviderImpl::new());
         let descriptor_provider = self
             .descriptor_provider_factory
-            .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
+            .create(&file_descriptors, &config_proto.sources, &self.service_publisher_manager)
             .await?;
         let node_factory_context = NodeFactoryContext {
             message_provider: Some(Arc::<MessageProviderImpl>::clone(&message_provider)),
@@ -298,19 +292,19 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         let (publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             &dependency_map,
             // Create a rust Publisher object using already created Trigger objects to resolve dependencies.
-            |publisher_proto, triggers| {
+            |source_proto, triggers| {
                 let context = PublisherFactoryCreateContext {
                     file_descriptors: &file_descriptors,
                     nodes: &expression_nodes,
                     node_types: &node_types,
                     triggers,
                 };
-                ordered_publisher_names.push(publisher_proto.name.clone());
+                ordered_publisher_names.push(source_proto.name.clone());
                 self.publisher_factory
-                    .create(uuid, publisher_proto, subscription_waiter.clone(), &context)
+                    .create(uuid, source_proto, subscription_waiter.clone(), &context)
                     .map_err(|factory_error| {
                         MetricsConfigOrchestratorError::InvalidPublisherDefinition {
-                            publisher_name: publisher_proto.name.clone(),
+                            publisher_name: source_proto.name.clone(),
                             factory_error,
                         }
                     })
@@ -382,15 +376,12 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                 // publishers must start data collection only after start trigger fires.
                 Some(start_trigger_publisher_names) => {
                     let service_publisher_names = config_proto
-                        .publishers
+                        .sources
                         .iter()
-                        .filter(|publisher| {
-                            matches!(
-                                publisher.publisher_type,
-                                Some(PublisherTypeProto::ServicePublisher(_))
-                            )
+                        .filter(|source| {
+                            matches!(source.source_type, Some(SourceTypeProto::DataSource(_)))
                         })
-                        .map(|publisher| publisher.name.to_owned())
+                        .map(|source| source.name.to_owned())
                         .collect::<HashSet<_>>();
 
                     ordered_publisher_names.into_iter().partition(|name| {
@@ -511,7 +502,7 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     end_trigger.unsubscribe(&TriggerSubscriber::MetricsConfigEnd).await;
                 }
 
-                Self::end_data_collection(&config, ReportReason::INCOMPLETE_FINISHED).await;
+                Self::end_data_collection(&config, ReportReason::INCOMPLETE_DEACTIVATED).await;
             }
             state => {
                 panic!(
@@ -548,15 +539,11 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         }
 
         // Build the provided proto file descriptors
-        let cloned_descriptor_protos = config_proto.descriptor_protos.to_vec();
-        let mut file_descriptors = FileDescriptor::new_dynamic_fds(
-            cloned_descriptor_protos,
-            &WELL_KNOWN_FILE_DESCRIPTORS,
-        )?;
-        file_descriptors.append(&mut WELL_KNOWN_FILE_DESCRIPTORS.clone());
+        let file_descriptors =
+            FileDescriptorsAndWkts::try_from(config_proto.descriptor_protos.to_vec())?;
         let descriptor_provider = self
             .descriptor_provider_factory
-            .create(&file_descriptors, &config_proto.publishers, &self.service_publisher_manager)
+            .create(&file_descriptors, &config_proto.sources, &self.service_publisher_manager)
             .await?;
         let node_factory_context =
             NodeFactoryContext { message_provider: None, descriptor_provider };
@@ -571,18 +558,18 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
         // Topologically sort publishers and triggers to ensure dependencies exist and there are no cycles.
         let (_publishers, triggers) = Self::try_fold_topoligically_sorted_publishers_triggers(
             &dependency_map,
-            |publisher_proto, _triggers| {
+            |source_proto, _triggers| {
                 let context = PublisherFactoryValidateContext {
                     node_types: &node_types,
                     file_descriptors: &file_descriptors,
                 };
-                self.publisher_factory.validate(publisher_proto, &context).map_err(|e| {
+                self.publisher_factory.validate(source_proto, &context).map_err(|e| {
                     MetricsConfigOrchestratorError::InvalidPublisherDefinition {
-                        publisher_name: publisher_proto.name.clone(),
+                        publisher_name: source_proto.name.clone(),
                         factory_error: e,
                     }
                 })?;
-                Ok(publisher_proto)
+                Ok(source_proto)
             },
             |trigger_proto, publishers, _triggers| {
                 let context = TriggerFactoryValidateContext { node_types: &node_types, publishers };
@@ -691,8 +678,9 @@ impl MetricsConfigOrchestratorImpl {
         MetricsConfigOrchestratorError,
     > {
         let start_trigger = Self::maybe_get_trigger(triggers, &config_proto.start_trigger_name)?;
-        let end_trigger = Self::maybe_get_trigger(triggers, &config_proto.end_trigger_name)?;
-        let finish_trigger = Self::maybe_get_trigger(triggers, &config_proto.finish_trigger_name)?;
+        let end_trigger = Self::maybe_get_trigger(triggers, &config_proto.stop_trigger_name)?;
+        let finish_trigger =
+            Self::maybe_get_trigger(triggers, &config_proto.deactivate_trigger_name)?;
 
         if start_trigger.is_none() && end_trigger.is_some() {
             return Err(MetricsConfigOrchestratorError::NoStartTriggerDefined);
@@ -765,16 +753,15 @@ impl MetricsConfigOrchestratorImpl {
         HashMap<(&str, &str), (DependencyContainer<'_>, Vec<(&str, &str)>)>,
         MetricsConfigOrchestratorError,
     > {
-        let dependency_map = config_proto.publishers.iter().try_fold(
+        let dependency_map = config_proto.sources.iter().try_fold(
             HashMap::new(),
-            |mut acc, publisher_proto| match acc.try_insert_value(
-                (PUBLISHER, publisher_proto.name.as_str()),
+            |mut acc, source_proto| match acc.try_insert_value(
+                (PUBLISHER, source_proto.name.as_str()),
                 (
-                    DependencyContainer::Publisher { publisher_proto },
-                    if let Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) =
-                        &publisher_proto.publisher_type
+                    DependencyContainer::Publisher { source_proto },
+                    if let Some(SourceTypeProto::Aggregator(aggregator)) = &source_proto.source_type
                     {
-                        aggregation_publisher
+                        aggregator
                             .trigger_names
                             .iter()
                             .map(|name| (TRIGGER, name.as_str()))
@@ -786,7 +773,7 @@ impl MetricsConfigOrchestratorImpl {
             ) {
                 Ok(_) => Ok(acc),
                 Err(_) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
-                    publisher_name: publisher_proto.name.clone(),
+                    publisher_name: source_proto.name.clone(),
                 }),
             },
         )?;
@@ -805,7 +792,7 @@ impl MetricsConfigOrchestratorImpl {
                         DependencyContainer::Trigger { trigger_proto },
                         match &trigger_proto.trigger_type {
                             Some(TriggerTypeProto::DataTrigger(data_trigger)) => {
-                                vec![(PUBLISHER, data_trigger.publisher_name.as_str())]
+                                vec![(PUBLISHER, data_trigger.source_name.as_str())]
                             }
                             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
                                 conditional_trigger
@@ -832,7 +819,7 @@ impl MetricsConfigOrchestratorImpl {
     fn try_fold_topoligically_sorted_publishers_triggers<'a, TTrig, TPub>(
         dependency_map: &'a HashMap<(&str, &str), (DependencyContainer<'_>, Vec<(&str, &str)>)>,
         mut publisher_func: impl FnMut(
-            &'a PublisherProto,
+            &'a SourceProto,
             &HashMap<String, TTrig>,
         ) -> Result<TPub, MetricsConfigOrchestratorError>,
         mut trigger_func: impl FnMut(
@@ -853,9 +840,9 @@ impl MetricsConfigOrchestratorImpl {
             (HashMap::new(), HashMap::new()),
             |(mut publishers, mut triggers), container_key| {
                 match dependency_map.get(container_key) {
-                    Some((DependencyContainer::Publisher { publisher_proto, .. }, _)) => {
-                        let publisher = publisher_func(publisher_proto, &triggers)?;
-                        publishers.insert(publisher_proto.name.clone(), publisher);
+                    Some((DependencyContainer::Publisher { source_proto, .. }, _)) => {
+                        let publisher = publisher_func(source_proto, &triggers)?;
+                        publishers.insert(source_proto.name.clone(), publisher);
                     }
                     Some((DependencyContainer::Trigger { trigger_proto, .. }, _)) => {
                         let trigger = trigger_func(trigger_proto, &publishers, &mut triggers)?;
@@ -911,9 +898,9 @@ impl MetricsConfigOrchestratorImpl {
         }
 
         // Add aggregation publisher dependencies on expression node publishers
-        for publisher_proto in &config_proto.publishers {
-            let Some(PublisherTypeProto::AggregationPublisher(aggregation_publisher)) =
-                &publisher_proto.publisher_type
+        for publisher_proto in &config_proto.sources {
+            let Some(SourceTypeProto::Aggregator(aggregation_publisher)) =
+                &publisher_proto.source_type
             else {
                 continue;
             };
@@ -1073,7 +1060,7 @@ impl MetricsConfigOrchestratorImpl {
                 .unsubscribe(&TriggerSubscriber::MetricsConfigEnd)
                 .await;
 
-            Self::end_data_collection(&config, ReportReason::INCOMPLETE_END).await;
+            Self::end_data_collection(&config, ReportReason::INCOMPLETE_STOPPED).await;
 
             // Subscribe to start trigger.
             Self::subscribe_to_start_trigger(
@@ -1112,22 +1099,20 @@ mod tests {
     };
     use sdv_telemetry_proto_rust::expression::{FieldLeafNode, Node as NodeProto};
     use sdv_telemetry_proto_rust::metrics_configuration::{
-        proto_message_builder, AggregationPublisher as AggregationPublisherProto,
-        ConditionalTrigger as ConditionalTriggerProto, DataTrigger as DataTriggerProto,
+        proto_message_builder, Aggregator, ConditionalTrigger as ConditionalTriggerProto,
+        DataSource as DataSourceProto, DataTrigger as DataTriggerProto,
         MetricsConfig as MetricsConfigProto, MetricsReportConfig,
-        PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Publisher as PublisherProto,
-        ServicePublisher as ServicePublisherProto, Trigger as TriggerProto,
+        PeriodicTrigger as PeriodicTriggerProto, ProtoMessageBuilder, Source as SourceProto,
+        Trigger as TriggerProto,
     };
-    use sdv_telemetry_test_utils::parameterized_test;
-    use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback};
+    use sdv_telemetry_test_proto::test_message;
+    use sdv_telemetry_test_utils::{msg_dyn_eq, oneshot_callback, parameterized_test};
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicU32, Ordering};
 
     use crate::metrics_config_orchestrator::descriptor_provider_factory::mock::MockDescriptorProviderFactory;
     use crate::metrics_config_orchestrator::message_builder::mock::MockMessageBuilder;
-    use crate::metrics_config_orchestrator::message_builder_factory::mock::{
-        get_test_file_descriptors, MockMessageBuilderFactory,
-    };
+    use crate::metrics_config_orchestrator::message_builder_factory::mock::MockMessageBuilderFactory;
     use crate::metrics_config_orchestrator::publisher::mock::MockPublisher;
     use crate::metrics_config_orchestrator::publisher_factory::{
         PublisherFactory, PublisherFactoryError,
@@ -1323,9 +1308,9 @@ mod tests {
     struct MockPublisherFactory {
         publishers: Mutex<HashMap<String, Arc<MockPublisher>>>,
         create_callback:
-            Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync>>,
+            Option<Box<dyn Fn(&SourceProto) -> Option<PublisherFactoryError> + Send + Sync>>,
         validate_callback:
-            Option<Box<dyn Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync>>,
+            Option<Box<dyn Fn(&SourceProto) -> Option<PublisherFactoryError> + Send + Sync>>,
     }
 
     impl MockPublisherFactory {
@@ -1347,14 +1332,14 @@ mod tests {
 
         fn set_create_callback(
             &mut self,
-            callback: impl Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync + 'static,
+            callback: impl Fn(&SourceProto) -> Option<PublisherFactoryError> + Send + Sync + 'static,
         ) {
             self.create_callback.replace(Box::new(callback));
         }
 
         fn set_validate_callback(
             &mut self,
-            callback: impl Fn(&PublisherProto) -> Option<PublisherFactoryError> + Send + Sync + 'static,
+            callback: impl Fn(&SourceProto) -> Option<PublisherFactoryError> + Send + Sync + 'static,
         ) {
             self.validate_callback.replace(Box::new(callback));
         }
@@ -1364,7 +1349,7 @@ mod tests {
         fn create(
             &self,
             metrics_config_uuid: MetricsConfigUuid,
-            publisher_proto: &PublisherProto,
+            publisher_proto: &SourceProto,
             _subscription_waiter: MultiLevelCountdownLatch,
             _context: &PublisherFactoryCreateContext,
         ) -> Result<Arc<dyn Publisher>, PublisherFactoryError> {
@@ -1383,7 +1368,7 @@ mod tests {
 
         fn validate(
             &self,
-            publisher_proto: &PublisherProto,
+            publisher_proto: &SourceProto,
             _context: &PublisherFactoryValidateContext,
         ) -> Result<(), PublisherFactoryError> {
             if let Some(callback) = &self.validate_callback {
@@ -1504,18 +1489,17 @@ mod tests {
     }
 
     fn create_test_file_descriptor_protos() -> Vec<FileDescriptorProto> {
-        let fds = get_test_file_descriptors();
-        fds.iter().map(|fd| fd.proto()).cloned().collect()
+        vec![test_message::file_descriptor().proto().to_owned()]
     }
 
     fn create_valid_config_with_publisher() -> MetricsConfigProto {
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         SOME_PUBLISHER_NAME.clone_into(&mut publisher.name);
-        publisher.set_service_publisher(ServicePublisherProto::new());
+        publisher.set_data_source(DataSourceProto::new());
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        config.publishers.push(publisher);
+        config.sources.push(publisher);
         config
     }
 
@@ -1541,18 +1525,18 @@ mod tests {
     }
 
     fn create_config_with_duplicate_publisher_name() -> MetricsConfigProto {
-        let mut publisher1 = PublisherProto::new();
+        let mut publisher1 = SourceProto::new();
         SOME_PUBLISHER_NAME.clone_into(&mut publisher1.name);
-        publisher1.mut_aggregation_publisher();
+        publisher1.mut_aggregator();
 
-        let mut publisher2 = PublisherProto::new();
+        let mut publisher2 = SourceProto::new();
         publisher2.name.clone_from(&publisher1.name);
-        publisher2.mut_aggregation_publisher();
+        publisher2.mut_aggregator();
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        config.publishers.push(publisher1);
-        config.publishers.push(publisher2);
+        config.sources.push(publisher1);
+        config.sources.push(publisher2);
         config
     }
 
@@ -1573,9 +1557,9 @@ mod tests {
     }
 
     fn create_config_with_duplicate_publisher_trigger_name() -> MetricsConfigProto {
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         SOME_PUBLISHER_NAME.clone_into(&mut publisher.name);
-        publisher.set_service_publisher(ServicePublisherProto::new());
+        publisher.set_data_source(DataSourceProto::new());
 
         let mut trigger = TriggerProto::new();
         trigger.name.clone_from(&publisher.name);
@@ -1583,7 +1567,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        config.publishers.push(publisher);
+        config.sources.push(publisher);
         config.triggers.push(trigger);
         config
     }
@@ -1596,46 +1580,46 @@ mod tests {
         DATA_TRIGGER_NAME.clone_into(&mut trigger1.name);
         let mut trigger2 = TriggerProto::new();
         CONDITIONAL_TRIGGER_NAME.clone_into(&mut trigger2.name);
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME.clone_into(&mut publisher.name);
 
         let mut data_trigger = DataTriggerProto::new();
-        data_trigger.publisher_name.clone_from(&publisher.name);
+        data_trigger.source_name.clone_from(&publisher.name);
         trigger1.set_data_trigger(data_trigger);
         let mut conditional_trigger = ConditionalTriggerProto::new();
         conditional_trigger.trigger_names.push(trigger1.name.clone());
         trigger2.set_conditional_trigger(conditional_trigger);
-        let mut aggregation_publisher = AggregationPublisherProto::new();
+        let mut aggregation_publisher = Aggregator::new();
         aggregation_publisher.trigger_names.push(trigger2.name.clone());
         let mut proto_message_builder = ProtoMessageBuilder::new();
         proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
-        publisher.set_aggregation_publisher(aggregation_publisher);
+        publisher.set_aggregator(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.push(publisher);
+        config.sources.push(publisher);
         config.triggers.push(trigger1);
         config.triggers.push(trigger2);
         config
     }
 
     fn create_config_with_invalid_aggregation_publisher_trigger() -> MetricsConfigProto {
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME.clone_into(&mut publisher.name);
 
-        let mut aggregation_publisher = AggregationPublisherProto::new();
+        let mut aggregation_publisher = Aggregator::new();
         aggregation_publisher.trigger_names.push(INVALID_TRIGGER_NAME.to_owned());
         let mut proto_message_builder = ProtoMessageBuilder::new();
         proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
-        publisher.set_aggregation_publisher(aggregation_publisher);
+        publisher.set_aggregator(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.push(publisher);
+        config.sources.push(publisher);
         config
     }
 
@@ -1644,7 +1628,7 @@ mod tests {
         DATA_TRIGGER_NAME.clone_into(&mut trigger.name);
 
         let mut data_trigger = DataTriggerProto::new();
-        INVALID_PUBLISHER_NAME.clone_into(&mut data_trigger.publisher_name);
+        INVALID_PUBLISHER_NAME.clone_into(&mut data_trigger.source_name);
         trigger.set_data_trigger(data_trigger);
 
         let mut config = MetricsConfigProto::new();
@@ -1687,7 +1671,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        config.end_trigger_name.clone_from(&trigger.name);
+        config.stop_trigger_name.clone_from(&trigger.name);
         config.triggers.push(trigger);
         config
     }
@@ -1705,31 +1689,31 @@ mod tests {
         DATA_TRIGGER_NAME.clone_into(&mut trigger1.name);
         let mut trigger2 = TriggerProto::new();
         CONDITIONAL_TRIGGER_NAME.clone_into(&mut trigger2.name);
-        let mut publisher1 = PublisherProto::new();
+        let mut publisher1 = SourceProto::new();
         SERVICE_PUBLISHER_NAME.clone_into(&mut publisher1.name);
-        let mut publisher2 = PublisherProto::new();
+        let mut publisher2 = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME.clone_into(&mut publisher2.name);
 
         let mut data_trigger = DataTriggerProto::new();
-        data_trigger.publisher_name.clone_from(&publisher1.name);
+        data_trigger.source_name.clone_from(&publisher1.name);
         trigger1.set_data_trigger(data_trigger);
         let mut conditional_trigger = ConditionalTriggerProto::new();
         conditional_trigger.trigger_names.push(trigger1.name.clone());
         trigger2.set_conditional_trigger(conditional_trigger);
-        publisher1.set_service_publisher(ServicePublisherProto::new());
+        publisher1.set_data_source(DataSourceProto::new());
 
-        let mut aggregation_publisher = AggregationPublisherProto::new();
+        let mut aggregation_publisher = Aggregator::new();
         aggregation_publisher.trigger_names.push(trigger2.name.clone());
         let mut proto_message_builder = ProtoMessageBuilder::new();
         proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
-        publisher2.set_aggregation_publisher(aggregation_publisher);
+        publisher2.set_aggregator(aggregation_publisher);
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.push(publisher1);
-        config.publishers.push(publisher2);
+        config.sources.push(publisher1);
+        config.sources.push(publisher2);
         config.triggers.push(trigger1);
         config.triggers.push(trigger2);
         config.expression_nodes.push(NodeProto::new());
@@ -1882,9 +1866,9 @@ mod tests {
         FINISH_TRIGGER_NAME.clone_into(&mut finish_trigger_proto.name);
 
         // Create publisher protos
-        let mut service_publisher_proto = PublisherProto::new();
+        let mut service_publisher_proto = SourceProto::new();
         SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher_proto.name);
-        let _ = service_publisher_proto.mut_service_publisher();
+        let _ = service_publisher_proto.mut_data_source();
 
         // Create message builder for start_aggregation_publisher
         let mut proto_field_assignment = proto_message_builder::FieldAssignment::new();
@@ -1900,10 +1884,9 @@ mod tests {
         // Create aggregation_publisher which is used only for determining when to start data
         // collection. Publisher's expression node is a field leaf node accessing service publisher.
         // The publisher starts its own data collection immediately on config initialization.
-        let mut start_aggregation_publisher_proto = PublisherProto::new();
+        let mut start_aggregation_publisher_proto = SourceProto::new();
         START_AGGREGATION_PUBLISHER_NAME.clone_into(&mut start_aggregation_publisher_proto.name);
-        let start_aggregation_publisher =
-            start_aggregation_publisher_proto.mut_aggregation_publisher();
+        let start_aggregation_publisher = start_aggregation_publisher_proto.mut_aggregator();
         start_aggregation_publisher.message_builder =
             protobuf::MessageField::some(proto_message_builder);
 
@@ -1913,11 +1896,10 @@ mod tests {
 
         // Create aggregation_publisher which is used only for data collection.
         // This publisher starts data collection after start_trigger fires
-        let mut collect_aggregation_publisher_proto = PublisherProto::new();
+        let mut collect_aggregation_publisher_proto = SourceProto::new();
         COLLECT_AGGREGATION_PUBLISHER_NAME
             .clone_into(&mut collect_aggregation_publisher_proto.name);
-        let collect_aggregation_publisher =
-            collect_aggregation_publisher_proto.mut_aggregation_publisher();
+        let collect_aggregation_publisher = collect_aggregation_publisher_proto.mut_aggregator();
         collect_aggregation_publisher.message_builder =
             protobuf::MessageField::some(proto_message_builder);
 
@@ -1925,12 +1907,12 @@ mod tests {
         // This indirectly creates start_trigger's dependency on service publisher which is only a
         // part of expression node, making service_publisher be activated before start trigger fires
         let data_trigger = start_trigger_proto.mut_data_trigger();
-        data_trigger.publisher_name.clone_from(&start_aggregation_publisher_proto.name);
+        data_trigger.source_name.clone_from(&start_aggregation_publisher_proto.name);
 
         // Setup expression field leaf node
         let mut node_proto = NodeProto::new();
         node_proto.set_field_leaf_node(FieldLeafNode {
-            publisher_name: SERVICE_PUBLISHER_NAME.to_owned(),
+            source_name: SERVICE_PUBLISHER_NAME.to_owned(),
             ..Default::default()
         });
 
@@ -1939,10 +1921,10 @@ mod tests {
 
         config.uuid = CONFIG_UUID.to_string();
         config.start_trigger_name.clone_from(&start_trigger_proto.name);
-        config.end_trigger_name.clone_from(&end_trigger_proto.name);
-        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.stop_trigger_name.clone_from(&end_trigger_proto.name);
+        config.deactivate_trigger_name.clone_from(&finish_trigger_proto.name);
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.extend([
+        config.sources.extend([
             service_publisher_proto,
             start_aggregation_publisher_proto,
             collect_aggregation_publisher_proto,
@@ -1969,9 +1951,9 @@ mod tests {
         FINISH_TRIGGER_NAME.clone_into(&mut finish_trigger_proto.name);
 
         // Create publisher protos
-        let mut service_publisher_proto = PublisherProto::new();
+        let mut service_publisher_proto = SourceProto::new();
         SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher_proto.name);
-        let _ = service_publisher_proto.mut_service_publisher();
+        let _ = service_publisher_proto.mut_data_source();
 
         // Create message builder for aggregation publishers
         let mut proto_message_builder = ProtoMessageBuilder::new();
@@ -1979,23 +1961,23 @@ mod tests {
 
         // Create aggregation_publisher which is used only for determining when to
         // start data collection.
-        let mut start_aggregation_publisher_proto = PublisherProto::new();
+        let mut start_aggregation_publisher_proto = SourceProto::new();
         START_AGGREGATION_PUBLISHER_NAME.clone_into(&mut start_aggregation_publisher_proto.name);
-        let aggregation_publisher = start_aggregation_publisher_proto.mut_aggregation_publisher();
+        let aggregation_publisher = start_aggregation_publisher_proto.mut_aggregator();
         aggregation_publisher.message_builder =
             protobuf::MessageField::some(proto_message_builder.clone());
 
         // Create aggregation_publisher which is used only for data collection.
-        let mut collect_aggregation_publisher_proto = PublisherProto::new();
+        let mut collect_aggregation_publisher_proto = SourceProto::new();
         COLLECT_AGGREGATION_PUBLISHER_NAME
             .clone_into(&mut collect_aggregation_publisher_proto.name);
-        let aggregation_publisher = collect_aggregation_publisher_proto.mut_aggregation_publisher();
+        let aggregation_publisher = collect_aggregation_publisher_proto.mut_aggregator();
         aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
 
         // Setup expression field lead node
         let mut node_proto = NodeProto::new();
         node_proto.set_field_leaf_node(FieldLeafNode {
-            publisher_name: START_AGGREGATION_PUBLISHER_NAME.to_owned(),
+            source_name: START_AGGREGATION_PUBLISHER_NAME.to_owned(),
             ..Default::default()
         });
 
@@ -2009,10 +1991,10 @@ mod tests {
 
         config.uuid = CONFIG_UUID.to_string();
         config.start_trigger_name.clone_from(&start_trigger_proto.name);
-        config.end_trigger_name.clone_from(&end_trigger_proto.name);
-        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.stop_trigger_name.clone_from(&end_trigger_proto.name);
+        config.deactivate_trigger_name.clone_from(&finish_trigger_proto.name);
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.extend([
+        config.sources.extend([
             service_publisher_proto,
             start_aggregation_publisher_proto,
             collect_aggregation_publisher_proto,
@@ -2368,7 +2350,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        SOME_TRIGGER_NAME.clone_into(&mut config.end_trigger_name);
+        SOME_TRIGGER_NAME.clone_into(&mut config.stop_trigger_name);
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
@@ -2385,7 +2367,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        SOME_TRIGGER_NAME.clone_into(&mut config.finish_trigger_name);
+        SOME_TRIGGER_NAME.clone_into(&mut config.deactivate_trigger_name);
 
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
@@ -2465,7 +2447,7 @@ mod tests {
         // Create and setup mock report generator.
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
-        report_generator_mock.expected_reason = Some(ReportReason::INCOMPLETE_END);
+        report_generator_mock.expected_reason = Some(ReportReason::INCOMPLETE_STOPPED);
         let factory_calls_clone = Arc::clone(&factory_calls);
         report_generator_mock.set_activate_callback(move |name| {
             factory_calls_clone.lock().push((ACTIVATE.to_owned(), name.to_owned()))
@@ -2496,7 +2478,7 @@ mod tests {
         END_TRIGGER_NAME.clone_into(&mut end_trigger.name);
         let mut finish_trigger = TriggerProto::new();
         FINISH_TRIGGER_NAME.clone_into(&mut finish_trigger.name);
-        let mut publisher = PublisherProto::new();
+        let mut publisher = SourceProto::new();
         SOME_PUBLISHER_NAME.clone_into(&mut publisher.name);
         let mut metrics_report_config = MetricsReportConfig::new();
         REPORT_GENERATOR_NAME.clone_into(&mut metrics_report_config.name);
@@ -2504,11 +2486,11 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.start_trigger_name.clone_from(&start_trigger.name);
-        config.end_trigger_name.clone_from(&end_trigger.name);
-        config.finish_trigger_name.clone_from(&finish_trigger.name);
+        config.stop_trigger_name.clone_from(&end_trigger.name);
+        config.deactivate_trigger_name.clone_from(&finish_trigger.name);
         config.metrics_report_configs.push(metrics_report_config);
         config.triggers.extend([start_trigger, end_trigger, finish_trigger]);
-        config.publishers.push(publisher);
+        config.sources.push(publisher);
 
         // Initialize config.
         orchestrator.initialize_config(&config).await.unwrap();
@@ -2630,17 +2612,17 @@ mod tests {
         // Setup config protobuf messages with the following dependencies:
         // Aggregation publisher 2 -> Aggregation data trigger -> Aggregation publisher 1 ->
         // Service data trigger -> Service publisher.
-        let mut service_publisher = PublisherProto::new();
+        let mut service_publisher = SourceProto::new();
         SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher.name);
-        service_publisher.mut_service_publisher();
+        service_publisher.mut_data_source();
 
         let mut service_data_trigger = TriggerProto::new();
         SERVICE_DATA_TRIGGER_NAME.clone_into(&mut service_data_trigger.name);
-        service_data_trigger.mut_data_trigger().publisher_name.clone_from(&service_publisher.name);
+        service_data_trigger.mut_data_trigger().source_name.clone_from(&service_publisher.name);
 
-        let mut aggregation_publisher1 = PublisherProto::new();
+        let mut aggregation_publisher1 = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME.clone_into(&mut aggregation_publisher1.name);
-        let aggregation_publisher = aggregation_publisher1.mut_aggregation_publisher();
+        let aggregation_publisher = aggregation_publisher1.mut_aggregator();
         aggregation_publisher.message_builder.mut_or_insert_default().message_type =
             TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.trigger_names.push(service_data_trigger.name.clone());
@@ -2649,12 +2631,12 @@ mod tests {
         AGGREGATION_DATA_TRIGGER_NAME.clone_into(&mut aggregation_data_trigger.name);
         aggregation_data_trigger
             .mut_data_trigger()
-            .publisher_name
+            .source_name
             .clone_from(&aggregation_publisher1.name);
 
-        let mut aggregation_publisher2 = PublisherProto::new();
+        let mut aggregation_publisher2 = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME_2.clone_into(&mut aggregation_publisher2.name);
-        let aggregation_publisher = aggregation_publisher2.mut_aggregation_publisher();
+        let aggregation_publisher = aggregation_publisher2.mut_aggregator();
         aggregation_publisher.message_builder.mut_or_insert_default().message_type =
             TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.trigger_names.push(aggregation_data_trigger.name.clone());
@@ -2662,9 +2644,9 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.push(aggregation_publisher2);
-        config.publishers.push(aggregation_publisher1);
-        config.publishers.push(service_publisher);
+        config.sources.push(aggregation_publisher2);
+        config.sources.push(aggregation_publisher1);
+        config.sources.push(service_publisher);
         config.triggers.push(aggregation_data_trigger);
         config.triggers.push(service_data_trigger);
 
@@ -2710,7 +2692,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.deactivate_trigger_name.clone_from(&finish_trigger_proto.name);
         config.triggers.push(finish_trigger_proto);
 
         // Initialize config.
@@ -2888,9 +2870,9 @@ mod tests {
         start_trigger_proto.name = START_TRIGGER_NAME.to_owned();
 
         // Create aggregation publisher proto
-        let mut publisher_proto = PublisherProto::new();
+        let mut publisher_proto = SourceProto::new();
         publisher_proto.name = AGGREGATION_PUBLISHER_NAME.to_owned();
-        let publisher = publisher_proto.mut_aggregation_publisher();
+        let publisher = publisher_proto.mut_aggregator();
         publisher.trigger_names.push(START_TRIGGER_NAME.to_owned());
         let mut message_builder_proto = ProtoMessageBuilder::new();
         message_builder_proto.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
@@ -2900,7 +2882,7 @@ mod tests {
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.start_trigger_name = START_TRIGGER_NAME.to_owned();
-        config.publishers.push(publisher_proto);
+        config.sources.push(publisher_proto);
         config.triggers.push(start_trigger_proto);
         config.descriptor_protos = create_test_file_descriptor_protos();
 
@@ -2996,9 +2978,9 @@ mod tests {
         ]);
 
         // Setup Metrics Config.
-        let mut service_publisher_proto = PublisherProto::new();
+        let mut service_publisher_proto = SourceProto::new();
         SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher_proto.name);
-        let mut aggregation_publisher_proto = PublisherProto::new();
+        let mut aggregation_publisher_proto = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME.clone_into(&mut aggregation_publisher_proto.name);
         let mut start_trigger_proto = TriggerProto::new();
         START_TRIGGER_NAME.clone_into(&mut start_trigger_proto.name);
@@ -3007,22 +2989,22 @@ mod tests {
         let mut finish_trigger_proto = TriggerProto::new();
         FINISH_TRIGGER_NAME.clone_into(&mut finish_trigger_proto.name);
 
-        let aggregation_publisher = aggregation_publisher_proto.mut_aggregation_publisher();
+        let aggregation_publisher = aggregation_publisher_proto.mut_aggregator();
         aggregation_publisher.trigger_names.push(start_trigger_proto.name.clone());
         let mut proto_message_builder = ProtoMessageBuilder::new();
         proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
 
         let data_trigger = start_trigger_proto.mut_data_trigger();
-        data_trigger.publisher_name.clone_from(&service_publisher_proto.name);
+        data_trigger.source_name.clone_from(&service_publisher_proto.name);
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.start_trigger_name.clone_from(&start_trigger_proto.name);
-        config.end_trigger_name.clone_from(&end_trigger_proto.name);
-        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.stop_trigger_name.clone_from(&end_trigger_proto.name);
+        config.deactivate_trigger_name.clone_from(&finish_trigger_proto.name);
         config.descriptor_protos = create_test_file_descriptor_protos();
-        config.publishers.extend([service_publisher_proto, aggregation_publisher_proto]);
+        config.sources.extend([service_publisher_proto, aggregation_publisher_proto]);
         config.triggers.extend([start_trigger_proto, end_trigger_proto, finish_trigger_proto]);
 
         // Initialize config.
@@ -3106,7 +3088,7 @@ mod tests {
         // Setup mock report generator.
         let mut report_generator_mock =
             MockMetricsReportGenerator::new(REPORT_GENERATOR_NAME.to_owned());
-        report_generator_mock.expected_reason = Some(ReportReason::INCOMPLETE_FINISHED);
+        report_generator_mock.expected_reason = Some(ReportReason::INCOMPLETE_DEACTIVATED);
         let name_container_clone = Arc::clone(&name_container);
         report_generator_mock
             .set_deactivate_callback(move |name| name_container_clone.lock().push(name.to_owned()));
@@ -3134,9 +3116,9 @@ mod tests {
             .add_report_generators(vec![report_generator_mock.into()]);
 
         // Setup Metrics Config.
-        let mut service_publisher_proto = PublisherProto::new();
+        let mut service_publisher_proto = SourceProto::new();
         SERVICE_PUBLISHER_NAME.clone_into(&mut service_publisher_proto.name);
-        let mut aggregation_publisher_proto = PublisherProto::new();
+        let mut aggregation_publisher_proto = SourceProto::new();
         AGGREGATION_PUBLISHER_NAME.clone_into(&mut aggregation_publisher_proto.name);
         let mut start_trigger_proto = TriggerProto::new();
         START_TRIGGER_NAME.clone_into(&mut start_trigger_proto.name);
@@ -3147,23 +3129,23 @@ mod tests {
         let mut metrics_report_config = MetricsReportConfig::new();
         REPORT_GENERATOR_NAME.clone_into(&mut metrics_report_config.name);
 
-        let aggregation_publisher = aggregation_publisher_proto.mut_aggregation_publisher();
+        let aggregation_publisher = aggregation_publisher_proto.mut_aggregator();
         aggregation_publisher.trigger_names.push(start_trigger_proto.name.clone());
         let mut proto_message_builder = ProtoMessageBuilder::new();
         proto_message_builder.message_type = TEST_MESSAGE_TYPE_NAME.to_string();
         aggregation_publisher.message_builder = protobuf::MessageField::some(proto_message_builder);
 
         let data_trigger = start_trigger_proto.mut_data_trigger();
-        data_trigger.publisher_name.clone_from(&service_publisher_proto.name);
+        data_trigger.source_name.clone_from(&service_publisher_proto.name);
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
         config.start_trigger_name.clone_from(&start_trigger_proto.name);
-        config.end_trigger_name.clone_from(&end_trigger_proto.name);
-        config.finish_trigger_name.clone_from(&finish_trigger_proto.name);
+        config.stop_trigger_name.clone_from(&end_trigger_proto.name);
+        config.deactivate_trigger_name.clone_from(&finish_trigger_proto.name);
         config.descriptor_protos = create_test_file_descriptor_protos();
         config.metrics_report_configs.push(metrics_report_config);
-        config.publishers.extend([service_publisher_proto, aggregation_publisher_proto]);
+        config.sources.extend([service_publisher_proto, aggregation_publisher_proto]);
         config.triggers.extend([start_trigger_proto, end_trigger_proto, finish_trigger_proto]);
 
         // Initialize config.
@@ -3617,7 +3599,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        SOME_TRIGGER_NAME.clone_into(&mut config.end_trigger_name);
+        SOME_TRIGGER_NAME.clone_into(&mut config.stop_trigger_name);
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
@@ -3634,7 +3616,7 @@ mod tests {
 
         let mut config = MetricsConfigProto::new();
         config.uuid = CONFIG_UUID.to_string();
-        SOME_TRIGGER_NAME.clone_into(&mut config.finish_trigger_name);
+        SOME_TRIGGER_NAME.clone_into(&mut config.deactivate_trigger_name);
 
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 

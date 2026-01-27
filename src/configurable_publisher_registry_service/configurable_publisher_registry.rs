@@ -26,14 +26,14 @@ use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::c
 };
 use log::{info, warn};
 use protobuf::descriptor::{FileDescriptorProto, FileDescriptorSet};
-use protobuf::reflect::{FileDescriptor, MessageDescriptor};
+use protobuf::reflect::MessageDescriptor;
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageDyn};
 use sdv_telemetry_binder_utils::{BinderAdapter, BinderAdapterImpl};
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome, NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription, SubSamplingInterval
 };
-use sdv_telemetry_utils::descriptor_utils::{find_message_by_full_name, WELL_KNOWN_FILE_DESCRIPTORS};
+use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
 use std::mem;
 use std::fmt::Debug;
 use std::sync::{Arc, Weak};
@@ -257,17 +257,13 @@ impl ConfigurablePublisherRegistry {
             }
         };
 
-        let message_descriptor = find_message_by_full_name(
-            FileDescriptor::new_dynamic_fds(file_descriptor_protos, &WELL_KNOWN_FILE_DESCRIPTORS)?
-                .iter()
-                .chain(WELL_KNOWN_FILE_DESCRIPTORS.iter()),
-            &publisher_info.messageTypeName,
-        )
-        .ok_or_else(|| {
-            ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName {
+        let file_descriptor_set = FileDescriptorsAndWkts::try_from(file_descriptor_protos)?;
+
+        let message_descriptor = file_descriptor_set
+            .find_message_by_full_name(&publisher_info.messageTypeName)
+            .ok_or_else(|| ConfigurablePublisherRegistryRegisterError::InvalidMessageTypeName {
                 message_type_name: publisher_info.messageTypeName.clone(),
-            }
-        })?;
+            })?;
 
         match self.publisher_entries.entry(publisher_info.serviceName.clone()) {
             DashMapEntry::Occupied(_) => {

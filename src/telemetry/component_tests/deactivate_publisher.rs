@@ -42,21 +42,21 @@ fn create_metrics_config() -> MetricsConfigProto {
         r#"
 uuid: "{config_uuid}"
 
-publishers {{
+sources {{
     name: "a_publisher"
-    service_publisher {{
-        service_name: "{SERVICE_NAME}"
+    data_source {{
+        source_identifier: "{SERVICE_NAME}"
         connection_type: SUBSCRIPTION
     }}
 }}
 
 triggers {{
     name: "a_trigger"
-    data_trigger {{ publisher_name: "a_publisher" }}
+    data_trigger {{ source_name: "a_publisher" }}
 }}
 
 # index 0
-expression_nodes {{ field_leaf_node {{ publisher_name: "a_publisher" field_names: "value" }} }}
+expression_nodes {{ field_leaf_node {{ source_name: "a_publisher" field_names: "value" }} }}
 
 metrics_report_configs {{
     name: "Report"
