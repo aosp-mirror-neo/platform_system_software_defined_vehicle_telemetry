@@ -40,8 +40,8 @@ fn create_comms_stack_accessor(
 ) -> Arc<dyn ServicePublisherAccessor> {
     use futures::FutureExt;
     use sdv_comms::id::ServiceFqin;
+    use sdv_telemetry_comms_stack_wrapper::comms_stack_accessor::CommsStackAccessor;
     use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
-    use sdv_telemetry_dt_wrapper::comms_stack_accessor::CommsStackAccessor;
     use std::str::FromStr;
 
     // WARNING: The VM name is automatically updated in the created `ContextRef` to match the actual

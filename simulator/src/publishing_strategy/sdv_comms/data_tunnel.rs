@@ -16,7 +16,7 @@ use anyhow::bail;
 use protobuf::descriptor::FileDescriptorProto;
 use protobuf::Message;
 use sdv_comms::ContextRef;
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
+use sdv_telemetry_comms_stack_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_simulator_publishing_strategy::PublishingStrategy;
 use std::fmt::Debug;
 

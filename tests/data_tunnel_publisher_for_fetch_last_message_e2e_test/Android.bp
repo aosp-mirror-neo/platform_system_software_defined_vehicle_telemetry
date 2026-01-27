@@ -34,9 +34,9 @@ rust_binary {
         "libsdv_comms_rs",
         "libsdv_proto_reflection_rs",
         "libsdv_status_rs",
+        "libsdv_telemetry_comms_stack_wrapper",
         "libsdv_telemetry_comms_utils",
         "libsdv_telemetry_dt_publisher_for_fetch_last_message_e2e_test_proto",
-        "libsdv_telemetry_dt_wrapper",
         "libsdv_telemetry_utils",
         "libtokio",
         // keep-sorted end
