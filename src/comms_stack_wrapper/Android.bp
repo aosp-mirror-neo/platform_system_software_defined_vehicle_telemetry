@@ -18,9 +18,8 @@ package {
     default_visibility: ["//visibility:private"],
 }
 
-// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_defaults
 rust_defaults {
-    name: "telemetry_dt_wrapper_defaults",
+    name: "libsdv_telemetry_comms_stack_wrapper_defaults",
     defaults: ["sdv_telemetry@rust_defaults"],
     srcs: ["lib.rs"],
     rustlibs: [
@@ -54,23 +53,21 @@ rust_defaults {
     vendor_available: true,
 }
 
-// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper
 rust_library {
-    name: "libsdv_telemetry_dt_wrapper",
+    name: "libsdv_telemetry_comms_stack_wrapper",
     visibility: [
         // keep-sorted start
         "//system/software_defined_vehicle/samples/telemetry:__subpackages__",
         "//system/software_defined_vehicle/telemetry:__subpackages__",
         // keep-sorted end
     ],
-    crate_name: "sdv_telemetry_dt_wrapper",
-    defaults: ["telemetry_dt_wrapper_defaults"],
+    crate_name: "sdv_telemetry_comms_stack_wrapper",
+    defaults: ["libsdv_telemetry_comms_stack_wrapper_defaults"],
 }
 
-// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_tests_defaults
 rust_defaults {
-    name: "telemetry_dt_wrapper_tests_defaults",
-    defaults: ["telemetry_dt_wrapper_defaults"],
+    name: "telemetry_comms_stack_wrapper_tests_defaults",
+    defaults: ["libsdv_telemetry_comms_stack_wrapper_defaults"],
     rustlibs: [
         // keep-sorted start
         "libgoogletest_rust",
@@ -102,10 +99,9 @@ rust_defaults {
     auto_gen_config: true,
 }
 
-// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_unit_tests
 rust_test {
     name: "sdv_mt_telemetry_unit_comms_stack_wrapper_test",
-    defaults: ["telemetry_dt_wrapper_tests_defaults"],
+    defaults: ["telemetry_comms_stack_wrapper_tests_defaults"],
     cfgs: ["unit_tests"],
     test_options: {
         unit_test: true,
@@ -115,10 +111,9 @@ rust_test {
     require_root: true,
 }
 
-// TODO(b/377539367): rename to libsdv_telemetry_comms_wrapper_integration_tests
 rust_test {
     name: "sdv_mt_telemetry_integration_comms_stack_wrapper_test",
-    defaults: ["telemetry_dt_wrapper_tests_defaults"],
+    defaults: ["telemetry_comms_stack_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
     // Use a custom test config template as per
     // https://source.android.com/docs/core/tests/vts/setup11, because we need

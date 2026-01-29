@@ -28,8 +28,8 @@ use sdv_mw_rs_com_sdv_telemetry_sample_tire_sensors_reader::{publisher, TireSens
 use sdv_mw_rs_sdv_comms::SdvComms;
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvResult;
+use sdv_telemetry_comms_stack_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
-use sdv_telemetry_dt_wrapper::data_tunnel_publisher::DataTunnelPublisher;
 use sdv_telemetry_proto_rust::expression::{
     combination_node::ArithmeticOperator, combination_node::Operator,
     constant_leaf_node::Node_value, node::Node_type, CombinationNode, ConstantLeafNode, Node,
