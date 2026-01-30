@@ -314,11 +314,6 @@ impl NodeValue {
         self_cow: Cow<'a, Self>,
         op: &OperatorProto,
     ) -> Result<OperationState<'a>, NodeEvaluationError> {
-        // None occurs when message is missing or incomplete, and None propagates up.
-        if self_cow.is_none() {
-            return Ok(OperationState::Finished(NodeValue::None));
-        }
-
         match op {
             OperatorProto::ArithmeticOperator(op) => {
                 let op = match op.enum_value() {
@@ -330,6 +325,10 @@ impl NodeValue {
                     }
                 };
 
+                // None occurs when message is missing or incomplete, and None propagates up.
+                if self_cow.is_none() {
+                    return Ok(OperationState::Finished(NodeValue::None));
+                }
                 Self::handle_arithmetic(self_cow, op)
             }
             OperatorProto::LogicalOperator(op) => {
@@ -342,6 +341,7 @@ impl NodeValue {
                     }
                 };
 
+                // None is handled inside `handle_logical`.
                 Self::handle_logical(self_cow, op)
             }
             OperatorProto::RelationalOperator(op) => {
@@ -354,9 +354,13 @@ impl NodeValue {
                     }
                 };
 
+                // None occurs when message is missing or incomplete, and None propagates up.
+                if self_cow.is_none() {
+                    return Ok(OperationState::Finished(NodeValue::None));
+                }
                 Self::handle_binary(self_cow, move |left, right| left.handle_relational(&op, right))
             }
-            OperatorProto::RoundingOperator(op) => self_cow.handle_unary(|value| {
+            OperatorProto::RoundingOperator(op) => {
                 let op = match op.enum_value() {
                     Ok(value) => value,
                     Err(i) => {
@@ -366,8 +370,12 @@ impl NodeValue {
                     }
                 };
 
-                value.handle_rounding(&op)
-            }),
+                // None occurs when message is missing or incomplete, and None propagates up.
+                if self_cow.is_none() {
+                    return Ok(OperationState::Finished(NodeValue::None));
+                }
+                self_cow.handle_unary(|value| value.handle_rounding(&op))
+            }
             _ => Err(NodeEvaluationError::UnknownOperator { op: format!("{op:?}") }),
         }
     }
@@ -498,35 +506,72 @@ impl NodeValue {
     ) -> Result<OperationState<'_>, NodeEvaluationError> {
         let err_provider = || NodeEvaluationError::LogicalOperatorIncompatibleOperands;
 
-        let Some(left_value) = self_cow.get_bool() else { return Err(err_provider()) };
+        let left_value = match self_cow.get_bool() {
+            // `left_value` is a boolean
+            Some(left_value) => Some(left_value),
+            // `left_value` is not a boolean (e.g., a string), or it is none (= unknown).
+            None => {
+                if self_cow.is_none() {
+                    // `left_value` is none (= unknown).
+                    None
+                } else {
+                    // `left_value` is not a boolean nor none -> incompatible operand.
+                    return Err(err_provider());
+                }
+            }
+        };
 
         match op {
-            LogicalOperator::AND => {
-                if !left_value {
-                    // Short-circuit and don't evaluate right operand if the left operand is false.
-                    Ok(OperationState::Finished(NodeValue::Bool(false)))
-                } else {
-                    // If left is true, the result depends on the right operand.
-                    Self::handle_binary(self_cow, move |_left, right| {
-                        Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
+            LogicalOperator::AND => match left_value {
+                // Short-circuit and don't evaluate right operand if the left operand is false.
+                Some(false) => Ok(OperationState::Finished(NodeValue::Bool(false))),
+                // If left is none, the result depends on the right operand, but can only be none or
+                // false. It can never be true, because we don't know whether left is true or false.
+                None => Self::handle_binary(self_cow, move |_left, right| {
+                    Ok(if !right.get_bool().ok_or_else(err_provider)? {
+                        NodeValue::Bool(false)
+                    } else {
+                        NodeValue::None
                     })
-                }
-            }
-            LogicalOperator::OR => {
-                if left_value {
-                    // Short-circuit and don't evaluate right operand if the left operand is true.
-                    Ok(OperationState::Finished(NodeValue::Bool(true)))
-                } else {
-                    // If left is false, the result depends on the right operand.
-                    Self::handle_binary(self_cow, move |_left, right| {
-                        Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
+                }),
+                // If left is true, the result depends on the right operand.
+                Some(true) => Self::handle_binary(self_cow, move |_left, right| {
+                    // We don't need to deal with the case where right is none here, because
+                    // `Self::handle_binary` has a guard clause that returns none if right is none.
+                    Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
+                }),
+            },
+            LogicalOperator::OR => match left_value {
+                // Short-circuit and don't evaluate right operand if the left operand is true.
+                Some(true) => Ok(OperationState::Finished(NodeValue::Bool(true))),
+                // If left is none, the result depends on the right operand, but can only be none or
+                // true. It can never be false, because we don't know whether left is true or false.
+                None => Self::handle_binary(self_cow, move |_left, right| {
+                    Ok(if right.get_bool().ok_or_else(err_provider)? {
+                        NodeValue::Bool(true)
+                    } else {
+                        NodeValue::None
                     })
-                }
-            }
-            LogicalOperator::XOR => Self::handle_binary(self_cow, move |_left, right| {
-                Ok(NodeValue::Bool(left_value != right.get_bool().ok_or_else(err_provider)?))
-            }),
-            LogicalOperator::NOT => Ok(OperationState::Finished(NodeValue::Bool(!left_value))),
+                }),
+                // If left is false, the result depends on the right operand.
+                Some(false) => Self::handle_binary(self_cow, move |_left, right| {
+                    // We don't need to deal with the case where right is none here, because
+                    // `Self::handle_binary` has a guard clause that returns none if right is none.
+                    Ok(NodeValue::Bool(right.get_bool().ok_or_else(err_provider)?))
+                }),
+            },
+            LogicalOperator::XOR => match left_value {
+                None => Ok(OperationState::Finished(NodeValue::None)),
+                Some(left_value) => Self::handle_binary(self_cow, move |_left, right| {
+                    // We don't need to deal with the case where right is none here, because
+                    // `Self::handle_binary` has a guard clause that returns none if right is none.
+                    Ok(NodeValue::Bool(left_value != right.get_bool().ok_or_else(err_provider)?))
+                }),
+            },
+            LogicalOperator::NOT => Ok(OperationState::Finished(match left_value {
+                None => NodeValue::None,
+                Some(left_value) => NodeValue::Bool(!left_value),
+            })),
         }
     }
 
@@ -968,8 +1013,10 @@ mod tests {
         and_2: (&OP_AND, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(false))),),
         and_3: (&OP_AND, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
         and_4: (&OP_AND, NodeValue::Bool(false), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
-        and_none_left: (&OP_AND, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
-        and_none_right: (&OP_AND, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::None)),),
+        and_none_left_true_right: (&OP_AND, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
+        and_none_left_false_right: (&OP_AND, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
+        and_true_left_none_right: (&OP_AND, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::None)),),
+        and_false_left_none_right: (&OP_AND, NodeValue::Bool(false), NodeValue::None, ok(eq(&NodeValue::Bool(false))),),
         and_integers_fails: (&OP_AND, NodeValue::Int32(1), NodeValue::Int32(0), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
         and_non_bool_left_fails_1: (&OP_AND, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
         and_non_bool_left_fails_2: (&OP_AND, NodeValue::BoolList(vec![true]), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
@@ -980,8 +1027,10 @@ mod tests {
         or_2: (&OP_OR, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
         or_3: (&OP_OR, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
         or_4: (&OP_OR, NodeValue::Bool(false), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
-        or_none_left: (&OP_OR, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
-        or_none_right: (&OP_OR, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::Bool(true))),),
+        or_none_left_true_right: (&OP_OR, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
+        or_none_left_false_right: (&OP_OR, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
+        or_true_left_none_right: (&OP_OR, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::Bool(true))),),
+        or_false_left_none_right: (&OP_OR, NodeValue::Bool(false), NodeValue::None, ok(eq(&NodeValue::None)),),
         or_integers_fails: (&OP_OR, NodeValue::Int32(1), NodeValue::Int32(0), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
         or_non_bool_left_fails_1: (&OP_OR, NodeValue::Int32(1), NodeValue::Bool(false), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
         or_non_bool_left_fails_2: (&OP_OR, NodeValue::BoolList(vec![false]), NodeValue::Bool(false), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
@@ -992,8 +1041,10 @@ mod tests {
         xor_2: (&OP_XOR, NodeValue::Bool(false), NodeValue::Bool(true), ok(eq(&NodeValue::Bool(true))),),
         xor_3: (&OP_XOR, NodeValue::Bool(true), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(true))),),
         xor_4: (&OP_XOR, NodeValue::Bool(false), NodeValue::Bool(false), ok(eq(&NodeValue::Bool(false))),),
-        xor_none_left: (&OP_XOR, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
-        xor_none_right: (&OP_XOR, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::None)),),
+        xor_none_left_true_right: (&OP_XOR, NodeValue::None, NodeValue::Bool(true), ok(eq(&NodeValue::None)),),
+        xor_none_left_false_right: (&OP_XOR, NodeValue::None, NodeValue::Bool(false), ok(eq(&NodeValue::None)),),
+        xor_true_left_none_right: (&OP_XOR, NodeValue::Bool(true), NodeValue::None, ok(eq(&NodeValue::None)),),
+        xor_false_left_none_right: (&OP_XOR, NodeValue::Bool(false), NodeValue::None, ok(eq(&NodeValue::None)),),
         xor_integers_fails: (&OP_XOR, NodeValue::Int32(1), NodeValue::Int32(0), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
         xor_non_bool_left_fails_1: (&OP_XOR, NodeValue::Int32(1), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
         xor_non_bool_left_fails_2: (&OP_XOR, NodeValue::BoolList(vec![true]), NodeValue::Bool(true), err(pat!(NodeEvaluationError::LogicalOperatorIncompatibleOperands)),),
