@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
@@ -264,6 +265,19 @@ impl Publisher for AggregationPublisher {
                 state_lock
             );
         }
+    }
+}
+
+impl DumpStateReporter for AggregationPublisher {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        let status = self.state.blocking_lock();
+        let name = self.base.get_name();
+        writeln!(writer, "[{status}] Aggregation publisher: '{name}'")?;
+        Ok(())
     }
 }
 
