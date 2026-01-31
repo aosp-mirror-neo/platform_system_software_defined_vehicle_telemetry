@@ -176,23 +176,28 @@ def parse_catbox_result(result_dir: Path) -> bool:
     try:
         tree = ET.parse(xml_path)
         root = tree.getroot()
-        failed_count = sum(
-            int(s.get("failed", "0")) for s in root.findall("Summary")
-        )
+
         modules_total = sum(
             int(s.get("modules_total", "0")) for s in root.findall("Summary")
+        )
+
+        if modules_total == 0:
+            print(f"{RED}No tests modules have been found")
+            return False
+
+        failed_count = sum(
+            int(s.get("failed", "0")) for s in root.findall("Summary")
         )
         modules_done = sum(
             int(s.get("modules_done", "0")) for s in root.findall("Summary")
         )
-        incomplete_modules = modules_total - modules_done
 
-        if failed_count == 0 and incomplete_modules == 0:
+        if failed_count == 0 and modules_done == modules_total:
             return True
 
         print(
-            f"{RED}{failed_count} tests failed and"
-            f" {incomplete_modules} modules were incomplete.{NC}"
+            f"{RED}{failed_count} test(s) failed,"
+            f" {modules_done}/{modules_total} module(s) completed.{NC}"
         )
         return False
     except ET.ParseError as e:
