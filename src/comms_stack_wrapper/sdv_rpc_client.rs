@@ -29,9 +29,11 @@ use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
-    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
+    CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
+    GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
+use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -76,6 +78,11 @@ impl SdvRpcClient {
 
         #[async_trait]
         impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            #[tracing::instrument(skip(self, configuration), fields(
+                publisher_type = "rpc",
+                await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+                    |e| e.duration()).as_nanos(),
+            ))]
             async fn get_latest_message(
                 &self,
                 configuration: Option<&Any>,
@@ -118,10 +125,8 @@ impl SdvRpcClient {
         configuration: Option<&Any>,
         config_descriptor: MessageDescriptor,
         message_descriptor: MessageDescriptor,
-        mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        mut new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let client = rpc::Client::create(
             self.ctx.clone().await,
@@ -157,6 +162,13 @@ impl SdvRpcClient {
                         return;
                     }
                     Some(Some(result)) => {
+                        let message_id = MessageId::new();
+                        tracing::event!(
+                            tracing::Level::INFO,
+                            "New message by RPC Publisher, message_id = {}",
+                            message_id
+                        );
+
                         let buffer = match result
                             .context("RPC server stream produced an intermittent error")
                         {
@@ -177,6 +189,7 @@ impl SdvRpcClient {
                         let message = message_descriptor
                             .parse_from_bytes(&buffer)
                             .context("Failed to parse the protobuf message")
+                            .map(|msg| (msg, message_id.into()))
                             .map_err(ServicePublisherAccessorError::MessageParsingFailed);
                         (new_message_callback)(message);
                     }

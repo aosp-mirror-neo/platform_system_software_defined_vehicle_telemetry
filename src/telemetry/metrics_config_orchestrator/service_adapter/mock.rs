@@ -15,6 +15,7 @@
 use super::*;
 
 use parking_lot::Mutex;
+use sdv_telemetry_service_publisher_accessor::CancellationCallback;
 use std::future;
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::{oneshot, Notify};
@@ -31,7 +32,7 @@ pub(crate) struct MockServiceAdapter {
     // Notify that's triggered when unsubscribe is blocked.
     pub(crate) notify_unsubscribing: Arc<Notify>,
     availability_callback: Mutex<Option<Box<dyn Fn() + Send + Sync>>>,
-    cancellation_callback: Mutex<Option<Box<dyn FnOnce() + Send + Sync>>>,
+    cancellation_callback: Mutex<Option<CancellationCallback>>,
     message_provider_returned_sender: Mutex<mpsc::UnboundedSender<()>>,
     message_provider_returned_receiver: AsyncMutex<mpsc::UnboundedReceiver<()>>,
     next_error: Mutex<Option<anyhow::Error>>,
@@ -43,8 +44,7 @@ pub(crate) struct MockServiceAdapter {
     num_unsubscribe_calls: AtomicU32,
     num_register_availability_callback_calls: AtomicU32,
     num_unregister_availability_callback_calls: Arc<AtomicU32>,
-    new_message_callback:
-        AsyncMutex<Option<Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>>>,
+    new_message_callback: AsyncMutex<Option<NewMessageCallback>>,
     return_availability_callback_registration: bool,
     successful_subscribe_sender: Mutex<Option<oneshot::Sender<()>>>,
 }
@@ -92,8 +92,8 @@ impl ServiceAdapter for MockServiceAdapter {
         configuration: Option<&Any>,
         _fetch_last_message: bool,
         _sub_sampling_interval: &SubSamplingInterval,
-        new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
         self.num_subscribe_calls.fetch_add(1, Ordering::AcqRel);
 
@@ -231,7 +231,7 @@ impl MockServiceAdapter {
     }
 
     pub(crate) async fn publish_new_message(&self, message: &Arc<dyn MessageDyn>) {
-        self.new_message_callback.lock().await.as_mut().unwrap()(message);
+        self.new_message_callback.lock().await.as_mut().unwrap()(message, None);
     }
 
     pub(crate) fn with_availability_callback(mut self) -> Self {

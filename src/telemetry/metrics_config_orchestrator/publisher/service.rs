@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_service_publisher_accessor::{
-    AvailabilityCallbackRegistration, ServicePublisherAccessorError, SubSamplingInterval,
+    AvailabilityCallbackRegistration, MessageId, ServicePublisherAccessorError, SubSamplingInterval,
 };
 use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use sdv_telemetry_utils::{
@@ -626,9 +626,9 @@ impl ServicePublisher {
                         self.configuration.as_ref(),
                         self.fetch_last_message,
                         &self.sub_sampling_interval,
-                        Box::new(move |msg| {
+                        Box::new(move |msg, id| {
                             sender
-                                .send(Arc::clone(msg))
+                                .send((Arc::clone(msg), id))
                                 .expect("Callback should only receive messages when subscribed")
                         }),
                         Box::new(move || {
@@ -643,12 +643,15 @@ impl ServicePublisher {
                 }
 
                 #[async_trait]
-                impl AsyncEventHandler<Arc<dyn MessageDyn>> for ServicePublisherHandler {
-                    async fn handle(&mut self, message: Arc<dyn MessageDyn>) {
+                impl AsyncEventHandler<(Arc<dyn MessageDyn>, Option<MessageId>)> for ServicePublisherHandler {
+                    async fn handle(
+                        &mut self,
+                        (message, message_id): (Arc<dyn MessageDyn>, Option<MessageId>),
+                    ) {
                         let Some(service_publisher) = self.service_publisher.upgrade() else {
                             return;
                         };
-                        service_publisher.on_new_message(message).await;
+                        service_publisher.on_new_message(message, message_id).await;
                     }
                 }
 
@@ -668,7 +671,7 @@ impl ServicePublisher {
         Ok(new_state)
     }
 
-    async fn on_new_message(&self, message: Arc<dyn MessageDyn>) {
+    async fn on_new_message(&self, message: Arc<dyn MessageDyn>, message_id: Option<MessageId>) {
         let message = Arc::new(ProtobufDynamicMessage::new(message));
 
         // Create context outside of the lock, so that the date/time is set as fast as possible,
@@ -689,6 +692,14 @@ impl ServicePublisher {
         };
 
         self.base.set_new_message(message, &context, callback_map);
+
+        if let Some(id) = message_id {
+            tracing::event!(
+                tracing::Level::INFO,
+                "Message processed by Service Publisher, message_id = {}",
+                id
+            );
+        }
     }
 
     fn on_subscription_cancelled(self: &Arc<Self>) {

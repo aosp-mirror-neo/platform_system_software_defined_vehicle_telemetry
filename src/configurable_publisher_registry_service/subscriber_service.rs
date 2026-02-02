@@ -15,17 +15,15 @@
 use async_trait::async_trait;
 use google_sdv_telemetry_configurable_publisher::aidl::google::sdv::telemetry::configurable_publisher::{ConfigurablePublisherStatusCodes::ConfigurablePublisherStatusCodes as StatusCodes, ISubscriber::ISubscriberAsyncServer};
 use parking_lot::Mutex;
-use protobuf::{reflect::MessageDescriptor, MessageDyn};
-use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
 use log::debug;
+use protobuf::reflect::MessageDescriptor;
+use sdv_telemetry_service_publisher_accessor::{NewMessageCallback, ServicePublisherAccessorError};
 
 /// Implementation of ISubscriber interface that calls associated callback on a new message.
 pub struct SubscriberService {
     service_name: String,
     message_descriptor: MessageDescriptor,
-    new_message_callback: Mutex<
-        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
-    >,
+    new_message_callback: Mutex<NewMessageCallback>,
 }
 
 impl binder::Interface for SubscriberService {}
@@ -50,7 +48,7 @@ impl ISubscriberAsyncServer for SubscriberService {
                 ))
             },
             |msg| {
-                (self.new_message_callback.lock())(Ok(msg));
+                (self.new_message_callback.lock())(Ok((msg, None)));
                 Ok(())
             },
         )
@@ -61,9 +59,7 @@ impl SubscriberService {
     pub fn new(
         service_name: String,
         message_descriptor: MessageDescriptor,
-        new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
+        new_message_callback: NewMessageCallback,
     ) -> Self {
         Self { service_name, message_descriptor, new_message_callback: new_message_callback.into() }
     }
@@ -113,7 +109,7 @@ mod tests {
         let value = Box::new(Int32Value { value: 42, ..Default::default() });
 
         wrapper.sendData(&value.write_to_bytes().unwrap()).await.unwrap();
-        let recv_val = rx.await.unwrap().downcast_box::<Int32Value>().unwrap();
+        let recv_val = rx.await.unwrap().0.downcast_box::<Int32Value>().unwrap();
 
         assert_eq!(recv_val, value);
     }

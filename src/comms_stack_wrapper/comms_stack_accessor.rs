@@ -654,14 +654,12 @@ mod integration_tests {
         MessageDescriptorAndFullNameEq { expected }
     }
 
-    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
-        Box::new(|| unreachable!())
+    fn create_empty_message_handler() -> NewMessageCallback {
+        Box::new(|_| unreachable!())
     }
 
-    fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
-    {
-        Box::new(|_| unreachable!())
+    fn create_empty_cancellation_handler() -> CancellationCallback {
+        Box::new(|| unreachable!())
     }
 
     fn create_accessor(ctx: ContextRef) -> CommsStackAccessor {
@@ -923,7 +921,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -944,7 +942,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -982,7 +980,7 @@ mod integration_tests {
                     fetch_last_message,
                     &SubSamplingInterval::ZERO,
                     create_empty_message_handler(),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -1032,7 +1030,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1044,7 +1042,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1096,13 +1094,12 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx1.send(message).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
 
-        let (tx2, mut rx2) =
-            mpsc::unbounded_channel::<Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>>();
+        let (tx2, mut rx2) = mpsc::unbounded_channel();
         let outcome2 = subscriber
             .create_subscription(
                 &service_name,
@@ -1110,7 +1107,7 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(move |message| tx2.send(message).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1133,11 +1130,11 @@ mod integration_tests {
             }
         ));
 
-        assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap()), 1);
-        assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap()), 2);
+        assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap().0), 1);
+        assert_eq!(get_int_field_value(rx1.recv().await.unwrap().unwrap().0), 2);
 
-        assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap()), 1);
-        assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap()), 2);
+        assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap().0), 1);
+        assert_eq!(get_int_field_value(rx2.recv().await.unwrap().unwrap().0), 2);
     }
 
     #[sdv_telemetry_test_utils::timeout(10_000)]
@@ -1171,7 +1168,7 @@ mod integration_tests {
                 false,
                 &notification_interval,
                 Box::new(move |message| tx.send((Instant::now(), message)).unwrap()),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -1186,14 +1183,16 @@ mod integration_tests {
         let message1_sent_at = Instant::now();
         write_message(&publisher, TestMessage { int_field: 1, ..Default::default() });
         let (message1_received_at, message1) = rx.recv().await.unwrap();
+        let message1 = message1.unwrap().0;
 
         write_message(&publisher, TestMessage { int_field: 2, ..Default::default() });
         write_message(&publisher, TestMessage { int_field: 3, ..Default::default() });
         let (message3_received_at, message3) = rx.recv().await.unwrap();
+        let message3 = message3.unwrap().0;
 
-        assert_eq!(get_int_field_value(message1.unwrap()), 1);
+        assert_eq!(get_int_field_value(message1), 1);
         // Message 2 should be silently discarded.
-        assert_eq!(get_int_field_value(message3.unwrap()), 3);
+        assert_eq!(get_int_field_value(message3), 3);
         assert!(
             matches!(rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)),
             "The channel should be empty."
@@ -1247,7 +1246,7 @@ mod integration_tests {
                     false,
                     &sub_sampling_interval,
                     Box::new(move |message| tx.send(message).unwrap()),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -1273,17 +1272,17 @@ mod integration_tests {
 
                 // After the overflow occurred, we should be able to read the last `n/2` (=3)
                 // messages, where `n` (=6) is the message queue size.
-                let message = rx.recv().await.unwrap();
-                assert_eq!(get_int_field_value(message.unwrap()), 28);
-                let message = rx.recv().await.unwrap();
-                assert_eq!(get_int_field_value(message.unwrap()), 29);
-                let message = rx.recv().await.unwrap();
-                assert_eq!(get_int_field_value(message.unwrap()), 30);
+                let message = rx.recv().await.unwrap().unwrap().0;
+                assert_eq!(get_int_field_value(message), 28);
+                let message = rx.recv().await.unwrap().unwrap().0;
+                assert_eq!(get_int_field_value(message), 29);
+                let message = rx.recv().await.unwrap().unwrap().0;
+                assert_eq!(get_int_field_value(message), 30);
             } else {
                 // In case of subsampling `CommsStackAccessor` contains the overflow error and
                 // retries a read.
-                let message = rx.recv().await.unwrap();
-                assert_eq!(get_int_field_value(message.unwrap()), 30);
+                let message = rx.recv().await.unwrap().unwrap().0;
+                assert_eq!(get_int_field_value(message), 30);
             }
         },
 
@@ -1485,11 +1484,11 @@ mod integration_tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 Box::new(tx),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
-        let received_msg = rx.await.unwrap();
+        let received_msg = rx.await.unwrap().0;
 
         let CreateSubscriptionOutcome::Subscribed {
             subscription,
@@ -2014,7 +2013,7 @@ mod integration_tests {
                     false,
                     &SubSamplingInterval::ZERO,
                     Box::new(tx),
-                    create_empty_fn_box(),
+                    create_empty_cancellation_handler(),
                 )
                 .await
                 .unwrap();
@@ -2035,7 +2034,7 @@ mod integration_tests {
             assert_eq!(message.write_to_bytes().unwrap(), vec![]);
             publish(message).await;
 
-            let subscription_message = rx.await.unwrap();
+            let subscription_message = rx.await.unwrap().0;
             let maybe_getter_message = message_provider.get_latest_message(config).await.unwrap();
 
             expect_that!(

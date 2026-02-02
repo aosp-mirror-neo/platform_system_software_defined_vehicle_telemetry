@@ -158,7 +158,7 @@ mod tests {
 
     use anyhow::anyhow;
     use protobuf::well_known_types::{empty::Empty, wrappers::Int32Value};
-    use protobuf::{MessageDyn, MessageFull};
+    use protobuf::MessageFull;
     use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
     use std::sync::Arc;
 
@@ -168,14 +168,12 @@ mod tests {
     const SERVICE_NAME: &str = "TEST_SERVICE_NAME";
     const SERVICE_NAME2: &str = "TEST_SERVICE_NAME2";
 
-    fn create_empty_fn_box() -> Box<dyn FnOnce() + Send + Sync> {
-        Box::new(|| unreachable!())
+    fn create_empty_message_handler() -> NewMessageCallback {
+        Box::new(|_| unreachable!())
     }
 
-    fn create_empty_message_handler(
-    ) -> Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>
-    {
-        Box::new(|_| unreachable!())
+    fn create_empty_cancellation_handler() -> CancellationCallback {
+        Box::new(|| unreachable!())
     }
 
     #[sdv_telemetry_test_utils::timeout]
@@ -325,7 +323,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -351,7 +349,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .err()
@@ -376,7 +374,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();
@@ -401,7 +399,7 @@ mod tests {
                 false,
                 &SubSamplingInterval::ZERO,
                 create_empty_message_handler(),
-                create_empty_fn_box(),
+                create_empty_cancellation_handler(),
             )
             .await
             .unwrap();

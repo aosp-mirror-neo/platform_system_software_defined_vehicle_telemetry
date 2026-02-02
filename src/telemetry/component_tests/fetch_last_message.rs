@@ -139,7 +139,7 @@ fn expect_manual_trigger_service(
                   _cancellation_callback| {
                 task::spawn(async move {
                     while let Some(()) = rx.next().await {
-                        new_message_callback(Ok(Box::new(Empty::default())));
+                        new_message_callback(Ok((Box::new(Empty::default()), None)));
                     }
                 });
 
@@ -239,10 +239,10 @@ async fn run_test(configs: Vec<bool>) {
                           mut new_message_callback,
                           _cancellation_callback| {
                         if flm_enabled {
-                            new_message_callback(Ok(Box::new(Int64Value {
-                                value: 123,
-                                ..Default::default()
-                            })));
+                            new_message_callback(Ok((
+                                Box::new(Int64Value { value: 123, ..Default::default() }),
+                                None,
+                            )));
                         }
 
                         Ok(CreateSubscriptionOutcome::Subscribed {
