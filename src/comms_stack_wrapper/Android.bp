@@ -42,7 +42,6 @@ rust_defaults {
         "libthiserror",
         "libtokio",
         "libtokio_util",
-        "libuuid",
         // keep-sorted end
     ],
     proc_macros: [
