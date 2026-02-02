@@ -17,6 +17,7 @@
 mod deactivate_publisher;
 mod fetch_last_message;
 mod immediate_message_from_publisher;
+mod journey_start;
 
 use google_sdv_telemetry::aidl::google::sdv::telemetry::status::TelemetryServiceStatus::TelemetryServiceStatus;
 use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
