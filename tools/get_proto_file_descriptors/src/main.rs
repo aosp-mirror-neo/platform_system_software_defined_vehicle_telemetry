@@ -34,17 +34,35 @@ use protobuf_parse::Parser as ProtoParser;
 #[derive(ClapParser, Debug)]
 #[command()]
 struct Args {
-    /// Path to the .proto file
-    #[arg(value_name = "PROTO_FILE")]
-    proto_file: String,
+    /// Additional include paths containing .proto files. If `$ANDROID_BUILD_TOP` is set and no
+    /// include paths are specified, `$ANDROID_BUILD_TOP` and
+    /// `$ANDROID_BUILD_TOP/external/protobuf/src` are added automatically.
+    #[arg(long = "include-path", value_name = "DIR")]
+    include_paths: Vec<PathBuf>,
 
-    /// Output directory. Defaults to the current directory.
+    /// Output directory. Defaults to the current directory. It is created if it doesn't exist.
     #[arg(long = "out-dir", value_name = "DIR")]
     out_dir: Option<String>,
+
+    /// Path to the .proto file. This is the primary .proto file for which descriptors will be
+    /// generated.
+    #[arg(value_name = "PROTO_FILE")]
+    proto_file: String,
 }
 
 fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let mut args = Args::parse();
+
+    if args.include_paths.is_empty() {
+        if let Some(android_build_top) = env::var_os("ANDROID_BUILD_TOP") {
+            let include_paths = vec![
+                Path::new(&android_build_top).join("external/protobuf/src"),
+                PathBuf::from(android_build_top),
+            ];
+            eprintln!("Setting include paths:\n{include_paths:?}");
+            args.include_paths = include_paths;
+        }
+    }
 
     let proto_path = absolute(&args.proto_file)?;
     let out_dir = match args.out_dir {
@@ -64,6 +82,7 @@ fn main() -> anyhow::Result<()> {
         ))
         .include(proto_path.parent().unwrap())
         .input(proto_path)
+        .includes(args.include_paths)
         .file_descriptor_set()?;
 
     let [first_file_descriptor, ..] = &file_descriptor_set.file[..] else {
