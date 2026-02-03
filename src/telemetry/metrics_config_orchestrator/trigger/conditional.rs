@@ -14,6 +14,7 @@
 
 use async_trait::async_trait;
 use log::error;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::{
     node::Node, node_error::NodeEvaluationError, node_evaluation_context::NodeEvaluationContext,
     node_value::NodeValue,
@@ -54,6 +55,8 @@ pub(crate) struct EdgeOptions {
     pub(crate) require_exact: bool,
 }
 
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) enum ConditionType {
     /// Compares values using the LT relational operator.
@@ -108,6 +111,28 @@ impl Trigger for ConditionalTrigger {
         if let Some(activation_id) = maybe_activation_id {
             self.base.fire_trigger(activation_id, context).await;
         }
+    }
+}
+
+impl DumpStateReporter for ConditionalTrigger {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        write!(
+            writer,
+            "[{}] '{}', conditional trigger of type {}, based on [{}] triggers",
+            self.base.state.blocking_lock(),
+            self.get_name(),
+            self.condition_type,
+            self.triggers
+                .iter()
+                .map(|t| format!("'{}'", t.get_name()))
+                .collect::<Vec<_>>()
+                .join(", "),
+        )?;
+        Ok(())
     }
 }
 

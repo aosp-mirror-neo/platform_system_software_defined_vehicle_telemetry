@@ -37,6 +37,7 @@ use async_trait::async_trait;
 use log::debug;
 use parking_lot::Mutex;
 use protobuf::well_known_types::timestamp::Timestamp;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use sdv_telemetry_expr::{
     node::Node, node_error::NodeError, node_evaluation_context::NodeEvaluationContext,
@@ -198,16 +199,34 @@ pub(super) struct MetricsConfig {
     finish_trigger: Option<Arc<dyn Trigger>>,
 }
 
-impl sdv_dump::DumpStateReporter for MetricsConfig {
+impl DumpStateReporter for MetricsConfig {
     fn dump(
         &self,
         writer: &mut dyn std::io::Write,
-        _args: &[&std::ffi::CStr],
+        args: &[&std::ffi::CStr],
     ) -> Result<(), std::io::Error> {
         writeln!(writer, "UUID: {}", self.uuid)?;
         writeln!(writer, "State: {:?}", *self.state.blocking_lock())?;
-        writeln!(writer, "Publishers: {:?}", self.publishers.keys())?;
         writeln!(writer, "Number of report generators: {}", self.metrics_report_generators.len())?;
+        writeln!(writer, "Number of publishers: {}", self.publishers.len())?;
+        for publisher in self.publishers.values() {
+            publisher.dump(writer, args)?;
+        }
+        if let Some(start_trigger) = &self.start_trigger {
+            write!(writer, "Start trigger: ")?;
+            start_trigger.dump(writer, args)?;
+            writeln!(writer)?;
+        }
+        if let Some(end_trigger) = &self.end_trigger {
+            write!(writer, "End trigger: ")?;
+            end_trigger.dump(writer, args)?;
+            writeln!(writer)?;
+        }
+        if let Some(finish_trigger) = &self.finish_trigger {
+            write!(writer, "Finish trigger: ")?;
+            finish_trigger.dump(writer, args)?;
+            writeln!(writer)?;
+        }
         Ok(())
     }
 }

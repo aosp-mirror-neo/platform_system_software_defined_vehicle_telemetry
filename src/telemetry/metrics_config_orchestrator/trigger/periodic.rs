@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::sync::{Arc, Weak};
 use tokio::sync::mpsc;
@@ -83,6 +84,23 @@ impl Trigger for PeriodicTrigger {
         if let Some(activation_id) = maybe_activation_id {
             self.base.fire_trigger(activation_id, context).await;
         }
+    }
+}
+
+impl DumpStateReporter for PeriodicTrigger {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        write!(
+            writer,
+            "[{}] '{}', periodic trigger with interval {}s",
+            self.base.state.blocking_lock(),
+            self.get_name(),
+            self.interval.as_secs_f64(),
+        )?;
+        Ok(())
     }
 }
 

@@ -16,6 +16,7 @@
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
@@ -88,6 +89,17 @@ impl Publisher for MockPublisher {
         if let Some(callback) = &self.unsubscribe_callback {
             callback();
         }
+    }
+}
+
+impl DumpStateReporter for MockPublisher {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        writeln!(writer, "MockPublisher")?;
+        Ok(())
     }
 }
 

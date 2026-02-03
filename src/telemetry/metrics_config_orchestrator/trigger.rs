@@ -15,6 +15,7 @@
  */
 
 use async_trait::async_trait;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use std::marker::{Send, Sync};
 use std::sync::Arc;
@@ -36,7 +37,7 @@ pub(crate) mod mock;
 type TriggerCallbackFn = CallbackFn<Arc<NodeEvaluationContext>>;
 
 #[async_trait]
-pub(crate) trait Trigger: Send + Sync {
+pub(crate) trait Trigger: DumpStateReporter + Send + Sync {
     /// Returns the name of the trigger.
     fn get_name(&self) -> &str;
 
