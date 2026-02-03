@@ -49,7 +49,7 @@ fn create_comms_stack_accessor(
     // `ContextRef::get_self_fqin`!
     const SERVICE_FQIN: &str = "vm:com.google.sdv.telemetry.TelemetryService/default";
     let fqin = ServiceFqin::from_str(SERVICE_FQIN).unwrap();
-    dump_manager.set_self_fqin(&fqin);
+    dump_manager.set_self_fqin(fqin.to_string());
 
     // Make a shared future of ContextRef to avoid blocking Telemetry Service startup.
     let ctx_future = wait_for_sdv_agents_and_create_context(fqin).boxed().shared();
