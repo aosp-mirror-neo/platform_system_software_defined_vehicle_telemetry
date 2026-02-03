@@ -48,8 +48,10 @@ rust_binary_host {
 genrule {
     name: "sdv_telemetry_get_proto_file_descriptors_test_data",
     tools: ["sdv_telemetry_get_proto_file_descriptors"],
+    tool_files: [":libprotobuf-internal-protos"],
     srcs: ["src/test_data/sample_message.proto"],
     cmd: "$(location sdv_telemetry_get_proto_file_descriptors) " +
+        "--include-path ./tools/src/external/protobuf/src " +
         "--out-dir \"$(genDir)\" " +
         "\"$(location src/test_data/sample_message.proto)\"",
     out: [

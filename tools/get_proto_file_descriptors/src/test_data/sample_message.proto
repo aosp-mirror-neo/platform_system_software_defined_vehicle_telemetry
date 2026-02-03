@@ -16,6 +16,9 @@
 
 syntax = "proto3";
 
+import "google/protobuf/empty.proto";
+
 message SampleMessage {
   int32 sample_data = 1;
+  google.protobuf.Empty empty = 2;
 }
