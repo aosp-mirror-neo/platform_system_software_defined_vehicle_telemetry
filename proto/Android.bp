@@ -68,6 +68,7 @@ rust_protobuf {
     product_available: true,
     vendor_available: true,
     system_ext_specific: true,
+    min_sdk_version: "35",
 }
 
 java_library {

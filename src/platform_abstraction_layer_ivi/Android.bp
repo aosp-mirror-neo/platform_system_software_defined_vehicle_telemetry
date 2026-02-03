@@ -39,6 +39,7 @@ rust_library {
     defaults: ["libsdv_telemetry_platform_abstraction_layer_ivi_defaults"],
     crate_name: "sdv_telemetry_platform_abstraction_layer_ivi",
     vendor_available: true,
+    min_sdk_version: "35",
 }
 
 rust_test {

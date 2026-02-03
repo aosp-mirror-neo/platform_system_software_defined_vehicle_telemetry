@@ -38,6 +38,7 @@ rust_library {
     crate_name: "sdv_telemetry_platform_abstraction_layer",
     features: [],
     vendor_available: true,
+    min_sdk_version: "35",
 }
 
 rust_library {
