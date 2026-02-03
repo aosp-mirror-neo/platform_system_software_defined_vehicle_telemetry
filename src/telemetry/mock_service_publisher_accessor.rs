@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use protobuf::{reflect::MessageDescriptor, well_known_types::any::Any, MessageDyn};
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
-    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
+    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome, MessageId,
     NewMessageCallback, ServicePublisherAccessor, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherMetadata, ServicePublisherSubscription,
     SubSamplingInterval,
@@ -39,10 +39,7 @@ pub(crate) struct MockServicePublisherAccessor {
 
 struct MockServicePublisherAccessorData {
     /// The map of subscribed callbacks, keyed by service name and sub-sampling interval.
-    new_message_callbacks: HashMap<
-        (String, SubSamplingInterval),
-        Box<dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync>,
-    >,
+    new_message_callbacks: HashMap<(String, SubSamplingInterval), NewMessageCallback>,
     /// Last passed cancellation callback.
     cancellation_callback: Option<CancellationCallback>,
     /// The last configuration message that was passed to create_subscription.
@@ -243,7 +240,7 @@ impl MockServicePublisherAccessor {
         &self,
         service_name: &str,
         sub_sampling_interval: &SubSamplingInterval,
-        message: Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>,
+        message: Result<(Box<dyn MessageDyn>, Option<MessageId>), ServicePublisherAccessorError>,
     ) {
         let mut data_lock = self.data.lock();
         data_lock

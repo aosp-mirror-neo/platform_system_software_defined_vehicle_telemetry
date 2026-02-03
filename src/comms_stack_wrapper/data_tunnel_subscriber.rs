@@ -28,12 +28,13 @@ use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
 use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
 use sdv_telemetry_service_publisher_accessor::{
-    CreateSubscriptionOutcome, FetchLastMessageOutcome, GetMessageProviderOutcome,
-    ServicePublisherAccessorError, ServicePublisherMessageProvider, ServicePublisherSubscription,
-    SubSamplingInterval,
+    CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
+    GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
+    ServicePublisherMessageProvider, ServicePublisherSubscription, SubSamplingInterval,
 };
 use std::iter::Iterator;
 use std::pin::pin;
+use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
@@ -63,10 +64,8 @@ impl DataTunnelSubscriber {
         fetch_last_message: bool,
         message_descriptor: MessageDescriptor,
         sub_sampling_interval: &SubSamplingInterval,
-        mut new_message_callback: Box<
-            dyn FnMut(Result<Box<dyn MessageDyn>, ServicePublisherAccessorError>) + Send + Sync,
-        >,
-        cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+        mut new_message_callback: NewMessageCallback,
+        cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
         let message_stream = create_message_stream(
             self.ctx.clone().await,
@@ -102,6 +101,13 @@ impl DataTunnelSubscriber {
                         return;
                     }
                     Some(Some(result)) => {
+                        let message_id = MessageId::new();
+                        tracing::event!(
+                            tracing::Level::INFO,
+                            "New message(s) by DT Publisher, message_id = {}",
+                            message_id
+                        );
+
                         let messages = match result {
                             Ok(result) => result,
                             Err(err) => {
@@ -132,7 +138,9 @@ impl DataTunnelSubscriber {
                                 message_bytes,
                                 &message_descriptor,
                             )
+                            .map(|msg| (msg, message_id.into()))
                             .map_err(ServicePublisherAccessorError::MessageParsingFailed);
+
                             (new_message_callback)(message);
                         }
                     }
@@ -162,6 +170,11 @@ impl DataTunnelSubscriber {
 
         #[async_trait]
         impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            #[tracing::instrument(skip(self, _configuration), fields(
+                publisher_type = "dt",
+                await_start_timestamp = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_else(
+                    |e| e.duration()).as_nanos(),
+            ))]
             async fn get_latest_message(
                 &self,
                 _configuration: Option<&Any>,

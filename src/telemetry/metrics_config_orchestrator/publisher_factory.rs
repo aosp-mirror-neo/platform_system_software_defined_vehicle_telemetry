@@ -329,11 +329,11 @@ mod tests {
     use lazy_static::lazy_static;
     use protobuf::well_known_types::duration::Duration as DurationProto;
     use protobuf::well_known_types::{any::Any, empty::Empty};
-    use protobuf::{Message, MessageDyn, MessageField};
+    use protobuf::{Message, MessageField};
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
     use sdv_telemetry_proto_rust::metrics_configuration::Source as PublisherProto;
     use sdv_telemetry_service_publisher_accessor::{
-        AvailabilityCallbackRegistration, ServicePublisherAccessorError,
+        AvailabilityCallbackRegistration, CancellationCallback, ServicePublisherAccessorError,
     };
     use sdv_telemetry_test_utils::parameterized_test;
     use sdv_telemetry_utils::collection_extension::VecExtension;
@@ -342,7 +342,7 @@ mod tests {
     use std::time::Duration;
 
     use crate::metrics_config_orchestrator::service_adapter::{
-        GetMessageProviderOutcome, ServiceSubscription,
+        GetMessageProviderOutcome, NewMessageCallback, ServiceSubscription,
     };
     use crate::metrics_config_orchestrator::{
         message_builder_factory::mock::MockMessageBuilderFactory,
@@ -377,8 +377,8 @@ mod tests {
             _configuration: Option<&Any>,
             _fetch_last_message: bool,
             _sub_sampling_interval: &SubSamplingInterval,
-            _new_message_callback: Box<dyn for<'a> FnMut(&'a Arc<dyn MessageDyn>) + Send + Sync>,
-            _cancellation_callback: Box<dyn FnOnce() + Send + Sync>,
+            _new_message_callback: NewMessageCallback,
+            _cancellation_callback: CancellationCallback,
         ) -> Result<Option<ServiceSubscription>, ServicePublisherAccessorError> {
             unreachable!()
         }

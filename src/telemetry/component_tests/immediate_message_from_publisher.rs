@@ -278,7 +278,10 @@ async fn report_is_generated_when_publisher_publishes_immediately() {
              _sub_sampling_interval,
              mut new_message_callback,
              _cancellation_callback| {
-                new_message_callback(Ok(Box::new(Int64Value { value: 123, ..Default::default() })));
+                new_message_callback(Ok((
+                    Box::new(Int64Value { value: 123, ..Default::default() }),
+                    None,
+                )));
 
                 let mut subscription = MockServicePublisherSubscription::new();
                 subscription.expect_unsubscribe().once().return_const(());
