@@ -34,35 +34,35 @@ descriptor_protos {
 }
 
 sources {
-  name: "tire_pressure_front_left_dt_publisher"
+  name: "tire_pressure_front_left_dt_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-left"
   }
 }
 
 sources {
-  name: "tire_pressure_front_right_dt_publisher"
+  name: "tire_pressure_front_right_dt_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-front-right"
   }
 }
 
 sources {
-  name: "tire_pressure_rear_left_dt_publisher"
+  name: "tire_pressure_rear_left_dt_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-left"
   }
 }
 
 sources {
-  name: "tire_pressure_rear_right_dt_publisher"
+  name: "tire_pressure_rear_right_dt_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TirePressure|com-sdv-telemetry-sample-tire-pressure-rear-right"
   }
 }
 
 sources {
-  name: "tire_pressure_front_left_rpc_publisher"
+  name: "tire_pressure_front_left_rpc_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
     connection_type: ON_DEMAND
@@ -74,7 +74,7 @@ sources {
 }
 
 sources {
-  name: "tire_pressure_front_right_rpc_publisher"
+  name: "tire_pressure_front_right_rpc_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
     connection_type: ON_DEMAND
@@ -86,7 +86,7 @@ sources {
 }
 
 sources {
-  name: "tire_pressure_rear_left_rpc_publisher"
+  name: "tire_pressure_rear_left_rpc_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
     connection_type: SUBSCRIPTION
@@ -98,7 +98,7 @@ sources {
 }
 
 sources {
-  name: "tire_pressure_rear_right_rpc_publisher"
+  name: "tire_pressure_rear_right_rpc_source"
   data_source {
     source_identifier: "com.sdv.telemetry.sample.TireSensorsReader#TireStatus"
     connection_type: SUBSCRIPTION
@@ -110,39 +110,39 @@ sources {
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_front_left_dt_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_front_left_dt_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_front_right_dt_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_front_right_dt_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_rear_left_dt_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_rear_left_dt_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_rear_right_dt_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_rear_right_dt_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_front_left_rpc_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_front_left_rpc_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_front_right_rpc_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_front_right_rpc_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_rear_left_rpc_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_rear_left_rpc_source" field_names: "pressure" }
 }
 
 expression_nodes {
-  field_leaf_node { source_name: "tire_pressure_rear_right_rpc_publisher" field_names: "pressure" }
+  field_leaf_node { source_name: "tire_pressure_rear_right_rpc_source" field_names: "pressure" }
 }
 
 triggers {
-  name: "finish_trigger"
+  name: "deactivate_trigger"
   periodic_trigger { interval { seconds: 6 } }
 }
 
@@ -151,7 +151,7 @@ triggers {
   periodic_trigger { interval { seconds: 4 } }
 }
 
-deactivate_trigger_name: "finish_trigger"
+deactivate_trigger_name: "deactivate_trigger"
 
 metrics_report_configs {
   name: "Report"

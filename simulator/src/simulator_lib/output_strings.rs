@@ -71,9 +71,9 @@ fn report_incomplete(report_reason: ReportReason) -> bool {
 fn format_report_reason(report_reason: ReportReason) -> String {
     match report_reason {
         ReportReason::INCOMPLETE_SHUTDOWN => "telemetry service shut down".to_owned(),
-        ReportReason::INCOMPLETE_STOPPED => "end trigger was triggered".to_owned(),
+        ReportReason::INCOMPLETE_STOPPED => "stop trigger was triggered".to_owned(),
         ReportReason::INCOMPLETE_DEACTIVATED => {
-            "either finish trigger was triggered or the config was deactvated/removed \
+            "either deactivate trigger was triggered or the config was deactivated/removed \
             by the simulation actions"
                 .to_owned()
         }
@@ -168,7 +168,7 @@ Report content
         let expected_output = "\
 INCOMPLETE
 Report #3 created 22-Jul-2024 09:59:08.578 UTC
-Created because end trigger was triggered
+Created because stop trigger was triggered
 Report content
 ";
 
@@ -186,7 +186,7 @@ Report content
         let expected_output = "\
 INCOMPLETE
 Report #4 created 22-Jul-2024 09:59:08.578 UTC
-Created because either finish trigger was triggered or the config was deactvated/removed by the simulation actions
+Created because either deactivate trigger was triggered or the config was deactivated/removed by the simulation actions
 Report content
 ";
 
