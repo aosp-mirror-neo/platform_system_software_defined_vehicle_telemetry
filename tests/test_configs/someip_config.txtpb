@@ -14,21 +14,21 @@
 uuid: "d3456cf0-8fde-436a-9f29-c12f16d10c10"
 version: 01
 
-expression_nodes { field_leaf_node { source_name: "someip_publisher" field_names: "sample_int" } }
+expression_nodes { field_leaf_node { source_name: "someip_source" field_names: "sample_int" } }
 
 sources {
-  name: "someip_publisher"
+  name: "someip_source"
   data_source { source_identifier: "com.sdv.someip.SomeIpBroker#SecondPart" }
 }
 
 triggers {
-  name: "someip_publisher_trigger"
-  data_trigger { source_name: "someip_publisher" }
+  name: "someip_source_trigger"
+  data_trigger { source_name: "someip_source" }
 }
 
 metrics_report_configs {
   name: "someip_report"
-  trigger_names: "someip_publisher_trigger"
+  trigger_names: "someip_source_trigger"
   message_builder {
     message_type: "google.protobuf.Int32Value"
     field_assignments {

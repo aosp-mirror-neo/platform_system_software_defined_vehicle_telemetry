@@ -64,19 +64,19 @@ const INACTIVE_CONFIGS_DATA_DIR: &str = "telemetry/inactive_configs";
 fn get_error_code_and_message(err: ConfigManagerError) -> (StatusCodes, String) {
     let err_code = match err {
         ConfigManagerError::ConfigOrchestratorError { ref error } => match error {
-            ConfigOrchestratorError::DuplicatePublisherDefinition { .. }
+            ConfigOrchestratorError::CycledSourcesTriggers
+            | ConfigOrchestratorError::DuplicateSourceDefinition { .. }
             | ConfigOrchestratorError::DuplicateTriggerDefinition { .. }
-            | ConfigOrchestratorError::DuplicateMetricsReportConfigName { .. }
-            | ConfigOrchestratorError::CycledPublishersTriggers
-            | ConfigOrchestratorError::InvalidDependency { .. }
             | ConfigOrchestratorError::DuplicateMetricsConfigUuid { .. }
-            | ConfigOrchestratorError::InvalidMetricsReportConfig { .. }
-            | ConfigOrchestratorError::InvalidPublisherDefinition { .. }
-            | ConfigOrchestratorError::InvalidTriggerDefinition { .. }
-            | ConfigOrchestratorError::InvalidDescriptorProtos { .. }
-            | ConfigOrchestratorError::NoStartTriggerDefined
+            | ConfigOrchestratorError::DuplicateMetricsReportConfigName { .. }
             | ConfigOrchestratorError::InvalidExpressionNodes { .. }
-            | ConfigOrchestratorError::InvalidPublisherAndDescriptorCombination { .. } => {
+            | ConfigOrchestratorError::InvalidDependency { .. }
+            | ConfigOrchestratorError::InvalidDescriptorProtos { .. }
+            | ConfigOrchestratorError::InvalidMetricsReportConfig { .. }
+            | ConfigOrchestratorError::InvalidSourceAndDescriptorCombination { .. }
+            | ConfigOrchestratorError::InvalidSourceDefinition { .. }
+            | ConfigOrchestratorError::InvalidTriggerDefinition { .. }
+            | ConfigOrchestratorError::NoStartTriggerDefined => {
                 StatusCodes::ADD_METRICS_CONFIG_FAILED
             }
             ConfigOrchestratorError::InvalidMetricsConfigUuid { .. }

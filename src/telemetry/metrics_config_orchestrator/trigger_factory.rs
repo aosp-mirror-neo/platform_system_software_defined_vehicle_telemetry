@@ -85,8 +85,8 @@ pub(crate) enum TriggerFactoryError {
     NoParentTriggers,
     #[error("Periodic trigger interval ({interval}) is invalid: {error:#}")]
     PeriodicTriggerInvalidDuration { interval: DurationProto, error: anyhow::Error },
-    #[error("Publisher {publisher_name} has getter connection type and cannot be listened to")]
-    UnableToListenToGetterPublisher { publisher_name: String },
+    #[error("Source {source_name} has ON_DEMAND connection type and cannot be listened to")]
+    UnableToListenToSourceOnDemand { source_name: String },
     #[error("Unknown condition type {condition_type:?}")]
     UnknownConditionTypeProto { condition_type: ConditionTypeProto },
     #[error("Unknown trigger type")]
@@ -148,8 +148,8 @@ impl TriggerFactory for TriggerFactoryImpl {
                 let publisher = &context.publishers[&data_trigger.source_name];
 
                 if !publisher.is_subscribable() {
-                    return Err(TriggerFactoryError::UnableToListenToGetterPublisher {
-                        publisher_name: publisher.get_name().to_owned(),
+                    return Err(TriggerFactoryError::UnableToListenToSourceOnDemand {
+                        source_name: publisher.get_name().to_owned(),
                     });
                 }
 
@@ -220,8 +220,8 @@ impl TriggerFactory for TriggerFactoryImpl {
                     if let Ok(connection_type) = service_publisher.connection_type.enum_value() {
                         match connection_type {
                             ConnectionTypeProto::ON_DEMAND => {
-                                return Err(TriggerFactoryError::UnableToListenToGetterPublisher {
-                                    publisher_name: publisher.name.clone(),
+                                return Err(TriggerFactoryError::UnableToListenToSourceOnDemand {
+                                    source_name: publisher.name.clone(),
                                 })
                             }
                             ConnectionTypeProto::SUBSCRIPTION => {
@@ -728,7 +728,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, TriggerFactoryError::UnableToListenToGetterPublisher { publisher_name } if publisher_name == PUBLISHER_NAME),
+            matches!(&err, TriggerFactoryError::UnableToListenToSourceOnDemand { source_name } if source_name == PUBLISHER_NAME),
             "Unexpected error: {err:?}"
         );
     }
@@ -1227,7 +1227,7 @@ mod tests {
             .unwrap();
 
         assert!(
-            matches!(&err, TriggerFactoryError::UnableToListenToGetterPublisher { publisher_name } if publisher_name == PUBLISHER_NAME),
+            matches!(&err, TriggerFactoryError::UnableToListenToSourceOnDemand { source_name } if source_name == PUBLISHER_NAME),
             "Unexpected error: {err:?}"
         );
     }

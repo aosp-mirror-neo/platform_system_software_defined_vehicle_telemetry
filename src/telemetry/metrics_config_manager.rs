@@ -851,7 +851,7 @@ mod tests {
         });
 
         let orchestrator = Arc::new(MockMetricsConfigOrchestratorImpl::new());
-        orchestrator.next_error.lock().replace(ConfigOrchestratorError::CycledPublishersTriggers);
+        orchestrator.next_error.lock().replace(ConfigOrchestratorError::CycledSourcesTriggers);
 
         let test_environment = TestEnvironment::new_with_orchestrator(
             &active_dir_path,
