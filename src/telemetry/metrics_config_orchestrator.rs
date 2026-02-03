@@ -759,8 +759,13 @@ impl MetricsConfigOrchestratorImpl {
         Arc::clone(start_trigger)
             .subscribe(
                 &TriggerSubscriber::MetricsConfigStart,
-                Box::new(move |context, _compute_order, _countdown_latch| {
-                    Self::on_start_trigger_fired(config_clone.take(), context);
+                Box::new(move |context, compute_order, countdown_latch| {
+                    Self::on_start_trigger_fired(
+                        config_clone.take(),
+                        context,
+                        compute_order,
+                        countdown_latch,
+                    );
                 }),
             )
             .await;
@@ -988,9 +993,14 @@ impl MetricsConfigOrchestratorImpl {
     fn on_start_trigger_fired(
         maybe_config: Option<Arc<MetricsConfig>>,
         context: Arc<NodeEvaluationContext>,
+        compute_order: Level,
+        countdown_latch: MultiLevelCountdownLatch,
     ) {
         tokio::spawn(async move {
             let Some(config) = maybe_config else {
+                // Let other TriggerSubscribers of start_trigger know that MetricsConfigStart
+                // subscriber has finished its job
+                countdown_latch.count_down(compute_order).await;
                 return;
             };
             debug!("MetricsConfig {} start trigger fired", config.uuid);
@@ -1044,6 +1054,10 @@ impl MetricsConfigOrchestratorImpl {
                 .expect("Start trigger is expected to exist in the start trigger fired handler")
                 .fire_manually(context)
                 .await;
+
+            // Let other TriggerSubscribers of start_trigger know that MetricsConfigStart
+            // subscriber has finished its job
+            countdown_latch.count_down(compute_order).await;
 
             // Change state to Running and release the mutex.
             *config_state = MetricsConfigState::Running;
