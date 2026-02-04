@@ -27,12 +27,12 @@ descriptor_protos {
 }
 
 sources {
-  name: "dt_publisher"
+  name: "dt_source"
   data_source { source_identifier: "<placeholder>" }
 }
 
 sources {
-  name: "agg_publisher"
+  name: "agg_source"
   aggregator {
     trigger_names: "data_trigger"
     message_builder {
@@ -45,12 +45,12 @@ sources {
   }
 }
 
-expression_nodes { field_leaf_node { source_name: "dt_publisher" field_names: "int_field" } }
+expression_nodes { field_leaf_node { source_name: "dt_source" field_names: "int_field" } }
 
-expression_nodes { field_leaf_node { source_name: "agg_publisher" field_names: "int_vector" } }
+expression_nodes { field_leaf_node { source_name: "agg_source" field_names: "int_vector" } }
 
 triggers {
-  name: "finish_trigger"
+  name: "deactivate_trigger"
   periodic_trigger { interval { seconds: 6 } }
 }
 
@@ -61,10 +61,10 @@ triggers {
 
 triggers {
   name: "data_trigger"
-  data_trigger { source_name: "dt_publisher" }
+  data_trigger { source_name: "dt_source" }
 }
 
-deactivate_trigger_name: "finish_trigger"
+deactivate_trigger_name: "deactivate_trigger"
 
 metrics_report_configs {
   name: "Report"

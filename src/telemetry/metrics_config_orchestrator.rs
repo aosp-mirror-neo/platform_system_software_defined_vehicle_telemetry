@@ -37,6 +37,7 @@ use async_trait::async_trait;
 use log::debug;
 use parking_lot::Mutex;
 use protobuf::well_known_types::timestamp::Timestamp;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::node_factory::{NodeFactory, NodeFactoryContext, NodeFactoryImpl};
 use sdv_telemetry_expr::{
     node::Node, node_error::NodeError, node_evaluation_context::NodeEvaluationContext,
@@ -92,7 +93,7 @@ use trigger_factory::{
     TriggerFactoryValidateContext,
 };
 
-const PUBLISHER: &str = "publisher";
+const SOURCE: &str = "source";
 const TRIGGER: &str = "trigger";
 
 /// Interface of a service that orchestrates lifecycle of Metrics Configurations.
@@ -122,10 +123,10 @@ pub trait MetricsConfigOrchestrator {
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum MetricsConfigOrchestratorError {
-    #[error("Cycle detected in the publisher and trigger dependency graph")]
-    CycledPublishersTriggers,
-    #[error("Duplicate definition of publisher {publisher_name}")]
-    DuplicatePublisherDefinition { publisher_name: String },
+    #[error("Cycle detected in the source and trigger dependency graph")]
+    CycledSourcesTriggers,
+    #[error("Duplicate definition of source {source_name}")]
+    DuplicateSourceDefinition { source_name: String },
     #[error("Duplicate definition of trigger {trigger_name}")]
     DuplicateTriggerDefinition { trigger_name: String },
     #[error("Duplicate Metrics Config UUID: {uuid}")]
@@ -148,13 +149,13 @@ pub(crate) enum MetricsConfigOrchestratorError {
         report_config_name: String,
         factory_error: MetricsReportGeneratorFactoryError,
     },
-    #[error("Unable to create DescriptorProvider because of an invalid publisher: {error}")]
-    InvalidPublisherAndDescriptorCombination {
+    #[error("Unable to create DescriptorProvider because of an invalid source: {error}")]
+    InvalidSourceAndDescriptorCombination {
         #[from]
         error: DescriptorProviderFactoryError,
     },
-    #[error("Invalid definition for publisher {publisher_name}: {factory_error}")]
-    InvalidPublisherDefinition { publisher_name: String, factory_error: PublisherFactoryError },
+    #[error("Invalid definition for source {source_name}: {factory_error}")]
+    InvalidSourceDefinition { source_name: String, factory_error: PublisherFactoryError },
     #[error("Invalid definition for trigger {trigger_name}: {factory_error}")]
     InvalidTriggerDefinition { trigger_name: String, factory_error: TriggerFactoryError },
     #[error("Metrics Config with UUID {uuid} not found")]
@@ -198,16 +199,34 @@ pub(super) struct MetricsConfig {
     finish_trigger: Option<Arc<dyn Trigger>>,
 }
 
-impl sdv_dump::DumpStateReporter for MetricsConfig {
+impl DumpStateReporter for MetricsConfig {
     fn dump(
         &self,
         writer: &mut dyn std::io::Write,
-        _args: &[&std::ffi::CStr],
+        args: &[&std::ffi::CStr],
     ) -> Result<(), std::io::Error> {
         writeln!(writer, "UUID: {}", self.uuid)?;
         writeln!(writer, "State: {:?}", *self.state.blocking_lock())?;
-        writeln!(writer, "Publishers: {:?}", self.publishers.keys())?;
         writeln!(writer, "Number of report generators: {}", self.metrics_report_generators.len())?;
+        writeln!(writer, "Number of publishers: {}", self.publishers.len())?;
+        for publisher in self.publishers.values() {
+            publisher.dump(writer, args)?;
+        }
+        if let Some(start_trigger) = &self.start_trigger {
+            write!(writer, "Start trigger: ")?;
+            start_trigger.dump(writer, args)?;
+            writeln!(writer)?;
+        }
+        if let Some(end_trigger) = &self.end_trigger {
+            write!(writer, "End trigger: ")?;
+            end_trigger.dump(writer, args)?;
+            writeln!(writer)?;
+        }
+        if let Some(finish_trigger) = &self.finish_trigger {
+            write!(writer, "Finish trigger: ")?;
+            finish_trigger.dump(writer, args)?;
+            writeln!(writer)?;
+        }
         Ok(())
     }
 }
@@ -303,8 +322,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                 self.publisher_factory
                     .create(uuid, source_proto, subscription_waiter.clone(), &context)
                     .map_err(|factory_error| {
-                        MetricsConfigOrchestratorError::InvalidPublisherDefinition {
-                            publisher_name: source_proto.name.clone(),
+                        MetricsConfigOrchestratorError::InvalidSourceDefinition {
+                            source_name: source_proto.name.clone(),
                             factory_error,
                         }
                     })
@@ -564,8 +583,8 @@ impl MetricsConfigOrchestrator for MetricsConfigOrchestratorImpl {
                     file_descriptors: &file_descriptors,
                 };
                 self.publisher_factory.validate(source_proto, &context).map_err(|e| {
-                    MetricsConfigOrchestratorError::InvalidPublisherDefinition {
-                        publisher_name: source_proto.name.clone(),
+                    MetricsConfigOrchestratorError::InvalidSourceDefinition {
+                        source_name: source_proto.name.clone(),
                         factory_error: e,
                     }
                 })?;
@@ -756,7 +775,7 @@ impl MetricsConfigOrchestratorImpl {
         let dependency_map = config_proto.sources.iter().try_fold(
             HashMap::new(),
             |mut acc, source_proto| match acc.try_insert_value(
-                (PUBLISHER, source_proto.name.as_str()),
+                (SOURCE, source_proto.name.as_str()),
                 (
                     DependencyContainer::Publisher { source_proto },
                     if let Some(SourceTypeProto::Aggregator(aggregator)) = &source_proto.source_type
@@ -772,15 +791,15 @@ impl MetricsConfigOrchestratorImpl {
                 ),
             ) {
                 Ok(_) => Ok(acc),
-                Err(_) => Err(MetricsConfigOrchestratorError::DuplicatePublisherDefinition {
-                    publisher_name: source_proto.name.clone(),
+                Err(_) => Err(MetricsConfigOrchestratorError::DuplicateSourceDefinition {
+                    source_name: source_proto.name.clone(),
                 }),
             },
         )?;
 
         let dependency_map =
             config_proto.triggers.iter().try_fold(dependency_map, |mut acc, trigger_proto| {
-                let publisher_key = (PUBLISHER, trigger_proto.name.as_str());
+                let publisher_key = (SOURCE, trigger_proto.name.as_str());
                 if acc.contains_key(&publisher_key) {
                     return Err(MetricsConfigOrchestratorError::DuplicateTriggerDefinition {
                         trigger_name: trigger_proto.name.clone(),
@@ -792,7 +811,7 @@ impl MetricsConfigOrchestratorImpl {
                         DependencyContainer::Trigger { trigger_proto },
                         match &trigger_proto.trigger_type {
                             Some(TriggerTypeProto::DataTrigger(data_trigger)) => {
-                                vec![(PUBLISHER, data_trigger.source_name.as_str())]
+                                vec![(SOURCE, data_trigger.source_name.as_str())]
                             }
                             Some(TriggerTypeProto::ConditionalTrigger(conditional_trigger)) => {
                                 conditional_trigger
@@ -832,7 +851,7 @@ impl MetricsConfigOrchestratorImpl {
         // Retrieve topologically sorted vector of keys.
         let sorted_vector = dependency_map
             .to_topological_sorted_vec(|(_, dependencies)| dependencies)
-            .ok_or(MetricsConfigOrchestratorError::CycledPublishersTriggers)?;
+            .ok_or(MetricsConfigOrchestratorError::CycledSourcesTriggers)?;
 
         // Create publishers and triggers in the topologically sorted order to make sure
         // the dependencies are created before those that reference them.
@@ -880,7 +899,7 @@ impl MetricsConfigOrchestratorImpl {
             expression_nodes[node_index].get_node_publishers(&mut node_publishers);
             for publisher_name in node_publishers {
                 let entry = dependency_map.entry(key).or_insert(vec![]);
-                entry.push((PUBLISHER, publisher_name));
+                entry.push((SOURCE, publisher_name));
             }
         };
 
@@ -948,7 +967,7 @@ impl MetricsConfigOrchestratorImpl {
                             .expect("Expression node index should be set")
                             as usize;
 
-                        add_node_dependencies((PUBLISHER, publisher_proto.name.as_ref()), index);
+                        add_node_dependencies((SOURCE, publisher_proto.name.as_ref()), index);
                     }
                     _ => panic!("Unexpected aggregation type"),
                 };
@@ -958,7 +977,7 @@ impl MetricsConfigOrchestratorImpl {
         let key = (TRIGGER, config_proto.start_trigger_name.as_str());
         let mut dependencies =
             dependency_map.get_key_dependencies(&key, |dependencies| dependencies);
-        dependencies.retain(|&k| k.0 == PUBLISHER);
+        dependencies.retain(|&k| k.0 == SOURCE);
         let publisher_names =
             dependencies.into_iter().map(|k| k.1.to_owned()).collect::<HashSet<_>>();
         Some(publisher_names)
@@ -2036,7 +2055,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateSourceDefinition { source_name } if source_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -2081,7 +2100,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
+            matches!(&err, MetricsConfigOrchestratorError::CycledSourcesTriggers),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -2111,7 +2130,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == SOURCE),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -2194,7 +2213,7 @@ mod tests {
         let err = orchestrator.initialize_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidSourceDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, source_name } if source_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -3328,7 +3347,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::DuplicatePublisherDefinition { publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::DuplicateSourceDefinition { source_name } if source_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -3373,7 +3392,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::CycledPublishersTriggers),
+            matches!(&err, MetricsConfigOrchestratorError::CycledSourcesTriggers),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -3403,7 +3422,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == PUBLISHER),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidDependency { dependency_name, dependency_type } if dependency_name == INVALID_PUBLISHER_NAME && dependency_type == SOURCE),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);
@@ -3486,7 +3505,7 @@ mod tests {
         let err = orchestrator.validate_config(&config).await.unwrap_err();
 
         assert!(
-            matches!(&err, MetricsConfigOrchestratorError::InvalidPublisherDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, publisher_name } if publisher_name == SOME_PUBLISHER_NAME),
+            matches!(&err, MetricsConfigOrchestratorError::InvalidSourceDefinition { factory_error: PublisherFactoryError::UnknownPublisherType, source_name } if source_name == SOME_PUBLISHER_NAME),
             "Unexpected error: {err:?}"
         );
         assert_eq!(orchestrator.configs.lock().len(), 0);

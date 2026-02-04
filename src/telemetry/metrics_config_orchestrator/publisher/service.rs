@@ -19,6 +19,7 @@ use futures::{future::BoxFuture, FutureExt};
 use log::{info, warn};
 use parking_lot::Mutex;
 use protobuf::{well_known_types::any::Any, MessageDyn};
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallbackRegistration, MessageId, ServicePublisherAccessorError, SubSamplingInterval,
@@ -56,6 +57,8 @@ use google_sdv_telemetry::aidl::google::sdv::telemetry::status::{
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
 
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 pub(crate) enum ConnectionType {
     Subscription,
     Getter,
@@ -76,6 +79,8 @@ pub(crate) struct ServicePublisher {
     activation_retry_interval: Duration,
 }
 
+#[derive(strum_macros::Display)]
+#[strum(serialize_all = "title_case")]
 enum ServicePublisherState {
     /// The publisher is not subscribed to the underlying data source
     /// and doesn't provide the latest message.
@@ -302,6 +307,24 @@ impl Publisher for ServicePublisher {
                 panic!("Getter publisher {} doesn't support unsubscription.", self.get_name())
             }
         };
+    }
+}
+
+impl DumpStateReporter for ServicePublisher {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        let name = self.base.get_name();
+        let status = self.state.blocking_lock();
+        let connection_type = &self.connection_type;
+        let service_name = &self.service_name;
+        writeln!(
+            writer,
+            "[{status}] Service publisher: '{name}', type: '{connection_type}', from: '{service_name}'",
+        )?;
+        Ok(())
     }
 }
 

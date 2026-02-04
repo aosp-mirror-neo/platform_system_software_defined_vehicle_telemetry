@@ -28,13 +28,13 @@ descriptor_protos {
   syntax: "proto2"
 }
 triggers {
-  name: "finish_trigger"
+  name: "deactivate_trigger"
   periodic_trigger { interval { nanos: 100000000 } }
 }
 sources {
   name: "aggregation"
   aggregator {
-    trigger_names: "finish_trigger"
+    trigger_names: "deactivate_trigger"
     message_builder {
       message_type: ".aaos.sdv.telemetry.adhoc.aggregation"
       field_assignments {
@@ -50,7 +50,7 @@ expression_nodes { constant_leaf_node { int32_value: 42 } }
 expression_nodes { field_leaf_node { source_name: "aggregation" field_names: "int_field" } }
 metrics_report_configs {
   name: "report"
-  trigger_names: "finish_trigger"
+  trigger_names: "deactivate_trigger"
   message_builder {
     message_type: ".aaos.sdv.telemetry.adhoc.report"
     field_assignments {
@@ -59,4 +59,4 @@ metrics_report_configs {
     }
   }
 }
-deactivate_trigger_name: "finish_trigger"
+deactivate_trigger_name: "deactivate_trigger"

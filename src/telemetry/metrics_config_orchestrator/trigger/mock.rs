@@ -16,6 +16,7 @@ use super::*;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_utils::countdown_latch::{Level, MultiLevelCountdownLatch};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -70,6 +71,17 @@ impl Trigger for MockTrigger {
 
     async fn fire_manually(&self, context: Arc<NodeEvaluationContext>) {
         self.fire_with_context(context).await;
+    }
+}
+
+impl DumpStateReporter for MockTrigger {
+    fn dump(
+        &self,
+        writer: &mut dyn std::io::Write,
+        _args: &[&std::ffi::CStr],
+    ) -> Result<(), std::io::Error> {
+        writeln!(writer, "MockTrigger")?;
+        Ok(())
     }
 }
 

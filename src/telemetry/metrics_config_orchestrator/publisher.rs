@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use async_trait::async_trait;
+use sdv_dump::DumpStateReporter;
 use sdv_telemetry_expr::dynamic_message::DynamicMessage;
 use sdv_telemetry_expr::node_evaluation_context::NodeEvaluationContext;
 use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
@@ -35,7 +36,7 @@ pub(crate) mod mock;
 type CallbackFn = Box<dyn FnMut(Arc<NodeEvaluationContext>) + Send + Sync>;
 
 #[async_trait]
-pub(crate) trait Publisher: Send + Sync {
+pub(crate) trait Publisher: DumpStateReporter + Send + Sync {
     fn get_name(&self) -> &str;
 
     fn get_metrics_config_uuid(&self) -> &MetricsConfigUuid;
