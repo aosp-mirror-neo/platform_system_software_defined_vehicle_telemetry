@@ -28,6 +28,7 @@ cc_library {
         // keep-sorted end
     ],
     vendor_available: true,
+    min_sdk_version: "35",
 }
 
 rust_bindgen {
@@ -42,6 +43,7 @@ rust_bindgen {
         // keep-sorted end
     ],
     vendor_available: true,
+    min_sdk_version: "35",
 }
 
 rust_test {
@@ -90,6 +92,7 @@ rust_library {
     defaults: ["libsdv_telemetry_time_wrapper_defaults"],
     crate_name: "sdv_telemetry_time_wrapper",
     vendor_available: true,
+    min_sdk_version: "35",
 }
 
 rust_test {

@@ -70,6 +70,7 @@ rust_library {
         "libsdv_telemetry_platform_abstraction_layer",
         // keep-sorted end
     ],
+    min_sdk_version: "35",
 }
 
 rust_test {

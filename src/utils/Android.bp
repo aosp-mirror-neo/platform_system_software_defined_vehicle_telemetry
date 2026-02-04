@@ -54,6 +54,7 @@ rust_library {
     ],
     defaults: ["libsdv_telemetry_utils_defaults"],
     crate_name: "sdv_telemetry_utils",
+    min_sdk_version: "35",
 }
 
 rust_test {

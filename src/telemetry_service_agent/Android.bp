@@ -88,4 +88,5 @@ rust_binary {
         "libsdv_telemetry_platform_abstraction_layer_ivi",
         // keep-sorted end
     ],
+    min_sdk_version: "35",
 }
