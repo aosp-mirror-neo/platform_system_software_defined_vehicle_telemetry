@@ -48,9 +48,11 @@ python_library_host {
     srcs: [":sdv_telemetry_proto_srcs"],
     proto: {
         canonical_path_from_root: true,
+        local_include_dirs: [
+            ".",
+        ],
         include_dirs: [
             "external/protobuf/src",
-            ".",
         ],
     },
 }

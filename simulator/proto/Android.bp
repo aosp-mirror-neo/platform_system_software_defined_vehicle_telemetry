@@ -30,7 +30,7 @@ rust_protobuf {
     crate_name: "sdv_telemetry_simulator_proto",
     proto_flags: [
         "-I external/protobuf/src",
-        "-I .",
+        "-I system/software_defined_vehicle/telemetry/simulator/proto",
     ],
     protos: [":sdv_telemetry_simulator_proto_srcs"],
     source_stem: "sdv_telemetry_simulator_proto_source",
@@ -43,9 +43,11 @@ python_library_host {
     srcs: [":sdv_telemetry_simulator_proto_srcs"],
     proto: {
         canonical_path_from_root: true,
+        local_include_dirs: [
+            ".",
+        ],
         include_dirs: [
             "external/protobuf/src",
-            ".",
         ],
     },
 }
