@@ -129,12 +129,21 @@ message ConditionalTrigger {
   message ConditionTypeRisingEdge {
     // Optional.
     EdgeOptions rising_options = 1;
+
+    // Optional. If true, the very first selector expression evaluation will unconditionally make
+    // this trigger fire. If true, edge options must not be set.
+    bool fire_initial = 2;
   }
 
-  // Fires if the new value is less than the previous value.
+  // Fires if the new value is less than the previous value. Either falling_options or
+  // fire_initial can be set.
   message ConditionTypeFallingEdge {
     // Optional.
     EdgeOptions falling_options = 1;
+
+    // Optional. If true, the very first selector expression evaluation will unconditionally make
+    // this trigger fire. If true, edge options must not be set.
+    bool fire_initial = 2;
   }
 
   // Fires if the new value is different from the previous value. If any
@@ -146,6 +155,10 @@ message ConditionalTrigger {
 
     // Optional.
     EdgeOptions falling_options = 2;
+
+    // Optional. If true, the very first selector expression evaluation will unconditionally make
+    // this trigger fire. If true, edge options must not be set.
+    bool fire_initial = 3;
   }
 
   // Fires if the condition evaluates to true or a non-zero numeric value.

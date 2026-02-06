@@ -97,6 +97,8 @@ pub(crate) enum TriggerFactoryError {
     UnspecifiedTriggerType,
     #[error("Edge options ({edge_options}) are invalid: {error:#}")]
     InvalidEdgeOptions { edge_options: EdgeOptionsProto, error: anyhow::Error },
+    #[error("Condition {condition_type:?} is invalid: {error:#}")]
+    InvalidConditionTypeProto { condition_type: ConditionTypeProto, error: anyhow::Error },
 }
 
 pub(crate) struct TriggerFactoryImpl {
@@ -320,64 +322,66 @@ impl TriggerFactoryImpl {
             .as_ref()
             .ok_or_else(|| TriggerFactoryError::UnspecifiedConditionTypeProto)?;
 
-        let is_bool_or_numeric = Box::new(|value_type: &NodeValueType| -> bool {
-            value_type.is_bool() || value_type.is_numeric()
-        });
+        let condition_type = match proto_condition_type {
+            ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                rising_options,
+                fire_initial,
+                special_fields: _,
+            }) => {
+                Self::validate_params(*fire_initial, rising_options, proto_condition_type)?;
+                ConditionType::RisingEdge {
+                    rising_options: Self::get_edge_options(rising_options)?,
+                    fire_initial: *fire_initial,
+                }
+            }
+            ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                falling_options,
+                fire_initial,
+                special_fields: _,
+            }) => {
+                Self::validate_params(*fire_initial, falling_options, proto_condition_type)?;
+                ConditionType::FallingEdge {
+                    falling_options: Self::get_edge_options(falling_options)?,
+                    fire_initial: *fire_initial,
+                }
+            }
+            ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                rising_options,
+                falling_options,
+                fire_initial,
+                special_fields: _,
+            }) => {
+                Self::validate_params(*fire_initial, rising_options, proto_condition_type)?;
+                Self::validate_params(*fire_initial, falling_options, proto_condition_type)?;
 
-        let (condition_type, is_value_type_allowed): (_, Box<dyn FnOnce(&NodeValueType) -> bool>) =
-            match proto_condition_type {
-                ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
-                    rising_options,
-                    special_fields: _,
-                }) => (
-                    ConditionType::RisingEdge(Self::get_edge_options(rising_options)?),
-                    is_bool_or_numeric,
-                ),
-                ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
-                    falling_options,
-                    special_fields: _,
-                }) => (
-                    ConditionType::FallingEdge(Self::get_edge_options(falling_options)?),
-                    is_bool_or_numeric,
-                ),
-                ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
-                    rising_options,
-                    falling_options,
-                    special_fields: _,
-                }) => {
-                    // If either of the edge options are set and not the default, use
-                    // `ConditionType::BothEdges`, otherwise use the `ConditionType::AllChanges`.
-                    if rising_options
-                        .as_ref()
-                        .is_some_and(|options| options != EdgeOptionsProto::default_instance())
-                        || falling_options
-                            .as_ref()
-                            .is_some_and(|options| options != EdgeOptionsProto::default_instance())
-                    {
-                        (
-                            ConditionType::BothEdges {
-                                rising_options: Self::get_edge_options(rising_options)?,
-                                falling_options: Self::get_edge_options(falling_options)?,
-                            },
-                            is_bool_or_numeric,
-                        )
-                    } else {
-                        (
-                            ConditionType::AllChanges,
-                            // `AllChanges` uses the NOT_EQ operator, which supports all node value
-                            // types.
-                            Box::new(|_| true),
-                        )
+                if Self::are_edge_options_set(rising_options)
+                    || Self::are_edge_options_set(falling_options)
+                {
+                    ConditionType::BothEdges {
+                        rising_options: Self::get_edge_options(rising_options)?,
+                        falling_options: Self::get_edge_options(falling_options)?,
                     }
+                } else {
+                    ConditionType::AllChanges { fire_initial: *fire_initial }
                 }
-                ConditionTypeProto::IsTrue(_) => (ConditionType::IsTrue, is_bool_or_numeric),
-                ConditionTypeProto::IsFalse(_) => (ConditionType::IsFalse, is_bool_or_numeric),
-                unknown_condition_type => {
-                    return Err(TriggerFactoryError::UnknownConditionTypeProto {
-                        condition_type: unknown_condition_type.clone(),
-                    })
-                }
-            };
+            }
+            ConditionTypeProto::IsTrue(_) => ConditionType::IsTrue,
+            ConditionTypeProto::IsFalse(_) => ConditionType::IsFalse,
+            unknown_condition_type => {
+                return Err(TriggerFactoryError::UnknownConditionTypeProto {
+                    condition_type: unknown_condition_type.clone(),
+                })
+            }
+        };
+
+        let is_value_type_allowed = |value_type: &NodeValueType| match condition_type {
+            ConditionType::RisingEdge { .. }
+            | ConditionType::FallingEdge { .. }
+            | ConditionType::BothEdges { .. }
+            | ConditionType::IsTrue
+            | ConditionType::IsFalse => value_type.is_bool() || value_type.is_numeric(),
+            ConditionType::AllChanges { .. } => true,
+        };
 
         if let Some(value_type) = value_type {
             if !is_value_type_allowed(value_type) {
@@ -415,6 +419,20 @@ impl TriggerFactoryImpl {
         Ok(interval)
     }
 
+    fn validate_params(
+        fire_initial: bool,
+        options: &EdgeOptionsProto,
+        proto_condition_type: &ConditionTypeProto,
+    ) -> Result<(), TriggerFactoryError> {
+        if fire_initial && Self::are_edge_options_set(options) {
+            return Err(TriggerFactoryError::InvalidConditionTypeProto {
+                condition_type: proto_condition_type.clone(),
+                error: anyhow!("Either `fire_initial = true` or edge options can be set"),
+            });
+        }
+        Ok(())
+    }
+
     fn verify_name_set(trigger_proto: &TriggerProto) -> Result<(), TriggerFactoryError> {
         if trigger_proto.name.is_empty() {
             Err(TriggerFactoryError::NameNotSet)
@@ -429,6 +447,10 @@ impl TriggerFactoryImpl {
         } else {
             Ok(())
         }
+    }
+
+    fn are_edge_options_set(edge_options: &EdgeOptionsProto) -> bool {
+        edge_options != EdgeOptionsProto::default_instance()
     }
 }
 
@@ -981,7 +1003,10 @@ mod tests {
         assert_eq!(res.get_name(), TRIGGER_NAME);
         assert_eq!(res.get_metrics_config_uuid(), &*CONFIG_UUID);
         let data_holder_value = data_holder.get().unwrap();
-        assert_eq!(data_holder_value.condition_type, ConditionType::AllChanges);
+        assert_eq!(
+            data_holder_value.condition_type,
+            ConditionType::AllChanges { fire_initial: false }
+        );
         // selector_expression should match the node at index 0
         assert!(Arc::ptr_eq(&data_holder_value.selector_expression, &node_0));
         assert!(!Arc::ptr_eq(&data_holder_value.selector_expression, &node_1));
@@ -1030,15 +1055,15 @@ mod tests {
 
         all_changes_default: (
             Some(ConditionTypeProto::AllChanges(Default::default())),
-            eq(&ConditionType::AllChanges),
+            eq(&ConditionType::AllChanges { fire_initial: false }),
         ),
         rising_default: (
             Some(ConditionTypeProto::RisingEdge(Default::default())),
-            eq(&ConditionType::RisingEdge(EdgeOptions::default())),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }),
         ),
         falling_default: (
             Some(ConditionTypeProto::FallingEdge(Default::default())),
-            eq(&ConditionType::FallingEdge(EdgeOptions::default())),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }),
         ),
         is_true_default: (
             Some(ConditionTypeProto::IsTrue(Default::default())),
@@ -1055,21 +1080,21 @@ mod tests {
                 falling_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::AllChanges),
+            eq(&ConditionType::AllChanges { fire_initial: false }),
         ),
         rising_with_default_options: (
             Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
                 rising_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::RisingEdge(EdgeOptions::default())),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }),
         ),
         falling_with_default_options: (
             Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
                 falling_options: Some(EdgeOptionsProto::default()).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::FallingEdge(EdgeOptions::default())),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }),
         ),
 
         all_changes_with_rising_options: (
@@ -1128,7 +1153,7 @@ mod tests {
                 }).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::RisingEdge(EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false })),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions { min_duration: Duration::from_secs(1), require_exact: false }, fire_initial: false }),
         ),
         falling_with_options: (
             Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
@@ -1139,7 +1164,42 @@ mod tests {
                 }).into(),
                 ..Default::default()
             })),
-            eq(&ConditionType::FallingEdge(EdgeOptions { min_duration: Duration::from_secs(7), require_exact: true })),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions { min_duration: Duration::from_secs(7), require_exact: true }, fire_initial: false  }),
+        ),
+        all_changes_fire_initial: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges { fire_initial: true, ..Default::default() })),
+            eq(&ConditionType::AllChanges { fire_initial: true }),
+        ),
+        rising_edge_fire_initial: (
+            Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge { fire_initial: true, ..Default::default() })),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }),
+        ),
+        falling_edge_fire_initial: (
+            Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge { fire_initial: true, ..Default::default() })),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }),
+        ),
+        all_changes_with_default_options_fire_initial: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                fire_initial: true,
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                ..Default::default() })),
+            eq(&ConditionType::AllChanges { fire_initial: true }),
+        ),
+        rising_edge_with_default_options_fire_initial: (
+            Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                fire_initial: true,
+                rising_options: Some(EdgeOptionsProto::default()).into(),
+                ..Default::default() })),
+            eq(&ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }),
+        ),
+        falling_edge_with_default_options_fire_initial: (
+            Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                fire_initial: true,
+                falling_options: Some(EdgeOptionsProto::default()).into(),
+                ..Default::default()
+            })),
+            eq(&ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }),
         ),
     );
 
@@ -1371,4 +1431,69 @@ mod tests {
 
         factory.validate_using_context_with(&trigger, vec![None], None).unwrap();
     }
+
+    parameterized_test!(
+        #[test]
+        validate_conditional_trigger_fire_initial_and_options_fails,
+
+        |condition_type| {
+            let factory = create_factory();
+
+            let (mut trigger, _) = create_valid_conditional_trigger(Arc::clone(&factory.node_evaluation_context_factory));
+            trigger.mut_conditional_trigger().condition_type = condition_type;
+
+            let err = factory.validate_using_context_with(&trigger, vec![Some(NodeValueType::Bool)], None).unwrap_err();
+            assert_that!(err, matches_pattern!(TriggerFactoryError::InvalidConditionTypeProto { .. }));
+        },
+
+        rising_edge_fire_initial_and_options: (
+            Some(ConditionTypeProto::RisingEdge(ConditionTypeRisingEdge {
+                fire_initial: true,
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 7, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+        ),
+        falling_edge_fire_initial_and_options: (
+            Some(ConditionTypeProto::FallingEdge(ConditionTypeFallingEdge {
+                fire_initial: true,
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 1, ..Default::default() }).into(),
+                    require_exact: true,
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+        ),
+        all_changes_fire_initial_and_rising_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                fire_initial: true,
+                rising_options: Some(EdgeOptionsProto { require_exact: true, ..Default::default() }).into(),
+                ..Default::default()
+            })),
+        ),
+        all_changes_fire_initial_and_falling_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                fire_initial: true,
+                falling_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                ..Default::default()
+            })),
+        ),
+        all_changes_fire_initial_and_both_options: (
+            Some(ConditionTypeProto::AllChanges(ConditionTypeAllChanges {
+                fire_initial: true,
+                rising_options: Some(EdgeOptionsProto {
+                    min_duration: Some(DurationProto { seconds: 3, ..Default::default() }).into(),
+                    ..Default::default()
+                }).into(),
+                falling_options: Some(EdgeOptionsProto { require_exact: true, ..Default::default() }).into(),
+                ..Default::default()
+            })),
+        ),
+    );
 }
