@@ -47,6 +47,7 @@ rust_library {
     visibility: ["//system/software_defined_vehicle/telemetry:__subpackages__"],
     defaults: ["libsdv_telemetry_expr_defaults"],
     crate_name: "sdv_telemetry_expr",
+    min_sdk_version: "35",
 }
 
 rust_library {

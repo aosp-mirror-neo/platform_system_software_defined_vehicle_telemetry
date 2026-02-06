@@ -43,6 +43,7 @@ rust_proc_macro {
         // `libsdv_telemetry_utils_macros`.
         "//system/software_defined_vehicle/telemetry/src/utils:__subpackages__",
     ],
+    min_sdk_version: "35",
 }
 
 rust_test_host {
