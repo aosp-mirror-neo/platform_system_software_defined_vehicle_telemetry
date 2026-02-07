@@ -144,7 +144,13 @@ def setup_devices(device_count: int, is_ivi: bool) -> List[str]:
     for i in range(1, device_count + 1):
         config = f"sdv_ivi_instance{i}" if is_ivi else f"sdv_core_instance{i}"
         result = run_command(
-            ["cvd", "create", f"--config={config}"],
+            [
+                "cvd",
+                "create",
+                # Required to avoid interactive mode.
+                "-report_anonymous_usage_stats=n",
+                f"--config={config}",
+            ],
             capture_output=True,
         )
         result = json.loads(result.stdout)
