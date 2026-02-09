@@ -55,6 +55,17 @@ pub(crate) struct EdgeOptions {
     pub(crate) require_exact: bool,
 }
 
+// Represents how the very first value should be handled for condition checkers which compare two
+// subsequent values.
+pub(crate) enum FirstValuePolicy {
+    Skip,
+    FireTrigger,
+    CompareTo {
+        #[allow(dead_code)]
+        node: Arc<Node>,
+    },
+}
+
 #[derive(strum_macros::Display)]
 #[strum(serialize_all = "title_case")]
 #[cfg_attr(test, derive(Debug, Eq, PartialEq))]
@@ -62,21 +73,22 @@ pub(crate) enum ConditionType {
     /// Compares values using the LT relational operator.
     RisingEdge {
         rising_options: EdgeOptions,
-        fire_initial: bool,
+        first_value_policy: FirstValuePolicy,
     },
     /// Compares values using the GT relational operator.
     FallingEdge {
         falling_options: EdgeOptions,
-        fire_initial: bool,
+        first_value_policy: FirstValuePolicy,
     },
     /// Compares values using the LT and GT relational operators.
     BothEdges {
         rising_options: EdgeOptions,
         falling_options: EdgeOptions,
+        first_value_policy: FirstValuePolicy,
     },
     /// Compares values using the NOT_EQ relational operator.
     AllChanges {
-        fire_initial: bool,
+        first_value_policy: FirstValuePolicy,
     },
     IsTrue,
     IsFalse,
@@ -187,11 +199,11 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         }
 
         let condition_checker = match &self.condition_type {
-            ConditionType::RisingEdge { rising_options, fire_initial } => {
+            ConditionType::RisingEdge { rising_options, first_value_policy } => {
                 let weak_conditional_trigger = Arc::downgrade(&self);
                 Box::new(EdgeConditionChecker::new_rising_edge(
                     rising_options.clone(),
-                    *fire_initial,
+                    matches!(first_value_policy, FirstValuePolicy::FireTrigger),
                     move |context| {
                         let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
                             return;
@@ -203,11 +215,11 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
-            ConditionType::FallingEdge { falling_options, fire_initial } => {
+            ConditionType::FallingEdge { falling_options, first_value_policy } => {
                 let weak_conditional_trigger = Arc::downgrade(&self);
                 Box::new(EdgeConditionChecker::new_falling_edge(
                     falling_options.clone(),
-                    *fire_initial,
+                    matches!(first_value_policy, FirstValuePolicy::FireTrigger),
                     move |context| {
                         let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
                             return;
@@ -219,12 +231,11 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
-            ConditionType::BothEdges { rising_options, falling_options } => {
+            ConditionType::BothEdges { rising_options, falling_options, .. } => {
                 let weak_conditional_trigger = Arc::downgrade(&self);
                 Box::new(EdgeConditionChecker::new_both_edges(
                     rising_options.clone(),
                     falling_options.clone(),
-                    false,
                     move |context| {
                         let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
                             return;
@@ -236,9 +247,11 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
-            ConditionType::AllChanges { fire_initial } => {
-                Box::new(PreviousValueRelationalConditionChecker::new_all_changes(*fire_initial))
-                    as Box<dyn ConditionChecker>
+            ConditionType::AllChanges { first_value_policy, .. } => {
+                Box::new(PreviousValueRelationalConditionChecker::new_all_changes(matches!(
+                    first_value_policy,
+                    FirstValuePolicy::FireTrigger
+                ))) as Box<dyn ConditionChecker>
             }
             ConditionType::IsTrue => Box::new(ConstantConditionChecker::new_is_true_or_non_zero())
                 as Box<dyn ConditionChecker>,
@@ -437,6 +450,29 @@ mod tests {
             Arc::new(Int32Value { value: 2, ..Default::default() });
     }
 
+    impl std::fmt::Debug for FirstValuePolicy {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Skip => write!(f, "Skip"),
+                Self::FireTrigger => write!(f, "FireTrigger"),
+                Self::CompareTo { node: _ } => write!(f, "CompareTo"),
+            }
+        }
+    }
+
+    impl PartialEq for FirstValuePolicy {
+        fn eq(&self, other: &Self) -> bool {
+            match (self, other) {
+                (Self::Skip, Self::Skip) => true,
+                (Self::FireTrigger, Self::FireTrigger) => true,
+                (Self::CompareTo { node: n1 }, Self::CompareTo { node: n2 }) => Arc::ptr_eq(n1, n2),
+                _ => false,
+            }
+        }
+    }
+
+    impl Eq for FirstValuePolicy {}
+
     fn create_field_node(field_name: String, message_provider: Arc<MockMessageProvider>) -> Node {
         Node::FieldLeaf {
             publisher_name: PUBLISHER_NAME.to_owned(),
@@ -537,7 +573,7 @@ mod tests {
         let message_provider = Arc::new(MockMessageProvider::new());
         let trigger = ConditionalTrigger::new(
             TRIGGER_NAME.to_owned(),
-            ConditionType::AllChanges { fire_initial: false },
+            ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip },
             *CONFIG_UUID,
             Arc::new(create_field_node("value".to_owned(), Arc::clone(&message_provider))),
             vec![
@@ -715,34 +751,34 @@ mod tests {
             expect_that!(u32_into_usize(callback_listener.get_fired_count()), eq(expected.len()));
         },
 
-        all_changes:      (ConditionType::AllChanges { fire_initial: false }, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
-        all_changes_fire_initial: (ConditionType::AllChanges { fire_initial: true }, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
-        all_changes_none_first: (ConditionType::AllChanges { fire_initial: false }, &[None], &[]),
-        all_changes_none_first_fire_initial: (ConditionType::AllChanges { fire_initial: true }, &[None], &[]),
-        all_changes_none_between_change: (ConditionType::AllChanges { fire_initial: false }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
-        all_changes_none_between_change_fire_initial: (ConditionType::AllChanges { fire_initial: true }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
-        all_changes_none_between_no_change: (ConditionType::AllChanges { fire_initial: false }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[],),
-        all_changes_none_between_no_change_fire_initial: (ConditionType::AllChanges { fire_initial: true }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+        all_changes:      (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        all_changes_fire_initial: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_1_MSG), /* change */ Some(&*INT_2_MSG), /* no change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
+        all_changes_none_first: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }, &[None], &[]),
+        all_changes_none_first_fire_initial: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::FireTrigger }, &[None], &[]),
+        all_changes_none_between_change: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        all_changes_none_between_change_fire_initial: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
+        all_changes_none_between_no_change: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[],),
+        all_changes_none_between_no_change_fire_initial: (ConditionType::AllChanges { first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
 
-        both_edges: (ConditionType::BothEdges { rising_options: EdgeOptions::default(), falling_options: EdgeOptions::default() }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
+        both_edges: (ConditionType::BothEdges { rising_options: EdgeOptions::default(), falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
 
-        rising_edge: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
-        rising_edge_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG, &*INT_2_MSG],),
-        rising_edge_none_first: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }, &[None], &[]),
-        rising_edge_none_first_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }, &[None], &[]),
-        rising_edge_none_between_edge: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
-        rising_edge_none_between_edge_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
-        rising_edge_none_between_no_edge: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: false }, &[Some(&*INT_2_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[],),
-        rising_edge_none_between_no_edge_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), fire_initial: true }, &[Some(&*INT_2_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[&*INT_2_MSG],),
+        rising_edge: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        rising_edge_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG)], &[&*INT_2_MSG, &*INT_2_MSG],),
+        rising_edge_none_first: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[None], &[]),
+        rising_edge_none_first_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[None], &[]),
+        rising_edge_none_between_edge: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_2_MSG],),
+        rising_edge_none_between_edge_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_1_MSG), None, /* change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG, &*INT_2_MSG],),
+        rising_edge_none_between_no_edge: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_2_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[],),
+        rising_edge_none_between_no_edge_fire_initial: (ConditionType::RisingEdge { rising_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_2_MSG), None, /* no change */ Some(&*INT_1_MSG)], &[&*INT_2_MSG],),
 
-        falling_edge: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }, &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
-        falling_edge_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }, &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG, &*INT_1_MSG],),
-        falling_edge_none_first: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }, &[None], &[]),
-        falling_edge_none_first_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }, &[None], &[]),
-        falling_edge_none_between_edge: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }, &[Some(&*INT_2_MSG), None, /* change */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
-        falling_edge_none_between_edge_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }, &[Some(&*INT_2_MSG), None, /* change */ Some(&*INT_1_MSG)], &[&*INT_2_MSG, &*INT_1_MSG],),
-        falling_edge_none_between_no_edge: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: false }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_2_MSG)], &[],),
-        falling_edge_none_between_no_edge_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), fire_initial: true }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG],),
+        falling_edge: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+        falling_edge_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_1_MSG), /* rising */ Some(&*INT_2_MSG), /* falling */ Some(&*INT_1_MSG)], &[&*INT_1_MSG, &*INT_1_MSG],),
+        falling_edge_none_first: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[None], &[]),
+        falling_edge_none_first_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[None], &[]),
+        falling_edge_none_between_edge: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_2_MSG), None, /* change */ Some(&*INT_1_MSG)], &[&*INT_1_MSG],),
+        falling_edge_none_between_edge_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_2_MSG), None, /* change */ Some(&*INT_1_MSG)], &[&*INT_2_MSG, &*INT_1_MSG],),
+        falling_edge_none_between_no_edge: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::Skip }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_2_MSG)], &[],),
+        falling_edge_none_between_no_edge_fire_initial: (ConditionType::FallingEdge { falling_options: EdgeOptions::default(), first_value_policy: FirstValuePolicy::FireTrigger }, &[Some(&*INT_1_MSG), None, /* no change */ Some(&*INT_2_MSG)], &[&*INT_1_MSG],),
 
         is_true_bool_1:    (ConditionType::IsTrue, &[Some(&*TRUE_MSG)], &[&*TRUE_MSG],),
         is_true_bool_2:    (ConditionType::IsTrue, &[Some(&*FALSE_MSG), Some(&*TRUE_MSG), Some(&*FALSE_MSG), Some(&*TRUE_MSG)], &[&*TRUE_MSG, &*TRUE_MSG],),
@@ -780,9 +816,10 @@ mod tests {
     #[tokio::test]
     #[should_panic]
     async fn activate_active_panics() {
-        let (trigger, _, _, _) =
-            setup_active_conditional_trigger(ConditionType::AllChanges { fire_initial: false })
-                .await;
+        let (trigger, _, _, _) = setup_active_conditional_trigger(ConditionType::AllChanges {
+            first_value_policy: FirstValuePolicy::Skip,
+        })
+        .await;
 
         // Activate the trigger again.
         trigger.activate(ActivationId::new(1)).await;
@@ -801,7 +838,7 @@ mod tests {
         parent_trigger
             .set_unsubscribe_callback(move |_| callback_listener_clone.on_callback_fired(()));
         let (trigger, _, _, _) = create_valid_conditional_trigger_with_mock_subscription_manager(
-            ConditionType::AllChanges { fire_initial: false },
+            ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip },
             Some(Arc::new(parent_trigger)),
         );
 
@@ -820,7 +857,7 @@ mod tests {
     #[should_panic]
     async fn deactivate_inactive_panics() {
         let (trigger, _, _, _) = create_valid_conditional_trigger_with_mock_subscription_manager(
-            ConditionType::AllChanges { fire_initial: false },
+            ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip },
             None,
         );
 
@@ -832,7 +869,7 @@ mod tests {
     #[tokio::test]
     async fn on_new_message_reports_error() {
         let (trigger, message_provider, parent_trigger) = create_valid_conditional_trigger(
-            ConditionType::AllChanges { fire_initial: false },
+            ConditionType::AllChanges { first_value_policy: FirstValuePolicy::Skip },
             None,
         );
 

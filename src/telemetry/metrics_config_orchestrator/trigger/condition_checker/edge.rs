@@ -309,7 +309,6 @@ impl EdgeConditionChecker {
     pub(crate) fn new_both_edges(
         rising_options: EdgeOptions,
         falling_options: EdgeOptions,
-        fire_initial: bool,
         synthetic_trigger_callback: impl FnMut(Arc<NodeEvaluationContext>) + Send + Sync + 'static,
         node_evaluation_context_factory: Arc<dyn NodeEvaluationContextFactory>,
     ) -> Self {
@@ -321,7 +320,7 @@ impl EdgeConditionChecker {
                         rising_options,
                         falling_options,
                     },
-                    fire_initial,
+                    fire_initial: false,
                     state: EdgeDetectionState::default(),
                     synthetic_trigger_callback: Box::new(synthetic_trigger_callback),
                     node_evaluation_context_factory,
@@ -566,25 +565,25 @@ mod tests {
 
         both_edges: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), callback, node_evaluation_context_factory),
             &[(d(0), &INT_1), (d(0), &INT_2), (d(0), &INT_2), (d(0), &INT_0)],
             &[F, T, F, T],
         ),
         both_edges_strings: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), callback, node_evaluation_context_factory),
             &[(d(0), &STR_0), (d(0), &STR_0)],
             &[F, E],
         ),
         both_edges_nones: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), callback, node_evaluation_context_factory),
             &[(d(0), &NONE), (d(0), &NONE)],
             &[F, F],
         ),
         both_edges_none_int: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), callback, node_evaluation_context_factory),
             &[(d(0), &NONE), (d(0), &INT_0)],
             &[F, F],
         ),
@@ -668,7 +667,7 @@ mod tests {
         both_edges_min_duration_1: (
             |require_exact|
             move |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(3), require_exact }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(3), require_exact }, callback, node_evaluation_context_factory),
             &[(d(0), &FALSE), (d(0), &TRUE), /* trigger */ (d(4), &FALSE)],
             &[F, F, F],
             &[d(3), d(7)],
@@ -678,7 +677,7 @@ mod tests {
         both_edges_min_duration_2: (
             |require_exact|
             move |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(3), require_exact }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(3), require_exact }, callback, node_evaluation_context_factory),
             &[(d(0), &FALSE), (d(0), &TRUE), (d(0), &TRUE), (d(1), &TRUE), /* trigger */ (d(3), &TRUE), (d(0), &FALSE), (d(0), &FALSE), (d(1), &FALSE), /* trigger */ (d(4), &FALSE)],
             &[F, F, F, F, F, F, F, F, F],
             &[d(3), d(7)],
@@ -687,7 +686,7 @@ mod tests {
         both_edges_min_duration_3: (
             |require_exact|
             move |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(3), require_exact }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(3), require_exact }, callback, node_evaluation_context_factory),
             &[(d(0), &FALSE), (d(0), &TRUE), (d(1), &FALSE), (d(4), &FALSE)],
             &[F, F, F, F],
             &[],
@@ -698,7 +697,7 @@ mod tests {
         both_edges_mixed_min_duration_1: (
             |require_exact|
             move |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(0), require_exact }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(0), require_exact }, callback, node_evaluation_context_factory),
             &[(d(0), &FALSE), (d(0), &TRUE), /* trigger */ (d(4), &FALSE), /* trigger */ (d(0), &TRUE) /* trigger */],
             &[F, F, /* sync trigger */ T, F],
             &[d(3), d(7)],
@@ -709,7 +708,7 @@ mod tests {
         both_edges_mixed_min_duration_2: (
             |require_exact|
             move |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(0), require_exact }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact }, EdgeOptions { min_duration: d(0), require_exact }, callback, node_evaluation_context_factory),
             &[(d(0), &FALSE), (d(0), &TRUE), (d(1), &FALSE)],
             &[F, F, F],
             &[],
@@ -788,7 +787,7 @@ mod tests {
         // with oscillating values during glitch monitoring.
         both_edges_oscillating_values: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: false }, EdgeOptions { min_duration: d(3), require_exact: false }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: false }, EdgeOptions { min_duration: d(3), require_exact: false }, callback, node_evaluation_context_factory),
             &[(d(0), &INT_0), (d(0), &INT_3), (d(1), &INT_1), (d(1), &INT_2), /* trigger */ (d(2), &INT_1), (d(0), &INT_0), (d(1), &INT_1), (d(0), &INT_0), /* trigger */ (d(3), &INT_0)],
             &[F, F, F, F, F, F, F, F, F],
             &[d(3), d(7)],
@@ -831,7 +830,7 @@ mod tests {
         // with all values matching exactly.
         both_edges_require_exact_all_match: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: true }, EdgeOptions { min_duration: d(3), require_exact: true }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: true }, EdgeOptions { min_duration: d(3), require_exact: true }, callback, node_evaluation_context_factory),
             &[(d(0), &INT_0), (d(0), &INT_3), (d(1), &INT_3), (d(3), &INT_1), (d(0), &INT_1), (d(1), &INT_1)],
             &[F, F, F, F, F, F],
             &[d(3), d(7)],
@@ -857,7 +856,7 @@ mod tests {
         // with not all values matching exactly.
         both_edges_require_exact_not_all_match: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: true }, EdgeOptions { min_duration: d(3), require_exact: true }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: true }, EdgeOptions { min_duration: d(3), require_exact: true }, callback, node_evaluation_context_factory),
             &[(d(0), &INT_2), (d(0), &INT_3), (d(2), &INT_4), (d(0), &INT_2), (d(0), &INT_1), (d(1), &INT_0), (d(1), &INT_2)],
             &[F, F, F, F, F, F, F],
             &[],
@@ -886,7 +885,7 @@ mod tests {
         // detected.
         both_edges_require_exact_not_all_match_then_pause: (
             |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: true }, EdgeOptions { min_duration: d(3), require_exact: true }, false, callback, node_evaluation_context_factory),
+            EdgeConditionChecker::new_both_edges(EdgeOptions { min_duration: d(3), require_exact: true }, EdgeOptions { min_duration: d(3), require_exact: true }, callback, node_evaluation_context_factory),
             &[(d(0), &INT_2), (d(0), &INT_3), (d(1), &INT_4), /* trigger (2 -> 4) */ (d(4), &INT_1), (d(0), &INT_0), (d(1), &INT_2) /* trigger (4 -> 2) */],
             &[F, F, F, F, F, F],
             &[d(4), d(9)],
@@ -945,12 +944,6 @@ mod tests {
             &[(d(0), &INT_2), (d(0), &INT_1), (d(0), &INT_2)],
             &[T, T, F],
         ),
-        both_edges_fire_initial_true: (
-            |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), true, callback, node_evaluation_context_factory),
-            &[(d(0), &INT_1), (d(0), &INT_2), (d(0), &INT_1)],
-            &[T, T, T],
-        ),
         rising_edge_fire_initial_true_none_first: (
             |callback, node_evaluation_context_factory|
             EdgeConditionChecker::new_rising_edge(EdgeOptions::default(), true, callback, node_evaluation_context_factory),
@@ -960,12 +953,6 @@ mod tests {
         falling_edge_fire_initial_true_none_first: (
             |callback, node_evaluation_context_factory|
             EdgeConditionChecker::new_falling_edge(EdgeOptions::default(), true, callback, node_evaluation_context_factory),
-            &[(d(0), &NONE), (d(0), &INT_2), (d(0), &INT_1)],
-            &[F, T, T],
-        ),
-        both_edges_fire_initial_true_none_first: (
-            |callback, node_evaluation_context_factory|
-            EdgeConditionChecker::new_both_edges(EdgeOptions::default(), EdgeOptions::default(), true, callback, node_evaluation_context_factory),
             &[(d(0), &NONE), (d(0), &INT_2), (d(0), &INT_1)],
             &[F, T, T],
         ),
