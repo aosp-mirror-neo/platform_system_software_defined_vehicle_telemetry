@@ -100,13 +100,6 @@ you can use `cvd create`):
 cvd create -base_instance_num=2 --config=sdv_ivi_instance2
 ```
 
-Start the IVI telemetry agent:
-
-```bash
-adb root
-adb shell sdv_ivi_telemetry_service_agent &
-```
-
 ```bash
 atest sdv_telemetry_integration_tests
 ```

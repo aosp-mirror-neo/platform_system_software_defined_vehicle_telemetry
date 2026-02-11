@@ -253,8 +253,11 @@ impl MetricsConfigManagerImpl {
                     // Success, directory was created or already exists
                     info!("Active config telemetry directory created");
                 }
-                Err(e) => {
-                    let err = format!("Error {e} in creating active config directory");
+                Err(err) => {
+                    let err = format!(
+                        "Failed to create active metrics config directory '{}': {err}",
+                        self.active_dir_path.display()
+                    );
                     error_handler(StatusCodes::FILE_IO_ERROR, &err, &self.active_dir_path);
                 }
             };
@@ -311,8 +314,11 @@ impl MetricsConfigManagerImpl {
                     // Success, directory was created or already exists
                     info!("Inactive config telemetry directory created");
                 }
-                Err(e) => {
-                    let err = format!("Error {e} in creating inactive config directory");
+                Err(err) => {
+                    let err = format!(
+                        "Failed to create inactive metrics config directory '{}': {err}",
+                        self.inactive_dir_path.display()
+                    );
                     error_handler(StatusCodes::FILE_IO_ERROR, &err, &self.inactive_dir_path);
                 }
             };

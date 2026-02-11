@@ -84,10 +84,6 @@ elif [ "$TARGET_PRODUCT" = "sdv_ivi_cf" ]; then
   else
     FILES="$@"
   fi
-
-  log "Starting Telemetry Service"
-  adb shell sdv_ivi_telemetry_service_agent &
-  trap "pkill -f sdv_ivi_telemetry_service_agent" 0 2 3 15
 else
   log "[ERROR] \$TARGET_PRODUCT is missing or unsupported. Please \`lunch\` one of the supported Android targets (\`sdv_core_cf-*\` or \`sdv_ivi_cf-*\`)."
   exit 1
