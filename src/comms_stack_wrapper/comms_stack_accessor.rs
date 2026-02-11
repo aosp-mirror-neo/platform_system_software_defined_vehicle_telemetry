@@ -1708,8 +1708,14 @@ mod integration_tests {
         let accessor = create_accessor_with_context();
 
         let unit_type = test_utils::make_unique_unit_type();
-        let _publisher1 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
-        let _publisher2 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher1 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
+        let _publisher2 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
@@ -1825,7 +1831,16 @@ mod integration_tests {
         }
     }
 
-    fn create_publisher_in_new_process(service_name: String) -> TestPublisherProxy {
+    enum PublisherType {
+        DataTunnel,
+        #[expect(dead_code)]
+        Rpc,
+    }
+
+    fn create_publisher_in_new_process(
+        service_name: String,
+        publisher_type: PublisherType,
+    ) -> TestPublisherProxy {
         use std::process::Command;
         use std::process::Stdio;
         use std::str::FromStr;
@@ -1835,27 +1850,34 @@ mod integration_tests {
         else {
             panic!("Unsupported service name: '{service_name}'");
         };
+        let unit_type = unit_type.to_string();
 
+        let mut args = vec![
+            "--fqin",
+            // Tests may run in multiple parallel processes, therefore we need to ensure that
+            // the FQINs created by the processes do not conflict with each other. This is
+            // achieved by embedding the process ID into the FQIN, which is done by the
+            // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
+            // `__PROCESS_ID__` placeholder with its process ID.
+            "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
+            "--unit-type",
+            &unit_type,
+            "--unit-name",
+            &unit_name,
+        ];
+        match publisher_type {
+            PublisherType::DataTunnel => {
+                args.extend(["data-tunnel", "--message-queue-size", "100"])
+            }
+            PublisherType::Rpc => args.extend(["rpc"]),
+        }
+        eprintln!("Spwaning publisher process with args: {args:?}");
         let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Print child process errors to the test's stderr.
             .stderr(Stdio::inherit())
-            .args([
-                "--fqin",
-                // Tests may run in multiple parallel processes, therefore we need to ensure that
-                // the FQINs created by the processes do not conflict with each other. This is
-                // achieved by embedding the process ID into the FQIN, which is done by the
-                // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
-                // `__PROCESS_ID__` placeholder with its process ID.
-                "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
-                "--unit-type",
-                &unit_type.to_string(),
-                "--unit-name",
-                &unit_name,
-                "--message-queue-size",
-                "100",
-            ])
+            .args(args)
             .spawn()
             .unwrap();
 
@@ -1889,8 +1911,14 @@ mod integration_tests {
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let _publisher1 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
-        let _publisher2 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher1 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
+        let _publisher2 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
 
         let accessor = create_accessor_with_context();
 
@@ -1909,7 +1937,10 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(format!("{unit_type}|different-name"));
+        let publisher = create_publisher_in_new_process(
+            format!("{unit_type}|different-name"),
+            PublisherType::DataTunnel,
+        );
 
         let accessor = create_accessor_with_context();
 
@@ -1928,7 +1959,10 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let publisher = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
 
         let accessor = create_accessor_with_context();
 
