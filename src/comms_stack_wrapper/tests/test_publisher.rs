@@ -35,6 +35,7 @@ use std::str::FromStr;
 
 #[derive(Parser, Debug)]
 struct Args {
+    /// FQIN of the service. If it contains `__PROCESS_ID__`, it will be replaced by the process ID.
     #[arg(long)]
     fqin: String,
     #[arg(long)]
@@ -51,15 +52,17 @@ const MESSAGE_SIZE: u32 = 20;
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     eprintln!("{args:?}");
+    let Args { fqin, unit_type, unit_name, message_queue_size } = args;
 
-    let fqin = ServiceFqin::from_str(&args.fqin).context("Failed to parse FQIN.")?;
-    let unit_type = UnitType::from_str(&args.unit_type).context("Failed to parse Unit Type.")?;
+    let fqin = fqin.replace("__PROCESS_ID__", &std::process::id().to_string());
+    let fqin = ServiceFqin::from_str(&fqin).context("Failed to parse FQIN.")?;
+    let unit_type = UnitType::from_str(&unit_type).context("Failed to parse Unit Type.")?;
 
     // The FQIN of the created context is actually silently updated with the correct VM name, so we
-    // must not rely on `args.fqin`, but instead query it from the context via
-    // `ctx.get_self_fqin()`.
+    // must not rely on `fqin`, but instead query it from the context via `ctx.get_self_fqin()`.
     let ctx = wait_for_sdv_agents_and_create_context(fqin).await;
-    println!("fqin:{}", ctx.get_self_fqin());
+    let fqin = ctx.get_self_fqin();
+    println!("fqin:{fqin}");
 
     let message_metadata = MessageMetadata {
         file_descriptors: vec![Int64Value::descriptor().file_descriptor_proto().to_owned()],
@@ -72,12 +75,12 @@ async fn main() -> anyhow::Result<()> {
     let create_unit_registration_args = move || -> UnitRegistrationArgs {
         let mut unit_registration_args = UnitRegistrationArgs::new();
         unit_registration_args.set_unit_type(&unit_type);
-        unit_registration_args.set_unit_name(&args.unit_name);
+        unit_registration_args.set_unit_name(&unit_name);
         unit_registration_args.set_application_metadata(&message_metadata);
 
         let mut publisher_unit_metadata = PublisherUnitMetadata::new();
         publisher_unit_metadata.set_message_size(MESSAGE_SIZE);
-        publisher_unit_metadata.set_message_count(args.message_queue_size);
+        publisher_unit_metadata.set_message_count(message_queue_size);
         unit_registration_args.set_unit_metadata(&UnitMetadata::Publisher(publisher_unit_metadata));
 
         unit_registration_args

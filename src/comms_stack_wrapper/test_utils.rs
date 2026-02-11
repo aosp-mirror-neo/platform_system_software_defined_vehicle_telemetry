@@ -35,20 +35,19 @@ use std::{collections::HashMap, str::FromStr};
 
 pub(super) const UNIT_NAME: &str = "default";
 
-pub(super) async fn make_context(fqin_extra: u8) -> ContextRef {
+pub(super) async fn make_context() -> ContextRef {
     use sdv_telemetry_comms_utils::wait_for_sdv_agents_and_create_context;
     use tokio::sync::OnceCell;
 
     static CONTEXT_REF: OnceCell<ContextRef> = OnceCell::const_new();
     *CONTEXT_REF
         .get_or_init(|| async {
-            // Tests may run in multiple parallel processes, therefore we need to ensure that the FQINs
-            // created by the processes do not conflict with each other. This is achieved by embedding
-            // the process ID into the FQIN.
+            // Tests may run in multiple parallel processes, therefore we need to ensure that the
+            // FQINs created by the processes do not conflict with each other. This is achieved by
+            // embedding the process ID into the FQIN.
             let fqin = ServiceFqin::from_str(&format!(
-                "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest{}{}/instance",
+                "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest{}/instance",
                 std::process::id(),
-                fqin_extra
             ))
             .unwrap();
             // The FQIN of the created context is actually silently updated with the correct VM
