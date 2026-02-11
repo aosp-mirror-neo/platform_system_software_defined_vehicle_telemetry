@@ -135,8 +135,7 @@ message ConditionalTrigger {
     bool fire_initial = 2;
   }
 
-  // Fires if the new value is less than the previous value. Either falling_options or
-  // fire_initial can be set.
+  // Fires if the new value is less than the previous value.
   message ConditionTypeFallingEdge {
     // Optional.
     EdgeOptions falling_options = 1;
