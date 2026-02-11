@@ -18,11 +18,10 @@
 mod service_name;
 
 use log::info;
-use tokio::time::{sleep, Duration};
-
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::ContextRef;
 use sdv_comms_ctx::wait_for_agents;
+use tokio::time::{sleep, Duration};
 
 pub use service_name::ServiceName;
 
@@ -42,4 +41,33 @@ async fn wait_for_sdv_agents() {
         info!("Retrying wait for service discovery: {err:?}");
         sleep(Duration::from_secs(10)).await;
     }
+}
+
+/// The `Debug` implementation for `ServiceUnitDefinition` just prints an opaque address, which
+/// isn't all that helpful. This helper macro converts a `ServiceUnitDefinition` into a more verbose
+/// representation.
+#[macro_export]
+macro_rules! debug_format_service_unit_definition {
+    ($service_unit_definition:expr) => {
+        format_args!(
+            "{{ self: {:?}, unit_identifier: {}, unit_type: {} }}",
+            $service_unit_definition,
+            $crate::debug_format_unit_identifier!($service_unit_definition.get_unit_identifier()),
+            $service_unit_definition.get_unit_type()
+        )
+    };
+}
+
+/// The `Debug` implementation for `UnitIdentifier` prints strings as vectors, which makes it really
+/// hard to read. This helper macro converts a `UnitIdentifier` into a better debug representation.
+#[macro_export]
+macro_rules! debug_format_unit_identifier {
+    ($unit_identifier:expr) => {
+        format_args!(
+            "{{ sid: {}, fqin: {}, unit_name: {} }}",
+            $unit_identifier.get_sid(),
+            $unit_identifier.get_fqin(),
+            $unit_identifier.get_unit_name(),
+        )
+    };
 }

@@ -18,7 +18,9 @@
 
 use anyhow::Context;
 use futures::StreamExt;
+use protobuf::well_known_types::wrappers::Int64Value;
 use protobuf::Message;
+use protobuf::MessageFull;
 use sdv_comms::dt;
 use sdv_comms::id::ServiceFqin;
 use sdv_comms::rpc;
@@ -35,6 +37,10 @@ use sdv_telemetry_test_utils::unique_dt_topic_name;
 use std::io::{BufRead, BufReader, Lines, Write};
 use std::process::{Child, ChildStdout};
 use std::{collections::HashMap, str::FromStr};
+
+use crate::metadata::Metadata;
+use crate::metadata::MetadataGeneration;
+use crate::metadata::MetadataServiceType;
 
 pub(super) const UNIT_NAME: &str = "default";
 
@@ -266,4 +272,30 @@ pub(super) fn create_publisher_in_new_process(
     let mut publisher = TestPublisherProxy::new(child, child_fqin, child_stdout);
     publisher.register();
     publisher
+}
+
+// There is no way to create a `UnitIdentifier` in unit tests, other than by discovering a real
+// service. Thus, we need to create a service in order to create a `MetadataGeneration` for
+// testing.
+pub(super) async fn create_metadata_generation(
+    service_name: String,
+) -> (TestPublisherProxy, MetadataGeneration) {
+    let ctx = make_context().await;
+
+    let ServiceName::UnitTypeBased { unit_type, .. } = ServiceName::parse(&service_name).unwrap()
+    else {
+        panic!("Failed to parse service name '{service_name}' as unit-type based service name.");
+    };
+
+    let publisher =
+        create_publisher_in_new_process(service_name.to_owned(), PublisherType::DataTunnel);
+    let service_unit = discover_service(ctx, &unit_type).await;
+
+    let metadata_generation = MetadataGeneration::new(
+        MetadataServiceType::new(&service_unit.get_unit_metadata()),
+        service_unit.get_unit_identifier(),
+        Metadata { config_descriptor: None, message_descriptor: Int64Value::descriptor() },
+    );
+
+    (publisher, metadata_generation)
 }
