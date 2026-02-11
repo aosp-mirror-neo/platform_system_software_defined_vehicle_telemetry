@@ -532,7 +532,8 @@ mod integration_tests {
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
-    use std::str::FromStr;
+    use std::io::{BufRead, BufReader, Lines, Write};
+    use std::process::{Child, ChildStdout};
     use std::time::Duration;
     use tokio::sync::mpsc;
     use tokio::time::Instant;
@@ -1790,162 +1791,171 @@ mod integration_tests {
         assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
     }
 
-    /// This madness forks the current process, and creates a publisher in the child process. It
-    /// then returns an object that stops the child when dropped, as well as the FQIN of the
-    /// publisher of the child process.
-    ///
-    /// # Safety
-    ///
-    /// This function must be called from a single-threaded environment. See the warnings around the
-    /// use of `fork` [1] for more information.
-    ///
-    /// [1]: https://docs.rs/nix/latest/nix/unistd/fn.fork.html#safety
-    unsafe fn fork_and_create_publisher(
-        fqin_extra: u8,
-        service_name: String,
-    ) -> (scopeguard::ScopeGuard<(), impl FnOnce(())>, ServiceFqin) {
-        use nix::sys::wait::waitpid;
-        use nix::unistd::{
-            fork, pipe as nix_pipe, read as nix_read, write as nix_write, ForkResult,
-        };
-        use scopeguard::guard;
-        use std::os::fd::AsRawFd;
+    struct TestPublisherProxy {
+        child: Child,
+        fqin: ServiceFqin,
+        child_stdout: Lines<BufReader<ChildStdout>>,
+    }
 
-        // This will be used to send the FQIN from the child process to the parent process.
-        let (rx_child_fqin, tx_child_fqin) = nix_pipe().unwrap();
-        // This will be used to signal to the child when it should exit.
-        let (rx_child_exit, tx_child_exit) = nix_pipe().unwrap();
+    impl TestPublisherProxy {
+        fn new(
+            child: Child,
+            fqin: ServiceFqin,
+            child_stdout: Lines<BufReader<ChildStdout>>,
+        ) -> Self {
+            Self { child, fqin, child_stdout }
+        }
 
-        // SAFETY: Safe because the caller ensured that this function is called in a single-threaded
-        // environment.
-        match unsafe { fork() }.unwrap() {
-            ForkResult::Parent { child: child_pid, .. } => {
-                drop(tx_child_fqin);
-                drop(rx_child_exit);
+        fn register(&mut self) {
+            let mut stdin = self.child.stdin.as_ref().unwrap();
+            stdin.write_all(b"r").unwrap();
+            stdin.flush().unwrap();
+            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+        }
 
-                let mut child_fqin = vec![0; 1000];
-                let read_count = nix_read(rx_child_fqin.as_raw_fd(), &mut child_fqin).unwrap();
-                child_fqin.resize(read_count, 0);
+        fn unregister(&mut self) {
+            let mut stdin = self.child.stdin.as_ref().unwrap();
+            stdin.write_all(b"u").unwrap();
+            stdin.flush().unwrap();
+            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+        }
 
-                let child_fqin =
-                    ServiceFqin::from_str(std::str::from_utf8(&child_fqin).unwrap()).unwrap();
-
-                let child = guard((), move |_| {
-                    // The child will stop when it receives any message; the message content is
-                    // inconsequential.
-                    nix_write(tx_child_exit, "stop please".as_bytes()).unwrap();
-                    waitpid(child_pid, None).unwrap();
-                });
-
-                (child, child_fqin)
-            }
-            ForkResult::Child => {
-                drop(rx_child_fqin);
-                drop(tx_child_exit);
-
-                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(
-                    async {
-                        let ctx = test_utils::make_context(fqin_extra).await;
-
-                        let _publisher = test_utils::register_topic(
-                            ctx,
-                            &service_name,
-                            MessageMetadata {
-                                file_descriptors: vec![test_message::file_descriptor()
-                                    .proto()
-                                    .clone()],
-                                message_full_name: format!(
-                                    ".{}",
-                                    TestMessage::descriptor().full_name()
-                                ),
-                                ..Default::default()
-                            },
-                        )
-                        .await
-                        .unwrap();
-
-                        nix_write(tx_child_fqin, format!("{}", ctx.get_self_fqin()).as_bytes())
-                            .unwrap();
-
-                        // Wait until we receive a message, then exit.
-                        let mut child_exit = vec![0; 1000];
-                        nix_read(rx_child_exit.as_raw_fd(), &mut child_exit).unwrap();
-                    },
-                );
-                std::process::exit(0);
-            }
+        #[expect(dead_code)]
+        fn publish(&mut self, value: u8) {
+            let mut stdin = self.child.stdin.as_ref().unwrap();
+            stdin.write_all(&[b'm', value]).unwrap();
+            stdin.flush().unwrap();
+            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
         }
     }
 
+    impl Drop for TestPublisherProxy {
+        fn drop(&mut self) {
+            self.unregister();
+
+            drop(self.child.stdin.take());
+            assert!(self.child.wait().unwrap().success());
+        }
+    }
+
+    fn create_publisher_in_new_process(fqin_extra: u8, service_name: String) -> TestPublisherProxy {
+        use std::process::Command;
+        use std::process::Stdio;
+        use std::str::FromStr;
+
+        let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
+            ServiceName::parse(&service_name).unwrap()
+        else {
+            panic!("Unsupported service name: '{service_name}'");
+        };
+
+        let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Print child process errors to the test's stderr.
+            .stderr(Stdio::inherit())
+            .args([
+                "--fqin",
+                // Tests may run in multiple parallel processes, therefore we need to ensure that
+                // the FQINs created by the processes do not conflict with each other. This is
+                // achieved by embedding the process ID into the FQIN.
+                &format!(
+                    "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest{}{}/instance",
+                    std::process::id(),
+                    fqin_extra
+                ),
+                "--unit-type",
+                &unit_type.to_string(),
+                "--unit-name",
+                &unit_name,
+                "--message-queue-size",
+                "100",
+            ])
+            .spawn()
+            .unwrap();
+
+        let mut child_stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+        let child_fqin = child_stdout
+            .find_map(|line| {
+                let line = line.unwrap();
+                let (command, payload) = line.split_once(":")?;
+                if command == "fqin" {
+                    Some(payload.to_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let child_fqin = ServiceFqin::from_str(&child_fqin)
+            .with_context(|| format!("Failed to parse child FQIN '{child_fqin}'"))
+            .unwrap();
+
+        let mut publisher = TestPublisherProxy::new(child, child_fqin, child_stdout);
+        publisher.register();
+        publisher
+    }
+
     // Unit Type + Unit Name -> 2 matches
-    #[test]
-    fn discover_service_by_unit_type_and_unit_name_when_two_matching_service_exists_fails() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn discover_service_by_unit_type_and_unit_name_when_two_matching_service_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let (_child1, _) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}")) };
-        let (_child2, _) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(2, format!("{unit_type}|{UNIT_NAME}")) };
+        let _publisher1 = create_publisher_in_new_process(1, format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher2 = create_publisher_in_new_process(2, format!("{unit_type}|{UNIT_NAME}"));
 
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context(0);
 
-            let service_name = ServiceName::UnitTypeBased {
-                unit_type: unit_type.clone(),
-                unit_name: Some(UNIT_NAME.to_owned()),
-            };
-            let result = accessor.discover_service(&service_name).await;
+        let service_name = ServiceName::UnitTypeBased {
+            unit_type: unit_type.clone(),
+            unit_name: Some(UNIT_NAME.to_owned()),
+        };
+        let result = accessor.discover_service(&service_name).await;
 
-            assert!(result.is_none(), "Unexpected result: {result:?}");
-        });
+        assert!(result.is_none(), "Unexpected result: {result:?}");
     }
 
     // FQIN + Unit Name -> 0 matches
-    #[test]
-    fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
-        let (_child, child_fqin) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(1, format!("{unit_type}|different-name")) };
+        let publisher = create_publisher_in_new_process(1, format!("{unit_type}|different-name"));
 
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let accessor = create_accessor_with_context(2);
+        let accessor = create_accessor_with_context(2);
 
-            let service_name =
-                ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
-            let result = accessor.discover_service(&service_name).await;
+        let service_name = ServiceName::FqinBased {
+            fqin: publisher.fqin.clone(),
+            unit_name: UNIT_NAME.to_owned(),
+        };
+        let result = accessor.discover_service(&service_name).await;
 
-            assert!(result.is_none(), "Unexpected result: {result:?}");
-        });
+        assert!(result.is_none(), "Unexpected result: {result:?}");
     }
 
     // FQIN + Unit Name -> 1 match
-    #[test]
-    fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
         let unit_type = test_utils::make_unique_unit_type();
-        let (_child, child_fqin) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}")) };
+        let publisher = create_publisher_in_new_process(1, format!("{unit_type}|{UNIT_NAME}"));
 
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let accessor = create_accessor_with_context(2);
+        let accessor = create_accessor_with_context(2);
 
-            let service_name =
-                ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
-            let result = accessor.discover_service(&service_name).await;
+        let service_name = ServiceName::FqinBased {
+            fqin: publisher.fqin.clone(),
+            unit_name: UNIT_NAME.to_owned(),
+        };
+        let result = accessor.discover_service(&service_name).await;
 
-            let service_unit_definition = result.unwrap();
-            assert_eq!(service_unit_definition.get_unit_type(), unit_type);
-            assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
-        });
+        let service_unit_definition = result.unwrap();
+        assert_eq!(service_unit_definition.get_unit_type(), unit_type);
+        assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
     }
 
     // FQIN + Unit Name -> 2 matches

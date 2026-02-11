@@ -115,6 +115,7 @@ rust_test {
     name: "sdv_mt_telemetry_integration_comms_stack_wrapper_test",
     defaults: ["telemetry_comms_stack_wrapper_tests_defaults"],
     cfgs: ["integration_tests"],
+    data_bins: ["sdv_telemetry_comms_stack_wrapper_test_publisher"],
     // Use a custom test config template as per
     // https://source.android.com/docs/core/tests/vts/setup11, because we need
     // to ensure that the integration tests are run serially (so that they can
