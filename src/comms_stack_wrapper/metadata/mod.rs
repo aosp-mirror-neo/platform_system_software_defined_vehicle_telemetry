@@ -14,6 +14,10 @@
 
 use protobuf::reflect::MessageDescriptor;
 
+mod fetch;
+
+pub(crate) use fetch::fetch_metadata;
+
 /// The metadata retrieved for a service, containing the necessary descriptors.
 #[derive(Clone, Debug)]
 pub(crate) struct Metadata {
