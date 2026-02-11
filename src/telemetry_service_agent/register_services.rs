@@ -12,22 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use binder_tokio::TokioRuntime;
 use google_sdv_telemetry::aidl::google::sdv::telemetry::ITelemetryService::{
     BnTelemetryService, BpTelemetryService, ITelemetryService,
 };
-
+use log::info;
 use rustutils::android::system_properties::PropertyWatcher;
 use sdv_telemetry::service_publisher_manager::ServicePublisherManager;
 use sdv_telemetry::SdvTelemetryService;
 use sdv_telemetry_platform_abstraction_layer::PlatformAbstractionLayer;
-
-use binder_tokio::TokioRuntime;
-use log::info;
 use std::sync::Arc;
 
-const SIZE_MB: usize = 1024 * 1024;
-
-const METRIC_CONFIG_STORE_SIZE_PROPERTY: &str = "ro.vendor.telemetry.metric_config_store_in_mb";
+const DEFAULT_METRIC_CONFIG_STORE_SIZE_MB: usize = 1; // 1 MB
+const METRIC_CONFIG_STORE_SIZE_MB_PROPERTY: &str = "ro.vendor.telemetry.metric_config_store_in_mb";
 const ROOT_DIR: &str = "/data/vendor/";
 
 pub async fn register_services(
@@ -35,17 +32,18 @@ pub async fn register_services(
     pal: Arc<dyn PlatformAbstractionLayer>,
     dump_manager: Arc<sdv_dump::DumpManager>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut watcher = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_PROPERTY).unwrap();
-    let value = watcher.read(|_, value| value.trim().to_owned()).ok();
+    let config_store_size_mb = PropertyWatcher::new(METRIC_CONFIG_STORE_SIZE_MB_PROPERTY)
+        .unwrap_or_else(|err| panic!("Failed to create property watcher for property '{METRIC_CONFIG_STORE_SIZE_MB_PROPERTY}': {err:?}"))
+        .read(|_property_name, value| value.trim().parse::<usize>().ok())
+        .ok()
+        .flatten()
+        .unwrap_or(DEFAULT_METRIC_CONFIG_STORE_SIZE_MB);
 
-    // Default size 1 MB
-    let configured_size: usize = value.and_then(|value| value.parse().ok()).unwrap_or(1);
-
-    info!("Creating telemetry service with {configured_size}MBs metric store size");
+    info!("Creating telemetry service with {config_store_size_mb}MB metrics config store size.");
 
     let Some(telemetry_service) = SdvTelemetryService::new(
         ROOT_DIR,
-        configured_size * SIZE_MB,
+        config_store_size_mb * 1024 * 1024,
         service_publisher_manager_impl,
         pal,
         dump_manager,
