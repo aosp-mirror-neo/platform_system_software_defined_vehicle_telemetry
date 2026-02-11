@@ -547,6 +547,42 @@ def run_all_tests(
             print("Skipping rerun prompt.")
 
 
+def get_all_test_names(sdv_catbox_config_dir: Path) -> List[str]:
+    return sorted(
+        [p.stem for p in sdv_catbox_config_dir.glob("sdv-*-telemetry-*.xml")]
+    )
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Run SDV Telemetry end-to-end tests."
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    # "run" subcommand
+    parser_run = subparsers.add_parser("run", help="running tests")
+    parser_run.add_argument(
+        "--test-runner",
+        type=TestRunner,
+        choices=list(TestRunner),
+        default=TestRunner.CATBOX,
+        help="The test runner to use.",
+    )
+    parser_run.add_argument(
+        "test_names",
+        nargs="*",
+        help=(
+            "Specific test names to run. If not provided, all Telemetry tests"
+            " are run."
+        ),
+    )
+
+    # "list" subcommand
+    parser_list = subparsers.add_parser("list", help="listing tests")
+
+    return parser.parse_args()
+
+
 def main() -> None:
     """Main entry point of the script."""
     if "ANDROID_BUILD_TOP" not in os.environ:
@@ -565,9 +601,7 @@ def main() -> None:
     )
     catbox_binary = catbox_dir / "tools/catbox-tradefed"
 
-    platform_testing_repo = (
-        android_build_top / "platform_testing"
-    )
+    platform_testing_repo = android_build_top / "platform_testing"
     sdv_catbox_config_dir = (
         platform_testing_repo / "libraries/sdv/sdv_catbox/res/config"
     )
@@ -578,42 +612,28 @@ def main() -> None:
         raise Exception(f"Unexpected TARGET_PRODUCT: {target_product}")
     is_ivi = "_ivi_" in target_product
 
-    parser = argparse.ArgumentParser(
-        description="Run SDV Telemetry end-to-end tests."
-    )
-    parser.add_argument(
-        "--test-runner",
-        type=TestRunner,
-        choices=list(TestRunner),
-        default=TestRunner.CATBOX,
-        help="The test runner to use.",
-    )
-    parser.add_argument(
-        "test_names",
-        nargs="*",
-        help=(
-            "Specific test names to run. If not provided, all Telemetry tests"
-            " are run."
-        ),
-    )
-    args = parser.parse_args()
+    args = parse_args()
+    if args.command == "run":
+        if args.test_names:
+            test_names: List[str] = args.test_names
+        else:
+            # Find all telemetry test configs and extract their basenames
+            test_names = get_all_test_names(sdv_catbox_config_dir)
 
-    if args.test_names:
-        test_names: List[str] = args.test_names
-    else:
-        # Find all telemetry test configs and extract their basenames
-        test_names = sorted([
-            p.stem for p in sdv_catbox_config_dir.glob("sdv-*-telemetry-*.xml")
-        ])
-
-    run_all_tests(
-        test_names=test_names,
-        test_runner=args.test_runner,
-        catbox_dir=catbox_dir,
-        catbox_binary=catbox_binary,
-        sdv_catbox_config_dir=sdv_catbox_config_dir,
-        is_ivi=is_ivi,
-    )
+        run_all_tests(
+            test_names=test_names,
+            test_runner=args.test_runner,
+            catbox_dir=catbox_dir,
+            catbox_binary=catbox_binary,
+            sdv_catbox_config_dir=sdv_catbox_config_dir,
+            is_ivi=is_ivi,
+        )
+        return
+    elif args.command == "list":
+        test_names = get_all_test_names(sdv_catbox_config_dir)
+        for test_name in test_names:
+            print(test_name)
+        return
 
 
 if __name__ == "__main__":
