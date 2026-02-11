@@ -21,6 +21,7 @@ pub mod data_tunnel_publisher;
 
 mod data_tunnel_message_stream;
 mod data_tunnel_subscriber;
+mod metadata;
 mod sdv_rpc_client;
 
 #[cfg(all(test, integration_tests))]

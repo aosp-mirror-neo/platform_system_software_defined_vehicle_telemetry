@@ -46,6 +46,7 @@ use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber;
+use crate::metadata::Metadata;
 use crate::sdv_rpc_client;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
@@ -274,7 +275,7 @@ impl CommsStackAccessor {
             return Ok(None);
         };
 
-        let (config_descriptor, message_descriptor) = self
+        let Metadata { config_descriptor, message_descriptor } = self
             .parse_telemetry_metadata(&service_name, &service_unit_definition)
             .await
             .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
@@ -375,7 +376,7 @@ impl CommsStackAccessor {
         &self,
         service_name: &ServiceName,
         service_unit_definition: &ServiceUnitDefinition,
-    ) -> anyhow::Result<(Option<MessageDescriptor>, MessageDescriptor)> {
+    ) -> anyhow::Result<Metadata> {
         let app_metadata = service_unit_definition.get_application_metadata();
         if !app_metadata.is_empty() {
             debug!("Service unit definition for {service_name} contains application metadata, using it to retrieve descriptor");
@@ -392,7 +393,7 @@ impl CommsStackAccessor {
             return file_descriptors.find_message_by_full_name(
                 &publisher_metadata.message_full_name
             )
-                .map(|message_descriptor| (None, message_descriptor))
+                .map(|message_descriptor| Metadata { config_descriptor: None, message_descriptor })
                 .ok_or_else(|| {
                     anyhow!(
                         "Message named \"{}\" not found in file descriptors ({file_descriptors_len} file descriptors provided)",
@@ -408,23 +409,35 @@ impl CommsStackAccessor {
             .await
             .ok_or_else(|| anyhow!("VSIDL provider is not available"))?;
         match service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => Ok((
-                None,
-                data_tunnel_subscriber::get_message_descriptor(
-                    vsidl_provider.as_ref(),
-                    service_unit_definition,
-                )
-                .await?,
-            )),
+            UnitMetadata::Publisher(_) => data_tunnel_subscriber::get_message_descriptor(
+                vsidl_provider.as_ref(),
+                service_unit_definition,
+            )
+            .await
+            .map(|maybe_message_descriptor| {
+                maybe_message_descriptor.map(|message_descriptor| Metadata {
+                    config_descriptor: None,
+                    message_descriptor,
+                })
+            }),
             UnitMetadata::Server(_) => sdv_rpc_client::get_message_descriptor(
                 vsidl_provider.as_ref(),
                 service_unit_definition,
             )
             .await
-            .map(|(config_descriptor, message_descriptor)| {
-                (Some(config_descriptor), message_descriptor)
+            .map(|maybe_descriptors| {
+                maybe_descriptors.map(|(config_descriptor, message_descriptor)| Metadata {
+                    config_descriptor: Some(config_descriptor),
+                    message_descriptor,
+                })
             }),
         }
+        .with_context(|| {
+            format!("Invalid descriptor(s) retrieved from VSIDL provider for '{service_name}'")
+        })?
+        .ok_or_else(|| {
+            anyhow!("VSIDL provider was unable to provide a descriptor for '{service_name}'")
+        })
     }
 
     async fn get_unit_change_stream(
@@ -1339,7 +1352,7 @@ mod integration_tests {
             /* message_metadata:             */ None,
             /* create_subscription_metadata: */ None,
             /* get_latest_message_metadata:  */ None,
-            err(displays_as(contains_substring("VSIDL provider was unable to provide RPC method descriptor"))),
+            err(displays_as(contains_substring("VSIDL provider was unable to provide a descriptor"))),
         ),
         message_metadata: (
             /* message_metadata:             */ Some(MESSAGE_METADATA_INT32.clone()),
@@ -1423,13 +1436,13 @@ mod integration_tests {
             /* message_metadata:             */ None,
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE_TEST2.clone()),
-            err(displays_as(contains_substring("VSIDL provider returned conflicting RPC method descriptors"))),
+            err(displays_as(contains_substring("Conflicting RPC method descriptors"))),
         ),
         create_subscription_and_get_latest_message_metadata_differ_1: (
             /* message_metadata:             */ None,
             /* create_subscription_metadata: */ Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()),
             /* get_latest_message_metadata:  */ Some(RPC_DESCRIPTOR_BOOL_REQUEST_RESPONSE.clone()),
-            err(displays_as(contains_substring("VSIDL provider returned conflicting RPC method descriptors"))),
+            err(displays_as(contains_substring("Conflicting RPC method descriptors"))),
         ),
         create_subscription_and_get_latest_message_metadata_differ_2: (
             /* message_metadata:             */ None,
