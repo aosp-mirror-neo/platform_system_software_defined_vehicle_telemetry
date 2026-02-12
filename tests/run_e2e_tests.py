@@ -222,6 +222,8 @@ def stream_and_parse_command(
     executed on every line of output. Returns the returncode and the matched
     output, if found.
     """
+    print(f"{CYAN}Executing: {' '.join(command)}{NC}")
+
     stdout_match: Optional[str] = None
     pty_parent, pty_child = pty.openpty()
 
@@ -317,6 +319,16 @@ def run_test_with_catbox(
     catbox_args: List[str] = []
     for i, serial in enumerate(serials):
         catbox_args.extend([f"--{{device{i+1}}}serial", serial])
+
+    if device_count in [1, 2, 3]:
+        catbox_args.extend([
+            "--mobly-config-file-name",
+            (
+                f"sdv_{['one', 'two', 'three'][device_count - 1]}_device{'s' if device_count > 1 else ''}_config_local.yaml"
+            ),
+        ])
+    else:
+        raise Exception(f"Unexpected device count: {device_count}")
 
     returncode, log_file = stream_and_parse_command(
         command=[

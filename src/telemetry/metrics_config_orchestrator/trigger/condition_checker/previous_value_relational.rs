@@ -22,6 +22,9 @@ use super::{apply_relational_operator, ConditionChecker};
 pub(crate) struct PreviousValueRelationalConditionChecker {
     operator: RelationalOperator,
     previous_value: Option<NodeValue>,
+
+    // Defines how the very first value should be treated.
+    fire_initial: bool,
 }
 
 impl ConditionChecker for PreviousValueRelationalConditionChecker {
@@ -31,10 +34,11 @@ impl ConditionChecker for PreviousValueRelationalConditionChecker {
             return Ok(false);
         }
 
-        // Extract previous value and save current value. Return false if there's no previous value.
+        // Extract previous value and save current value. If there is no previous value, use the
+        // behavior setting provided in the metrics configuration.
         let (previous_value, current_value) = self.previous_value.take_and_insert(current_value);
         let Some(previous_value) = previous_value else {
-            return Ok(false);
+            return Ok(self.fire_initial);
         };
 
         apply_relational_operator(self.operator, &previous_value, current_value)
@@ -42,8 +46,8 @@ impl ConditionChecker for PreviousValueRelationalConditionChecker {
 }
 
 impl PreviousValueRelationalConditionChecker {
-    pub(crate) fn new_all_changes() -> Self {
-        Self { operator: RelationalOperator::NOT_EQ, previous_value: None }
+    pub(crate) fn new_all_changes(fire_initial: bool) -> Self {
+        Self { operator: RelationalOperator::NOT_EQ, previous_value: None, fire_initial }
     }
 }
 
@@ -71,8 +75,8 @@ mod tests {
     const T: Result<bool, ()> = Ok(true);
     const F: Result<bool, ()> = Ok(false);
 
-    fn all_changes() -> PreviousValueRelationalConditionChecker {
-        PreviousValueRelationalConditionChecker::new_all_changes()
+    fn all_changes(fire_initial: bool) -> PreviousValueRelationalConditionChecker {
+        PreviousValueRelationalConditionChecker::new_all_changes(fire_initial)
     }
 
     parameterized_test!(
@@ -88,9 +92,19 @@ mod tests {
             assert_that!(got, container_eq(want.to_vec()));
         },
 
-        all_changes:        (all_changes(), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[F, T, F]),
-        all_changes_string: (all_changes(), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[F, T, F]),
-        all_changes_mixed:  (all_changes(), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[F, T, T, T, T]),
-        all_changes_none:   (all_changes(), &[&NONE, &NONE], &[F, F]),
+        all_changes:        (all_changes(false), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[F, T, F]),
+        all_changes_string: (all_changes(false), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[F, T, F]),
+        all_changes_mixed:  (all_changes(false), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[F, T, T, T, T]),
+        all_changes_nones:   (all_changes(false), &[&NONE, &NONE], &[F, F]),
+        all_changes_none_first:   (all_changes(false), &[&NONE, &STR_1], &[F, F]),
+        all_changes_none_between_change:   (all_changes(false), &[&INT_1, &NONE, &INT_2], &[F, F, T]),
+        all_changes_none_between_no_change:   (all_changes(false), &[&INT_1, &NONE, &INT_1], &[F, F, F]),
+        all_changes_fire_initial:        (all_changes(true), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[T, T, F]),
+        all_changes_string_fire_initial: (all_changes(true), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[T, T, F]),
+        all_changes_mixed_fire_initial:  (all_changes(true), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[T, T, T, T, T]),
+        all_changes_nones_fire_initial:   (all_changes(true), &[&NONE, &NONE], &[F, F]),
+        all_changes_none_first_fire_initial:   (all_changes(true), &[&NONE, &STR_1], &[F, T]),
+        all_changes_none_between_change_fire_initial:   (all_changes(true), &[&INT_1, &NONE, &INT_2], &[T, F, T]),
+        all_changes_none_between_no_change_fire_initial:   (all_changes(true), &[&INT_1, &NONE, &INT_1], &[T, F, F]),
     );
 }

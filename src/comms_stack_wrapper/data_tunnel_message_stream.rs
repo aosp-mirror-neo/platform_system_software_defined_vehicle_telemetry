@@ -109,7 +109,7 @@ mod integration_tests {
     async fn no_duplicate_message_for_frequent_publisher_with_fetch_last_message_set_to_true() {
         const DURATION: Duration = Duration::from_secs(3);
 
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
 
         let publisher = DataTunnelPublisher::register_topic(
@@ -188,7 +188,7 @@ mod integration_tests {
     async fn correctly_handles_no_last_message_when_creating_subscription() {
         const MESSAGE_SIZE: u32 = 10;
 
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
 
         let publisher = DataTunnelPublisher::register_topic(
@@ -237,7 +237,7 @@ mod integration_tests {
     async fn correctly_handles_empty_messages() {
         const MESSAGE_SIZE: u32 = 10;
 
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
 
         let publisher = DataTunnelPublisher::register_topic(

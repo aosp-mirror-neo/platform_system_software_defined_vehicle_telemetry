@@ -532,7 +532,8 @@ mod integration_tests {
     use sdv_telemetry_test_utils::{oneshot_callback, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
-    use std::str::FromStr;
+    use std::io::{BufRead, BufReader, Lines, Write};
+    use std::process::{Child, ChildStdout};
     use std::time::Duration;
     use tokio::sync::mpsc;
     use tokio::time::Instant;
@@ -666,8 +667,8 @@ mod integration_tests {
         CommsStackAccessor::new(future::ready(ctx).boxed().shared())
     }
 
-    fn create_accessor_with_context(fqin_extra: u8) -> CommsStackAccessor {
-        let ctx = crate::test_utils::make_context(fqin_extra).boxed().shared();
+    fn create_accessor_with_context() -> CommsStackAccessor {
+        let ctx = test_utils::make_context().boxed().shared();
         CommsStackAccessor::new(ctx)
     }
 
@@ -717,7 +718,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_invalid_service_name_success() {
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
         assert!(accessor.get_metadata(INVALID_SERVICE_NAME).await.unwrap().is_none());
     }
 
@@ -726,7 +727,7 @@ mod integration_tests {
     async fn get_metadata_topic_not_registered_returns_none() {
         let service_name = test_utils::make_unique_service_name();
 
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
         // The service should not exist yet, therefore metadata should be `None`.
         assert!(accessor.get_metadata(&service_name).await.unwrap().is_none());
     }
@@ -738,7 +739,7 @@ mod integration_tests {
         get_metadata_success,
 
         |message_full_name, file_descriptors: Vec<FileDescriptorProto>, expected_name, expected_proto| async move {
-            let ctx = test_utils::make_context(0).await;
+            let ctx = test_utils::make_context().await;
 
             let service_name = test_utils::make_unique_service_name();
 
@@ -795,7 +796,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_invalid_service_name_success() {
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
         let outcome = accessor.get_message_provider(INVALID_SERVICE_NAME).await;
 
@@ -808,7 +809,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_message_provider_success() {
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
         let outcome = accessor.get_message_provider(VALID_SERVICE_NAME).await;
 
@@ -821,7 +822,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_metadata_uses_cache() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let service_name = test_utils::make_unique_service_name();
 
         // Register a service
@@ -864,7 +865,7 @@ mod integration_tests {
         // Start binder thread pool to receive notification from Service Discovery
         binder::ProcessState::start_thread_pool();
 
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let service_name = test_utils::make_unique_service_name();
         let accessor = create_accessor(ctx);
         let parsed_service_name = ServiceName::parse(&service_name).unwrap();
@@ -912,7 +913,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_subscription_invalid_service_name_success() {
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
         let outcome = accessor
             .create_subscription(
@@ -933,7 +934,7 @@ mod integration_tests {
     #[tokio::test]
     async fn create_subscription_when_topic_does_not_exist_failure() {
         let service_name = test_utils::make_unique_service_name();
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
         let outcome = accessor
             .create_subscription(
@@ -956,7 +957,7 @@ mod integration_tests {
         create_subscription_success,
 
         |fetch_last_message| async move {
-            let ctx = test_utils::make_context(0).await;
+            let ctx = test_utils::make_context().await;
 
             let service_name = test_utils::make_unique_service_name();
 
@@ -1006,7 +1007,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(10_000)]
     #[tokio::test]
     async fn create_multiple_subscription_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let service_name = test_utils::make_unique_service_name();
 
@@ -1065,7 +1066,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(10_000)]
     #[tokio::test]
     async fn create_repeated_subscriptions_and_read_messages_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let service_name = test_utils::make_unique_service_name();
 
@@ -1142,7 +1143,7 @@ mod integration_tests {
     // more accurate, even when one of the threads is stuck in synchronous FFI code.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn create_subscription_and_read_messages_with_sub_sampling_interval_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let service_name = test_utils::make_unique_service_name();
         let notification_interval = SubSamplingInterval::try_from(Duration::from_secs(2)).unwrap();
@@ -1220,7 +1221,7 @@ mod integration_tests {
         recovers_after_data_tunnel_overflow,
 
         |sub_sampling_interval| async move {
-            let ctx = test_utils::make_context(0).await;
+            let ctx = test_utils::make_context().await;
 
             let service_name = test_utils::make_unique_service_name();
 
@@ -1301,7 +1302,7 @@ mod integration_tests {
             get_latest_message_metadata: Option<RpcMethodDescriptor>,
             metadata_matcher
         | async move {
-            let ctx = test_utils::make_context(0).await;
+            let ctx = test_utils::make_context().await;
             let service_name = test_utils::make_unique_service_name();
 
             let _server = test_utils::register_server(
@@ -1452,7 +1453,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn create_rpc_subscription_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let service_name = test_utils::make_unique_service_name();
         let msg = Int32Value { value: 42, ..Default::default() };
         let msg_bytes = msg.write_to_bytes().expect("Message should be successfully serialized");
@@ -1512,7 +1513,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_dt_message_provider_not_registered_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let service_name = test_utils::make_unique_service_name();
 
@@ -1526,7 +1527,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_dt_message_provider_and_read_messages_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let service_name = test_utils::make_unique_service_name();
 
@@ -1563,7 +1564,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_rpc_message_provider_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let service_name = test_utils::make_unique_service_name();
         let msg = Int32Value { value: 42, ..Default::default() };
         let msg_bytes = msg.write_to_bytes().expect("Message should be successfully serialized");
@@ -1606,7 +1607,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn get_rpc_message_provider_latest_message_not_found() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let service_name = test_utils::make_unique_service_name();
 
         let _server = test_utils::register_server(
@@ -1641,7 +1642,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_no_matching_service_exists_fails() {
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
         let unit_type = test_utils::make_unique_unit_type();
 
@@ -1656,7 +1657,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_exactly_one_matching_service_exists_success() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let accessor = create_accessor(ctx);
 
         let unit_type = test_utils::make_unique_unit_type();
@@ -1696,32 +1697,11 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_when_two_matching_services_exist_fail() {
-        let accessor = create_accessor_with_context(1);
-        let (ctx2, ctx3) = (test_utils::make_context(2).await, test_utils::make_context(3).await);
+        let accessor = create_accessor_with_context();
 
         let unit_type = test_utils::make_unique_unit_type();
-        let _publisher1 = test_utils::register_topic(
-            ctx2,
-            &format!("{unit_type}|first-unit-name"),
-            MessageMetadata {
-                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
-                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-        let _publisher2 = test_utils::register_topic(
-            ctx3,
-            &format!("{unit_type}|second-unit-name"),
-            MessageMetadata {
-                file_descriptors: vec![test_message::file_descriptor().proto().clone()],
-                message_full_name: format!(".{}", TestMessage::descriptor().full_name()),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
+        let _publisher1 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher2 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
@@ -1734,7 +1714,7 @@ mod integration_tests {
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_no_matching_service_exists_fails() {
-        let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
         let unit_type = test_utils::make_unique_unit_type();
 
@@ -1752,7 +1732,7 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_unit_type_and_unit_name_when_exactly_one_matching_service_exists_success(
     ) {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let accessor = create_accessor(ctx);
 
         let unit_type = test_utils::make_unique_unit_type();
@@ -1790,169 +1770,176 @@ mod integration_tests {
         assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
     }
 
-    /// This madness forks the current process, and creates a publisher in the child process. It
-    /// then returns an object that stops the child when dropped, as well as the FQIN of the
-    /// publisher of the child process.
-    ///
-    /// # Safety
-    ///
-    /// This function must be called from a single-threaded environment. See the warnings around the
-    /// use of `fork` [1] for more information.
-    ///
-    /// [1]: https://docs.rs/nix/latest/nix/unistd/fn.fork.html#safety
-    unsafe fn fork_and_create_publisher(
-        fqin_extra: u8,
-        service_name: String,
-    ) -> (scopeguard::ScopeGuard<(), impl FnOnce(())>, ServiceFqin) {
-        use nix::sys::wait::waitpid;
-        use nix::unistd::{
-            fork, pipe as nix_pipe, read as nix_read, write as nix_write, ForkResult,
-        };
-        use scopeguard::guard;
-        use std::os::fd::AsRawFd;
+    struct TestPublisherProxy {
+        child: Child,
+        fqin: ServiceFqin,
+        child_stdout: Lines<BufReader<ChildStdout>>,
+    }
 
-        // This will be used to send the FQIN from the child process to the parent process.
-        let (rx_child_fqin, tx_child_fqin) = nix_pipe().unwrap();
-        // This will be used to signal to the child when it should exit.
-        let (rx_child_exit, tx_child_exit) = nix_pipe().unwrap();
+    impl TestPublisherProxy {
+        fn new(
+            child: Child,
+            fqin: ServiceFqin,
+            child_stdout: Lines<BufReader<ChildStdout>>,
+        ) -> Self {
+            Self { child, fqin, child_stdout }
+        }
 
-        // SAFETY: Safe because the caller ensured that this function is called in a single-threaded
-        // environment.
-        match unsafe { fork() }.unwrap() {
-            ForkResult::Parent { child: child_pid, .. } => {
-                drop(tx_child_fqin);
-                drop(rx_child_exit);
+        fn register(&mut self) {
+            let mut stdin = self.child.stdin.as_ref().unwrap();
+            stdin.write_all(b"r").unwrap();
+            stdin.flush().unwrap();
+            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+        }
 
-                let mut child_fqin = vec![0; 1000];
-                let read_count = nix_read(rx_child_fqin.as_raw_fd(), &mut child_fqin).unwrap();
-                child_fqin.resize(read_count, 0);
+        fn unregister(&mut self) {
+            let mut stdin = self.child.stdin.as_ref().unwrap();
+            stdin.write_all(b"u").unwrap();
+            stdin.flush().unwrap();
+            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
+        }
 
-                let child_fqin =
-                    ServiceFqin::from_str(std::str::from_utf8(&child_fqin).unwrap()).unwrap();
-
-                let child = guard((), move |_| {
-                    // The child will stop when it receives any message; the message content is
-                    // inconsequential.
-                    nix_write(tx_child_exit, "stop please".as_bytes()).unwrap();
-                    waitpid(child_pid, None).unwrap();
-                });
-
-                (child, child_fqin)
-            }
-            ForkResult::Child => {
-                drop(rx_child_fqin);
-                drop(tx_child_exit);
-
-                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(
-                    async {
-                        let ctx = test_utils::make_context(fqin_extra).await;
-
-                        let _publisher = test_utils::register_topic(
-                            ctx,
-                            &service_name,
-                            MessageMetadata {
-                                file_descriptors: vec![test_message::file_descriptor()
-                                    .proto()
-                                    .clone()],
-                                message_full_name: format!(
-                                    ".{}",
-                                    TestMessage::descriptor().full_name()
-                                ),
-                                ..Default::default()
-                            },
-                        )
-                        .await
-                        .unwrap();
-
-                        nix_write(tx_child_fqin, format!("{}", ctx.get_self_fqin()).as_bytes())
-                            .unwrap();
-
-                        // Wait until we receive a message, then exit.
-                        let mut child_exit = vec![0; 1000];
-                        nix_read(rx_child_exit.as_raw_fd(), &mut child_exit).unwrap();
-                    },
-                );
-                std::process::exit(0);
-            }
+        #[expect(dead_code)]
+        fn publish(&mut self, value: u8) {
+            let mut stdin = self.child.stdin.as_ref().unwrap();
+            stdin.write_all(&[b'm', value]).unwrap();
+            stdin.flush().unwrap();
+            self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
         }
     }
 
+    impl Drop for TestPublisherProxy {
+        fn drop(&mut self) {
+            self.unregister();
+
+            drop(self.child.stdin.take());
+            assert!(self.child.wait().unwrap().success());
+        }
+    }
+
+    fn create_publisher_in_new_process(service_name: String) -> TestPublisherProxy {
+        use std::process::Command;
+        use std::process::Stdio;
+        use std::str::FromStr;
+
+        let ServiceName::UnitTypeBased { unit_type, unit_name: Some(unit_name) } =
+            ServiceName::parse(&service_name).unwrap()
+        else {
+            panic!("Unsupported service name: '{service_name}'");
+        };
+
+        let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Print child process errors to the test's stderr.
+            .stderr(Stdio::inherit())
+            .args([
+                "--fqin",
+                // Tests may run in multiple parallel processes, therefore we need to ensure that
+                // the FQINs created by the processes do not conflict with each other. This is
+                // achieved by embedding the process ID into the FQIN, which is done by the
+                // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
+                // `__PROCESS_ID__` placeholder with its process ID.
+                "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
+                "--unit-type",
+                &unit_type.to_string(),
+                "--unit-name",
+                &unit_name,
+                "--message-queue-size",
+                "100",
+            ])
+            .spawn()
+            .unwrap();
+
+        let mut child_stdout = BufReader::new(child.stdout.take().unwrap()).lines();
+        let child_fqin = child_stdout
+            .find_map(|line| {
+                let line = line.unwrap();
+                let (command, payload) = line.split_once(":")?;
+                if command == "fqin" {
+                    Some(payload.to_owned())
+                } else {
+                    None
+                }
+            })
+            .unwrap();
+        let child_fqin = ServiceFqin::from_str(&child_fqin)
+            .with_context(|| format!("Failed to parse child FQIN '{child_fqin}'"))
+            .unwrap();
+
+        let mut publisher = TestPublisherProxy::new(child, child_fqin, child_stdout);
+        publisher.register();
+        publisher
+    }
+
     // Unit Type + Unit Name -> 2 matches
-    #[test]
-    fn discover_service_by_unit_type_and_unit_name_when_two_matching_service_exists_fails() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn discover_service_by_unit_type_and_unit_name_when_two_matching_service_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let (_child1, _) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}")) };
-        let (_child2, _) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(2, format!("{unit_type}|{UNIT_NAME}")) };
+        let _publisher1 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher2 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
 
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let accessor = create_accessor_with_context(0);
+        let accessor = create_accessor_with_context();
 
-            let service_name = ServiceName::UnitTypeBased {
-                unit_type: unit_type.clone(),
-                unit_name: Some(UNIT_NAME.to_owned()),
-            };
-            let result = accessor.discover_service(&service_name).await;
+        let service_name = ServiceName::UnitTypeBased {
+            unit_type: unit_type.clone(),
+            unit_name: Some(UNIT_NAME.to_owned()),
+        };
+        let result = accessor.discover_service(&service_name).await;
 
-            assert!(result.is_none(), "Unexpected result: {result:?}");
-        });
+        assert!(result.is_none(), "Unexpected result: {result:?}");
     }
 
     // FQIN + Unit Name -> 0 matches
-    #[test]
-    fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
-        let (_child, child_fqin) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(1, format!("{unit_type}|different-name")) };
+        let publisher = create_publisher_in_new_process(format!("{unit_type}|different-name"));
 
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let accessor = create_accessor_with_context(2);
+        let accessor = create_accessor_with_context();
 
-            let service_name =
-                ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
-            let result = accessor.discover_service(&service_name).await;
+        let service_name = ServiceName::FqinBased {
+            fqin: publisher.fqin.clone(),
+            unit_name: UNIT_NAME.to_owned(),
+        };
+        let result = accessor.discover_service(&service_name).await;
 
-            assert!(result.is_none(), "Unexpected result: {result:?}");
-        });
+        assert!(result.is_none(), "Unexpected result: {result:?}");
     }
 
     // FQIN + Unit Name -> 1 match
-    #[test]
-    fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
+    #[sdv_telemetry_test_utils::timeout]
+    #[googletest::test]
+    #[tokio::test]
+    async fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
         let unit_type = test_utils::make_unique_unit_type();
-        let (_child, child_fqin) =
-            // Safety: Safe because tests are configured to run single-threaded (`--test-threads=1`)
-            // and it is called before setting up Tokio.
-            unsafe { fork_and_create_publisher(1, format!("{unit_type}|{UNIT_NAME}")) };
+        let publisher = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
 
-        tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap().block_on(async {
-            let accessor = create_accessor_with_context(2);
+        let accessor = create_accessor_with_context();
 
-            let service_name =
-                ServiceName::FqinBased { fqin: child_fqin, unit_name: UNIT_NAME.to_owned() };
-            let result = accessor.discover_service(&service_name).await;
+        let service_name = ServiceName::FqinBased {
+            fqin: publisher.fqin.clone(),
+            unit_name: UNIT_NAME.to_owned(),
+        };
+        let result = accessor.discover_service(&service_name).await;
 
-            let service_unit_definition = result.unwrap();
-            assert_eq!(service_unit_definition.get_unit_type(), unit_type);
-            assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
-        });
+        let service_unit_definition = result.unwrap();
+        assert_eq!(service_unit_definition.get_unit_type(), unit_type);
+        assert_eq!(service_unit_definition.get_unit_identifier().get_unit_name(), UNIT_NAME);
     }
 
     // FQIN + Unit Name -> 2 matches
     #[sdv_telemetry_test_utils::timeout(5_000)]
     #[tokio::test]
     async fn discover_service_by_fqin_when_two_services_with_unit_name_exist_fails() {
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let _publisher1 = test_utils::register_topic(
             ctx,
@@ -1990,7 +1977,7 @@ mod integration_tests {
         read_message_with_zero_bytes_success,
 
         |create_publisher_and_get_publish_callback| async move {
-            let ctx = test_utils::make_context(0).await;
+            let ctx = test_utils::make_context().await;
 
             let unit_type = test_utils::make_unique_unit_type();
             let unit_name = test_utils::UNIT_NAME;
@@ -2132,7 +2119,7 @@ mod integration_tests {
         // Start binder thread pool to receive notification from Service Discovery
         binder::ProcessState::start_thread_pool();
 
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let service_name = test_utils::make_unique_service_name();
         let parsed_service_name = ServiceName::parse(&service_name).unwrap();
         let accessor = Arc::new(create_accessor(ctx));

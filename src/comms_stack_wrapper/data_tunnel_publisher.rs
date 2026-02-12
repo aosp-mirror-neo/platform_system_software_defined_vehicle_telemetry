@@ -148,7 +148,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn register_topic_success() {
-        let ctx = make_context(0).await;
+        let ctx = make_context().await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -167,7 +167,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_bytes_success() {
-        let ctx = make_context(0).await;
+        let ctx = make_context().await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -196,7 +196,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_bytes_overflow() {
-        let ctx = make_context(0).await;
+        let ctx = make_context().await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -236,7 +236,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_length_delimited_proto_success() {
-        let ctx = make_context(0).await;
+        let ctx = make_context().await;
         let unit_type = make_unique_unit_type();
 
         let publisher =
@@ -271,7 +271,7 @@ mod tests {
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn publish_length_delimited_proto_too_long_failure() {
-        let ctx = make_context(0).await;
+        let ctx = make_context().await;
         let unit_type = make_unique_unit_type();
 
         let publisher =

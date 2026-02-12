@@ -272,7 +272,7 @@ mod tests {
     #[tokio::test]
     async fn get_message_descriptor_success() {
         // Get ServiceUnitDefinition
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
 
         let unit_type = test_utils::make_unique_unit_type();
         let _publisher = test_utils::register_topic(
@@ -312,7 +312,7 @@ mod tests {
     #[tokio::test]
     async fn get_message_descriptor_failure() {
         // Get ServiceUnitDefinition
-        let ctx = test_utils::make_context(0).await;
+        let ctx = test_utils::make_context().await;
         let unit_type = test_utils::make_unique_unit_type();
         let _publisher = test_utils::register_topic(
             ctx,
