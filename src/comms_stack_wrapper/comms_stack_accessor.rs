@@ -43,14 +43,12 @@ use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
-use crate::data_tunnel_subscriber::DataTunnelSubscriber;
+use crate::data_tunnel_subscriber;
 use crate::sdv_rpc_client::SdvRpcClient;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 pub struct CommsStackAccessor {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
-
-    data_tunnel_subscriber: DataTunnelSubscriber,
 
     /// Cache to store service metadata (`MessageDescriptor`s) and service unit definition,
     /// as well as service availability notifitications registration.
@@ -110,9 +108,11 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
 
         match metadata.service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => self
-                .data_tunnel_subscriber
-                .get_message_provider(unit_identifier, metadata.message_descriptor),
+            UnitMetadata::Publisher(_) => data_tunnel_subscriber::get_message_provider(
+                self.ctx.clone().await,
+                unit_identifier,
+                metadata.message_descriptor,
+            ),
             UnitMetadata::Server(_) => {
                 self.sdv_rpc_client
                     .get_message_provider(
@@ -169,16 +169,16 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         match metadata.service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => {
-                self.data_tunnel_subscriber
-                    .create_subscription(
-                        unit_identifier,
-                        fetch_last_message,
-                        metadata.message_descriptor,
-                        sub_sampling_interval,
-                        new_message_callback,
-                        cancellation_callback,
-                    )
-                    .await
+                data_tunnel_subscriber::create_subscription(
+                    self.ctx.clone().await,
+                    unit_identifier,
+                    fetch_last_message,
+                    metadata.message_descriptor,
+                    sub_sampling_interval,
+                    new_message_callback,
+                    cancellation_callback,
+                )
+                .await
             }
             UnitMetadata::Server(_) => {
                 self.sdv_rpc_client
@@ -239,12 +239,10 @@ impl CommsStackAccessor {
             Option<Arc<dyn VsidlConfigProvider + Send + Sync>>,
         >,
     ) -> Self {
-        let data_tunnel_subscriber = DataTunnelSubscriber::new(ctx.clone());
         let sdv_rpc_client = SdvRpcClient::new(ctx.clone());
 
         Self {
             ctx,
-            data_tunnel_subscriber,
             cached_metadata: Arc::new(DashMap::new()),
             sdv_rpc_client,
             vsidl_provider: vsidl_provider_factory().shared(),
@@ -394,7 +392,7 @@ impl CommsStackAccessor {
         match service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => Ok((
                 None,
-                DataTunnelSubscriber::get_message_descriptor(
+                data_tunnel_subscriber::get_message_descriptor(
                     vsidl_provider.as_ref(),
                     service_unit_definition,
                 )
