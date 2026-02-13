@@ -44,7 +44,7 @@ use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber;
-use crate::sdv_rpc_client::SdvRpcClient;
+use crate::sdv_rpc_client;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 pub struct CommsStackAccessor {
@@ -56,8 +56,6 @@ pub struct CommsStackAccessor {
     cached_metadata: Arc<
         DashMap<ServiceName, (CachedMetadata, Option<Box<dyn AvailabilityCallbackRegistration>>)>,
     >,
-
-    sdv_rpc_client: SdvRpcClient,
 
     vsidl_provider:
         future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProvider + Send + Sync>>>>,
@@ -114,13 +112,13 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 metadata.message_descriptor,
             ),
             UnitMetadata::Server(_) => {
-                self.sdv_rpc_client
-                    .get_message_provider(
-                        unit_identifier,
-                        metadata.config_descriptor.unwrap_or(Any::descriptor()),
-                        metadata.message_descriptor,
-                    )
-                    .await
+                sdv_rpc_client::get_message_provider(
+                    self.ctx.clone().await,
+                    unit_identifier,
+                    metadata.config_descriptor.unwrap_or(Any::descriptor()),
+                    metadata.message_descriptor,
+                )
+                .await
             }
         }
     }
@@ -181,16 +179,16 @@ impl ServicePublisherAccessor for CommsStackAccessor {
                 .await
             }
             UnitMetadata::Server(_) => {
-                self.sdv_rpc_client
-                    .create_subscription(
-                        unit_identifier,
-                        configuration,
-                        metadata.config_descriptor.unwrap_or(Any::descriptor()),
-                        metadata.message_descriptor,
-                        new_message_callback,
-                        cancellation_callback,
-                    )
-                    .await
+                sdv_rpc_client::create_subscription(
+                    self.ctx.clone().await,
+                    unit_identifier,
+                    configuration,
+                    metadata.config_descriptor.unwrap_or(Any::descriptor()),
+                    metadata.message_descriptor,
+                    new_message_callback,
+                    cancellation_callback,
+                )
+                .await
             }
         }
     }
@@ -239,12 +237,9 @@ impl CommsStackAccessor {
             Option<Arc<dyn VsidlConfigProvider + Send + Sync>>,
         >,
     ) -> Self {
-        let sdv_rpc_client = SdvRpcClient::new(ctx.clone());
-
         Self {
             ctx,
             cached_metadata: Arc::new(DashMap::new()),
-            sdv_rpc_client,
             vsidl_provider: vsidl_provider_factory().shared(),
         }
     }
@@ -398,7 +393,7 @@ impl CommsStackAccessor {
                 )
                 .await?,
             )),
-            UnitMetadata::Server(_) => SdvRpcClient::get_message_descriptor(
+            UnitMetadata::Server(_) => sdv_rpc_client::get_message_descriptor(
                 vsidl_provider.as_ref(),
                 service_unit_definition,
             )
