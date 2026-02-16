@@ -30,6 +30,7 @@ rust_defaults {
         "libfutures",
         "liblog_rust",
         "liblogger",
+        "libparking_lot",
         "libprotobuf",
         "libtokio",
         "libtokio_stream",

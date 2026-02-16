@@ -14,6 +14,7 @@
 
 //! This module includes all the utility functions used in telemetry service
 
+pub mod async_lazy_map;
 pub mod atomic;
 pub mod collection_extension;
 pub mod conversions;
