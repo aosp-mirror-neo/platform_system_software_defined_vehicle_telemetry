@@ -18,6 +18,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
+use futures::Stream;
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, info};
 use protobuf::reflect::MessageDescriptor;
@@ -39,6 +40,7 @@ use sdv_telemetry_service_publisher_accessor::{
     SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -51,11 +53,8 @@ pub struct CommsStackAccessor {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
 
     /// Cache to store service metadata (`MessageDescriptor`s) and service unit definition,
-    /// as well as service availability notifitications registration.
-    /// TODO: b/434121693 - update naming of AvailabilityCallbackRegistration
-    cached_metadata: Arc<
-        DashMap<ServiceName, (CachedMetadata, Option<Box<dyn AvailabilityCallbackRegistration>>)>,
-    >,
+    /// as well as a `DropGuard` for the unit change stream.
+    cached_metadata: Arc<DashMap<ServiceName, (CachedMetadata, Option<DropGuard>)>>,
 
     vsidl_provider:
         future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProvider + Send + Sync>>>>,
@@ -66,10 +65,6 @@ struct CachedMetadata {
     service_unit_definition: ServiceUnitDefinition,
     config_descriptor: Option<MessageDescriptor>,
     message_descriptor: MessageDescriptor,
-}
-
-struct AvailabilityCallbackRegistrationImpl {
-    _availability_callback_drop_guard: DropGuard,
 }
 
 #[async_trait]
@@ -202,17 +197,37 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let registration = self
-            .register_unit_change_callback(
-                service_name,
-                Arc::clone(callback),
-                |event: &ServiceUnitChangeEvent| {
-                    matches!(event, ServiceUnitChangeEvent::Registered(_))
-                },
-            )
-            .await?;
+        let mut stream = self.get_unit_change_stream(service_name).await?.filter(
+            |event: &ServiceUnitChangeEvent| {
+                future::ready(matches!(event, ServiceUnitChangeEvent::Registered(_)))
+            },
+        );
 
-        Ok(Some(registration))
+        let callback = Arc::clone(callback);
+        let cancellation_token = CancellationToken::new();
+        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
+        tokio::spawn(async move {
+            while let Some(_event) = select! {
+                biased;
+                _ = cancellation_token.cancelled() => None,
+                event = stream.next() => event,
+            } {
+                callback();
+            }
+        });
+
+        struct AvailabilityCallbackRegistrationImpl {
+            _availability_callback_drop_guard: DropGuard,
+        }
+
+        #[async_trait]
+        impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
+            async fn unregister(self: Box<Self>) {}
+        }
+
+        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {
+            _availability_callback_drop_guard: availability_callback_drop_guard,
+        })))
     }
 }
 
@@ -280,28 +295,36 @@ impl CommsStackAccessor {
                     cached_metadata_clone.remove(&service_name_clone);
                 });
 
-                // Register the callback
-                let registration = self
-                    .register_unit_change_callback(
-                        service_name,
-                        Arc::clone(&callback),
-                        |event: &ServiceUnitChangeEvent| {
-                            matches!(
+                let unit_change_stream_drop_guard =
+                    self.get_unit_change_stream(service_name).await.ok().map(|stream| {
+                        let mut stream = stream.filter(|event: &ServiceUnitChangeEvent| {
+                            future::ready(matches!(
                                 event,
                                 ServiceUnitChangeEvent::Unregistered(_)
                                     | ServiceUnitChangeEvent::Changed(_)
-                            )
-                        },
-                    )
-                    .await
-                    .ok();
+                            ))
+                        });
+
+                        let cancellation_token = CancellationToken::new();
+                        let unit_change_stream_drop_guard = cancellation_token.clone().drop_guard();
+                        tokio::spawn(async move {
+                            while let Some(_event) = select! {
+                                biased;
+                                _ = cancellation_token.cancelled() => None,
+                                event = stream.next() => event,
+                            } {
+                                callback();
+                            }
+                        });
+                        unit_change_stream_drop_guard
+                    });
 
                 let metadata = CachedMetadata {
                     service_unit_definition,
                     config_descriptor,
                     message_descriptor,
                 };
-                entry.insert((metadata.clone(), registration));
+                entry.insert((metadata.clone(), unit_change_stream_drop_guard));
                 Ok(Some(metadata))
             }
         }
@@ -404,15 +427,13 @@ impl CommsStackAccessor {
         }
     }
 
-    async fn register_unit_change_callback(
+    async fn get_unit_change_stream(
         &self,
         service_name: ServiceName,
-        callback: Arc<dyn Fn() + Send + Sync + 'static>,
-        event_matcher: impl Fn(&ServiceUnitChangeEvent) -> bool + Send + Sync + 'static,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ServiceUnitChangeEvent> + Send>>> {
         let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
 
-        let mut event_stream = match service_name {
+        Ok(match service_name {
             ServiceName::UnitTypeBased { unit_type, unit_name } => sd
                 .subscribe_service_unit_change_by_type(&unit_type)
                 .await
@@ -420,9 +441,6 @@ impl CommsStackAccessor {
                     format!("Failed to subscribe to changes for unit type {unit_type}")
                 })?
                 .filter(move |event| {
-                    if !event_matcher(event) {
-                        return future::ready(false);
-                    }
                     future::ready(match event {
                         ServiceUnitChangeEvent::Registered(service_unit)
                         | ServiceUnitChangeEvent::Unregistered(service_unit)
@@ -450,9 +468,6 @@ impl CommsStackAccessor {
                         format!("Failed to subscribe to changes for service {fqin}|{unit_name}")
                     })?
                     .filter(move |event| {
-                        if !event_matcher(event) {
-                            return future::ready(false);
-                        }
                         future::ready(match event {
                             ServiceUnitChangeEvent::Registered(service_unit)
                             | ServiceUnitChangeEvent::Unregistered(service_unit)
@@ -467,30 +482,8 @@ impl CommsStackAccessor {
                     })
                     .boxed()
             }
-        };
-
-        let callback_clone = Arc::clone(&callback);
-        let cancellation_token = CancellationToken::new();
-        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
-        tokio::spawn(async move {
-            while let Some(_event) = select! {
-                biased;
-                _ = cancellation_token.cancelled() => None,
-                event = event_stream.next() => event,
-            } {
-                callback_clone();
-            }
-        });
-
-        Ok(Box::new(AvailabilityCallbackRegistrationImpl {
-            _availability_callback_drop_guard: availability_callback_drop_guard,
-        }))
+        })
     }
-}
-
-#[async_trait]
-impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
-    async fn unregister(self: Box<Self>) {}
 }
 
 #[cfg(all(test, integration_tests))]
@@ -865,16 +858,17 @@ mod integration_tests {
 
         // Get a notification when the service is unregistered
         let (tx, rx) = oneshot_callback();
-        let _registration = accessor
-            .register_unit_change_callback(
-                parsed_service_name.clone(),
-                Arc::new(move || tx(())),
+        let mut stream =
+            accessor.get_unit_change_stream(parsed_service_name.clone()).await.unwrap().filter(
                 |event: &ServiceUnitChangeEvent| {
-                    matches!(event, ServiceUnitChangeEvent::Unregistered(_))
+                    future::ready(matches!(event, ServiceUnitChangeEvent::Unregistered(_)))
                 },
-            )
-            .await
-            .unwrap();
+            );
+        tokio::spawn(async move {
+            while let Some(_event) = stream.next().await {
+                tx(());
+            }
+        });
 
         // Scope for the publisher, so that it gets dropped and unregistered.
         {
