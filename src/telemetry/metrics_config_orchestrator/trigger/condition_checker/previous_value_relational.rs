@@ -16,15 +16,15 @@ use sdv_telemetry_expr::node_value::NodeValue;
 use sdv_telemetry_proto_rust::expression::combination_node::RelationalOperator;
 use sdv_telemetry_utils::option_extension::OptionExtension;
 
-use super::{apply_relational_operator, ConditionChecker};
+use super::{apply_relational_operator, ConditionChecker, EvaluatedFirstValuePolicy};
 
 /// Compares current value with the previous value using provided operator.
 pub(crate) struct PreviousValueRelationalConditionChecker {
     operator: RelationalOperator,
     previous_value: Option<NodeValue>,
 
-    // Defines how the very first value should be treated.
-    fire_initial: bool,
+    // Handling policy of the first evaluation, as specified in the metrics configuration.
+    first_value_policy: EvaluatedFirstValuePolicy,
 }
 
 impl ConditionChecker for PreviousValueRelationalConditionChecker {
@@ -34,11 +34,16 @@ impl ConditionChecker for PreviousValueRelationalConditionChecker {
             return Ok(false);
         }
 
-        // Extract previous value and save current value. If there is no previous value, use the
-        // behavior setting provided in the metrics configuration.
+        // Extract previous value and save current value.
         let (previous_value, current_value) = self.previous_value.take_and_insert(current_value);
-        let Some(previous_value) = previous_value else {
-            return Ok(self.fire_initial);
+        let previous_value = match previous_value {
+            Some(previous_value) => previous_value,
+            // Handle the very first expression evaluation
+            None => match &self.first_value_policy {
+                EvaluatedFirstValuePolicy::Skip => return Ok(false),
+                EvaluatedFirstValuePolicy::FireTrigger => return Ok(true),
+                EvaluatedFirstValuePolicy::CompareTo { value } => value.clone(),
+            },
         };
 
         apply_relational_operator(self.operator, &previous_value, current_value)
@@ -46,8 +51,8 @@ impl ConditionChecker for PreviousValueRelationalConditionChecker {
 }
 
 impl PreviousValueRelationalConditionChecker {
-    pub(crate) fn new_all_changes(fire_initial: bool) -> Self {
-        Self { operator: RelationalOperator::NOT_EQ, previous_value: None, fire_initial }
+    pub(crate) fn new_all_changes(first_value_policy: EvaluatedFirstValuePolicy) -> Self {
+        Self { operator: RelationalOperator::NOT_EQ, previous_value: None, first_value_policy }
     }
 }
 
@@ -58,7 +63,11 @@ mod tests {
     use googletest::assert_that;
     use googletest::matchers::container_eq;
     use lazy_static::lazy_static;
+    use protobuf::well_known_types::empty::Empty;
     use sdv_telemetry_test_utils::parameterized_test;
+    use std::sync::Arc;
+
+    use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
 
     const NONE: NodeValue = NodeValue::None;
     const TRUE: NodeValue = NodeValue::Bool(true);
@@ -75,8 +84,10 @@ mod tests {
     const T: Result<bool, ()> = Ok(true);
     const F: Result<bool, ()> = Ok(false);
 
-    fn all_changes(fire_initial: bool) -> PreviousValueRelationalConditionChecker {
-        PreviousValueRelationalConditionChecker::new_all_changes(fire_initial)
+    fn all_changes(
+        first_value_policy: EvaluatedFirstValuePolicy,
+    ) -> PreviousValueRelationalConditionChecker {
+        PreviousValueRelationalConditionChecker::new_all_changes(first_value_policy)
     }
 
     parameterized_test!(
@@ -92,19 +103,28 @@ mod tests {
             assert_that!(got, container_eq(want.to_vec()));
         },
 
-        all_changes:        (all_changes(false), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[F, T, F]),
-        all_changes_string: (all_changes(false), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[F, T, F]),
-        all_changes_mixed:  (all_changes(false), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[F, T, T, T, T]),
-        all_changes_nones:   (all_changes(false), &[&NONE, &NONE], &[F, F]),
-        all_changes_none_first:   (all_changes(false), &[&NONE, &STR_1], &[F, F]),
-        all_changes_none_between_change:   (all_changes(false), &[&INT_1, &NONE, &INT_2], &[F, F, T]),
-        all_changes_none_between_no_change:   (all_changes(false), &[&INT_1, &NONE, &INT_1], &[F, F, F]),
-        all_changes_fire_initial:        (all_changes(true), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[T, T, F]),
-        all_changes_string_fire_initial: (all_changes(true), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[T, T, F]),
-        all_changes_mixed_fire_initial:  (all_changes(true), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[T, T, T, T, T]),
-        all_changes_nones_fire_initial:   (all_changes(true), &[&NONE, &NONE], &[F, F]),
-        all_changes_none_first_fire_initial:   (all_changes(true), &[&NONE, &STR_1], &[F, T]),
-        all_changes_none_between_change_fire_initial:   (all_changes(true), &[&INT_1, &NONE, &INT_2], &[T, F, T]),
-        all_changes_none_between_no_change_fire_initial:   (all_changes(true), &[&INT_1, &NONE, &INT_1], &[T, F, F]),
+        all_changes:        (all_changes(EvaluatedFirstValuePolicy::Skip), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[F, T, F]),
+        all_changes_string: (all_changes(EvaluatedFirstValuePolicy::Skip), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[F, T, F]),
+        all_changes_mixed:  (all_changes(EvaluatedFirstValuePolicy::Skip), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[F, T, T, T, T]),
+        all_changes_nones:   (all_changes(EvaluatedFirstValuePolicy::Skip), &[&NONE, &NONE], &[F, F]),
+        all_changes_none_first:   (all_changes(EvaluatedFirstValuePolicy::Skip), &[&NONE, &STR_1], &[F, F]),
+        all_changes_none_between_change:   (all_changes(EvaluatedFirstValuePolicy::Skip), &[&INT_1, &NONE, &INT_2], &[F, F, T]),
+        all_changes_none_between_no_change:   (all_changes(EvaluatedFirstValuePolicy::Skip), &[&INT_1, &NONE, &INT_1], &[F, F, F]),
+
+        all_changes_fire_initial:        (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&INT_1, /* change */ &INT_2, /* no change */ &INT_2], &[T, T, F]),
+        all_changes_string_fire_initial: (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&STR_0, /* change */ &STR_1, /* no change */ &STR_1], &[T, T, F]),
+        all_changes_mixed_fire_initial:  (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&STR_0, &STR_1, &TRUE, &INT_1, &INT_0], &[T, T, T, T, T]),
+        all_changes_nones_fire_initial:   (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&NONE, &NONE], &[F, F]),
+        all_changes_none_first_fire_initial:   (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&NONE, &STR_1], &[F, T]),
+        all_changes_none_between_change_fire_initial:   (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&INT_1, &NONE, &INT_2], &[T, F, T]),
+        all_changes_none_between_no_change_fire_initial:   (all_changes(EvaluatedFirstValuePolicy::FireTrigger), &[&INT_1, &NONE, &INT_1], &[T, F, F]),
+
+        all_changes_initial_value_change: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: INT_1.clone() }), &[&INT_2, &INT_2, &INT_1], &[T, F, T]),
+        all_changes_initial_value_no_change: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: INT_1.clone() }), &[&INT_1, &INT_2, &INT_2], &[F, T, F]),
+        all_changes_initial_value_string_change: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: STR_0.clone() }), &[&STR_1, &STR_1, &STR_0], &[T, F, T]),
+        all_changes_initial_value_string_no_change: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: STR_0.clone() }), &[&STR_0, &STR_1, &STR_1], &[F, T, F]),
+        all_changes_initial_value_first_none_change: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: INT_1.clone() }), &[&NONE, &INT_2, &INT_2], &[F, T, F]),
+        all_changes_initial_value_first_none_no_change: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: INT_1.clone() }), &[&NONE, &INT_1, &INT_2], &[F, F, T]),
+        all_changes_initial_value_different_node_types: (all_changes(EvaluatedFirstValuePolicy::CompareTo { value: NodeValue::Message(Arc::new(ProtobufDynamicMessage::new(Arc::new(Empty::default())))) }), &[&INT_1, &INT_2], &[T, T]),
     );
 }

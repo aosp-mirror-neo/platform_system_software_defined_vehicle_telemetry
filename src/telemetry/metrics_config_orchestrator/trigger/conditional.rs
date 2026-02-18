@@ -33,7 +33,7 @@ use crate::metrics_config_orchestrator::async_event_processor::{
 };
 use crate::metrics_config_orchestrator::subscription_manager::{Activatable, ActivationId};
 use crate::metrics_config_orchestrator::trigger::condition_checker::{
-    ConditionChecker, ConstantConditionChecker, EdgeConditionChecker,
+    ConditionChecker, ConstantConditionChecker, EdgeConditionChecker, EvaluatedFirstValuePolicy,
     PreviousValueRelationalConditionChecker,
 };
 use crate::metrics_config_orchestrator::{
@@ -60,10 +60,7 @@ pub(crate) struct EdgeOptions {
 pub(crate) enum FirstValuePolicy {
     Skip,
     FireTrigger,
-    CompareTo {
-        #[allow(dead_code)]
-        node: Arc<Node>,
-    },
+    CompareTo { node: Arc<Node> },
 }
 
 #[derive(strum_macros::Display)]
@@ -201,9 +198,10 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
         let condition_checker = match &self.condition_type {
             ConditionType::RisingEdge { rising_options, first_value_policy } => {
                 let weak_conditional_trigger = Arc::downgrade(&self);
+                let evaluated_policy = self.evaluate_first_value_policy(first_value_policy).await;
                 Box::new(EdgeConditionChecker::new_rising_edge(
                     rising_options.clone(),
-                    matches!(first_value_policy, FirstValuePolicy::FireTrigger),
+                    evaluated_policy,
                     move |context| {
                         let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
                             return;
@@ -217,9 +215,10 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
             }
             ConditionType::FallingEdge { falling_options, first_value_policy } => {
                 let weak_conditional_trigger = Arc::downgrade(&self);
+                let evaluated_policy = self.evaluate_first_value_policy(first_value_policy).await;
                 Box::new(EdgeConditionChecker::new_falling_edge(
                     falling_options.clone(),
-                    matches!(first_value_policy, FirstValuePolicy::FireTrigger),
+                    evaluated_policy,
                     move |context| {
                         let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
                             return;
@@ -231,11 +230,13 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
-            ConditionType::BothEdges { rising_options, falling_options, .. } => {
+            ConditionType::BothEdges { rising_options, falling_options, first_value_policy } => {
                 let weak_conditional_trigger = Arc::downgrade(&self);
+                let evaluated_policy = self.evaluate_first_value_policy(first_value_policy).await;
                 Box::new(EdgeConditionChecker::new_both_edges(
                     rising_options.clone(),
                     falling_options.clone(),
+                    evaluated_policy,
                     move |context| {
                         let Some(conditional_trigger) = weak_conditional_trigger.upgrade() else {
                             return;
@@ -247,11 +248,10 @@ impl Activatable<TriggerSubscriber, Arc<NodeEvaluationContext>> for ConditionalT
                     Arc::clone(&self.node_evaluation_context_factory),
                 )) as Box<dyn ConditionChecker>
             }
-            ConditionType::AllChanges { first_value_policy, .. } => {
-                Box::new(PreviousValueRelationalConditionChecker::new_all_changes(matches!(
-                    first_value_policy,
-                    FirstValuePolicy::FireTrigger
-                ))) as Box<dyn ConditionChecker>
+            ConditionType::AllChanges { first_value_policy } => {
+                let policy = self.evaluate_first_value_policy(first_value_policy).await;
+                Box::new(PreviousValueRelationalConditionChecker::new_all_changes(policy))
+                    as Box<dyn ConditionChecker>
             }
             ConditionType::IsTrue => Box::new(ConstantConditionChecker::new_is_true_or_non_zero())
                 as Box<dyn ConditionChecker>,
@@ -392,6 +392,44 @@ impl ConditionalTrigger {
             self.base.fire_trigger(activation_id, context).await;
         }
     }
+
+    async fn evaluate_first_value_policy(
+        &self,
+        policy: &FirstValuePolicy,
+    ) -> EvaluatedFirstValuePolicy {
+        match policy {
+            FirstValuePolicy::Skip => EvaluatedFirstValuePolicy::Skip,
+            FirstValuePolicy::FireTrigger => EvaluatedFirstValuePolicy::FireTrigger,
+            FirstValuePolicy::CompareTo { node } => {
+                match node
+                    .evaluate(self.node_evaluation_context_factory.create().into())
+                    .into_future()
+                    .await
+                {
+                    Ok(NodeValue::None) => EvaluatedFirstValuePolicy::Skip,
+                    Ok(value) => EvaluatedFirstValuePolicy::CompareTo { value },
+                    Err(err) => {
+                        let trigger_name = self.get_name().to_owned();
+                        let metrics_config_uuid = self.get_metrics_config_uuid().to_owned();
+                        self.status_reporter.report(
+                            err.get_status_code(),
+                            format!(
+                                "Metrics config {metrics_config_uuid} conditional trigger '{trigger_name}' \
+                                failed to evaluate initial expression: {err}"
+                            ),
+                            StatusDetails::ConditionalTriggerErrorDetails(
+                                ConditionalTriggerErrorDetails {
+                                    metricsConfigUUID: metrics_config_uuid.to_string(),
+                                    triggerName: trigger_name,
+                                },
+                            ),
+                        );
+                        EvaluatedFirstValuePolicy::Skip
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -404,7 +442,7 @@ mod tests {
         TelemetryServiceStatus::TelemetryServiceStatus,
         TelemetryServiceStatusCodes::TelemetryServiceStatusCodes as StatusCodes,
     };
-    use googletest::matchers::{eq, none, result_of_ref, some};
+    use googletest::matchers::{contains_substring, eq, none, pat, result_of_ref, some};
     use googletest::{assert_that, expect_that};
     use lazy_static::lazy_static;
     use protobuf::reflect::ReflectEqMode;
@@ -415,12 +453,16 @@ mod tests {
         node_error::MessageProviderError,
     };
     use sdv_telemetry_platform_abstraction_layer::new_stub_pal;
+    use sdv_telemetry_proto_rust::expression::{
+        combination_node::Operator as OperatorProto, combination_node::RelationalOperator,
+    };
     use sdv_telemetry_service_publisher_accessor::ServicePublisherAccessorError;
     use sdv_telemetry_test_utils::oneshot_callback;
     use sdv_telemetry_test_utils::{msg_dyn_eq, parameterized_test};
     use sdv_telemetry_utils::conversions::u32_into_usize;
     use std::collections::HashMap;
     use std::future;
+    use tokio::time::{timeout, Duration};
 
     use crate::metrics_config_orchestrator::node_evaluation_context_factory::NodeEvaluationContextFactoryImpl;
     use crate::metrics_config_orchestrator::protobuf_dynamic_message::ProtobufDynamicMessage;
@@ -793,6 +835,152 @@ mod tests {
         is_false_none:      (ConditionType::IsFalse, &[None, Some(&*FALSE_MSG), None, Some(&*INT_0_MSG)], &[&*FALSE_MSG, &*INT_0_MSG],),
     );
 
+    parameterized_test!(
+        #[googletest::test]
+        #[sdv_telemetry_test_utils::timeout]
+        #[tokio::test]
+        activate_evaluates_initial_expression,
+
+        |condition_type_factory: fn(&Arc<MockMessageProvider>) -> ConditionType,
+         initial_provider_setup: fn(&Arc<MockMessageProvider>),
+         message: &Arc<dyn MessageDyn>,
+         fired_count: u32| async move {
+            let initial_message_provider = Arc::new(MockMessageProvider::new());
+            initial_provider_setup(&initial_message_provider);
+
+            let condition_type = condition_type_factory(&initial_message_provider);
+
+            let (trigger, message_provider, parent_trigger, subscription_manager) =
+                create_valid_conditional_trigger_with_mock_subscription_manager(
+                    condition_type,
+                    None,
+                );
+
+            let callback_listener = Arc::new(MockCallbackListener::new());
+            subscription_manager
+                .subscribe_for_test(
+                    TriggerSubscriber::MetricsConfigStart,
+                    callback_listener.create_callback(),
+                )
+                .await;
+
+            Arc::clone(&trigger).activate(ACTIVATION_ID).await;
+
+            message_provider.set_next_sync_result(Ok(Some(
+                Arc::new(ProtobufDynamicMessage::new(Arc::clone(message))) as Arc<dyn DynamicMessage>
+            )));
+            parent_trigger.fire().await;
+
+            let _ = timeout(Duration::from_millis(100), callback_listener.wait_for_callback_fired()).await;
+
+            assert_eq!(callback_listener.get_fired_count(), fired_count);
+        },
+
+        constant_leaf_node: (
+            |_| ConditionType::RisingEdge {
+                rising_options: EdgeOptions::default(),
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(0) }),
+                }
+            },
+            |_| {},
+            // 0 -> 1, rising edge
+            &INT_1_MSG,
+            1,
+        ),
+        constant_leaf_node_no_edge: (
+            |_| ConditionType::RisingEdge {
+                rising_options: EdgeOptions::default(),
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(2) }),
+                }
+            },
+            |_| {},
+            // 2 -> 1, no rising edge
+            &INT_1_MSG,
+            0,
+        ),
+        field_leaf_node: (
+            |message_provider| ConditionType::FallingEdge {
+                falling_options: EdgeOptions::default(),
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(create_field_node("value".to_owned(), Arc::clone(message_provider))),
+                }
+            },
+            |message_provider| {
+                message_provider.set_next_sync_result(Ok(Some(
+                    Arc::new(ProtobufDynamicMessage::new(Arc::clone(&*INT_2_MSG))) as Arc<dyn DynamicMessage>
+                )));
+            },
+            // 2 -> 1, falling edge
+            &INT_1_MSG,
+            1,
+        ),
+        field_leaf_node_no_edge: (
+            |message_provider| ConditionType::FallingEdge {
+                falling_options: EdgeOptions::default(),
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(create_field_node("value".to_owned(), Arc::clone(message_provider))),
+                }
+            },
+            |message_provider| {
+                message_provider.set_next_sync_result(Ok(Some(
+                    Arc::new(ProtobufDynamicMessage::new(Arc::clone(&*INT_1_MSG))) as Arc<dyn DynamicMessage>
+                )));
+            },
+            // 1 -> 1, no falling edge
+            &INT_1_MSG,
+            0,
+        ),
+        field_leaf_node_no_initial_message: (
+            |message_provider| ConditionType::FallingEdge {
+                falling_options: EdgeOptions::default(),
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(create_field_node("value".to_owned(), Arc::clone(message_provider))),
+                }
+            },
+            // no initial message
+            |message_provider| {
+                message_provider.set_next_sync_result(Ok(None));
+            },
+            // the FirstValuePolicy should fallback to Skip
+            &INT_1_MSG,
+            0,
+        ),
+        combination_node: (
+            |_| ConditionType::AllChanges {
+                // evaluates to true
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(Node::Combination {
+                        operator: OperatorProto::RelationalOperator(RelationalOperator::EQ.into()),
+                        left: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) })),
+                        right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) })),
+                    }),
+                },
+            },
+            |_| {},
+            // true -> false, a change
+            &FALSE_MSG,
+            1,
+        ),
+        combination_node_no_change: (
+            |_| ConditionType::AllChanges {
+                // evaluates to false
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(Node::Combination {
+                        operator: OperatorProto::RelationalOperator(RelationalOperator::NOT_EQ.into()),
+                        left: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) })),
+                        right: Some(Arc::new(Node::ConstantLeaf { value: NodeValue::Int32(5) })),
+                    }),
+                },
+            },
+            |_| {},
+            // false -> false, no change
+            &FALSE_MSG,
+            0,
+        ),
+    );
+
     #[sdv_telemetry_test_utils::timeout]
     #[tokio::test]
     async fn activate_handles_async_expression_result() {
@@ -888,17 +1076,72 @@ mod tests {
 
         // Wait for error status to be delivered
         let status = rx.await;
-        assert!(
-            matches!(&status, TelemetryServiceStatus {
-                id: 0,
-                code: StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR,
-                message,
-                details: StatusDetails::ConditionalTriggerErrorDetails(
-                    ConditionalTriggerErrorDetails { metricsConfigUUID, triggerName }
+        assert_that!(
+            status,
+            pat!(TelemetryServiceStatus {
+                id: eq(&0),
+                code: eq(&StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR),
+                message: all!(
+                    contains_substring("failed to evaluate condition"),
+                    contains_substring(ERROR_MESSAGE)
                 ),
-            }
-            if message.contains("failed to evaluate condition") && message.contains(ERROR_MESSAGE) && *metricsConfigUUID == CONFIG_UUID.to_string() && triggerName == TRIGGER_NAME),
-            "Unexpected status: {status:?}"
+                details: pat!(StatusDetails::ConditionalTriggerErrorDetails(pat!(
+                    ConditionalTriggerErrorDetails {
+                        metricsConfigUUID: eq(&CONFIG_UUID.to_string()),
+                        triggerName: eq(TRIGGER_NAME),
+                    }
+                ))),
+            })
+        );
+    }
+
+    #[sdv_telemetry_test_utils::timeout]
+    #[tokio::test]
+    async fn initialize_node_fails_reports_error() {
+        let initial_node_message_provider = Arc::new(MockMessageProvider::new());
+        let (trigger, _, _) = create_valid_conditional_trigger(
+            ConditionType::AllChanges {
+                first_value_policy: FirstValuePolicy::CompareTo {
+                    node: Arc::new(create_field_node(
+                        "field".to_owned(),
+                        Arc::clone(&initial_node_message_provider),
+                    )),
+                },
+            },
+            None,
+        );
+
+        initial_node_message_provider.set_next_sync_result(Err(
+            MessageProviderError::MessageRetrievalError {
+                e: ServicePublisherAccessorError::MessageRetrievalFailed(anyhow!(ERROR_MESSAGE)),
+            },
+        ));
+
+        let (tx, rx) = oneshot_callback();
+        let mut trigger = Arc::into_inner(trigger).unwrap();
+        trigger.status_reporter = Arc::new(StatusReporterImpl::new(tx));
+        let trigger = Arc::new(trigger);
+
+        Arc::clone(&trigger).activate(ACTIVATION_ID).await;
+
+        // Wait for error status to be delivered
+        let status = rx.await;
+        assert_that!(
+            status,
+            pat!(TelemetryServiceStatus {
+                id: eq(&0),
+                code: eq(&StatusCodes::METRICS_CONFIG_RUNTIME_SERVICE_MESSAGE_RETRIEVAL_ERROR),
+                message: all!(
+                    contains_substring("failed to evaluate initial expression"),
+                    contains_substring(ERROR_MESSAGE)
+                ),
+                details: pat!(StatusDetails::ConditionalTriggerErrorDetails(pat!(
+                    ConditionalTriggerErrorDetails {
+                        metricsConfigUUID: eq(&CONFIG_UUID.to_string()),
+                        triggerName: eq(TRIGGER_NAME),
+                    }
+                ))),
+            })
         );
     }
 }
