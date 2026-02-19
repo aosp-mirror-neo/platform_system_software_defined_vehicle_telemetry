@@ -187,7 +187,6 @@ impl TestPublisherProxy {
         self.child_stdout.find(|line| line.as_ref().unwrap() == "done").unwrap().unwrap();
     }
 
-    #[expect(dead_code)]
     pub(super) fn publish(&mut self, value: u8) {
         let mut stdin = self.child.stdin.as_ref().unwrap();
         stdin.write_all(&[b'm', value]).unwrap();
@@ -207,7 +206,6 @@ impl Drop for TestPublisherProxy {
 
 pub(super) enum PublisherType {
     DataTunnel,
-    #[expect(dead_code)]
     Rpc,
 }
 

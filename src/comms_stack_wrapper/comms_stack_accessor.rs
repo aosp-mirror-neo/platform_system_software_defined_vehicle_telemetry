@@ -14,28 +14,37 @@
 
 //! Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 
+use anyhow::anyhow;
 use async_trait::async_trait;
+use futures::future::OptionFuture;
 use futures::future::{self, BoxFuture};
+use futures::Stream;
 use futures::{FutureExt, StreamExt};
+use log::warn;
 use log::{error, info};
 use protobuf::well_known_types::any::Any;
+use protobuf::MessageDyn;
 use sdv_comms::sd::{ServiceDiscoveryManager, ServiceUnitDefinition};
 use sdv_comms::ContextRef;
 use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProvider};
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_comms_utils::ServiceName;
+use sdv_telemetry_service_publisher_accessor::ServicePublisherMessageProvider;
 use sdv_telemetry_service_publisher_accessor::{
     AvailabilityCallback, AvailabilityCallbackRegistration, CancellationCallback,
     CreateSubscriptionOutcome, GetMessageProviderOutcome, NewMessageCallback,
     ServicePublisherAccessor, ServicePublisherAccessorError, ServicePublisherMetadata,
     SubSamplingInterval,
 };
+use std::pin::pin;
 use std::sync::Arc;
 use tokio::select;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
 use crate::data_tunnel_subscriber;
 use crate::metadata::MetadataCache;
+use crate::metadata::MetadataGeneration;
 use crate::metadata::MetadataServiceType;
 use crate::sdv_rpc_client;
 
@@ -82,32 +91,127 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         let mutex_guard = self
             .metadata_cache
-            .get_or_fetch_current(ctx, service_name)
+            .get_or_fetch_current(ctx, service_name.clone())
             .await
             .map_err(ServicePublisherAccessorError::MetadataParsingFailed)?;
-        let Some(metadata_generation) =
-            mutex_guard.borrow_map(|metadata_generation| metadata_generation.to_owned())
-        else {
-            return Ok(GetMessageProviderOutcome::NotRegistered);
-        };
+        let mut stream = mutex_guard.subscribe();
         drop(mutex_guard);
 
-        match metadata_generation.service_type {
-            MetadataServiceType::Dt => data_tunnel_subscriber::get_message_provider(
-                ctx,
-                metadata_generation.unit_identifier,
-                metadata_generation.metadata.message_descriptor,
-            ),
-            MetadataServiceType::Rpc => {
-                sdv_rpc_client::get_message_provider(
-                    ctx,
-                    metadata_generation.unit_identifier,
-                    metadata_generation.metadata.get_config_descriptor_or_any(),
-                    metadata_generation.metadata.message_descriptor,
-                )
-                .await
+        // This is guaranteed to immediately return the latest value, because the stream immediately
+        // yields the latest value.
+        let metadata_generation = stream.next().await;
+        let Some(Some(metadata_generation)) = metadata_generation else {
+            return Ok(GetMessageProviderOutcome::NotRegistered);
+        };
+
+        struct ServicePublisherMessageProviderImpl {
+            inner: Arc<AsyncMutex<Option<Box<dyn ServicePublisherMessageProvider>>>>,
+            service_name: ServiceName,
+        }
+
+        impl ServicePublisherMessageProviderImpl {
+            fn new(
+                ctx: ContextRef,
+                inner: Box<dyn ServicePublisherMessageProvider>,
+                stream: impl Stream<Item = Option<MetadataGeneration>> + 'static + Send,
+                service_name: ServiceName,
+            ) -> Self {
+                let inner = Arc::new(AsyncMutex::new(Some(inner)));
+                let weak_inner = Arc::downgrade(&inner);
+                let service_name_clone = service_name.clone();
+                tokio::spawn(async move {
+                    let mut stream = pin!(stream);
+                    while let Some(metadata_generation) = stream.next().await {
+                        let Some(inner) = weak_inner.upgrade() else {
+                            // `ServicePublisherMessageProviderImpl` has been dropped.
+                            break;
+                        };
+
+                        let service_name = service_name_clone.clone();
+                        let new_inner = OptionFuture::from(metadata_generation.map(
+                            |metadata_generation| async move {
+                                let outcome =
+                                    Self::create_inner_message_provider(ctx, metadata_generation)
+                                        .await;
+                                match outcome {
+                                    Ok(GetMessageProviderOutcome::Success(inner)) => Some(inner),
+                                    outcome @ (
+                                        Ok(GetMessageProviderOutcome::GetNotSupported | GetMessageProviderOutcome::NotRegistered) |
+                                        Err(_)
+                                    ) => {
+                                        warn!("Failed to re-create Getter message provider for {service_name}: {outcome:?}");
+                                        None
+                                    },
+                                }
+                            },
+                        ))
+                        .await
+                        .flatten();
+                        *inner.lock().await = new_inner;
+                    }
+                });
+
+                Self { inner, service_name }
+            }
+
+            async fn create_inner_message_provider(
+                ctx: ContextRef,
+                metadata_generation: MetadataGeneration,
+            ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
+                match metadata_generation.service_type {
+                    MetadataServiceType::Dt => data_tunnel_subscriber::get_message_provider(
+                        ctx,
+                        metadata_generation.unit_identifier,
+                        metadata_generation.metadata.message_descriptor,
+                    ),
+                    MetadataServiceType::Rpc => {
+                        sdv_rpc_client::get_message_provider(
+                            ctx,
+                            metadata_generation.unit_identifier,
+                            metadata_generation.metadata.get_config_descriptor_or_any(),
+                            metadata_generation.metadata.message_descriptor,
+                        )
+                        .await
+                    }
+                }
             }
         }
+
+        #[async_trait]
+        impl ServicePublisherMessageProvider for ServicePublisherMessageProviderImpl {
+            async fn get_latest_message(
+                &self,
+                configuration: Option<&Any>,
+            ) -> Result<Option<Box<dyn MessageDyn>>, ServicePublisherAccessorError> {
+                let inner = self.inner.lock().await;
+                let Some(inner) = inner.as_ref() else {
+                    return Err(ServicePublisherAccessorError::MessageRetrievalFailed(anyhow!(
+                        "Service {} is not currently available.",
+                        self.service_name
+                    )));
+                };
+
+                inner.get_latest_message(configuration).await
+            }
+        }
+
+        let inner_message_provider =
+            match ServicePublisherMessageProviderImpl::create_inner_message_provider(
+                ctx,
+                metadata_generation,
+            )
+            .await?
+            {
+                GetMessageProviderOutcome::Success(message_provider) => message_provider,
+                outcome => return Ok(outcome),
+            };
+
+        Ok(GetMessageProviderOutcome::Success(Box::new(ServicePublisherMessageProviderImpl::new(
+            ctx,
+            inner_message_provider,
+            stream,
+            service_name,
+        ))))
     }
 
     async fn create_subscription<'a>(
@@ -315,7 +419,7 @@ mod integration_tests {
     use googletest::description::Description;
     use googletest::matcher::{Matcher, MatcherBase, MatcherResult};
     use googletest::matchers::{
-        contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
+        anything, contains_substring, displays_as, each, eq, err, is_false, is_true, none, ok, pat,
         result_of, result_of_ref, some,
     };
     use googletest::{assert_that, expect_that};
@@ -335,6 +439,7 @@ mod integration_tests {
     use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
     use sdv_status_rs::SdvStatus;
     use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
+    use sdv_telemetry_service_publisher_accessor::ServicePublisherMessageProvider;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
     use sdv_telemetry_test_proto_bool_value::{
         test_bool_value_1::BoolValue as TestBoolValue1,
@@ -346,6 +451,7 @@ mod integration_tests {
     use std::pin::pin;
     use std::time::Duration;
     use tokio::sync::mpsc;
+    use tokio::time::sleep;
     use tokio::time::Instant;
 
     use crate::data_tunnel_publisher::DataTunnelPublisher;
@@ -502,6 +608,14 @@ mod integration_tests {
                 .boxed()
             },
         )
+    }
+
+    fn get_i64_field(message: Box<dyn MessageDyn>) -> i64 {
+        let field_descriptor = message.descriptor_dyn().field_by_name("value").unwrap();
+        match field_descriptor.get_singular(&*message) {
+            Some(ReflectValueRef::I64(value)) => value,
+            result => panic!("Unexpected value: {result:?}"),
+        }
     }
 
     fn get_int_field_value(message: Box<dyn MessageDyn>) -> i32 {
@@ -1909,4 +2023,133 @@ mod integration_tests {
 
         expect_that!(accessor.get_metadata(&service_name).await, ok(none()));
     }
+
+    parameterized_test!(
+        #[sdv_telemetry_test_utils::timeout]
+        #[googletest::test]
+        #[tokio::test]
+        get_message_provider_works_after_publisher_is_interrupted,
+
+        |initial_publisher_type, interruption_action| async move {
+            // Start binder thread pool to receive notification from Service Discovery
+            binder::ProcessState::start_thread_pool();
+
+            let service_name = test_utils::make_unique_service_name();
+            let mut publisher = test_utils::create_publisher_in_new_process(service_name.clone(), initial_publisher_type);
+
+            let accessor = create_accessor_with_context();
+            let outcome = accessor.get_message_provider(&service_name).await.unwrap();
+            let GetMessageProviderOutcome::Success(provider) = outcome else {
+                panic!("Unexpected outcome: {outcome:?}");
+            };
+
+            publisher.publish(1);
+            let msg = provider.get_latest_message(None).await.unwrap().unwrap();
+            expect_that!(get_i64_field(msg), eq(1));
+
+            let mut publisher = interruption_action(publisher, provider.as_ref(), service_name).await;
+
+            publisher.publish(2);
+
+            let mut msg = None;
+            for _ in 0..10 {
+                // This may fail intermittently until we have processed the publisher re-creation
+                // and connected to it again.
+                let result = provider.get_latest_message(None).await;
+                if let Ok(result) = result {
+                    msg = result;
+                    break;
+                } else {
+                    sleep(Duration::from_millis(50)).await;
+                }
+            }
+            expect_that!(get_i64_field(msg.unwrap()), eq(2));
+        },
+
+        dt_unregistered_and_reregistered: (
+            test_utils::PublisherType::DataTunnel,
+            async |mut publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, _service_name: String| {
+                publisher.unregister();
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from unregistered publisher"
+                );
+                publisher.register();
+                publisher
+             }
+        ),
+        dt_killed_and_restarted: (
+            test_utils::PublisherType::DataTunnel,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::DataTunnel)
+             }
+        ),
+        dt_killed_and_restarted_as_rpc: (
+            test_utils::PublisherType::DataTunnel,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::Rpc)
+             }
+        ),
+
+        rpc_unregistered_and_reregistered: (
+            test_utils::PublisherType::Rpc,
+            async |mut publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, _service_name: String| {
+                publisher.unregister();
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from unregistered publisher"
+                );
+                publisher.register();
+                publisher
+             }
+        ),
+        rpc_killed_and_restarted: (
+            test_utils::PublisherType::Rpc,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::Rpc)
+             }
+        ),
+        rpc_killed_and_restarted_as_dt: (
+            test_utils::PublisherType::Rpc,
+            async |publisher: test_utils::TestPublisherProxy, provider: &dyn ServicePublisherMessageProvider, service_name: String| {
+                // Kill the publisher.
+                drop(publisher);
+                let result = provider.get_latest_message(None).await;
+                expect_that!(
+                    result,
+                    err(anything()),
+                    "Expected error when getting message from killed publisher"
+                );
+                test_utils::create_publisher_in_new_process(service_name, test_utils::PublisherType::DataTunnel)
+             }
+        ),
+    );
 }
