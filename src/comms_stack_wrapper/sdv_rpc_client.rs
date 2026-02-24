@@ -33,6 +33,7 @@ use sdv_telemetry_service_publisher_accessor::{
     GetMessageProviderOutcome, MessageId, NewMessageCallback, ServicePublisherAccessorError,
     ServicePublisherMessageProvider, ServicePublisherSubscription,
 };
+use std::time::Duration;
 use std::time::SystemTime;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
@@ -42,6 +43,7 @@ use crate::unit_identifier_to_string;
 const CREATE_SUBSCRIPTION_METHOD: &str = "CreateSubscription";
 const GET_LATEST_MESSAGE_METHOD: &str = "GetLatestMessage";
 const PROTO_ANY_FULL_NAME: &str = "google.protobuf.Any";
+const RPC_UNARY_CALL_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub(super) struct SdvRpcClient {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
@@ -62,13 +64,12 @@ impl SdvRpcClient {
         config_descriptor: MessageDescriptor,
         message_descriptor: MessageDescriptor,
     ) -> Result<GetMessageProviderOutcome, ServicePublisherAccessorError> {
-        let client = rpc::Client::create(
-            self.ctx.clone().await,
-            unit_identifier.clone(),
-            &rpc::ClientOptions::default(),
-        )
-        .await
-        .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
+        let mut client_options = rpc::ClientOptions::default();
+        client_options.set_timeout(RPC_UNARY_CALL_TIMEOUT);
+        let client =
+            rpc::Client::create(self.ctx.clone().await, unit_identifier.clone(), &client_options)
+                .await
+                .map_err(ServicePublisherAccessorError::RpcFailedToConnect)?;
 
         struct ServicePublisherMessageProviderImpl {
             client: rpc::Client,
@@ -128,6 +129,15 @@ impl SdvRpcClient {
         mut new_message_callback: NewMessageCallback,
         cancellation_callback: CancellationCallback,
     ) -> Result<CreateSubscriptionOutcome, ServicePublisherAccessorError> {
+        // Note: **No timeout** is set on this client.
+        //
+        // We set a general timeout, `RPC_UNARY_CALL_TIMEOUT` by default, on gRPC cals from the
+        // `client` in `get_latest_message()`, which is **only** used for unary gRPC calls.
+        //
+        // This `client` is used **only** for server-streaming calls, which gRPC treats as the
+        // timeout for receiving the whole stream (not the first message). Defining a general
+        // timeout for all server-streaming calls is tricky. Some server-streaming RPC calls might
+        // justifiably take a few seconds, even longer.
         let client = rpc::Client::create(
             self.ctx.clone().await,
             unit_identifier.clone(),
