@@ -26,7 +26,7 @@ use sdv_comms::id::UnitIdentifier;
 use sdv_comms::rpc;
 use sdv_comms::sd::ServiceUnitDefinition;
 use sdv_comms::ContextRef;
-use sdv_config_provider::vsidl_provider_api::VsidlConfigProviderV1;
+use sdv_config_provider::vsidl_provider_api::VsidlConfigProvider;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_service_publisher_accessor::{
     CancellationCallback, CreateSubscriptionOutcome, FetchLastMessageOutcome,
@@ -207,7 +207,7 @@ impl SdvRpcClient {
     }
 
     pub(super) async fn get_message_descriptor(
-        vsidl_provider: &dyn VsidlConfigProviderV1,
+        vsidl_provider: &dyn VsidlConfigProvider,
         service_unit_definition: &ServiceUnitDefinition,
     ) -> anyhow::Result<(MessageDescriptor, MessageDescriptor)> {
         let (create_subscription_req, create_subscription_res) = Self::get_descriptor_for_method(
@@ -246,11 +246,11 @@ impl SdvRpcClient {
     }
 
     async fn get_descriptor_for_method(
-        vsidl_provider: &dyn VsidlConfigProviderV1,
+        vsidl_provider: &dyn VsidlConfigProvider,
         service_unit_definition: &ServiceUnitDefinition,
         method_name: &str,
     ) -> anyhow::Result<Option<(MessageDescriptor, MessageDescriptor)>> {
-        let Some(rpc_descriptor) = vsidl_provider
+        let Ok(rpc_descriptor) = vsidl_provider
             .get_rpc_method_descriptor(
                 service_unit_definition.get_service_bundle_identity().get_fqin(),
                 &service_unit_definition.get_unit_type(),

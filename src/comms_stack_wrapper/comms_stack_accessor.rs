@@ -28,7 +28,7 @@ use sdv_comms::sd::{
     UnitNameDiscoveryArgs,
 };
 use sdv_comms::ContextRef;
-use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProviderV1};
+use sdv_config_provider::{vsidl_provider, vsidl_provider_api::VsidlConfigProvider};
 use sdv_proto_reflection_rs::message_metadata::MessageMetadata;
 use sdv_status_rs::SdvStatusCode;
 use sdv_telemetry_comms_utils::ServiceName;
@@ -62,7 +62,7 @@ pub struct CommsStackAccessor {
     sdv_rpc_client: SdvRpcClient,
 
     vsidl_provider:
-        future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProviderV1 + Send + Sync>>>>,
+        future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProvider + Send + Sync>>>>,
 }
 
 #[derive(Clone)]
@@ -225,7 +225,7 @@ impl CommsStackAccessor {
         Self::new_with_vsidl_provider_factory(ctx, move || {
             async move {
                 Some(vsidl_provider::new_for_telemetry_agent(ctx_clone.await)).map(|provider| {
-                    Arc::new(provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>
+                    Arc::new(provider) as Arc<dyn VsidlConfigProvider + Send + Sync>
                 })
             }
             .boxed()
@@ -236,7 +236,7 @@ impl CommsStackAccessor {
         ctx: future::Shared<BoxFuture<'static, ContextRef>>,
         vsidl_provider_factory: impl FnOnce() -> BoxFuture<
             'static,
-            Option<Arc<dyn VsidlConfigProviderV1 + Send + Sync>>,
+            Option<Arc<dyn VsidlConfigProvider + Send + Sync>>,
         >,
     ) -> Self {
         let data_tunnel_subscriber = DataTunnelSubscriber::new(ctx.clone());
@@ -521,7 +521,7 @@ mod integration_tests {
     use sdv_comms::dt;
     use sdv_comms::id::ServiceFqin;
     use sdv_comms::rpc;
-    use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProviderV1, RpcMethodDescriptor};
+    use sdv_config_provider::vsidl_provider_api::{MockVsidlConfigProvider, RpcMethodDescriptor};
     use sdv_status_rs::SdvStatus;
     use sdv_telemetry_service_publisher_accessor::FetchLastMessageOutcome;
     use sdv_telemetry_test_proto::test_message::{self, TestMessage};
@@ -674,13 +674,13 @@ mod integration_tests {
 
     fn create_accessor_with_mock_vsidl_provider(
         ctx: ContextRef,
-        vsidl_provider: MockVsidlConfigProviderV1,
+        vsidl_provider: MockVsidlConfigProvider,
     ) -> CommsStackAccessor {
         CommsStackAccessor::new_with_vsidl_provider_factory(
             future::ready(ctx).boxed().shared(),
             || {
                 future::ready(Some(
-                    Arc::new(vsidl_provider) as Arc<dyn VsidlConfigProviderV1 + Send + Sync>
+                    Arc::new(vsidl_provider) as Arc<dyn VsidlConfigProvider + Send + Sync>
                 ))
                 .boxed()
             },
@@ -838,11 +838,11 @@ mod integration_tests {
         // Set expectation to have descriptors to be requested by get_metadata only once.
         // Note that RPC Client requests two descriptors within one request
         // (one for both create_subscription and get_latest_message methods), so we do .times(2)
-        let mut vsidl_provider_mock = MockVsidlConfigProviderV1::new();
+        let mut vsidl_provider_mock = MockVsidlConfigProvider::new();
         vsidl_provider_mock
             .expect_get_rpc_method_descriptor()
             .times(2)
-            .returning(|_, _, _| Some(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()));
+            .returning(|_, _, _| Ok(RPC_DESCRIPTOR_INT32_REQUEST_RESPONSE.clone()));
         let accessor = create_accessor_with_mock_vsidl_provider(ctx, vsidl_provider_mock);
 
         // Call the VSIDL provider and populate the cache.
@@ -1324,15 +1324,23 @@ mod integration_tests {
             .await
             .unwrap();
 
-            let mut vsidl_provider_mock = MockVsidlConfigProviderV1::new();
+            let mut vsidl_provider_mock = MockVsidlConfigProvider::new();
             vsidl_provider_mock
                 .expect_get_rpc_method_descriptor()
                 .withf(|_, _, method_name| method_name == "CreateSubscription")
-                .returning(move |_, _, _| create_subscription_metadata.clone());
+                .returning(move |_, _, _| {
+                    create_subscription_metadata
+                        .clone()
+                        .ok_or_else(|| SdvStatus::new(SdvStatusCode::NotFound))
+                });
             vsidl_provider_mock
                 .expect_get_rpc_method_descriptor()
                 .withf(|_, _, method_name| method_name == "GetLatestMessage")
-                .returning(move |_, _, _| get_latest_message_metadata.clone());
+                .returning(move |_, _, _| {
+                    get_latest_message_metadata
+                        .clone()
+                        .ok_or_else(|| SdvStatus::new(SdvStatusCode::NotFound))
+                });
             let subscriber = create_accessor_with_mock_vsidl_provider(ctx, vsidl_provider_mock);
 
             let metadata = subscriber.get_metadata(&service_name).await;
