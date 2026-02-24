@@ -42,6 +42,7 @@ pub fn timeout(
     timeout_impl(attr.into(), item.into()).unwrap_or_else(|err| err.to_compile_error()).into()
 }
 
+#[allow(clippy::test_attr_in_doctest)]
 /// Macro for generating parameterized tests. Arguments:
 /// - Test attributes and a common test name prefix for all generated tests.
 /// - A closure that takes a number of arguments, and provides the actual test body. If the
