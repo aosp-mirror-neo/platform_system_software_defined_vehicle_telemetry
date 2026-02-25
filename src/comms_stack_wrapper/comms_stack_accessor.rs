@@ -18,6 +18,7 @@ use anyhow::{anyhow, Context};
 use async_trait::async_trait;
 use dashmap::{mapref::entry::Entry as DashMapEntry, DashMap};
 use futures::future::{self, BoxFuture};
+use futures::Stream;
 use futures::{FutureExt, StreamExt};
 use log::{debug, error, info};
 use protobuf::reflect::MessageDescriptor;
@@ -39,27 +40,21 @@ use sdv_telemetry_service_publisher_accessor::{
     SubSamplingInterval,
 };
 use sdv_telemetry_utils::descriptor_utils::FileDescriptorsAndWkts;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::select;
 use tokio_util::sync::{CancellationToken, DropGuard};
 
-use crate::data_tunnel_subscriber::DataTunnelSubscriber;
-use crate::sdv_rpc_client::SdvRpcClient;
+use crate::data_tunnel_subscriber;
+use crate::sdv_rpc_client;
 
 /// Service Publisher Accessor that provides access to Comms Stack publishers (Data Tunnel and SDV RPC).
 pub struct CommsStackAccessor {
     ctx: future::Shared<BoxFuture<'static, ContextRef>>,
 
-    data_tunnel_subscriber: DataTunnelSubscriber,
-
     /// Cache to store service metadata (`MessageDescriptor`s) and service unit definition,
-    /// as well as service availability notifitications registration.
-    /// TODO: b/434121693 - update naming of AvailabilityCallbackRegistration
-    cached_metadata: Arc<
-        DashMap<ServiceName, (CachedMetadata, Option<Box<dyn AvailabilityCallbackRegistration>>)>,
-    >,
-
-    sdv_rpc_client: SdvRpcClient,
+    /// as well as a `DropGuard` for the unit change stream.
+    cached_metadata: Arc<DashMap<ServiceName, (CachedMetadata, Option<DropGuard>)>>,
 
     vsidl_provider:
         future::Shared<BoxFuture<'static, Option<Arc<dyn VsidlConfigProvider + Send + Sync>>>>,
@@ -70,10 +65,6 @@ struct CachedMetadata {
     service_unit_definition: ServiceUnitDefinition,
     config_descriptor: Option<MessageDescriptor>,
     message_descriptor: MessageDescriptor,
-}
-
-struct AvailabilityCallbackRegistrationImpl {
-    _availability_callback_drop_guard: DropGuard,
 }
 
 #[async_trait]
@@ -110,17 +101,19 @@ impl ServicePublisherAccessor for CommsStackAccessor {
         let unit_identifier = metadata.service_unit_definition.get_unit_identifier();
 
         match metadata.service_unit_definition.get_unit_metadata() {
-            UnitMetadata::Publisher(_) => self
-                .data_tunnel_subscriber
-                .get_message_provider(unit_identifier, metadata.message_descriptor),
+            UnitMetadata::Publisher(_) => data_tunnel_subscriber::get_message_provider(
+                self.ctx.clone().await,
+                unit_identifier,
+                metadata.message_descriptor,
+            ),
             UnitMetadata::Server(_) => {
-                self.sdv_rpc_client
-                    .get_message_provider(
-                        unit_identifier,
-                        metadata.config_descriptor.unwrap_or(Any::descriptor()),
-                        metadata.message_descriptor,
-                    )
-                    .await
+                sdv_rpc_client::get_message_provider(
+                    self.ctx.clone().await,
+                    unit_identifier,
+                    metadata.config_descriptor.unwrap_or(Any::descriptor()),
+                    metadata.message_descriptor,
+                )
+                .await
             }
         }
     }
@@ -169,28 +162,28 @@ impl ServicePublisherAccessor for CommsStackAccessor {
 
         match metadata.service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => {
-                self.data_tunnel_subscriber
-                    .create_subscription(
-                        unit_identifier,
-                        fetch_last_message,
-                        metadata.message_descriptor,
-                        sub_sampling_interval,
-                        new_message_callback,
-                        cancellation_callback,
-                    )
-                    .await
+                data_tunnel_subscriber::create_subscription(
+                    self.ctx.clone().await,
+                    unit_identifier,
+                    fetch_last_message,
+                    metadata.message_descriptor,
+                    sub_sampling_interval,
+                    new_message_callback,
+                    cancellation_callback,
+                )
+                .await
             }
             UnitMetadata::Server(_) => {
-                self.sdv_rpc_client
-                    .create_subscription(
-                        unit_identifier,
-                        configuration,
-                        metadata.config_descriptor.unwrap_or(Any::descriptor()),
-                        metadata.message_descriptor,
-                        new_message_callback,
-                        cancellation_callback,
-                    )
-                    .await
+                sdv_rpc_client::create_subscription(
+                    self.ctx.clone().await,
+                    unit_identifier,
+                    configuration,
+                    metadata.config_descriptor.unwrap_or(Any::descriptor()),
+                    metadata.message_descriptor,
+                    new_message_callback,
+                    cancellation_callback,
+                )
+                .await
             }
         }
     }
@@ -204,17 +197,37 @@ impl ServicePublisherAccessor for CommsStackAccessor {
             return Ok(None);
         };
 
-        let registration = self
-            .register_unit_change_callback(
-                service_name,
-                Arc::clone(callback),
-                |event: &ServiceUnitChangeEvent| {
-                    matches!(event, ServiceUnitChangeEvent::Registered(_))
-                },
-            )
-            .await?;
+        let mut stream = self.get_unit_change_stream(service_name).await?.filter(
+            |event: &ServiceUnitChangeEvent| {
+                future::ready(matches!(event, ServiceUnitChangeEvent::Registered(_)))
+            },
+        );
 
-        Ok(Some(registration))
+        let callback = Arc::clone(callback);
+        let cancellation_token = CancellationToken::new();
+        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
+        tokio::spawn(async move {
+            while let Some(_event) = select! {
+                biased;
+                _ = cancellation_token.cancelled() => None,
+                event = stream.next() => event,
+            } {
+                callback();
+            }
+        });
+
+        struct AvailabilityCallbackRegistrationImpl {
+            _availability_callback_drop_guard: DropGuard,
+        }
+
+        #[async_trait]
+        impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
+            async fn unregister(self: Box<Self>) {}
+        }
+
+        Ok(Some(Box::new(AvailabilityCallbackRegistrationImpl {
+            _availability_callback_drop_guard: availability_callback_drop_guard,
+        })))
     }
 }
 
@@ -239,14 +252,9 @@ impl CommsStackAccessor {
             Option<Arc<dyn VsidlConfigProvider + Send + Sync>>,
         >,
     ) -> Self {
-        let data_tunnel_subscriber = DataTunnelSubscriber::new(ctx.clone());
-        let sdv_rpc_client = SdvRpcClient::new(ctx.clone());
-
         Self {
             ctx,
-            data_tunnel_subscriber,
             cached_metadata: Arc::new(DashMap::new()),
-            sdv_rpc_client,
             vsidl_provider: vsidl_provider_factory().shared(),
         }
     }
@@ -287,28 +295,36 @@ impl CommsStackAccessor {
                     cached_metadata_clone.remove(&service_name_clone);
                 });
 
-                // Register the callback
-                let registration = self
-                    .register_unit_change_callback(
-                        service_name,
-                        Arc::clone(&callback),
-                        |event: &ServiceUnitChangeEvent| {
-                            matches!(
+                let unit_change_stream_drop_guard =
+                    self.get_unit_change_stream(service_name).await.ok().map(|stream| {
+                        let mut stream = stream.filter(|event: &ServiceUnitChangeEvent| {
+                            future::ready(matches!(
                                 event,
                                 ServiceUnitChangeEvent::Unregistered(_)
                                     | ServiceUnitChangeEvent::Changed(_)
-                            )
-                        },
-                    )
-                    .await
-                    .ok();
+                            ))
+                        });
+
+                        let cancellation_token = CancellationToken::new();
+                        let unit_change_stream_drop_guard = cancellation_token.clone().drop_guard();
+                        tokio::spawn(async move {
+                            while let Some(_event) = select! {
+                                biased;
+                                _ = cancellation_token.cancelled() => None,
+                                event = stream.next() => event,
+                            } {
+                                callback();
+                            }
+                        });
+                        unit_change_stream_drop_guard
+                    });
 
                 let metadata = CachedMetadata {
                     service_unit_definition,
                     config_descriptor,
                     message_descriptor,
                 };
-                entry.insert((metadata.clone(), registration));
+                entry.insert((metadata.clone(), unit_change_stream_drop_guard));
                 Ok(Some(metadata))
             }
         }
@@ -394,13 +410,13 @@ impl CommsStackAccessor {
         match service_unit_definition.get_unit_metadata() {
             UnitMetadata::Publisher(_) => Ok((
                 None,
-                DataTunnelSubscriber::get_message_descriptor(
+                data_tunnel_subscriber::get_message_descriptor(
                     vsidl_provider.as_ref(),
                     service_unit_definition,
                 )
                 .await?,
             )),
-            UnitMetadata::Server(_) => SdvRpcClient::get_message_descriptor(
+            UnitMetadata::Server(_) => sdv_rpc_client::get_message_descriptor(
                 vsidl_provider.as_ref(),
                 service_unit_definition,
             )
@@ -411,15 +427,13 @@ impl CommsStackAccessor {
         }
     }
 
-    async fn register_unit_change_callback(
+    async fn get_unit_change_stream(
         &self,
         service_name: ServiceName,
-        callback: Arc<dyn Fn() + Send + Sync + 'static>,
-        event_matcher: impl Fn(&ServiceUnitChangeEvent) -> bool + Send + Sync + 'static,
-    ) -> anyhow::Result<Box<dyn AvailabilityCallbackRegistration>> {
+    ) -> anyhow::Result<Pin<Box<dyn Stream<Item = ServiceUnitChangeEvent> + Send>>> {
         let sd = ServiceDiscoveryManager::new(self.ctx.clone().await);
 
-        let mut event_stream = match service_name {
+        Ok(match service_name {
             ServiceName::UnitTypeBased { unit_type, unit_name } => sd
                 .subscribe_service_unit_change_by_type(&unit_type)
                 .await
@@ -427,9 +441,6 @@ impl CommsStackAccessor {
                     format!("Failed to subscribe to changes for unit type {unit_type}")
                 })?
                 .filter(move |event| {
-                    if !event_matcher(event) {
-                        return future::ready(false);
-                    }
                     future::ready(match event {
                         ServiceUnitChangeEvent::Registered(service_unit)
                         | ServiceUnitChangeEvent::Unregistered(service_unit)
@@ -457,9 +468,6 @@ impl CommsStackAccessor {
                         format!("Failed to subscribe to changes for service {fqin}|{unit_name}")
                     })?
                     .filter(move |event| {
-                        if !event_matcher(event) {
-                            return future::ready(false);
-                        }
                         future::ready(match event {
                             ServiceUnitChangeEvent::Registered(service_unit)
                             | ServiceUnitChangeEvent::Unregistered(service_unit)
@@ -474,30 +482,8 @@ impl CommsStackAccessor {
                     })
                     .boxed()
             }
-        };
-
-        let callback_clone = Arc::clone(&callback);
-        let cancellation_token = CancellationToken::new();
-        let availability_callback_drop_guard = cancellation_token.clone().drop_guard();
-        tokio::spawn(async move {
-            while let Some(_event) = select! {
-                biased;
-                _ = cancellation_token.cancelled() => None,
-                event = event_stream.next() => event,
-            } {
-                callback_clone();
-            }
-        });
-
-        Ok(Box::new(AvailabilityCallbackRegistrationImpl {
-            _availability_callback_drop_guard: availability_callback_drop_guard,
-        }))
+        })
     }
-}
-
-#[async_trait]
-impl AvailabilityCallbackRegistration for AvailabilityCallbackRegistrationImpl {
-    async fn unregister(self: Box<Self>) {}
 }
 
 #[cfg(all(test, integration_tests))]
@@ -872,16 +858,17 @@ mod integration_tests {
 
         // Get a notification when the service is unregistered
         let (tx, rx) = oneshot_callback();
-        let _registration = accessor
-            .register_unit_change_callback(
-                parsed_service_name.clone(),
-                Arc::new(move || tx(())),
+        let mut stream =
+            accessor.get_unit_change_stream(parsed_service_name.clone()).await.unwrap().filter(
                 |event: &ServiceUnitChangeEvent| {
-                    matches!(event, ServiceUnitChangeEvent::Unregistered(_))
+                    future::ready(matches!(event, ServiceUnitChangeEvent::Unregistered(_)))
                 },
-            )
-            .await
-            .unwrap();
+            );
+        tokio::spawn(async move {
+            while let Some(_event) = stream.next().await {
+                tx(());
+            }
+        });
 
         // Scope for the publisher, so that it gets dropped and unregistered.
         {
@@ -1708,8 +1695,14 @@ mod integration_tests {
         let accessor = create_accessor_with_context();
 
         let unit_type = test_utils::make_unique_unit_type();
-        let _publisher1 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
-        let _publisher2 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher1 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
+        let _publisher2 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
 
         let service_name =
             ServiceName::UnitTypeBased { unit_type: unit_type.clone(), unit_name: None };
@@ -1825,7 +1818,16 @@ mod integration_tests {
         }
     }
 
-    fn create_publisher_in_new_process(service_name: String) -> TestPublisherProxy {
+    enum PublisherType {
+        DataTunnel,
+        #[expect(dead_code)]
+        Rpc,
+    }
+
+    fn create_publisher_in_new_process(
+        service_name: String,
+        publisher_type: PublisherType,
+    ) -> TestPublisherProxy {
         use std::process::Command;
         use std::process::Stdio;
         use std::str::FromStr;
@@ -1835,27 +1837,34 @@ mod integration_tests {
         else {
             panic!("Unsupported service name: '{service_name}'");
         };
+        let unit_type = unit_type.to_string();
 
+        let mut args = vec![
+            "--fqin",
+            // Tests may run in multiple parallel processes, therefore we need to ensure that
+            // the FQINs created by the processes do not conflict with each other. This is
+            // achieved by embedding the process ID into the FQIN, which is done by the
+            // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
+            // `__PROCESS_ID__` placeholder with its process ID.
+            "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
+            "--unit-type",
+            &unit_type,
+            "--unit-name",
+            &unit_name,
+        ];
+        match publisher_type {
+            PublisherType::DataTunnel => {
+                args.extend(["data-tunnel", "--message-queue-size", "100"])
+            }
+            PublisherType::Rpc => args.extend(["rpc"]),
+        }
+        eprintln!("Spwaning publisher process with args: {args:?}");
         let mut child = Command::new("./sdv_telemetry_comms_stack_wrapper_test_publisher")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Print child process errors to the test's stderr.
             .stderr(Stdio::inherit())
-            .args([
-                "--fqin",
-                // Tests may run in multiple parallel processes, therefore we need to ensure that
-                // the FQINs created by the processes do not conflict with each other. This is
-                // achieved by embedding the process ID into the FQIN, which is done by the
-                // `sdv_telemetry_comms_stack_wrapper_test_publisher` binary, which replaces the
-                // `__PROCESS_ID__` placeholder with its process ID.
-                "vm:com.google.sdv.telemetry.tests.DataTunnelSubscriberTest__PROCESS_ID__/instance",
-                "--unit-type",
-                &unit_type.to_string(),
-                "--unit-name",
-                &unit_name,
-                "--message-queue-size",
-                "100",
-            ])
+            .args(args)
             .spawn()
             .unwrap();
 
@@ -1889,8 +1898,14 @@ mod integration_tests {
         // We must create these services in separate processes, because it is impossible to create
         // two DT topics with the same unit name in the same process (even if we specified different
         // FQINs).
-        let _publisher1 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
-        let _publisher2 = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let _publisher1 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
+        let _publisher2 = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
 
         let accessor = create_accessor_with_context();
 
@@ -1909,7 +1924,10 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_fqin_when_no_service_with_unit_name_exists_fails() {
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(format!("{unit_type}|different-name"));
+        let publisher = create_publisher_in_new_process(
+            format!("{unit_type}|different-name"),
+            PublisherType::DataTunnel,
+        );
 
         let accessor = create_accessor_with_context();
 
@@ -1928,7 +1946,10 @@ mod integration_tests {
     #[tokio::test]
     async fn discover_service_by_fqin_when_exactly_one_service_with_unit_name_exists_success() {
         let unit_type = test_utils::make_unique_unit_type();
-        let publisher = create_publisher_in_new_process(format!("{unit_type}|{UNIT_NAME}"));
+        let publisher = create_publisher_in_new_process(
+            format!("{unit_type}|{UNIT_NAME}"),
+            PublisherType::DataTunnel,
+        );
 
         let accessor = create_accessor_with_context();
 

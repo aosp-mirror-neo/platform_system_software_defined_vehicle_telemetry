@@ -101,7 +101,7 @@ mod integration_tests {
     use tokio::time::{sleep, timeout_at, Duration, Instant};
 
     use crate::data_tunnel_publisher::DataTunnelPublisher;
-    use crate::data_tunnel_subscriber::DataTunnelSubscriber;
+    use crate::data_tunnel_subscriber;
     use crate::test_utils;
 
     #[sdv_telemetry_test_utils::timeout(10_000)]
@@ -158,7 +158,7 @@ mod integration_tests {
         let mut last_value = None;
         while let Ok(Some(messages)) = timeout_at(start + DURATION, message_stream.next()).await {
             for message_bytes in messages.unwrap().iter() {
-                let value = DataTunnelSubscriber::read_length_delimited_proto(
+                let value = data_tunnel_subscriber::read_length_delimited_proto(
                     message_bytes,
                     &Int64Value::descriptor(),
                 )
