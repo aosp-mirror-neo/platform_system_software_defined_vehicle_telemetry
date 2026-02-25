@@ -27,6 +27,7 @@ pub(crate) struct MacroInput {
 }
 
 impl Parse for MacroInput {
+    #[allow(clippy::test_attr_in_doctest)]
     /// Input format:
     /// ```
     /// #[test]
